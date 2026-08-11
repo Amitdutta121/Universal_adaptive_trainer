@@ -5,7 +5,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QuestionStatus, RejectionReason, ReviewDecision
-from app.domain.feedback import encode_changed_fields, encode_reasons
 from app.domain.questions import Question, apply_professor_edit
 from app.errors import DomainRuleError
 from app.persistence.models import ProfessorReviewRow
@@ -94,12 +93,12 @@ def submit_review(
     review = ProfessorReviewRow(
         question_id=question.id,
         decision=decision,
-        reasons_json=encode_reasons(reason_list),
+        reasons=reason_list,
         comment=comment,
         edited_prompt=edited_prompt,
         edited_reference_solution=edited_reference_solution,
         edited_tests=edited_tests,
-        changed_fields_json=encode_changed_fields(changed_fields) if changed_fields else None,
+        changed_fields=changed_fields,
         professor_id=professor_id,
         reviewed_generator_name=question.generator_name,
         reviewed_generator_version=question.generator_version,

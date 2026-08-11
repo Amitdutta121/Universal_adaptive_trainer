@@ -42,11 +42,7 @@ from app.ingestion.schema import (
     WarningInput,
     parse_book_document,
 )
-from app.ingestion.service import (
-    BookImportService,
-    decode_warnings,
-    encode_warnings,
-)
+from app.ingestion.service import BookImportService
 from app.ingestion.storage import (
     FORMAT_BY_EXTENSION,
     SUPPORTED_EXTENSIONS,
@@ -65,8 +61,6 @@ __all__ = [
     "SourceRetrieval",
     "WarningInput",
     "chapter_from_row",
-    "decode_warnings",
-    "encode_warnings",
     "format_for_filename",
     "parse_book_document",
     "section_from_row",

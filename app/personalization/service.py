@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.domain.enums import PreferenceConfirmationState, ReviewDecision
-from app.domain.feedback import REJECTION_REASON_LABELS, decode_changed_fields, decode_reasons
+from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.preferences import confidence_from_evidence
 from app.errors import DomainRuleError
 from app.llm import StructuredLLMClient, get_structured_client
@@ -44,7 +44,7 @@ def serialize_reviews_for_extraction(reviews: list[ProfessorReviewRow]) -> str:
     for review in reviews:
         prompt = _example_prompt(review)
         snippet = prompt[:PROMPT_SNIPPET_CHARS] if prompt else None
-        reasons = decode_reasons(review.reasons_json)
+        reasons = review.reasons
         entries.append(
             {
                 "review_id": review.id,
@@ -52,7 +52,7 @@ def serialize_reviews_for_extraction(reviews: list[ProfessorReviewRow]) -> str:
                 "reasons": [REJECTION_REASON_LABELS[reason] for reason in reasons],
                 "comment": review.comment.strip() if review.comment else None,
                 "prompt_snippet": snippet,
-                "changed_fields": decode_changed_fields(review.changed_fields_json),
+                "changed_fields": review.changed_fields,
             }
         )
     return json.dumps(entries, separators=(",", ":"))

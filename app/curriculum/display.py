@@ -1,11 +1,16 @@
-"""Decode curriculum database fields for server-rendered display."""
+"""Validate curriculum database fields for server-rendered display.
+
+These shapes belong to the removed LLM proposal pipeline and survive only so
+existing rows still render. The columns behind them are plain JSON objects and
+lists (see :mod:`app.persistence.types`) rather than typed model columns,
+because ``app.persistence`` must not import a subsystem to describe them.
+"""
 
 from __future__ import annotations
 
-import json
 import logging
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -35,35 +40,23 @@ class DisplayExtractionMetadata(BaseModel):
     groups_returned: int = Field(default=0, ge=0)
 
 
-def decode_json_list(raw: str | None) -> list:
-    """Read a JSON list column without allowing bad display data to break a page."""
-    if not raw:
-        return []
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Discarding unreadable JSON list payload")
-        return []
-    return payload if isinstance(payload, list) else []
-
-
-def decode_proposal_warnings(raw: str | None) -> list[DisplayProposalWarning]:
-    """Read warnings retained on a legacy proposal row for display."""
+def proposal_warnings(payload: list[object]) -> list[DisplayProposalWarning]:
+    """Read warnings retained on a legacy proposal row, skipping unusable items."""
     warnings: list[DisplayProposalWarning] = []
-    for item in decode_json_list(raw):
+    for item in payload:
         try:
             warnings.append(DisplayProposalWarning.model_validate(item))
-        except ValueError:
+        except ValidationError:
             continue
     return warnings
 
 
-def decode_metadata(raw: str | None) -> DisplayExtractionMetadata | None:
-    """Read legacy proposal metadata, or ``None`` when absent or unreadable."""
-    if not raw:
+def extraction_metadata(payload: dict | None) -> DisplayExtractionMetadata | None:
+    """Read legacy proposal metadata, or ``None`` when absent or no longer valid."""
+    if payload is None:
         return None
     try:
-        return DisplayExtractionMetadata.model_validate_json(raw)
-    except ValueError:
-        logger.warning("Discarding unreadable extraction metadata")
+        return DisplayExtractionMetadata.model_validate(payload)
+    except ValidationError:
+        logger.warning("Discarding extraction metadata that no longer validates")
         return None

@@ -48,8 +48,8 @@ def _question(
         subtopic_id=subtopic_id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        spec_json=f'{{"source_section_ids":[{section_id}]}}',
-        content_json=f'{{"sources":[{{"section_id":{section_id}}}]}}',
+        spec={"source_section_ids": [section_id]},
+        content={"sources": [{"section_id": section_id}]},
     )
 
 
@@ -76,7 +76,7 @@ def test_shared_checks_pass_for_seeded_ids(session: Session, settings: Any) -> N
 def test_shared_checks_reject_unknown_section(session: Session, settings: Any) -> None:
     version_id, topic_id, subtopic_id, section_id = _seed(session, settings)
     question = _question(version_id, topic_id, subtopic_id, section_id)
-    question.content_json = '{"sources":[{"section_id":999999}]}'
+    question.content = {"sources": [{"section_id": 999999}]}
 
     checks = {check.name: check for check in check_shared(question, session)}
 

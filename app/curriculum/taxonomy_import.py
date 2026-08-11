@@ -59,9 +59,9 @@ class TaxonomyImportService:
                 status=CurriculumStatus.APPROVED,
                 approved_at=now,
                 generated_by=GENERATED_BY,
-                source_book_ids_json=None,
-                extraction_metadata_json=None,
-                warnings_json=None,
+                source_book_ids=[],
+                extraction_metadata=None,
+                warnings=[],
             )
         )
         for position, topic in enumerate(document.topics):
@@ -80,7 +80,7 @@ class TaxonomyImportService:
                         position=sub_position,
                         stable_id=subtopic_id_from_names(topic.name, subtopic.name),
                         review_status=CurriculumItemStatus.ACCEPTED,
-                        candidate_labels_json=None,
+                        candidate_labels=[],
                         grouping_reason=None,
                         confidence=None,
                     )

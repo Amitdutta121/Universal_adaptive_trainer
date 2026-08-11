@@ -141,7 +141,7 @@ def test_pass_runs_judge_and_stores_completed(session: Session, settings: Any) -
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.status is QuestionStatus.VALIDATION_PASSED
-    evaluation = PedagogicalEvaluation.model_validate_json(loaded.pedagogical_eval_json)
+    evaluation = PedagogicalEvaluation.model_validate(loaded.pedagogical_eval)
     assert evaluation.status is PedagogicalEvalStatus.COMPLETED
     assert client.judge_calls == 1
 
@@ -160,7 +160,7 @@ def test_fail_skips_judge_and_stores_skipped(session: Session, settings: Any) ->
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.status is QuestionStatus.VALIDATION_FAILED
-    evaluation = PedagogicalEvaluation.model_validate_json(loaded.pedagogical_eval_json)
+    evaluation = PedagogicalEvaluation.model_validate(loaded.pedagogical_eval)
     assert evaluation.status is PedagogicalEvalStatus.SKIPPED
     assert client.judge_calls == 0
 
@@ -179,6 +179,6 @@ def test_judge_error_preserves_validation_passed_question(session: Session, sett
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.status is QuestionStatus.VALIDATION_PASSED
-    evaluation = PedagogicalEvaluation.model_validate_json(loaded.pedagogical_eval_json)
+    evaluation = PedagogicalEvaluation.model_validate(loaded.pedagogical_eval)
     assert evaluation.status is PedagogicalEvalStatus.ERROR
     assert client.judge_calls == 3

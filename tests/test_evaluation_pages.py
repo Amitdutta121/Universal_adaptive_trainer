@@ -48,9 +48,9 @@ def _seed_question(
             difficulty=Difficulty.EASY,
             prompt="What is printed?",
             reference_solution="3",
-            spec_json=f'{{"source_section_ids":[{book.chapters[0].sections[0].id}]}}',
-            content_json='{"code":"print(3)","expected_output":"3"}',
-            pedagogical_eval_json=evaluation.model_dump_json(),
+            spec={"source_section_ids": [book.chapters[0].sections[0].id]},
+            content={"code": "print(3)", "expected_output": "3"},
+            pedagogical_eval=evaluation.model_dump(mode="json"),
         )
     )
     session.commit()

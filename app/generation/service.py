@@ -98,14 +98,14 @@ class GenerationService:
                 )
             )
             report = validator.validate(Question.model_validate(row))
-            row.validation_report_json = report.model_dump_json()
+            row.validation_report = report
             row.status = report.resulting_status()
-            if report.passed:
-                row.pedagogical_eval_json = self._judge.evaluate(
-                    Question.model_validate(row)
-                ).model_dump_json()
-            else:
-                row.pedagogical_eval_json = skipped_evaluation(question_id=row.id).model_dump_json()
+            evaluation = (
+                self._judge.evaluate(Question.model_validate(row))
+                if report.passed
+                else skipped_evaluation(question_id=row.id)
+            )
+            row.pedagogical_eval = evaluation.model_dump(mode="json")
             rows.append(row)
         self._session.commit()
         return rows
@@ -136,10 +136,10 @@ class GenerationService:
             prompt=question.prompt,
             reference_solution=question.reference_solution,
             tests=question.tests,
-            spec_json=question.spec_json,
-            content_json=question.content_json,
-            validation_report_json=question.validation_report_json,
-            pedagogical_eval_json=question.pedagogical_eval_json,
+            spec=question.spec,
+            content=question.content,
+            validation_report=question.validation_report,
+            pedagogical_eval=question.pedagogical_eval,
             original_prompt=question.original_prompt,
             original_reference_solution=question.original_reference_solution,
             original_tests=question.original_tests,
@@ -148,7 +148,7 @@ class GenerationService:
             generator_version=question.generator_version,
             priority=question.priority,
             times_used=question.times_used,
-            personalization_context_json=question.personalization_context_json,
+            personalization_context=question.personalization_context,
             created_at=question.created_at,
             updated_at=question.updated_at,
         )

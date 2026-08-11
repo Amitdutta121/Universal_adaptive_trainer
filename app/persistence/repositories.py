@@ -7,6 +7,8 @@ here rather than in routes or services.
 
 from __future__ import annotations
 
+from collections import Counter
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -326,16 +328,9 @@ class ProfessorReviewRepository:
         return {str(decision): count for decision, count in self._session.execute(stmt)}
 
     def reason_counts(self) -> dict[str, int]:
-        """Count structured reasons across all reviews (Python-side JSON parse)."""
-        from app.domain.feedback import decode_reasons
-
-        counts: dict[str, int] = {}
-        rows = self._session.scalars(select(ProfessorReviewRow.reasons_json)).all()
-        for raw in rows:
-            for reason in decode_reasons(raw):
-                key = reason.value
-                counts[key] = counts.get(key, 0) + 1
-        return counts
+        """Count structured reasons across all reviews, decoded column-side."""
+        reasons = self._session.scalars(select(ProfessorReviewRow.reasons)).all()
+        return Counter(reason.value for row in reasons for reason in row)
 
     def list_with_questions(self, limit: int = 50) -> list[ProfessorReviewRow]:
         stmt = (
@@ -405,7 +400,7 @@ class ReviewEmbeddingRepository:
             self._session.flush()
             return row
         existing.model_id = row.model_id
-        existing.vector_json = row.vector_json
+        existing.vector = row.vector
         existing.content_hash = row.content_hash
         self._session.flush()
         return existing

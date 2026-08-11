@@ -8,7 +8,7 @@ from app.domain.questions import Question, QuestionValidationReport
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
 from app.validation.shared import check_shared
-from app.validation.type_checks import check_type, load_content
+from app.validation.type_checks import check_type
 
 
 class DeterministicQuestionValidator:
@@ -20,7 +20,7 @@ class DeterministicQuestionValidator:
     def validate(self, question: Question) -> QuestionValidationReport:
         """Return the complete deterministic report for ``question``."""
         checks = check_shared(question, self._session)
-        content = load_content(question)
+        content = question.content
         if content is None:
             checks.append(
                 make_check(

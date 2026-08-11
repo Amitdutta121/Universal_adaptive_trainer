@@ -16,7 +16,7 @@ from app.generation.schemas import (
     ParsonsBlock,
     ParsonsDraft,
     TrueFalseDraft,
-    encode_content,
+    build_content,
     prompt_fields_from_draft,
     scoring_kind_for,
 )
@@ -165,19 +165,18 @@ def test_prompt_fields_from_parsons_draft() -> None:
     assert parsed["indents"] == {"a": 0, "b": 1}
 
 
-def test_encode_content_includes_draft_and_metadata() -> None:
+def test_build_content_includes_draft_and_metadata() -> None:
     draft = OutputPredictionDraft(
         prompt="What prints?",
         code="print(1 + 2)",
         expected_output="3",
         explanation="Addition.",
     )
-    content = encode_content(
+    content = build_content(
         draft,
         sources=[{"section_id": 7, "citation": "Book, ch.1, sec.2"}],
         model="fake/test-model",
     )
-    parsed = json.loads(content)
-    assert parsed["expected_output"] == "3"
-    assert parsed["sources"][0]["section_id"] == 7
-    assert parsed["model"] == "fake/test-model"
+    assert content["expected_output"] == "3"
+    assert content["sources"][0]["section_id"] == 7
+    assert content["model"] == "fake/test-model"

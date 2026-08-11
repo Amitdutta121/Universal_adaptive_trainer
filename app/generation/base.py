@@ -13,7 +13,7 @@ from app.generation import GeneratorDescriptor
 from app.generation.prompts import build_prompt
 from app.generation.schemas import (
     RESPONSE_MODEL_FOR,
-    encode_content,
+    build_content,
     prompt_fields_from_draft,
     scoring_kind_for,
 )
@@ -144,8 +144,8 @@ class BaseQuestionGenerator:
             prompt=question_prompt,
             reference_solution=reference_solution,
             tests=tests,
-            spec_json=spec.model_dump_json(),
-            content_json=encode_content(
+            spec=spec.model_dump(mode="json"),
+            content=build_content(
                 draft,
                 sources=[{"section_id": section_id, "citation": citation}],
                 model=client.description,

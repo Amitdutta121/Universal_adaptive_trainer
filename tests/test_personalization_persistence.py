@@ -10,7 +10,6 @@ from app.domain.enums import (
     QuestionStatus,
     ReviewDecision,
 )
-from app.domain.preferences import encode_review_ids
 from app.feedback import submit_review
 from app.persistence.models import (
     PreferenceStatementRow,
@@ -65,7 +64,7 @@ def test_preference_round_trip(session: Session) -> None:
             category=PreferenceCategory.EMPHASIS,
             evidence_count=2,
             confidence=0.4,
-            supporting_review_ids_json=encode_review_ids([1, 2]),
+            supporting_review_ids=([1, 2]),
             active=True,
             confirmation_state=PreferenceConfirmationState.INFERRED,
             profile_version="1",
@@ -82,7 +81,7 @@ def test_embedding_upsert(session: Session) -> None:
         ReviewEmbeddingRow(
             review_id=review.id,
             model_id="fake/embeddings",
-            vector_json="[0.1, 0.2]",
+            vector=[0.1, 0.2],
             content_hash="abc",
         )
     )

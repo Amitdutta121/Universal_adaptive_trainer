@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
-
 from sqlalchemy.orm import Session
 
 from app.domain.enums import RejectionReason, ReviewDecision
-from app.domain.feedback import encode_reasons
 from app.persistence.models import ProfessorReviewRow, QuestionRow
 from app.persistence.repositories import ProfessorReviewRepository, QuestionRepository
 
@@ -18,12 +15,12 @@ def test_review_row_stores_reasons_and_edit_snapshot(session: Session) -> None:
     review = ProfessorReviewRow(
         question_id=question.id,
         decision=ReviewDecision.EDIT,
-        reasons_json=encode_reasons([RejectionReason.POOR_WORDING]),
+        reasons=([RejectionReason.POOR_WORDING]),
         comment="Clarify.",
         edited_prompt="New prompt.",
         edited_reference_solution="print(1)",
         edited_tests="",
-        changed_fields_json=json.dumps(["prompt"]),
+        changed_fields=["prompt"],
         professor_id=None,
         reviewed_generator_name="base",
         reviewed_generator_version="1",
@@ -32,10 +29,10 @@ def test_review_row_stores_reasons_and_edit_snapshot(session: Session) -> None:
     session.commit()
 
     loaded = ProfessorReviewRepository(session).list_recent()[0]
-    assert loaded.reasons_json is not None
+    assert loaded.reasons == [RejectionReason.POOR_WORDING]
     assert loaded.edited_prompt == "New prompt."
     assert loaded.edited_tests == ""
-    assert json.loads(loaded.changed_fields_json) == ["prompt"]
+    assert loaded.changed_fields == ["prompt"]
 
 
 def test_count_by_decision_and_reason_counts(session: Session) -> None:
@@ -46,25 +43,25 @@ def test_count_by_decision_and_reason_counts(session: Session) -> None:
         ProfessorReviewRow(
             question_id=q.id,
             decision=ReviewDecision.APPROVE,
-            reasons_json="[]",
+            reasons=[],
         )
     )
     repo.add(
         ProfessorReviewRow(
             question_id=q.id,
             decision=ReviewDecision.REJECT,
-            reasons_json=encode_reasons([RejectionReason.TOO_EASY, RejectionReason.AMBIGUOUS]),
+            reasons=([RejectionReason.TOO_EASY, RejectionReason.AMBIGUOUS]),
         )
     )
     repo.add(
         ProfessorReviewRow(
             question_id=q.id,
             decision=ReviewDecision.EDIT,
-            reasons_json=encode_reasons([RejectionReason.TOO_EASY]),
+            reasons=([RejectionReason.TOO_EASY]),
             edited_prompt="Q2",
             edited_reference_solution="",
             edited_tests="",
-            changed_fields_json='["prompt"]',
+            changed_fields=["prompt"],
         )
     )
     session.commit()

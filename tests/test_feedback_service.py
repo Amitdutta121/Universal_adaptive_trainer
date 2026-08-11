@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QuestionStatus, RejectionReason, ReviewDecision
-from app.domain.feedback import decode_changed_fields, decode_reasons
 from app.errors import DomainRuleError, NotFoundError
 from app.feedback import submit_review
 from app.persistence.models import QuestionRow
@@ -49,11 +48,11 @@ def test_approve_sets_status_and_ignores_reasons_and_edit_snapshots(session: Ses
 
     assert question.status == QuestionStatus.APPROVED
     assert question.prompt == "Write a loop."
-    assert decode_reasons(review.reasons_json) == []
+    assert review.reasons == []
     assert review.edited_prompt is None
     assert review.edited_reference_solution is None
     assert review.edited_tests is None
-    assert review.changed_fields_json is None
+    assert review.changed_fields == []
     assert review.comment == "  Good  "
     assert review.reviewed_generator_name == "base-gen"
 
@@ -82,7 +81,7 @@ def test_reject_stores_many_reasons_and_ignores_edit_payloads(session: Session) 
 
     assert question.status == QuestionStatus.REJECTED
     assert question.prompt == "Write a loop."
-    assert decode_reasons(review.reasons_json) == [
+    assert review.reasons == [
         RejectionReason.TOO_EASY,
         RejectionReason.OTHER,
     ]
@@ -114,7 +113,7 @@ def test_edit_preserves_originals_and_snapshots_all_fields(session: Session) -> 
     assert review.edited_prompt == "Write a for-loop over a list."
     assert review.edited_reference_solution == "pass"
     assert review.edited_tests == "assert True"
-    assert decode_changed_fields(review.changed_fields_json) == ["prompt"]
+    assert review.changed_fields == ["prompt"]
 
 
 @pytest.mark.parametrize("missing", ["prompt", "reference_solution", "tests"])
@@ -150,7 +149,7 @@ def test_edit_accepts_empty_strings_for_unused_fields(session: Session) -> None:
 
     assert review.edited_reference_solution == ""
     assert review.edited_tests == ""
-    assert decode_changed_fields(review.changed_fields_json) == ["prompt"]
+    assert review.changed_fields == ["prompt"]
 
 
 def test_edit_with_no_changes_errors(session: Session) -> None:

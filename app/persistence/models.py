@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.domain.books import ExtractionWarning
 from app.domain.enums import (
     BookStatus,
     ConceptConfidence,
@@ -26,13 +27,22 @@ from app.domain.enums import (
     QuestionKind,
     QuestionStatus,
     QuestionType,
+    RejectionReason,
     ReviewDecision,
     SourceFormat,
     StructureConfidence,
     StructureSource,
 )
-from app.domain.questions import DEFAULT_PRIORITY
+from app.domain.questions import DEFAULT_PRIORITY, QuestionValidationReport
 from app.persistence.database import Base
+from app.persistence.types import (
+    EnumList,
+    JsonList,
+    JsonObject,
+    PydanticList,
+    PydanticObject,
+    StrEnumType,
+)
 
 
 def _now() -> datetime:
@@ -41,6 +51,12 @@ def _now() -> datetime:
 
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+#: JSON-bearing attributes name their database column explicitly (the first
+#: positional argument to ``mapped_column``) so the attribute can read as what it
+#: holds -- ``question.content`` is a ``dict`` -- while the stored column keeps
+#: its original ``*_json`` name. Nothing about an existing database file changes.
 
 
 class BookRow(TimestampMixin, Base):
@@ -57,18 +73,24 @@ class BookRow(TimestampMixin, Base):
     #: Name of the retained file inside the configured upload directory. The
     #: uploaded document is kept so an import is reproducible from its exact input.
     stored_filename: Mapped[str | None] = mapped_column(String(500), default=None)
-    source_format: Mapped[SourceFormat] = mapped_column(String(16), default=SourceFormat.BOOK_JSON)
+    source_format: Mapped[SourceFormat] = mapped_column(
+        StrEnumType(SourceFormat, 16), default=SourceFormat.BOOK_JSON
+    )
     file_size_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
     #: Provenance declared by the document: what it was made from, and by what.
     source_filename: Mapped[str | None] = mapped_column(String(500), default=None)
     producer: Mapped[str | None] = mapped_column(String(200), default=None)
 
-    status: Mapped[BookStatus] = mapped_column(String(32), default=BookStatus.IMPORTED)
+    status: Mapped[BookStatus] = mapped_column(
+        StrEnumType(BookStatus, 32), default=BookStatus.IMPORTED
+    )
     page_count: Mapped[int | None] = mapped_column(Integer, default=None)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
-    #: Document-level warnings, JSON-encoded list of objects.
-    warnings_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Document-level warnings declared by the imported document.
+    warnings: Mapped[list[ExtractionWarning]] = mapped_column(
+        "warnings_json", PydanticList(ExtractionWarning), default=list, nullable=True
+    )
     imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     chapters: Mapped[list[BookChapterRow]] = relationship(
@@ -98,10 +120,12 @@ class BookChapterRow(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     start_page: Mapped[int | None] = mapped_column(Integer, default=None)
     end_page: Mapped[int | None] = mapped_column(Integer, default=None)
-    structure_source: Mapped[StructureSource] = mapped_column(String(32))
+    structure_source: Mapped[StructureSource] = mapped_column(StrEnumType(StructureSource, 32))
     #: Stored rather than derived, because a document may declare a confidence
     #: that differs from the one its source value implies.
-    structure_confidence: Mapped[StructureConfidence] = mapped_column(String(16))
+    structure_confidence: Mapped[StructureConfidence] = mapped_column(
+        StrEnumType(StructureConfidence, 16)
+    )
 
     book: Mapped[BookRow] = relationship(back_populates="chapters")
     # Read-only grouping view; the book owns the section rows.
@@ -137,9 +161,13 @@ class BookSectionRow(Base):
     start_page: Mapped[int | None] = mapped_column(Integer, default=None)
     end_page: Mapped[int | None] = mapped_column(Integer, default=None)
 
-    structure_source: Mapped[StructureSource] = mapped_column(String(32))
-    structure_confidence: Mapped[StructureConfidence] = mapped_column(String(16))
-    warnings_json: Mapped[str | None] = mapped_column(Text, default=None)
+    structure_source: Mapped[StructureSource] = mapped_column(StrEnumType(StructureSource, 32))
+    structure_confidence: Mapped[StructureConfidence] = mapped_column(
+        StrEnumType(StructureConfidence, 16)
+    )
+    warnings: Mapped[list[ExtractionWarning]] = mapped_column(
+        "warnings_json", PydanticList(ExtractionWarning), default=list, nullable=True
+    )
 
     book: Mapped[BookRow] = relationship(back_populates="sections")
     chapter: Mapped[BookChapterRow | None] = relationship(back_populates="sections")
@@ -152,21 +180,30 @@ class CurriculumVersionRow(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     label: Mapped[str] = mapped_column(String(200))
-    status: Mapped[CurriculumStatus] = mapped_column(String(32), default=CurriculumStatus.PROPOSED)
+    status: Mapped[CurriculumStatus] = mapped_column(
+        StrEnumType(CurriculumStatus, 32), default=CurriculumStatus.PROPOSED
+    )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
-    #: Which books grounded this proposal, JSON-encoded list of book ids. A
-    #: professor reviewing a proposal needs to know what it was derived from.
-    source_book_ids_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Which books grounded this proposal. A professor reviewing a proposal
+    #: needs to know what it was derived from.
+    source_book_ids: Mapped[list[int]] = mapped_column(
+        "source_book_ids_json", JsonList, default=list, nullable=True
+    )
     #: Provider and model that produced it, e.g. "openrouter/deepseek/deepseek-chat".
     #: Never a credential. Empty for a version not built by the proposer.
     generated_by: Mapped[str | None] = mapped_column(String(200), default=None)
-    #: Stage versions, counts and timings, JSON-encoded. Proposals must stay
-    #: comparable across changes to the prompts, so the procedure records itself.
-    extraction_metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Stage versions and counts retained from the removed LLM proposal
+    #: pipeline. Kept as a plain object because its shape belongs to
+    #: :mod:`app.curriculum.display`, which persistence must not import.
+    extraction_metadata: Mapped[dict | None] = mapped_column(
+        "extraction_metadata_json", JsonObject, default=None
+    )
     #: Caveats about this proposal (sections skipped, candidates the normalizer
     #: dropped). Shown to the professor rather than logged and forgotten.
-    warnings_json: Mapped[str | None] = mapped_column(Text, default=None)
+    warnings: Mapped[list[dict]] = mapped_column(
+        "warnings_json", JsonList, default=list, nullable=True
+    )
 
     topics: Mapped[list[TopicRow]] = relationship(
         back_populates="curriculum_version",
@@ -193,7 +230,7 @@ class TopicRow(Base):
     #: identity, or the professor's edits would look like new topics.
     stable_id: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     review_status: Mapped[CurriculumItemStatus] = mapped_column(
-        String(16), default=CurriculumItemStatus.PROPOSED
+        StrEnumType(CurriculumItemStatus, 16), default=CurriculumItemStatus.PROPOSED
     )
 
     curriculum_version: Mapped[CurriculumVersionRow] = relationship(back_populates="topics")
@@ -222,13 +259,17 @@ class SubtopicRow(Base):
 
     stable_id: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     review_status: Mapped[CurriculumItemStatus] = mapped_column(
-        String(16), default=CurriculumItemStatus.PROPOSED
+        StrEnumType(CurriculumItemStatus, 16), default=CurriculumItemStatus.PROPOSED
     )
-    #: The differing book wordings that normalised to this subtopic, JSON list.
-    candidate_labels_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The differing book wordings that normalised to this subtopic.
+    candidate_labels: Mapped[list[str]] = mapped_column(
+        "candidate_labels_json", JsonList, default=list, nullable=True
+    )
     #: Why those wordings were judged to be the same concept. Auditable prose.
     grouping_reason: Mapped[str | None] = mapped_column(Text, default=None)
-    confidence: Mapped[ConceptConfidence | None] = mapped_column(String(16), default=None)
+    confidence: Mapped[ConceptConfidence | None] = mapped_column(
+        StrEnumType(ConceptConfidence, 16), default=None
+    )
 
     topic: Mapped[TopicRow] = relationship(back_populates="subtopics")
     evidence: Mapped[list[SubtopicEvidenceRow]] = relationship(
@@ -261,8 +302,8 @@ class SubtopicEvidenceRow(Base):
     candidate_label: Mapped[str] = mapped_column(String(300))
     #: What the section actually teaches, in the analysis's words.
     definition: Mapped[str | None] = mapped_column(Text, default=None)
-    #: Short representative excerpts drawn from the section, JSON list.
-    quotes_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Short representative excerpts drawn from the section.
+    quotes: Mapped[list[str]] = mapped_column("quotes_json", JsonList, default=list, nullable=True)
     #: Denormalised one-line citation, so listing evidence needs no extra joins.
     citation: Mapped[str] = mapped_column(String(1000), default="")
     position: Mapped[int] = mapped_column(Integer, default=0)
@@ -290,32 +331,52 @@ class QuestionRow(TimestampMixin, Base):
         ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
     )
 
-    kind: Mapped[QuestionKind] = mapped_column(String(32), default=QuestionKind.TESTABLE_PROGRAM)
-    question_type: Mapped[QuestionType | None] = mapped_column(String(32), default=None)
-    difficulty: Mapped[Difficulty] = mapped_column(String(16), default=Difficulty.EASY)
-    status: Mapped[QuestionStatus] = mapped_column(String(32), default=QuestionStatus.GENERATED)
+    kind: Mapped[QuestionKind] = mapped_column(
+        StrEnumType(QuestionKind, 32), default=QuestionKind.TESTABLE_PROGRAM
+    )
+    question_type: Mapped[QuestionType | None] = mapped_column(
+        StrEnumType(QuestionType, 32), default=None
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+    status: Mapped[QuestionStatus] = mapped_column(
+        StrEnumType(QuestionStatus, 32), default=QuestionStatus.GENERATED
+    )
 
     prompt: Mapped[str] = mapped_column(Text)
     reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     tests: Mapped[str | None] = mapped_column(Text, default=None)
 
-    spec_json: Mapped[str | None] = mapped_column(Text, default=None)
-    content_json: Mapped[str | None] = mapped_column(Text, default=None)
-    validation_report_json: Mapped[str | None] = mapped_column(Text, default=None)
-    pedagogical_eval_json: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The frozen ``QuestionSpec`` this question was generated from.
+    spec: Mapped[dict | None] = mapped_column("spec_json", JsonObject, default=None)
+    #: The typed draft plus its grounding metadata (``sources``, ``model``).
+    content: Mapped[dict | None] = mapped_column("content_json", JsonObject, default=None)
+    validation_report: Mapped[QuestionValidationReport | None] = mapped_column(
+        "validation_report_json", PydanticObject(QuestionValidationReport), default=None
+    )
+    #: Advisory judge output. A plain object because its shape belongs to
+    #: :mod:`app.evaluation`, which persistence must not import.
+    pedagogical_eval: Mapped[dict | None] = mapped_column(
+        "pedagogical_eval_json", JsonObject, default=None
+    )
 
     # Retained generated originals -- never overwritten by professor edits.
     original_prompt: Mapped[str | None] = mapped_column(Text, default=None)
     original_reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     original_tests: Mapped[str | None] = mapped_column(Text, default=None)
 
-    generator_kind: Mapped[GeneratorKind] = mapped_column(String(32), default=GeneratorKind.BASE)
+    generator_kind: Mapped[GeneratorKind] = mapped_column(
+        StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
+    )
     generator_name: Mapped[str] = mapped_column(String(200), default="unset")
     generator_version: Mapped[str] = mapped_column(String(50), default="0")
 
     priority: Mapped[int] = mapped_column(Integer, default=DEFAULT_PRIORITY)
     times_used: Mapped[int] = mapped_column(Integer, default=0)
-    personalization_context_json: Mapped[str | None] = mapped_column(Text, default=None)
+    personalization_context: Mapped[dict | None] = mapped_column(
+        "personalization_context_json", JsonObject, default=None
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     reviews: Mapped[list[ProfessorReviewRow]] = relationship(
@@ -330,13 +391,17 @@ class ProfessorReviewRow(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"))
-    decision: Mapped[ReviewDecision] = mapped_column(String(16))
-    reasons_json: Mapped[str | None] = mapped_column(Text, default="[]")
+    decision: Mapped[ReviewDecision] = mapped_column(StrEnumType(ReviewDecision, 16))
+    reasons: Mapped[list[RejectionReason]] = mapped_column(
+        "reasons_json", EnumList(RejectionReason), default=list, nullable=True
+    )
     comment: Mapped[str | None] = mapped_column(Text, default=None)
     edited_prompt: Mapped[str | None] = mapped_column(Text, default=None)
     edited_reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     edited_tests: Mapped[str | None] = mapped_column(Text, default=None)
-    changed_fields_json: Mapped[str | None] = mapped_column(Text, default=None)
+    changed_fields: Mapped[list[str]] = mapped_column(
+        "changed_fields_json", JsonList, default=list, nullable=True
+    )
     professor_id: Mapped[int | None] = mapped_column(Integer, default=None)
     reviewed_generator_name: Mapped[str | None] = mapped_column(String(200), default=None)
     reviewed_generator_version: Mapped[str | None] = mapped_column(String(50), default=None)
@@ -349,13 +414,15 @@ class PreferenceStatementRow(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     rule_text: Mapped[str] = mapped_column(Text)
-    category: Mapped[PreferenceCategory] = mapped_column(String(32))
+    category: Mapped[PreferenceCategory] = mapped_column(StrEnumType(PreferenceCategory, 32))
     evidence_count: Mapped[int] = mapped_column(Integer, default=0)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    supporting_review_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    supporting_review_ids: Mapped[list[int]] = mapped_column(
+        "supporting_review_ids_json", JsonList, default=list
+    )
     active: Mapped[bool] = mapped_column(default=True)
     confirmation_state: Mapped[PreferenceConfirmationState] = mapped_column(
-        String(16), default=PreferenceConfirmationState.INFERRED
+        StrEnumType(PreferenceConfirmationState, 16), default=PreferenceConfirmationState.INFERRED
     )
     profile_version: Mapped[str] = mapped_column(String(50), default="1")
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -369,5 +436,5 @@ class ReviewEmbeddingRow(TimestampMixin, Base):
         ForeignKey("professor_reviews.id", ondelete="CASCADE"), unique=True
     )
     model_id: Mapped[str] = mapped_column(String(200))
-    vector_json: Mapped[str] = mapped_column(Text)
+    vector: Mapped[list[float]] = mapped_column("vector_json", JsonList)
     content_hash: Mapped[str] = mapped_column(String(64))

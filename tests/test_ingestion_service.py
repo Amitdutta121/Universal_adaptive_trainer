@@ -11,7 +11,6 @@ from app.domain.enums import BookStatus, SourceFormat, StructureConfidence
 from app.errors import FileTooLargeError, InvalidBookDocumentError, UnsupportedFileError
 from app.ingestion import (
     BookImportService,
-    decode_warnings,
     format_for_filename,
     parse_book_document,
     validate_upload,
@@ -153,7 +152,7 @@ class TestCaveatedImport:
             filename="uncertain.json", data=docs.to_bytes(docs.with_caveats())
         )
         session.commit()
-        warnings = decode_warnings(book.warnings_json)
+        warnings = book.warnings
         assert [warning.code for warning in warnings] == ["producer_inferred_structure"]
 
     def test_guessed_boundaries_are_stored_as_low_confidence(
@@ -174,7 +173,7 @@ class TestCaveatedImport:
         )
         session.commit()
         assert book.status == BookStatus.IMPORTED
-        assert decode_warnings(book.warnings_json)
+        assert book.warnings
 
     def test_partial_books_are_still_usable_for_grounding(
         self, service: BookImportService, session: Session

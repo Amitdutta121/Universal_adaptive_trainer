@@ -717,3 +717,53 @@ refresh/confirm/correct/remove, and `PersonalizedContextGenerator`. `app/generat
 `app/adaptive/` (ADR-001). Future generator optimization (including any GEPA-style procedure) is
 out of scope until explicitly requested; it would be a new ADR and a new generator version, not an
 in-place change to `personalized-context@1`.
+
+---
+
+## ADR-026 — JSON and enum columns decode themselves
+
+**Status:** accepted
+
+Sixteen columns hold JSON, and eighteen hold an enum. Both were plain
+`Text`/`String` columns that every reader decoded for itself, so `json.loads`
+plus `isinstance` guards were repeated at each call site and the copies were
+free to disagree. `app/persistence/types.py` moves that work into the column:
+
+- `JsonObject` / `JsonList` — a `dict | None` / `list`;
+- `PydanticObject(Model)` / `PydanticList(Model)` — validated model instances;
+- `EnumList(Enum)` — a list of members;
+- `StrEnumType(Enum)` — one member.
+
+The Python attribute is named for what it holds (`question.content`,
+`review.reasons`) while `mapped_column`'s first positional argument pins the
+original database column name (`content_json`, `reasons_json`).
+
+**Why:** decoding belongs to the thing that encoded it. The duplicated version
+had already drifted — `MultipleChoiceDraft` accepts duplicate options while
+`_multiple_choice` rejects them — and `Mapped[SomeEnum]` backed by `String`
+returned the member on a constructed row but a bare `str` on a loaded one, so
+callers had grown `hasattr(value, "value")` guards to survive both.
+
+`TypeDecorator` over `Text`/`String` rather than `sqlalchemy.JSON` keeps the
+stored text and the emitted DDL byte-identical, so an existing database file
+keeps working. That matters while there is still no migration tool (ADR-008):
+altering column types would mean "delete your database", and professor reviews
+are append-only history that must not be deleted.
+
+**Implications:**
+
+- Tolerance policy lives in one place: an unreadable *display* value yields
+  `None`/`[]` and logs a warning, because a bad stored value must not break a
+  page the professor came to read. An unrecognised **scalar enum** value raises
+  instead — that is a schema/code mismatch, and naming it beats rendering
+  around it (same spirit as `verify_schema`).
+- Mutation is not tracked. Assign a new value; mutating a returned `list`,
+  `dict` or model in place will not persist.
+- `app/persistence/` still must not import a subsystem, so columns whose shape
+  is owned by one (`pedagogical_eval`, curriculum `extraction_metadata` and
+  `warnings`) stay `JsonObject`/`JsonList` and the subsystem validates them.
+- Removed as redundant: `encode_reasons`/`decode_reasons`,
+  `encode_changed_fields`/`decode_changed_fields`, `encode_review_ids`/
+  `decode_review_ids`, `encode_warnings`/`decode_warnings`, `decode_json_list`,
+  `load_content`, and the local `_decode_json`/`_decode_object` helpers in
+  `app/validation/shared.py` and `app/evaluation/service.py`.

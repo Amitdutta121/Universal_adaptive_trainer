@@ -12,7 +12,7 @@ student engine depend on them:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -29,6 +29,46 @@ DEFAULT_PRIORITY = 100
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+class QuestionCheck(BaseModel):
+    """One deterministic or LLM check performed on a question."""
+
+    name: str = Field(min_length=1)
+    passed: bool
+    #: Deterministic checks (syntax, execution, tests) outrank LLM judgment.
+    deterministic: bool = True
+    severity: Literal["error"] = "error"
+    detail: str | None = None
+    evidence: str | None = None
+
+
+class QuestionValidationReport(BaseModel):
+    """Outcome of validating a single question."""
+
+    question_id: int | None = None
+    checks: list[QuestionCheck] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_now)
+
+    @property
+    def deterministic_checks(self) -> list[QuestionCheck]:
+        return [c for c in self.checks if c.deterministic]
+
+    @property
+    def passed(self) -> bool:
+        """A report passes only if every deterministic check passed.
+
+        A failing deterministic check cannot be overridden by a positive LLM
+        judgment; if there are no deterministic checks at all, the report does
+        not pass.
+        """
+        deterministic = self.deterministic_checks
+        if not deterministic:
+            return False
+        return all(check.passed for check in deterministic)
+
+    def resulting_status(self) -> QuestionStatus:
+        return QuestionStatus.VALIDATION_PASSED if self.passed else QuestionStatus.VALIDATION_FAILED
 
 
 class Question(BaseModel):
@@ -54,15 +94,16 @@ class Question(BaseModel):
     #: (text) at this stage; the executable format is decided with the validator.
     tests: str | None = None
 
-    #: Frozen generation request (``QuestionSpec`` JSON) for later comparison.
-    spec_json: str | None = None
+    #: Frozen generation request (a dumped ``QuestionSpec``) for later comparison.
+    spec: dict[str, Any] | None = None
     #: Full typed draft plus grounding metadata for display and scoring.
-    content_json: str | None = None
-    #: Serialized deterministic validation outcome for display and review.
-    validation_report_json: str | None = None
-    #: Serialized LLM pedagogical evaluation for display and review.
-    pedagogical_eval_json: str | None = None
-    personalization_context_json: str | None = None
+    content: dict[str, Any] | None = None
+    #: Deterministic validation outcome, for display and review.
+    validation_report: QuestionValidationReport | None = None
+    #: LLM pedagogical evaluation. Left as a plain object because its shape is
+    #: owned by :mod:`app.evaluation`, which the domain must not import.
+    pedagogical_eval: dict[str, Any] | None = None
+    personalization_context: dict[str, Any] | None = None
 
     # Retained generated originals. Never overwritten by professor edits.
     original_prompt: str | None = None
@@ -122,43 +163,3 @@ def apply_professor_edit(
     if tests is not None:
         updates["tests"] = tests
     return question.model_copy(update=updates)
-
-
-class QuestionCheck(BaseModel):
-    """One deterministic or LLM check performed on a question."""
-
-    name: str = Field(min_length=1)
-    passed: bool
-    #: Deterministic checks (syntax, execution, tests) outrank LLM judgment.
-    deterministic: bool = True
-    severity: Literal["error"] = "error"
-    detail: str | None = None
-    evidence: str | None = None
-
-
-class QuestionValidationReport(BaseModel):
-    """Outcome of validating a single question."""
-
-    question_id: int | None = None
-    checks: list[QuestionCheck] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=_now)
-
-    @property
-    def deterministic_checks(self) -> list[QuestionCheck]:
-        return [c for c in self.checks if c.deterministic]
-
-    @property
-    def passed(self) -> bool:
-        """A report passes only if every deterministic check passed.
-
-        A failing deterministic check cannot be overridden by a positive LLM
-        judgment; if there are no deterministic checks at all, the report does
-        not pass.
-        """
-        deterministic = self.deterministic_checks
-        if not deterministic:
-            return False
-        return all(check.passed for check in deterministic)
-
-    def resulting_status(self) -> QuestionStatus:
-        return QuestionStatus.VALIDATION_PASSED if self.passed else QuestionStatus.VALIDATION_FAILED

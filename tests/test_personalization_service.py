@@ -14,7 +14,6 @@ from app.domain.enums import (
     RejectionReason,
     ReviewDecision,
 )
-from app.domain.preferences import encode_review_ids
 from app.feedback import submit_review
 from app.persistence.models import PreferenceStatementRow, QuestionRow
 from app.persistence.repositories import PreferenceRepository, QuestionRepository
@@ -119,7 +118,7 @@ def test_confirm_correct_remove(session: Session) -> None:
             category=PreferenceCategory.EMPHASIS,
             evidence_count=2,
             confidence=0.4,
-            supporting_review_ids_json=encode_review_ids([1, 2]),
+            supporting_review_ids=([1, 2]),
             active=True,
             confirmation_state=PreferenceConfirmationState.INFERRED,
             profile_version="1",

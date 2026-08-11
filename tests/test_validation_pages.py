@@ -53,9 +53,9 @@ def _seed_question(
             difficulty=Difficulty.EASY,
             prompt="Strings are immutable.",
             reference_solution="true",
-            spec_json=f'{{"source_section_ids":[{book.chapters[0].sections[0].id}]}}',
-            content_json='{"correct_answer":true,"explanation":"Strings cannot be changed."}',
-            validation_report_json=report.model_dump_json(),
+            spec={"source_section_ids": [book.chapters[0].sections[0].id]},
+            content={"correct_answer": True, "explanation": "Strings cannot be changed."},
+            validation_report=report,
         )
     )
     session.commit()

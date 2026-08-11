@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.domain.books import BookChapter, BookSection, SectionSource
 from app.domain.enums import StructureConfidence, StructureSource
-from app.ingestion.service import decode_warnings
 from app.persistence.models import BookChapterRow, BookSectionRow
 from app.persistence.repositories import BookRepository, BookStructureRepository
 
@@ -34,7 +33,7 @@ def section_from_row(row: BookSectionRow) -> BookSection:
         end_page=row.end_page,
         structure_source=StructureSource(row.structure_source),
         declared_confidence=StructureConfidence(row.structure_confidence),
-        warnings=decode_warnings(row.warnings_json),
+        warnings=row.warnings,
     )
 
 

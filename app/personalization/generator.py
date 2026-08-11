@@ -13,7 +13,7 @@ from app.generation import GeneratorDescriptor
 from app.generation.prompts import build_prompt
 from app.generation.schemas import (
     RESPONSE_MODEL_FOR,
-    encode_content,
+    build_content,
     prompt_fields_from_draft,
     scoring_kind_for,
 )
@@ -130,8 +130,8 @@ class PersonalizedContextGenerator:
             prompt=question_prompt,
             reference_solution=reference_solution,
             tests=tests,
-            spec_json=spec.model_dump_json(),
-            content_json=encode_content(
+            spec=spec.model_dump(mode="json"),
+            content=build_content(
                 draft,
                 sources=[{"section_id": section_id, "citation": citation}],
                 model=client.description,
@@ -139,7 +139,7 @@ class PersonalizedContextGenerator:
             generator_kind=DESCRIPTOR.kind,
             generator_name=DESCRIPTOR.name,
             generator_version=DESCRIPTOR.version,
-            personalization_context_json=transparency_payload(
+            personalization_context=transparency_payload(
                 preference_ids=preference_ids,
                 review_ids=review_ids,
             ),

@@ -7,7 +7,6 @@ Showing genuine empty state rather than mock data keeps the UI honest.
 
 from __future__ import annotations
 
-import json
 import logging
 from contextlib import suppress
 from typing import Annotated, Literal
@@ -18,17 +17,10 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.curriculum import (
-    TaxonomyImportService,
-    decode_json_list,
-    decode_metadata,
-    decode_proposal_warnings,
-)
+from app.curriculum import TaxonomyImportService, extraction_metadata, proposal_warnings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.domain.enums import Difficulty, QuestionType, RejectionReason, ReviewDecision
-from app.domain.feedback import REJECTION_REASON_LABELS, decode_reasons
-from app.domain.preferences import decode_review_ids
-from app.domain.questions import QuestionValidationReport
+from app.domain.feedback import REJECTION_REASON_LABELS
 from app.errors import (
     ConfigurationError,
     DomainRuleError,
@@ -53,7 +45,6 @@ from app.ingestion import (
     SUPPORTED_EXTENSIONS,
     BookImportService,
     SourceRetrieval,
-    decode_warnings,
 )
 from app.llm import describe_availability
 from app.persistence.database import get_session
@@ -188,7 +179,7 @@ def book_detail(request: Request, session: DbSession, book_id: int) -> HTMLRespo
             "active_section": "books",
             "book": book,
             "chapters": retrieval.chapters_in_book(book_id),
-            "warnings": decode_warnings(book.warnings_json),
+            "warnings": book.warnings,
             "section_count": BookStructureRepository(session).section_count(book_id),
         },
     )
@@ -294,7 +285,7 @@ def curriculum_version(request: Request, session: DbSession, version_id: int) ->
     """One curriculum version: the Topic -> Subtopic hierarchy."""
     repo = CurriculumRepository(session)
     version = repo.get_with_tree(version_id)
-    book_ids = decode_json_list(version.source_book_ids_json)
+    book_ids = version.source_book_ids
     books = []
     for book_id in book_ids:
         try:
@@ -311,8 +302,8 @@ def curriculum_version(request: Request, session: DbSession, version_id: int) ->
             "active_section": "curriculum",
             "version": version,
             "books": books,
-            "metadata": decode_metadata(version.extraction_metadata_json),
-            "warnings": decode_proposal_warnings(version.warnings_json),
+            "metadata": extraction_metadata(version.extraction_metadata),
+            "warnings": proposal_warnings(version.warnings),
             "subtopic_count": repo.subtopic_count(version_id),
         },
     )
@@ -329,7 +320,7 @@ def curriculum_subtopic(request: Request, session: DbSession, subtopic_id: int) 
     evidence = [
         {
             "row": item,
-            "quotes": decode_json_list(item.quotes_json),
+            "quotes": item.quotes,
         }
         for item in subtopic.evidence
     ]
@@ -345,7 +336,7 @@ def curriculum_subtopic(request: Request, session: DbSession, subtopic_id: int) 
             "is_taxonomy_upload": (
                 subtopic.topic.curriculum_version.generated_by == "taxonomy-upload"
             ),
-            "candidate_labels": decode_json_list(subtopic.candidate_labels_json),
+            "candidate_labels": subtopic.candidate_labels,
             "evidence": evidence,
             "book_count": len({item.book_id for item in subtopic.evidence}),
         },
@@ -506,29 +497,12 @@ def _approved_curriculum_id(session: Session) -> int:
 def question_detail(request: Request, session: DbSession, question_id: int) -> HTMLResponse:
     """Show generated content and the citation(s) that ground one question."""
     question = QuestionRepository(session).get(question_id)
-    validation_report = None
-    if question.validation_report_json:
-        with suppress(ValidationError):
-            validation_report = QuestionValidationReport.model_validate_json(
-                question.validation_report_json
-            )
+    validation_report = question.validation_report
     pedagogical_eval = None
-    if question.pedagogical_eval_json:
+    if question.pedagogical_eval is not None:
         with suppress(ValidationError):
-            pedagogical_eval = PedagogicalEvaluation.model_validate_json(
-                question.pedagogical_eval_json
-            )
-    try:
-        content = json.loads(question.content_json or "{}")
-    except json.JSONDecodeError:
-        content = {}
-    if not isinstance(content, dict):
-        content = {}
-    spec = None
-    if question.spec_json:
-        with suppress(json.JSONDecodeError, TypeError):
-            parsed_spec = json.loads(question.spec_json)
-            spec = parsed_spec if isinstance(parsed_spec, dict) else None
+            pedagogical_eval = PedagogicalEvaluation.model_validate(question.pedagogical_eval)
+    content = question.content or {}
     sources = content.get("sources", [])
     taxonomy = {
         "curriculum": str(question.curriculum_version_id or "—"),
@@ -551,16 +525,14 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
                 if subtopic is not None:
                     taxonomy["subtopic"] = subtopic.name
     personalization_evidence = None
-    if question.generator_name == "personalized-context" and question.personalization_context_json:
-        with suppress(json.JSONDecodeError, TypeError):
-            payload = json.loads(question.personalization_context_json)
-            if isinstance(payload, dict):
-                preference_ids = payload.get("preference_ids", [])
-                review_ids = payload.get("retrieved_review_ids", [])
-                personalization_evidence = {
-                    "preference_ids": preference_ids if isinstance(preference_ids, list) else [],
-                    "review_ids": review_ids if isinstance(review_ids, list) else [],
-                }
+    payload = question.personalization_context
+    if question.generator_name == "personalized-context" and payload is not None:
+        preference_ids = payload.get("preference_ids", [])
+        review_ids = payload.get("retrieved_review_ids", [])
+        personalization_evidence = {
+            "preference_ids": preference_ids if isinstance(preference_ids, list) else [],
+            "review_ids": review_ids if isinstance(review_ids, list) else [],
+        }
     return render(
         request,
         "question_detail.html",
@@ -569,7 +541,7 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "active_section": "questions",
             "question": question,
             "content": content,
-            "spec": spec,
+            "spec": question.spec,
             "rejection_reasons": list(REJECTION_REASON_LABELS.items()),
             "sources": sources if isinstance(sources, list) else [],
             "taxonomy": taxonomy,
@@ -627,27 +599,19 @@ def review_question(
 
 
 def _preference_rows(session: Session) -> list[dict[str, object]]:
-    rows = []
-    for pref in PreferenceRepository(session).list_all():
-        category = pref.category.value if hasattr(pref.category, "value") else pref.category
-        state = (
-            pref.confirmation_state.value
-            if hasattr(pref.confirmation_state, "value")
-            else pref.confirmation_state
-        )
-        rows.append(
-            {
-                "id": pref.id,
-                "rule_text": pref.rule_text,
-                "category_label": str(category).replace("_", " "),
-                "evidence_count": pref.evidence_count,
-                "confidence": pref.confidence,
-                "state": state,
-                "active": pref.active,
-                "review_ids": decode_review_ids(pref.supporting_review_ids_json),
-            }
-        )
-    return rows
+    return [
+        {
+            "id": pref.id,
+            "rule_text": pref.rule_text,
+            "category_label": pref.category.value.replace("_", " "),
+            "evidence_count": pref.evidence_count,
+            "confidence": pref.confidence,
+            "state": pref.confirmation_state.value,
+            "active": pref.active,
+            "review_ids": pref.supporting_review_ids,
+        }
+        for pref in PreferenceRepository(session).list_all()
+    ]
 
 
 @router.get("/preferences", response_class=HTMLResponse, name="preferences")
@@ -740,9 +704,7 @@ def feedback(request: Request, session: DbSession) -> HTMLResponse:
             "id": review.id,
             "question_id": review.question_id,
             "decision": review.decision,
-            "reasons": [
-                REJECTION_REASON_LABELS[reason] for reason in decode_reasons(review.reasons_json)
-            ],
+            "reasons": [REJECTION_REASON_LABELS[reason] for reason in review.reasons],
             "comment": review.comment,
             "generator": (f"{review.reviewed_generator_name}@{review.reviewed_generator_version}"),
             "created_at": review.created_at,

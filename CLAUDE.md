@@ -165,6 +165,7 @@ app/
   __main__.py         `python -m app` development server
   domain/             Foundational shared entities. Pure; no IO.
   persistence/        Engine, session, ORM tables, repositories. The only DB access.
+    types.py          Column types that decode themselves (JSON, Pydantic, enums). ADR-026.
   ingestion/          Book JSON import                          (IMPLEMENTED)
     schema.py         The book JSON contract, and its validation
     storage.py        Upload validation and retention of the document

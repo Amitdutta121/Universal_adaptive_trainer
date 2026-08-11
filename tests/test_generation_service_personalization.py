@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import book_documents as docs
@@ -16,7 +15,7 @@ from app.domain.enums import (
     QuestionType,
     ReviewDecision,
 )
-from app.domain.preferences import confidence_from_evidence, encode_review_ids
+from app.domain.preferences import confidence_from_evidence
 from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.feedback import submit_review
 from app.generation.schemas import DebuggingDraft
@@ -124,7 +123,7 @@ def _seed_with_feedback(session: Session, settings) -> tuple[object, object, obj
             category=PreferenceCategory.WORDING,
             evidence_count=2,
             confidence=confidence_from_evidence(2),
-            supporting_review_ids_json=encode_review_ids([1]),
+            supporting_review_ids=([1]),
         )
     )
     session.commit()
@@ -147,8 +146,8 @@ def test_generation_service_selects_personalized(session: Session, settings) -> 
     )
 
     assert rows[0].generator_name == "personalized-context"
-    assert rows[0].personalization_context_json
-    payload = json.loads(rows[0].personalization_context_json)
+    assert rows[0].personalization_context
+    payload = rows[0].personalization_context
     assert "retrieved_review_ids" in payload
 
 
@@ -166,4 +165,4 @@ def test_generation_service_default_is_base(session: Session, settings) -> None:
     )
 
     assert rows[0].generator_name == "base"
-    assert rows[0].personalization_context_json is None
+    assert rows[0].personalization_context is None

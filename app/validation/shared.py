@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from sqlalchemy.orm import Session
 
 from app.domain.enums import CurriculumStatus
@@ -17,30 +14,18 @@ from app.validation.report import make_check
 def _source_section_ids(question: Question) -> set[int]:
     """Collect integer section ids from the frozen request and generated content."""
     section_ids: set[int] = set()
-    spec = _decode_json(question.spec_json)
-    if isinstance(spec, dict):
-        source_section_ids = spec.get("source_section_ids")
+    if question.spec is not None:
+        source_section_ids = question.spec.get("source_section_ids")
         if isinstance(source_section_ids, list):
             section_ids.update(value for value in source_section_ids if type(value) is int)
 
-    content = _decode_json(question.content_json)
-    if isinstance(content, dict):
-        sources = content.get("sources")
+    if question.content is not None:
+        sources = question.content.get("sources")
         if isinstance(sources, list):
             for source in sources:
                 if isinstance(source, dict) and type(source.get("section_id")) is int:
                     section_ids.add(source["section_id"])
     return section_ids
-
-
-def _decode_json(raw_json: str | None) -> Any:
-    """Decode JSON, treating malformed persisted content as absent."""
-    if raw_json is None:
-        return None
-    try:
-        return json.loads(raw_json)
-    except json.JSONDecodeError:
-        return None
 
 
 def _has_approved_taxonomy_ids(question: Question, session: Session | None) -> bool:

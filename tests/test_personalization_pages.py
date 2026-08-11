@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import book_documents as docs
@@ -17,7 +16,6 @@ from app.domain.enums import (
     RejectionReason,
     ReviewDecision,
 )
-from app.domain.preferences import encode_review_ids
 from app.errors import ConfigurationError
 from app.feedback import submit_review
 from app.generation.schemas import DebuggingDraft
@@ -147,7 +145,7 @@ def test_refresh_preferences_post(client, session, monkeypatch) -> None:
                     category=PreferenceCategory.WORDING,
                     evidence_count=1,
                     confidence=0.4,
-                    supporting_review_ids_json=encode_review_ids([1]),
+                    supporting_review_ids=([1]),
                 )
             )
             request_session.commit()
@@ -188,7 +186,7 @@ def test_preferences_confirm_correct_remove(client, session) -> None:
             category=PreferenceCategory.EMPHASIS,
             evidence_count=2,
             confidence=0.4,
-            supporting_review_ids_json=encode_review_ids([1, 2]),
+            supporting_review_ids=([1, 2]),
             confirmation_state=PreferenceConfirmationState.INFERRED,
         )
     )
@@ -227,7 +225,7 @@ def test_preferences_correct_empty_rule_shows_error(client, session) -> None:
             category=PreferenceCategory.EMPHASIS,
             evidence_count=2,
             confidence=0.4,
-            supporting_review_ids_json=encode_review_ids([1, 2]),
+            supporting_review_ids=([1, 2]),
             confirmation_state=PreferenceConfirmationState.INFERRED,
         )
     )
@@ -288,14 +286,12 @@ def test_generate_form_accepts_personalized(client, session, settings, monkeypat
 
 
 def test_question_detail_shows_personalization_evidence(client, session) -> None:
-    context = json.dumps(
-        {
-            "preference_ids": [7],
-            "retrieved_review_ids": [3, 5],
-            "profile_version": "1",
-            "generator": "personalized-context@1",
-        }
-    )
+    context = {
+        "preference_ids": [7],
+        "retrieved_review_ids": [3, 5],
+        "profile_version": "1",
+        "generator": "personalized-context@1",
+    }
     row = QuestionRepository(session).add(
         QuestionRow(
             prompt="Personalized prompt.",
@@ -307,7 +303,7 @@ def test_question_detail_shows_personalization_evidence(client, session) -> None
             generator_name="personalized-context",
             generator_version="1",
             status=QuestionStatus.VALIDATION_PASSED,
-            personalization_context_json=context,
+            personalization_context=context,
         )
     )
     session.commit()

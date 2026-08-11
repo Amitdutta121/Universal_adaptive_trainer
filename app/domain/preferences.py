@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,16 +24,6 @@ def confidence_from_evidence(evidence_count: int, *, confirmed: bool = False) ->
     if confirmed:
         raw = min(1.0, raw + 0.1)
     return round(min(1.0, raw), 4)
-
-
-def encode_review_ids(ids: list[int]) -> str:
-    return json.dumps(ids)
-
-
-def decode_review_ids(raw: str | None) -> list[int]:
-    if not raw:
-        return []
-    return [int(x) for x in json.loads(raw)]
 
 
 class PreferenceStatement(BaseModel):

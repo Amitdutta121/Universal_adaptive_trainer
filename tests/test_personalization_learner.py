@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.domain.enums import PreferenceCategory, PreferenceConfirmationState
-from app.domain.preferences import confidence_from_evidence, decode_review_ids, encode_review_ids
+from app.domain.preferences import confidence_from_evidence
 from app.persistence.models import PreferenceStatementRow
 from app.personalization.learner import (
     MIN_SUPPORTING_REVIEWS,
@@ -65,7 +65,7 @@ def test_merge_accepts_two_supporting_reviews() -> None:
     assert rows[0].evidence_count == 2
     assert rows[0].confidence >= 0.35
     assert rows[0].confirmation_state is PreferenceConfirmationState.INFERRED
-    assert decode_review_ids(rows[0].supporting_review_ids_json) == [1, 2]
+    assert rows[0].supporting_review_ids == [1, 2]
 
 
 def test_merge_unions_existing_row_on_normalized_rule_text() -> None:
@@ -76,7 +76,7 @@ def test_merge_unions_existing_row_on_normalized_rule_text() -> None:
             category=PreferenceCategory.WORDING,
             evidence_count=2,
             confidence=0.4,
-            supporting_review_ids_json=encode_review_ids([1, 2]),
+            supporting_review_ids=([1, 2]),
             confirmation_state=PreferenceConfirmationState.INFERRED,
         )
     ]
@@ -91,7 +91,7 @@ def test_merge_unions_existing_row_on_normalized_rule_text() -> None:
     assert len(rows) == 1
     assert rows[0].id == 10
     assert rows[0].evidence_count == 3
-    assert decode_review_ids(rows[0].supporting_review_ids_json) == [1, 2, 3]
+    assert rows[0].supporting_review_ids == [1, 2, 3]
     assert rows[0].confidence >= 0.35
 
 
@@ -103,7 +103,7 @@ def test_merge_respects_confirmed_boost_on_existing_row() -> None:
             category=PreferenceCategory.SCENARIO_STYLE,
             evidence_count=2,
             confidence=0.5,
-            supporting_review_ids_json=encode_review_ids([1, 2]),
+            supporting_review_ids=([1, 2]),
             confirmation_state=PreferenceConfirmationState.CONFIRMED,
         )
     ]

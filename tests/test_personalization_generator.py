@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import book_documents as docs
@@ -16,7 +15,7 @@ from app.domain.enums import (
     QuestionType,
     ReviewDecision,
 )
-from app.domain.preferences import confidence_from_evidence, encode_review_ids
+from app.domain.preferences import confidence_from_evidence
 from app.feedback import submit_review
 from app.generation.schemas import DebuggingDraft
 from app.generation.spec import build_question_spec
@@ -120,7 +119,7 @@ def _seed_with_feedback(session: Session, settings) -> tuple[object, object, obj
             category=PreferenceCategory.WORDING,
             evidence_count=2,
             confidence=confidence_from_evidence(2),
-            supporting_review_ids_json=encode_review_ids([1]),
+            supporting_review_ids=([1]),
         )
     )
     session.commit()
@@ -175,8 +174,8 @@ def test_no_feedback_still_personalized_descriptor(session: Session, settings) -
     question = gen.generate_one(spec, topic_name=topic.name, subtopic_names=[subtopic.name])
 
     assert question.generator_name == "personalized-context"
-    assert question.personalization_context_json is not None
-    payload = json.loads(question.personalization_context_json)
+    assert question.personalization_context is not None
+    payload = question.personalization_context
     assert payload["retrieved_review_ids"] == []
 
 

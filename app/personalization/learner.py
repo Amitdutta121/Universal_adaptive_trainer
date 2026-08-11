@@ -7,12 +7,7 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, Field
 
 from app.domain.enums import PreferenceCategory, PreferenceConfirmationState
-from app.domain.preferences import (
-    PROFILE_VERSION,
-    confidence_from_evidence,
-    decode_review_ids,
-    encode_review_ids,
-)
+from app.domain.preferences import PROFILE_VERSION, confidence_from_evidence
 from app.llm import StructuredLLMClient
 from app.persistence.models import PreferenceStatementRow
 
@@ -76,10 +71,8 @@ def merge_candidates(
         )
 
         if match is not None:
-            merged_ids = sorted(
-                set(decode_review_ids(match.supporting_review_ids_json)) | set(review_ids)
-            )
-            match.supporting_review_ids_json = encode_review_ids(merged_ids)
+            merged_ids = sorted(set(match.supporting_review_ids) | set(review_ids))
+            match.supporting_review_ids = merged_ids
             match.evidence_count = len(merged_ids)
             match.confidence = confidence_from_evidence(
                 match.evidence_count,
@@ -95,7 +88,7 @@ def merge_candidates(
             category=candidate.category,
             evidence_count=len(review_ids),
             confidence=confidence_from_evidence(len(review_ids)),
-            supporting_review_ids_json=encode_review_ids(review_ids),
+            supporting_review_ids=review_ids,
             active=True,
             confirmation_state=PreferenceConfirmationState.INFERRED,
             profile_version=PROFILE_VERSION,

@@ -110,20 +110,20 @@ def _seed_question(session: Session, settings: Any) -> Question:
         difficulty=Difficulty.EASY,
         prompt="What is printed?",
         reference_solution="3",
-        content_json=(
-            '{"prompt":"What is printed?","code":"print(3)","expected_output":"3",'
-            f'"sources":[{{"section_id":{section.id},"citation":"x"}}]}}'
-        ),
-        spec_json=(
-            '{"curriculum_version_id":'
-            + str(version.id)
-            + ',"topic_id":'
-            + str(version.topics[0].id)
-            + ',"subtopic_ids":['
-            + str(version.topics[0].subtopics[0].id)
-            + '],"question_type":"output_prediction","difficulty":"easy",'
-            + f'"source_section_ids":[{section.id}]}}'
-        ),
+        content={
+            "prompt": "What is printed?",
+            "code": "print(3)",
+            "expected_output": "3",
+            "sources": [{"section_id": section.id, "citation": "x"}],
+        },
+        spec={
+            "curriculum_version_id": version.id,
+            "topic_id": version.topics[0].id,
+            "subtopic_ids": [version.topics[0].subtopics[0].id],
+            "question_type": "output_prediction",
+            "difficulty": "easy",
+            "source_section_ids": [section.id],
+        },
     )
 
 

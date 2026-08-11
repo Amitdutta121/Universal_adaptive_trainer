@@ -111,7 +111,8 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
     assert question.question_type is QuestionType.DEBUGGING
     assert question.generator_name == "base"
     assert question.generator_version == "1"
-    assert question.content_json and f'"section_id": {section_ids[0]}' in question.content_json
+    assert question.content is not None
+    assert question.content["sources"][0]["section_id"] == section_ids[0]
     assert question.tests and '"assert": "assert True"' in question.tests
     assert client.calls[0]["model"] is RESPONSE_MODEL_FOR[QuestionType.DEBUGGING]
     assert "Immutability" in client.calls[0]["prompt"]
@@ -162,5 +163,5 @@ def test_service_persists_one_question_per_selected_section(session, settings) -
     assert QuestionRepository(session).count() == 2
     assert [row.topic_id for row in rows] == [topic.id, topic.id]
     assert all(row.question_type is QuestionType.DEBUGGING for row in rows)
-    assert all(row.spec_json and '"source_section_ids":[' in row.spec_json for row in rows)
+    assert all(row.spec and row.spec["source_section_ids"] for row in rows)
     assert len(client.calls) == 2

@@ -121,7 +121,7 @@ def test_generation_persists_passing_validation_report(session: Session, setting
     )
 
     loaded = QuestionRepository(session).get(rows[0].id)
-    assert loaded.validation_report_json
+    assert loaded.validation_report is not None
     assert loaded.status is QuestionStatus.VALIDATION_PASSED
 
 
@@ -138,5 +138,5 @@ def test_generation_persists_failing_validation_report(session: Session, setting
     )
 
     loaded = QuestionRepository(session).get(rows[0].id)
-    assert loaded.validation_report_json
+    assert loaded.validation_report is not None
     assert loaded.status is QuestionStatus.VALIDATION_FAILED

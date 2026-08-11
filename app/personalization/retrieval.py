@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, RejectionReason, ReviewDecision
-from app.domain.feedback import REJECTION_REASON_LABELS, decode_reasons
+from app.domain.feedback import REJECTION_REASON_LABELS
 from app.generation.spec import QuestionSpec
 from app.persistence.models import ProfessorReviewRow, QuestionRow, ReviewEmbeddingRow
 from app.persistence.repositories import ProfessorReviewRepository, ReviewEmbeddingRepository
@@ -97,7 +96,7 @@ def _example_prompt(review: ProfessorReviewRow, question: QuestionRow) -> str:
 
 def _build_example_text(review: ProfessorReviewRow, question: QuestionRow) -> str:
     parts = [_example_prompt(review, question)]
-    reasons = decode_reasons(review.reasons_json)
+    reasons = review.reasons
     if reasons:
         labels = [REJECTION_REASON_LABELS[reason] for reason in reasons]
         parts.append(" ".join(labels))
@@ -176,7 +175,7 @@ def _ensure_embeddings(
             and existing.model_id == embedder.model_id
             and existing.content_hash == content_hash
         ):
-            vectors[review.id] = json.loads(existing.vector_json)
+            vectors[review.id] = existing.vector
             continue
         pending_reviews.append(review)
         pending_texts.append(text)
@@ -188,7 +187,7 @@ def _ensure_embeddings(
                 ReviewEmbeddingRow(
                     review_id=review.id,
                     model_id=embedder.model_id,
-                    vector_json=json.dumps(vector),
+                    vector=vector,
                     content_hash=example_content_hash(text),
                 )
             )
@@ -229,7 +228,7 @@ def retrieve_examples(
 
     for rank, review in enumerate(reviews):
         question = review.question
-        reasons = decode_reasons(review.reasons_json)
+        reasons = review.reasons
         meta_raw = _meta_raw_score(
             review=review,
             question=question,

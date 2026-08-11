@@ -137,10 +137,9 @@ def test_curriculum_boundary_only_exports_taxonomy_import_and_display_helpers() 
     assert curriculum.__all__ == [
         "SCHEMA_VERSION",
         "TaxonomyImportService",
-        "decode_json_list",
-        "decode_metadata",
-        "decode_proposal_warnings",
+        "extraction_metadata",
         "parse_taxonomy_document",
+        "proposal_warnings",
     ]
     assert not hasattr(curriculum, "CurriculumProposalService")
     assert not hasattr(curriculum, "get_curriculum_proposer")

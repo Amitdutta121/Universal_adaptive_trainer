@@ -19,14 +19,12 @@ structure validated. That is why there is no ``FAILED`` book status.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.domain.books import ExtractionWarning
 from app.domain.enums import BookStatus
 from app.ingestion.schema import BookDocument, parse_book_document
 from app.ingestion.storage import checksum, store_upload, validate_upload
@@ -34,31 +32,6 @@ from app.persistence.models import BookChapterRow, BookRow, BookSectionRow
 from app.persistence.repositories import BookRepository, BookStructureRepository
 
 logger = logging.getLogger(__name__)
-
-
-def encode_warnings(warnings: list[ExtractionWarning]) -> str | None:
-    """Serialise warnings for storage. ``None`` when there are none."""
-    if not warnings:
-        return None
-    return json.dumps([warning.model_dump(mode="json") for warning in warnings])
-
-
-def decode_warnings(raw: str | None) -> list[ExtractionWarning]:
-    """Read warnings back, tolerating rows written by an older format."""
-    if not raw:
-        return []
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Discarding unreadable warnings payload")
-        return []
-    warnings: list[ExtractionWarning] = []
-    for item in payload if isinstance(payload, list) else []:
-        try:
-            warnings.append(ExtractionWarning.model_validate(item))
-        except ValueError:
-            continue
-    return warnings
 
 
 class BookImportService:
@@ -106,9 +79,7 @@ class BookImportService:
                 producer=document.producer,
                 page_count=document.page_count,
                 status=BookStatus.PARTIAL if document.is_partial() else BookStatus.IMPORTED,
-                warnings_json=encode_warnings(
-                    [warning.to_domain() for warning in document.warnings]
-                ),
+                warnings=[warning.to_domain() for warning in document.warnings],
                 imported_at=datetime.now(UTC),
             )
         )
@@ -138,7 +109,7 @@ class BookImportService:
         book.source_filename = document.source_filename
         book.producer = document.producer
         book.status = BookStatus.PARTIAL if document.is_partial() else BookStatus.IMPORTED
-        book.warnings_json = encode_warnings([warning.to_domain() for warning in document.warnings])
+        book.warnings = [warning.to_domain() for warning in document.warnings]
         book.imported_at = datetime.now(UTC)
         self._persist_structure(book, document)
         return book
@@ -172,7 +143,7 @@ class BookImportService:
                         end_page=section.end_page,
                         structure_source=section.structure_source,
                         structure_confidence=section.structure_confidence,
-                        warnings_json=encode_warnings(section.warnings),
+                        warnings=section.warnings,
                     )
                 )
 

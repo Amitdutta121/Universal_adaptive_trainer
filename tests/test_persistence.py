@@ -16,6 +16,7 @@ from app.domain.enums import (
     RejectionReason,
     ReviewDecision,
 )
+from app.domain.questions import QuestionValidationReport
 from app.errors import NotFoundError, SchemaOutOfDateError
 from app.feedback import submit_review
 from app.persistence.database import init_db, verify_schema
@@ -210,10 +211,10 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
         prompt="Strings are immutable.",
         reference_solution="true",
         tests=None,
-        spec_json='{"topic_id":1}',
-        content_json='{"explanation":"because..."}',
-        validation_report_json='{"checks":[]}',
-        pedagogical_eval_json='{"status":"skipped"}',
+        spec={"topic_id": 1},
+        content={"explanation": "because..."},
+        validation_report=QuestionValidationReport(checks=[]),
+        pedagogical_eval={"status": "skipped"},
         generator_kind=GeneratorKind.BASE,
         generator_name="base",
         generator_version="1",
@@ -222,6 +223,8 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
     session.commit()
     loaded = QuestionRepository(session).get(saved.id)
     assert loaded.question_type == QuestionType.TRUE_FALSE
-    assert loaded.spec_json and loaded.content_json
-    assert loaded.validation_report_json == '{"checks":[]}'
-    assert loaded.pedagogical_eval_json == '{"status":"skipped"}'
+    assert loaded.spec == {"topic_id": 1}
+    assert loaded.content == {"explanation": "because..."}
+    assert loaded.validation_report is not None
+    assert loaded.validation_report.checks == []
+    assert loaded.pedagogical_eval == {"status": "skipped"}

@@ -52,6 +52,6 @@ def test_real_generation_smoke(tmp_path) -> None:
             )[0]
 
             assert row.prompt
-            assert row.content_json
+            assert row.content
     finally:
         engine.dispose()

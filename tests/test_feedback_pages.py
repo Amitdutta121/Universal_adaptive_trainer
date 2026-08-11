@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.domain.enums import QuestionStatus, ReviewDecision
+from app.domain.enums import QuestionStatus, RejectionReason, ReviewDecision
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import ProfessorReviewRepository, QuestionRepository
 
@@ -22,7 +22,7 @@ def _seed_question(session: Session) -> int:
             status=QuestionStatus.VALIDATION_PASSED,
             generator_name="base",
             generator_version="1",
-            spec_json='{"difficulty":"easy","question_type":"true_false"}',
+            spec={"difficulty": "easy", "question_type": "true_false"},
         )
     )
     session.commit()
@@ -82,8 +82,8 @@ def test_post_reject_multiple_reasons(client: TestClient, session: Session) -> N
     session.expire_all()
     review = ProfessorReviewRepository(session).list_recent()[0]
     assert review.decision == ReviewDecision.REJECT
-    assert "too_easy" in (review.reasons_json or "")
-    assert "ambiguous" in (review.reasons_json or "")
+    assert RejectionReason.TOO_EASY in review.reasons
+    assert RejectionReason.AMBIGUOUS in review.reasons
 
 
 def test_post_edit_preserves_original(client: TestClient, session: Session) -> None:

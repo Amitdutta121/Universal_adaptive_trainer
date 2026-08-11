@@ -54,8 +54,6 @@ from app.domain.preferences import (
     PROFILE_VERSION,
     PreferenceStatement,
     confidence_from_evidence,
-    decode_review_ids,
-    encode_review_ids,
 )
 from app.domain.questions import Question, QuestionCheck, QuestionValidationReport
 
@@ -96,9 +94,7 @@ __all__ = [
     "Topic",
     "WarningSeverity",
     "confidence_from_evidence",
-    "decode_review_ids",
     "difficulty_for_mastery",
-    "encode_review_ids",
     "mastery_band",
     "score_from_tests",
 ]

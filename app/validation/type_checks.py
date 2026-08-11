@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import json
 from collections.abc import Callable
 
 from pydantic import ValidationError
@@ -13,17 +12,6 @@ from app.domain.questions import Question, QuestionCheck
 from app.generation.schemas import ExecutableTestCase
 from app.validation.report import make_check
 from app.validation.runner import EVIDENCE_LIMIT, LocalCodeRunner, TestRunSummary, normalize_output
-
-
-def load_content(question: Question) -> dict | None:
-    """Decode a question's content object, returning ``None`` when unreadable."""
-    if not question.content_json:
-        return None
-    try:
-        content = json.loads(question.content_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return content if isinstance(content, dict) else None
 
 
 def check_type(

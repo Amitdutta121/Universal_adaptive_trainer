@@ -4,7 +4,7 @@ Each draft model is the structured output schema for one :class:`~app.domain.enu
 They are kept plain and field-based so Instructor can validate LLM responses without unions.
 
 Storage encoding maps drafts into domain :class:`~app.domain.questions.Question` fields and
-``content_json``.
+its ``content`` object.
 """
 
 from __future__ import annotations
@@ -170,16 +170,16 @@ def prompt_fields_from_draft(draft: BaseModel) -> tuple[str, str | None, str | N
     raise TypeError(msg)
 
 
-def encode_content(
+def build_content(
     draft: BaseModel,
     *,
     sources: list[dict[str, object]] | None = None,
     model: str | None = None,
-) -> str:
-    """Serialize a draft and optional grounding metadata for ``content_json``."""
+) -> dict[str, object]:
+    """Combine a draft with its grounding metadata for the ``content`` column."""
     payload: dict[str, object] = draft.model_dump(mode="json")
     if sources is not None:
         payload["sources"] = sources
     if model is not None:
         payload["model"] = model
-    return json.dumps(payload, ensure_ascii=False)
+    return payload

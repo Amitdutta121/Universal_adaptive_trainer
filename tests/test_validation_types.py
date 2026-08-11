@@ -2,23 +2,21 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from app.domain.enums import QuestionType
 from app.domain.questions import Question
 from app.validation.runner import EVIDENCE_LIMIT, LocalCodeRunner
-from app.validation.type_checks import check_type, load_content
+from app.validation.type_checks import check_type
 
 RUNNER = LocalCodeRunner(timeout_seconds=2)
 
 
-def _question(question_type: QuestionType | None, content: object) -> Question:
+def _question(question_type: QuestionType | None, content: dict[str, object]) -> Question:
     return Question(
         prompt="Validate this question.",
         question_type=question_type,
-        content_json=json.dumps(content),
+        content=content,
     )
 
 
@@ -134,10 +132,7 @@ def test_parsons_non_string_order_id_fails_consistency_check() -> None:
         "correct_order": [{}],
     }
     question = _question(QuestionType.PARSONS, content)
-    checks = {
-        check.name: check
-        for check in check_type(question, json.loads(question.content_json), RUNNER)
-    }
+    checks = {check.name: check for check in check_type(question, content, RUNNER)}
 
     assert checks["parsons_order_consistent"].passed is False
 
@@ -253,19 +248,6 @@ def test_happy_path_passes_all_type_checks(
     assert [check.name for check in checks] == expected_names
     assert [check.detail for check in checks] == expected_details
     assert all(check.passed for check in checks)
-
-
-@pytest.mark.parametrize("content_json", [None, "", "{", "[]"])
-def test_load_content_returns_none_for_unreadable_content(content_json: str | None) -> None:
-    question = Question(prompt="x", content_json=content_json)
-
-    assert load_content(question) is None
-
-
-def test_load_content_returns_decoded_object() -> None:
-    question = Question(prompt="x", content_json='{"answer": 3}')
-
-    assert load_content(question) == {"answer": 3}
 
 
 def test_null_question_type_has_no_type_checks() -> None:

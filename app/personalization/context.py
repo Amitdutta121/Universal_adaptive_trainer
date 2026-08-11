@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from app.domain.enums import ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.preferences import PROFILE_VERSION
@@ -21,8 +19,7 @@ STYLE_PEDAGOGY_DISCLAIMER = (
 
 
 def _format_preference(pref: PreferenceStatementRow) -> str:
-    category = pref.category.value if hasattr(pref.category, "value") else pref.category
-    return f"- [{category}] {pref.rule_text}"
+    return f"- [{pref.category.value}] {pref.rule_text}"
 
 
 def _format_positive_example(example: RetrievedExample) -> str:
@@ -78,14 +75,11 @@ def transparency_payload(
     *,
     preference_ids: list[int],
     review_ids: list[int],
-) -> str:
-    """Serialize the non-chain-of-thought personalization evidence stamped on questions."""
-    return json.dumps(
-        {
-            "preference_ids": preference_ids,
-            "retrieved_review_ids": review_ids,
-            "profile_version": PROFILE_VERSION,
-            "generator": "personalized-context@1",
-        },
-        separators=(",", ":"),
-    )
+) -> dict[str, object]:
+    """The non-chain-of-thought personalization evidence stamped on questions."""
+    return {
+        "preference_ids": preference_ids,
+        "retrieved_review_ids": review_ids,
+        "profile_version": PROFILE_VERSION,
+        "generator": "personalized-context@1",
+    }

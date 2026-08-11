@@ -7,7 +7,6 @@ signals such as student performance.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,33 +30,9 @@ REJECTION_REASON_LABELS: dict[RejectionReason, str] = {
     RejectionReason.OTHER: "Other",
 }
 
-_CHANGED_FIELD_NAMES = frozenset({"prompt", "reference_solution", "tests"})
-
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def encode_reasons(reasons: list[RejectionReason]) -> str:
-    return json.dumps([reason.value for reason in reasons])
-
-
-def decode_reasons(raw: str | None) -> list[RejectionReason]:
-    if not raw:
-        return []
-    values = json.loads(raw)
-    return [RejectionReason(value) for value in values]
-
-
-def encode_changed_fields(fields: list[str]) -> str:
-    return json.dumps(fields)
-
-
-def decode_changed_fields(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    values = json.loads(raw)
-    return [str(item) for item in values if str(item) in _CHANGED_FIELD_NAMES]
 
 
 class ProfessorReview(BaseModel):

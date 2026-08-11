@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from sqlalchemy.orm import Session
 
 from app.domain.questions import Question
@@ -78,7 +75,7 @@ class PedagogicalJudge:
     def _load_context(
         self, question: Question
     ) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
-        content = _decode_object(question.content_json)
+        content = question.content or {}
         artifact = {
             "prompt": question.prompt,
             "question_type": question.question_type.value if question.question_type else None,
@@ -122,23 +119,12 @@ class PedagogicalJudge:
         return artifact, sources, taxonomy
 
 
-def _decode_object(raw_json: str | None) -> dict[str, Any]:
-    """Decode persisted object JSON, treating malformed or non-object values as empty."""
-    if raw_json is None:
-        return {}
-    try:
-        decoded = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return {}
-    return decoded if isinstance(decoded, dict) else {}
-
-
 def _source_section_ids(question: Question) -> list[int]:
     """Collect unique source ids in frozen-request order, then content order."""
     section_ids: list[int] = []
     for payload, key in (
-        (_decode_object(question.spec_json), "source_section_ids"),
-        (_decode_object(question.content_json), "sources"),
+        (question.spec or {}, "source_section_ids"),
+        (question.content or {}, "sources"),
     ):
         values = payload.get(key)
         if key == "sources" and isinstance(values, list):
