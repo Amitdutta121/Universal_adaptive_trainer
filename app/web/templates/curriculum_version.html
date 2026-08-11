@@ -30,30 +30,38 @@
   {% endif %}
 
   <section class="panel">
-    <h2>Proposed hierarchy</h2>
-    <p class="hint">Click a subtopic to see its definition, the sections that support it, and why
-       the differing book wordings behind it were merged.</p>
+    <h2>{{ "Approved hierarchy" if version.generated_by == "taxonomy-upload" else "Proposed hierarchy" }}</h2>
+    {% if version.generated_by == "taxonomy-upload" %}
+      <p class="hint">This hierarchy is the fixed taxonomy supplied by the professor.</p>
+    {% else %}
+      <p class="hint">Click a subtopic to see its definition, the sections that support it, and why
+         the differing book wordings behind it were merged.</p>
+    {% endif %}
     {{ hierarchy(version.topics) }}
   </section>
 
-  <section class="panel">
-    <h2>Derived from</h2>
-    {% if books %}
-      <ul class="structure-sections">
-        {% for book in books %}
-          <li><a href="/books/{{ book.id }}">{{ book.title }}</a>
-            {% if book.author %}<span class="source-note">{{ book.author }}</span>{% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="empty">The books this proposal was derived from are no longer available.</p>
-    {% endif %}
-  </section>
+  {% if version.generated_by != "taxonomy-upload" %}
+    <section class="panel">
+      <h2>Derived from</h2>
+      {% if books %}
+        <ul class="structure-sections">
+          {% for book in books %}
+            <li><a href="/books/{{ book.id }}">{{ book.title }}</a>
+              {% if book.author %}<span class="source-note">{{ book.author }}</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty">The books this proposal was derived from are no longer available.</p>
+      {% endif %}
+    </section>
+  {% endif %}
 
   <section class="panel">
     <h2>How this was produced</h2>
-    {% if metadata %}
+    {% if version.generated_by == "taxonomy-upload" %}
+      <p>Uploaded fixed taxonomy</p>
+    {% elif metadata %}
       <ul class="kv">
         <li><span>Model</span><strong>{{ metadata.generated_by }}</strong></li>
         <li><span>Section analysis</span><strong>{{ metadata.stage_a_version }}</strong></li>

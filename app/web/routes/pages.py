@@ -16,18 +16,16 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.curriculum import (
+    TaxonomyImportService,
     decode_json_list,
     decode_metadata,
     decode_proposal_warnings,
-    get_curriculum_proposer,
 )
+from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.errors import (
-    ConfigurationError,
-    CurriculumProposalError,
     FileTooLargeError,
     InvalidBookDocumentError,
-    LLMRequestError,
-    MalformedModelOutputError,
+    InvalidTaxonomyDocumentError,
     NotFoundError,
     UnsupportedFileError,
 )
@@ -38,7 +36,7 @@ from app.ingestion import (
     SourceRetrieval,
     decode_warnings,
 )
-from app.llm import StructuredLLMClient, describe_availability, get_structured_client
+from app.llm import describe_availability
 from app.persistence.database import get_session
 from app.persistence.repositories import (
     BookRepository,
@@ -55,23 +53,6 @@ router = APIRouter(tags=["pages"])
 
 #: Request-scoped database session.
 DbSession = Annotated[Session, Depends(get_session)]
-
-
-def structured_llm_client() -> StructuredLLMClient | None:
-    """The LLM client for this request, or ``None`` when unconfigured.
-
-    Returning ``None`` rather than raising keeps an unconfigured install on the
-    Curriculum page with an explanation, instead of bouncing it to a full-page
-    error. It is also the seam tests override to run the pipeline against a
-    deterministic fake client with no API key present.
-    """
-    try:
-        return get_structured_client()
-    except ConfigurationError:
-        return None
-
-
-LLMClient = Annotated[StructuredLLMClient | None, Depends(structured_llm_client)]
 
 
 @router.get("/", response_class=HTMLResponse, name="dashboard")
@@ -219,7 +200,6 @@ def _curriculum_page(
     request: Request,
     session: Session,
     *,
-    llm_available: bool,
     error: str | None = None,
     error_detail: str | None = None,
     status_code: int = 200,
@@ -236,9 +216,8 @@ def _curriculum_page(
             "versions": repo.list_versions(),
             "approved_version": repo.get_approved(),
             "latest_version": repo.get_with_tree(latest.id) if latest else None,
-            "book_count": len(BookRepository(session).list_usable()),
-            "llm_available": llm_available,
-            "llm_status": describe_availability()[1],
+            "schema_version": TAXONOMY_SCHEMA_VERSION,
+            "format_hint": "schema_version, label, topics, and each topic's subtopics",
             "error": error,
             "error_detail": error_detail,
         },
@@ -247,49 +226,34 @@ def _curriculum_page(
 
 
 @router.get("/curriculum", response_class=HTMLResponse, name="curriculum")
-def curriculum(request: Request, session: DbSession, client: LLMClient) -> HTMLResponse:
-    return _curriculum_page(request, session, llm_available=client is not None)
+def curriculum(request: Request, session: DbSession) -> HTMLResponse:
+    return _curriculum_page(request, session)
 
 
-@router.post("/curriculum/generate", name="generate_curriculum")
-def generate_curriculum(request: Request, session: DbSession, client: LLMClient) -> Response:
-    """Derive a proposed Topic -> Subtopic curriculum from the imported books.
-
-    Every failure is rendered back onto this page rather than as a full-page
-    error: missing credentials, no books, an unreachable provider and a proposal
-    that failed its structural checks are all things the professor can act on and
-    retry. Nothing is committed unless the whole proposal passed its checks.
-    """
-    if client is None:
-        return _curriculum_page(
-            request,
-            session,
-            llm_available=False,
-            error="Curriculum proposal needs an LLM provider and API key.",
-            error_detail=(
-                "Set LLM_PROVIDER, LLM_MODEL and LLM_API_KEY in your .env file "
-                "(see .env.example), then restart the server."
-            ),
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
+@router.post("/curriculum/upload", name="upload_taxonomy")
+def upload_taxonomy(
+    request: Request,
+    session: DbSession,
+    file: Annotated[UploadFile, File()],
+) -> Response:
+    """Import an uploaded fixed taxonomy and open its approved version."""
+    data = file.file.read()
+    filename = file.filename or "taxonomy.json"
     try:
-        version = get_curriculum_proposer(session, client=client).propose()
-    except (
-        CurriculumProposalError,
-        MalformedModelOutputError,
-        LLMRequestError,
-        ConfigurationError,
-    ) as exc:
+        version = TaxonomyImportService(session).import_upload(filename=filename, data=data)
+    except (UnsupportedFileError, FileTooLargeError, InvalidTaxonomyDocumentError) as exc:
         session.rollback()
-        logger.info("Curriculum proposal failed: %s", exc.message)
+        logger.info("Rejected taxonomy upload %r: %s", filename, exc.message)
         return _curriculum_page(
             request,
             session,
-            llm_available=True,
             error=exc.message,
             error_detail=exc.detail,
-            status_code=exc.status_code,
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+                if isinstance(exc, InvalidTaxonomyDocumentError)
+                else exc.status_code
+            ),
         )
 
     session.commit()
