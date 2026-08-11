@@ -386,7 +386,7 @@ book at all.
 
 ## ADR-017 — The LLM boundary offers structured output only, over `httpx`
 
-**Status:** accepted
+**Status:** superseded by ADR-020
 
 `app/llm/` exposes exactly one operation: give it a JSON Schema, get back a dictionary that
 satisfied it, or an error. There is no free-text completion API. Both providers are called with
@@ -469,7 +469,7 @@ single section — the section does not know how other books word the same skill
 
 ## ADR-019 — OpenRouter is a first-class provider, used to reach DeepSeek
 
-**Status:** accepted
+**Status:** superseded by ADR-020
 
 `LLM_PROVIDER` accepts `openrouter` alongside `anthropic`, `openai` and `none`, and the default
 local configuration is OpenRouter routed to `deepseek/deepseek-chat`. OpenRouter speaks OpenAI's
@@ -503,3 +503,29 @@ that retain it for training. None of that is expressible as a base-URL override.
   reasoning tokens and needs the budget raised before a full Stage B reply will fit.
 - Attribution headers (`HTTP-Referer`, `X-Title`) are sent because OpenRouter asks for them. They
   carry no credential, and the API key still travels in the `authorization` header only.
+
+---
+
+## ADR-020 — Instructor over OpenRouter owns structured LLM calls
+
+**Status:** accepted
+
+`app/llm/` exposes one operation: pass a Pydantic model type, receive a validated
+instance (or an error). Transport is OpenRouter via the OpenAI SDK, wrapped by
+Instructor (`Mode.JSON`). Direct Anthropic/OpenAI providers and hand-rolled
+`httpx` request builders are removed. Model choice is `LLM_MODEL`
+(default `deepseek/deepseek-chat`).
+
+**Why:** maintaining provider wire formats (tools vs strict json_schema,
+`to_strict_schema`) cost more than it saved. Instructor provides structured
+output; OpenRouter provides one endpoint for DeepSeek and future routes.
+Validation-repair retries stay off (`max_retries=0`) so bad answers surface as
+`MalformedModelOutputError` rather than being silently re-prompted.
+
+**Implications:**
+
+- `LLM_PROVIDER` is `openrouter` or `none` only.
+- Every request sends `provider.data_collection: deny`. Do not set
+  `require_parameters` — DeepSeek routes would disappear.
+- `LLMRequestError` vs `MalformedModelOutputError` remain distinct.
+- Callers depend on `StructuredLLMClient`, never on Instructor or OpenAI types.

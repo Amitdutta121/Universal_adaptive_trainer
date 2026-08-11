@@ -75,12 +75,10 @@ Copy-Item .env.example .env
 
 Curriculum proposal (and later question generation) needs a provider. Set these in `.env`:
 
-| Provider     | `LLM_PROVIDER` | `LLM_MODEL` example      | Key format   |
-| ------------ | -------------- | ------------------------ | ------------ |
-| OpenRouter   | `openrouter`   | `deepseek/deepseek-chat` | `sk-or-v1-…` |
-| Anthropic    | `anthropic`    | `claude-sonnet-5`        | `sk-ant-…`   |
-| OpenAI       | `openai`       | `gpt-4.1`                | `sk-…`       |
-| None         | `none`         | —                        | —            |
+| Provider   | `LLM_PROVIDER` | `LLM_MODEL` example      | Key format   |
+| ---------- | -------------- | ------------------------ | ------------ |
+| OpenRouter | `openrouter`   | `deepseek/deepseek-chat` | `sk-or-v1-…` |
+| None       | `none`         | —                        | —            |
 
 The default configuration is **OpenRouter routed to DeepSeek V3**:
 
@@ -90,8 +88,8 @@ LLM_MODEL=deepseek/deepseek-chat
 LLM_API_KEY=sk-or-v1-your-key-here
 ```
 
-OpenRouter requests are pinned to upstream routes that actually enforce the JSON Schema and that do
-not retain prompts for training (`docs/DECISIONS.md` ADR-019). Prefer a non-reasoning route:
+Every OpenRouter request asks upstream providers not to retain prompts for training
+(`provider.data_collection: deny`; see `docs/DECISIONS.md` ADR-020). Prefer a non-reasoning route:
 `deepseek/deepseek-r1` spends part of `LLM_MAX_OUTPUT_TOKENS` on hidden reasoning tokens, so raise
 that budget before using one.
 

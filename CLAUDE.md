@@ -149,7 +149,7 @@ data that reads as success.
 | Frontend             | Server-rendered Jinja2 templates + one plain CSS file. No JS build step, no SPA framework. |
 | Persistence          | SQLite via SQLAlchemy 2.0 ORM                                 |
 | Book input           | Structured book JSON, validated by Pydantic. No parsing anywhere. |
-| LLM access           | `httpx` straight to the provider's HTTP API. Structured output only — a JSON Schema in, a validated object out. No provider SDK. |
+| LLM access           | Instructor + OpenAI SDK → OpenRouter. Structured output only — Pydantic model in, validated instance out. |
 | Configuration        | pydantic-settings, environment variables / `.env`             |
 | Validation / schemas | Pydantic v2                                                   |
 | Dependencies         | `pyproject.toml`, installed into the local `.venv`            |
