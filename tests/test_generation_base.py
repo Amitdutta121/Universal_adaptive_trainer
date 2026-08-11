@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, QuestionKind, QuestionType
 from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
-from app.generation.base import BaseQuestionGenerator
+from app.generation.base import DESCRIPTOR, BaseQuestionGenerator
 from app.generation.schemas import RESPONSE_MODEL_FOR, DebuggingDraft
 from app.generation.service import GenerationService
 from app.generation.spec import build_question_spec
@@ -83,6 +83,11 @@ def _debugging_draft() -> DebuggingDraft:
         tests=[{"assert": "assert True"}],
         explanation="Item assignment on str fails.",
     )
+
+
+def test_base_descriptor_unchanged() -> None:
+    assert DESCRIPTOR.name == "base" and DESCRIPTOR.version == "1"
+    assert DESCRIPTOR.label() == "base:base@1"
 
 
 def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> None:
