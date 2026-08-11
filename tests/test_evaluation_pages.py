@@ -142,4 +142,5 @@ def test_question_detail_shows_pedagogical_evaluation_error(
 
     assert response.status_code == 200
     assert "Status: error" in response.text
-    assert "Error: Judge service unavailable." in response.text
+    assert "Judge service unavailable." in response.text
+    assert "Error: Judge service unavailable." not in response.text

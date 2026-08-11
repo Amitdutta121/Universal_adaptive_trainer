@@ -38,7 +38,11 @@ from app.errors import (
     NotFoundError,
     UnsupportedFileError,
 )
-from app.evaluation import PedagogicalEvaluation
+from app.evaluation import (
+    PedagogicalEvalStatus,
+    PedagogicalEvaluation,
+    humanize_judge_error_detail,
+)
 from app.generation import GenerationService
 from app.ingestion import (
     SCHEMA_VERSION,
@@ -523,6 +527,11 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "validation_checks": validation_report.checks if validation_report else [],
             "validation_passed": validation_report.passed if validation_report else None,
             "pedagogical_eval": pedagogical_eval,
+            "pedagogical_error_message": (
+                humanize_judge_error_detail(pedagogical_eval.error_detail)
+                if pedagogical_eval is not None and pedagogical_eval.status.value == "error"
+                else None
+            ),
         },
     )
 

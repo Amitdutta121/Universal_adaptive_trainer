@@ -14,6 +14,7 @@ from app.evaluation.schema import (
     derive_advisory_status,
     error_evaluation,
     evaluation_from_judge_response,
+    humanize_judge_error_detail,
     mean_applicable_score,
     skipped_evaluation,
 )
@@ -147,3 +148,30 @@ def test_evaluation_from_judge_response_sets_mean() -> None:
     assert evaluation.status is PedagogicalEvalStatus.COMPLETED
     assert evaluation.overall_advisory_score == 3.0
     assert evaluation.overall_advisory_status is AdvisoryStatus.ADEQUATE
+
+
+def test_na_dimension_accepts_omitted_confidence_and_rationale() -> None:
+    dim = DimensionEvaluation.model_validate(
+        {
+            "dimension": "distractor_quality",
+            "score": None,
+            "applicable": False,
+        }
+    )
+    assert dim.applicable is False
+    assert dim.score is None
+    assert dim.confidence == 1.0
+    assert dim.rationale
+
+
+def test_humanize_validation_error_is_readable() -> None:
+    raw = (
+        "ValidationError: 2 validation errors for JudgeModelResponse "
+        "dimensions.8.confidence Field required [type=missing, "
+        "input_value={'dimension': 'distractor_quality', 'score': None, "
+        "'applicable': False}, input_type=dict]"
+    )
+    message = humanize_judge_error_detail(raw)
+    assert "ValidationError" not in message
+    assert "incomplete evaluation" in message
+    assert "deterministic checks" in message

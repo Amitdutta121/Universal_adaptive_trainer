@@ -20,6 +20,7 @@ from app.evaluation.schema import (
     PedagogicalEvaluation,
     error_evaluation,
     evaluation_from_judge_response,
+    humanize_judge_error_detail,
 )
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
@@ -67,7 +68,7 @@ class PedagogicalJudge:
                     judge_model=self._client.description,
                 )
             except (LLMRequestError, MalformedModelOutputError) as exc:
-                last_detail = str(exc.detail or exc)[:400]
+                last_detail = humanize_judge_error_detail(str(exc.detail or exc))
         return error_evaluation(
             question_id=question.id,
             detail=last_detail,
@@ -150,6 +151,6 @@ def _source_section_ids(question: Question) -> list[int]:
 
 
 def _error_detail(exc: Exception) -> str:
-    """Return a bounded diagnostic for persisted advisory failures."""
+    """Return a short professor-facing diagnostic for persisted advisory failures."""
     detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
-    return detail[:400]
+    return humanize_judge_error_detail(str(detail))

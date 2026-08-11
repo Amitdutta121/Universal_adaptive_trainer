@@ -18,9 +18,28 @@ class DimensionEvaluation(BaseModel):
     dimension: JudgeDimensionId
     score: int | None = Field(default=None, ge=1, le=5)
     applicable: bool = True
-    confidence: float = Field(ge=0.0, le=1.0)
-    rationale: str = Field(min_length=1)
+    #: Defaulted because models often omit these on not-applicable dimensions.
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    rationale: str = Field(default="Not applicable for this question type.", min_length=1)
     issues: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_omitted_fields(cls, data: object) -> object:
+        """Fill fields the model commonly drops on non-applicable dimensions."""
+        if not isinstance(data, dict):
+            return data
+        applicable = data.get("applicable", True)
+        score = data.get("score")
+        if applicable is False or score is None:
+            data.setdefault("confidence", 1.0)
+            data.setdefault("rationale", "Not applicable for this question type.")
+            data.setdefault("issues", [])
+        else:
+            data.setdefault("confidence", 0.5)
+            data.setdefault("rationale", "No rationale provided.")
+            data.setdefault("issues", [])
+        return data
 
     @model_validator(mode="after")
     def score_matches_applicability(self) -> DimensionEvaluation:
@@ -30,6 +49,32 @@ class DimensionEvaluation(BaseModel):
         elif not self.applicable:
             self.score = None
         return self
+
+
+def humanize_judge_error_detail(detail: str | None) -> str:
+    """Return a short professor-facing summary of a judge failure."""
+    if not detail or not detail.strip():
+        return "The pedagogical judge could not complete its review."
+    lowered = detail.lower()
+    if "validationerror" in lowered or "validation error" in lowered:
+        return (
+            "The judge returned an incomplete evaluation (missing fields on some "
+            "dimensions). The question still passed deterministic checks; try regenerating."
+        )
+    if "malformed" in lowered or "usable structured" in lowered:
+        return (
+            "The judge returned a malformed evaluation. The question still passed "
+            "deterministic checks; try regenerating."
+        )
+    if "http" in lowered or "could not reach" in lowered or "provider" in lowered:
+        return (
+            "The judge service was unavailable. The question still passed "
+            "deterministic checks; try regenerating."
+        )
+    clean = " ".join(detail.split())
+    if len(clean) > 180:
+        return clean[:177] + "..."
+    return clean
 
 
 class JudgeModelResponse(BaseModel):

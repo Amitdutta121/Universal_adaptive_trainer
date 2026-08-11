@@ -33,6 +33,7 @@ from app.evaluation.schema import (
     derive_advisory_status,
     error_evaluation,
     evaluation_from_judge_response,
+    humanize_judge_error_detail,
     mean_applicable_score,
     skipped_evaluation,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "derive_advisory_status",
     "error_evaluation",
     "evaluation_from_judge_response",
+    "humanize_judge_error_detail",
     "mean_applicable_score",
     "skipped_evaluation",
 ]

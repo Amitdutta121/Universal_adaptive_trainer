@@ -79,7 +79,7 @@
       {% elif pedagogical_eval.status == "skipped" %}
         <p>Skipped: {{ pedagogical_eval.skip_reason or "No reason was recorded." }}</p>
       {% else %}
-        <p>Error: {{ pedagogical_eval.error_detail or "No error detail was recorded." }}</p>
+        <p>{{ pedagogical_error_message or "The pedagogical judge could not complete its review." }}</p>
       {% endif %}
     {% else %}
       <p class="empty">Pedagogical evaluation has not been recorded.</p>
