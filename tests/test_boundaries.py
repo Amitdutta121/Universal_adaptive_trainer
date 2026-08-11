@@ -14,6 +14,7 @@ import pytest
 
 from app.adaptive import get_adaptive_engine
 from app.domain.enums import Difficulty, GeneratorKind, QuestionType
+from app.domain.questions import QuestionValidationReport
 from app.errors import ConfigurationError, FeatureNotAvailableError
 from app.generation import GenerationRequest, GeneratorDescriptor, get_question_generator
 from app.llm import describe_availability, require_llm
@@ -194,11 +195,13 @@ def test_base_and_personalized_generators_are_distinguishable() -> None:
     assert base.label() == "base:grounded@1"
 
 
-def test_question_validation_fails_loudly() -> None:
+def test_question_validation_returns_a_report() -> None:
     from app.domain.questions import Question
 
-    with pytest.raises(FeatureNotAvailableError):
-        get_question_validator().validate(Question(prompt="Anything"))
+    report = get_question_validator().validate(Question(prompt="Anything"))
+
+    assert isinstance(report, QuestionValidationReport)
+    assert report.passed is False
 
 
 def test_preference_learning_fails_loudly() -> None:

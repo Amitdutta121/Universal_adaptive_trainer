@@ -299,6 +299,7 @@ class QuestionRow(TimestampMixin, Base):
 
     spec_json: Mapped[str | None] = mapped_column(Text, default=None)
     content_json: Mapped[str | None] = mapped_column(Text, default=None)
+    validation_report_json: Mapped[str | None] = mapped_column(Text, default=None)
 
     # Retained generated originals -- never overwritten by professor edits.
     original_prompt: Mapped[str | None] = mapped_column(Text, default=None)

@@ -13,6 +13,7 @@ from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import CurriculumRepository, QuestionRepository
+from app.validation import get_question_validator
 
 
 class GenerationService:
@@ -26,6 +27,7 @@ class GenerationService:
         )
         self._curriculum = CurriculumRepository(session)
         self._questions = QuestionRepository(session)
+        self._validator = get_question_validator(session)
 
     def generate_for_sections(
         self,
@@ -63,8 +65,9 @@ class GenerationService:
         subtopic_names = [
             subtopic.name for subtopic in topic.subtopics if subtopic.id == subtopic_id
         ]
-        rows = [
-            self._questions.add(
+        rows = []
+        for spec in specs:
+            row = self._questions.add(
                 self._row_from_question(
                     self._generator.generate_one(
                         spec,
@@ -73,8 +76,10 @@ class GenerationService:
                     )
                 )
             )
-            for spec in specs
-        ]
+            report = self._validator.validate(Question.model_validate(row))
+            row.validation_report_json = report.model_dump_json()
+            row.status = report.resulting_status()
+            rows.append(row)
         self._session.commit()
         return rows
 
@@ -106,6 +111,7 @@ class GenerationService:
             tests=question.tests,
             spec_json=question.spec_json,
             content_json=question.content_json,
+            validation_report_json=question.validation_report_json,
             original_prompt=question.original_prompt,
             original_reference_solution=question.original_reference_solution,
             original_tests=question.original_tests,

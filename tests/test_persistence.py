@@ -200,6 +200,7 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
         tests=None,
         spec_json='{"topic_id":1}',
         content_json='{"explanation":"because..."}',
+        validation_report_json='{"checks":[]}',
         generator_kind=GeneratorKind.BASE,
         generator_name="base",
         generator_version="1",
@@ -209,3 +210,4 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
     loaded = QuestionRepository(session).get(saved.id)
     assert loaded.question_type == QuestionType.TRUE_FALSE
     assert loaded.spec_json and loaded.content_json
+    assert loaded.validation_report_json == '{"checks":[]}'

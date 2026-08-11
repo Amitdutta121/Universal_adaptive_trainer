@@ -5,8 +5,9 @@ Responsibility
     :class:`~app.domain.questions.QuestionValidationReport`.
 
 Status
-    **Not implemented in this task.** Only the seam exists. Sandboxed execution
-    of model-written code is a security-sensitive design step of its own.
+    Implemented with deterministic grounding and question-type checks. Executable
+    checks use a bounded local subprocess; they do not provide a multi-tenant
+    security sandbox.
 
 Key rule
     Deterministic checks outrank LLM judgment. A question that fails a
@@ -18,24 +19,18 @@ Key rule
     non-deterministic checks entirely.
 
 Allowed dependencies
-    ``app.config``, ``app.domain``, ``app.errors``, ``app.llm``.
+    ``app.config``, ``app.domain``, ``app.errors``, ``app.persistence``,
+    ``app.generation.schemas``. Validation does not use an LLM.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from app.domain.questions import Question, QuestionValidationReport
-from app.errors import FeatureNotAvailableError
+from sqlalchemy.orm import Session
 
-#: Deterministic checks that must exist before validation can be trusted.
-PLANNED_DETERMINISTIC_CHECKS = (
-    "prompt_non_empty",
-    "solution_parses",
-    "solution_passes_own_tests",
-    "tests_are_non_trivial",
-    "execution_within_timeout",
-)
+from app.domain.questions import Question, QuestionValidationReport
+from app.validation.service import DeterministicQuestionValidator
 
 
 class QuestionValidator(Protocol):
@@ -44,20 +39,13 @@ class QuestionValidator(Protocol):
     def validate(self, question: Question) -> QuestionValidationReport: ...
 
 
-class NullQuestionValidator:
-    """Placeholder validator.
-
-    Raises instead of returning an empty passing report -- an empty report would
-    read as "validated" when nothing was checked.
-    """
-
-    def validate(self, question: Question) -> QuestionValidationReport:
-        raise FeatureNotAvailableError(
-            "Automatic question validation is not implemented yet.",
-            detail="Deterministic checks require a sandboxed execution design.",
-        )
+def get_question_validator(session: Session | None = None) -> QuestionValidator:
+    """Return the deterministic validator, optionally bound to persistence."""
+    return DeterministicQuestionValidator(session)
 
 
-def get_question_validator() -> QuestionValidator:
-    """Return the configured validator. Currently always the null implementation."""
-    return NullQuestionValidator()
+__all__ = [
+    "DeterministicQuestionValidator",
+    "QuestionValidator",
+    "get_question_validator",
+]
