@@ -5,9 +5,8 @@ Responsibility
     and expose that history to personalization and generator optimization.
 
 Status
-    Recording is backed by real storage
-    (:class:`~app.persistence.repositories.ProfessorReviewRepository`); writing
-    reviews through the UI is deferred with the Questions review screen.
+    Review recording, including the Questions UI write path, is implemented and
+    backed by :class:`~app.persistence.repositories.ProfessorReviewRepository`.
 
 Key rules
     * Professor feedback is *the* authority for professor preference. Student
