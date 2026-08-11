@@ -84,9 +84,9 @@ fails in correlated ways with the generator that produced the question — the s
 wrote a subtly wrong question will happily approve it.
 
 **Implications:** `QuestionValidationReport.passed` considers only checks marked
-`deterministic=True`, and an empty report does **not** pass. Deterministic execution checks need a
-sandbox design before they can be implemented; until then validation raises rather than returning
-a vacuously passing report.
+`deterministic=True`, and an empty report does **not** pass. Deterministic execution checks run via
+a local isolated subprocess runner (ADR-023); validation stores a report and never returns a
+vacuously empty passing report.
 
 ---
 
@@ -599,6 +599,34 @@ relationships are checked before the first model call.
   choose a book, then select topic, subtopic, difficulty, type, and one or more sections. The
   generated question detail shows its prompt, typed content, answer/tests when applicable,
   curriculum, difficulty, type, generator, and source citation.
-- Automatic validation, professor review writes, personalization, and database migrations remain
-  deferred. Existing local SQLite databases that predate question-generation columns must be
-  recreated until migrations are introduced (ADR-008 and ADR-014).
+- Automatic validation is implemented (ADR-023). Professor review writes, personalization, and
+  database migrations remain deferred. Existing local SQLite databases that predate
+  question-generation columns must be recreated until migrations are introduced (ADR-008 and
+  ADR-014).
+
+---
+
+## ADR-023 — Local deterministic validation uses an isolated subprocess runner
+
+**Status:** accepted
+
+Executable question checks use a hybrid test shape: each case may provide standard input, expected
+standard output, an assertion, or both output and an assertion. The local runner writes generated
+Python to a temporary directory and invokes the current interpreter with `-I`, a minimal
+environment, captured output, and a configured timeout.
+
+**Why:** syntax checks alone cannot establish that expected output is correct or that a reference
+solution passes its own tests. A bounded subprocess makes those deterministic behaviors
+reproducible while keeping execution failure and timeout separate from the web process. Validation
+does not use an LLM: deterministic runtime and structural evidence remains the authority required
+by ADR-004.
+
+**Implications:** every generated question is validated before its generation transaction commits.
+The complete `QuestionValidationReport` is stored on the question, and its deterministic result
+sets the question's validation status. The question detail page renders the stored report in an
+**Automatic Checks** panel, including failure evidence when available.
+
+This runner is local research-prototype isolation, not multi-tenant security isolation. `-I`, a
+temporary working directory, and a timeout reduce accidental interference, but generated code can
+still reach the filesystem and other same-user process capabilities in theory. Untrusted
+multi-tenant execution requires a stronger sandbox outside this design.

@@ -129,6 +129,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 
 .checklist { margin: 0; padding-left: 20px; color: var(--ink-soft); }
 .checklist li { margin: 4px 0; }
+.check-evidence { margin: 6px 0 0; font-size: 12px; white-space: pre-wrap; }
 
 .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
 .kv dt { color: var(--ink-soft); }

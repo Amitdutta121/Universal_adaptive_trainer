@@ -26,6 +26,24 @@
     </dl>
   </section>
 
+  <section class="panel {% if validation_passed is none %}{% elif validation_passed %}panel-success{% else %}panel-error{% endif %}">
+    <h2>Automatic Checks</h2>
+    {% if validation_checks %}
+      <ul class="checklist">
+        {% for check in validation_checks %}
+          <li>
+            {% if check.passed %}✓{% else %}✗{% endif %} {{ check.detail or check.name }}
+            {% if not check.passed and check.evidence %}
+              <pre class="check-evidence">{{ check.evidence }}</pre>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">Automatic checks have not been recorded.</p>
+    {% endif %}
+  </section>
+
   {% if content.code %}
     <section class="panel">
       <h2>Code</h2>

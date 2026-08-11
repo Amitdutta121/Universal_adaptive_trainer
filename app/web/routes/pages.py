@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import suppress
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -24,6 +26,7 @@ from app.curriculum import (
 )
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.domain.enums import Difficulty, QuestionType
+from app.domain.questions import QuestionValidationReport
 from app.errors import (
     ConfigurationError,
     FileTooLargeError,
@@ -467,6 +470,12 @@ def _approved_curriculum_id(session: Session) -> int:
 def question_detail(request: Request, session: DbSession, question_id: int) -> HTMLResponse:
     """Show generated content and the citation(s) that ground one question."""
     question = QuestionRepository(session).get(question_id)
+    validation_report = None
+    if question.validation_report_json:
+        with suppress(ValidationError):
+            validation_report = QuestionValidationReport.model_validate_json(
+                question.validation_report_json
+            )
     try:
         content = json.loads(question.content_json or "{}")
     except json.JSONDecodeError:
@@ -504,6 +513,8 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "content": content,
             "sources": sources if isinstance(sources, list) else [],
             "taxonomy": taxonomy,
+            "validation_checks": validation_report.checks if validation_report else [],
+            "validation_passed": validation_report.passed if validation_report else None,
         },
     )
 
