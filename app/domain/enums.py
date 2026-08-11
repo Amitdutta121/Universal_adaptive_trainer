@@ -184,6 +184,18 @@ class QuestionKind(StrEnum):
     DISCRETE = "discrete"
 
 
+class QuestionType(StrEnum):
+    """Assessment format (independent of scoring mode)."""
+
+    MULTIPLE_CHOICE = "multiple_choice"
+    TRUE_FALSE = "true_false"
+    OUTPUT_PREDICTION = "output_prediction"
+    CODE_COMPLETION = "code_completion"
+    DEBUGGING = "debugging"
+    PARSONS = "parsons"
+    CODING = "coding"
+
+
 class QuestionStatus(StrEnum):
     """Lifecycle of a generated question through validation and review."""
 
