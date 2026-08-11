@@ -54,8 +54,9 @@ def test_taxonomy_upload_creates_approved_version(client: TestClient, session: S
     subtopic_page = client.get(f"/curriculum/subtopics/{tree.topics[0].subtopics[0].id}")
     assert subtopic_page.status_code == 200
     assert "While loops" in subtopic_page.text
-    assert "No supporting sections were recorded for this subtopic." in subtopic_page.text
-    assert "No grouping rationale was recorded." in subtopic_page.text
+    assert "0 supporting sections" not in subtopic_page.text
+    assert "Uploaded taxonomies do not include textbook evidence." in subtopic_page.text
+    assert "No grouping rationale was recorded." not in subtopic_page.text
 
 
 def test_invalid_taxonomy_json_stays_on_curriculum_page(client: TestClient) -> None:

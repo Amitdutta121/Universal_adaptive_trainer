@@ -52,22 +52,19 @@ Where this lives in code:
 - priority constants: `app/domain/questions.py`;
 - the engine boundary (not implemented): `app/adaptive/__init__.py`.
 
-## Fixed curriculum-proposal decisions
+## Fixed curriculum decisions
 
-**Settled. See `docs/DECISIONS.md` ADR-017 and ADR-018 for the reasoning.**
+**Settled. See `docs/DECISIONS.md` ADR-021 for the reasoning.**
 
-- The curriculum is **derived from the books in two LLM stages** — per-section instructional
-  analysis, then cross-book normalization — followed by deterministic assembly and structural
-  checks that never consult a model. Judgement is the model's; bookkeeping is not.
-- A proposed subtopic must be **something a student can practise, a professor can assess with
-  several different questions, and the adaptive engine can track a weakness against**. Extracting
-  terminology is explicitly not the task, and there is no pattern-matching over book text anywhere.
-- Every subtopic is **traceable to real sections of real books**, retains the differing book
-  wordings merged into it, and states **why** they were merged.
-- **Stable ids come from source material, never from display names**, so a professor's rename does
-  not detach evidence or later reset a student's measured weakness.
-- **Proposing is not approving.** Proposals are written `PROPOSED`; generation still requires an
-  approved version.
+- A professor supplies a **fixed Topic → Subtopic taxonomy as structured JSON**.
+- Taxonomy validation is strict and total. An invalid document is rejected before any row is
+  written.
+- A valid taxonomy upload creates an **approved** curriculum version immediately.
+- The application does **not** derive or propose curriculum with an LLM. The former Stage A/B
+  pipeline is deleted and must not be reintroduced.
+- Stable ids are assigned at import and survive later display-name edits.
+- Taxonomy uploads do not claim textbook evidence, candidate labels, grouping rationales or model
+  metadata that the input did not provide.
 
 The two loops are **separate**: student adaptation reacts to student scores, professor content
 optimization reacts to professor reviews. Neither may feed the other beyond the shared question
@@ -173,14 +170,11 @@ app/
     storage.py        Upload validation and retention of the document
     service.py        The workflow: validate, store, persist
     retrieval.py      Reading sections back out, with citations
-  curriculum/         Curriculum proposal                       (PROPOSAL IMPLEMENTED)
-    schema.py         The strict LLM input/output contract, both stages
-    extraction.py     Stage A: what one instructional section teaches
-    normalization.py  Stage B: consolidating candidates across books
-    stable_ids.py     Identity derived from sources, not display names
-    draft.py          Stage C: the proposed curriculum as reviewable entities
-    checks.py         Deterministic structural checks, run before any write
-    service.py        The workflow: analyse, normalise, check, store
+  curriculum/         Fixed taxonomy JSON import                 (IMPLEMENTED)
+    taxonomy_schema.py  The strict taxonomy JSON contract
+    taxonomy_ids.py     Stable identity assigned during import
+    taxonomy_import.py  The workflow: validate and persist approved versions
+    display.py          Safe display decoding for current and legacy rows
   generation/         Question generation                       (boundary only)
   validation/         Automatic question validation             (boundary only)
   feedback/           Professor approve/reject/edit records     (recording implemented)
@@ -195,8 +189,7 @@ docs/book_document_example.json  A valid book document, kept valid by a test
 
 Dependency direction: `web` → subsystems → `domain` / `persistence` / `config`. `domain` imports
 nothing from the application. Subsystems do not import each other except where documented in
-their module docstring — the one such case today is `curriculum` reading `ingestion.retrieval`,
-the sanctioned read-only surface for fetching grounding text with citations.
+their module docstring.
 
 ## Coding conventions
 

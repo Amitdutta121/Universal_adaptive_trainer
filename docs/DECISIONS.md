@@ -412,7 +412,7 @@ raises `ConfigurationError` before any work starts, so an unconfigured run costs
 
 ## ADR-018 — Curriculum is derived in two LLM stages, then checked deterministically
 
-**Status:** accepted
+**Status:** superseded by ADR-021
 
 A proposed Topic → Subtopic curriculum is derived from the imported books by two separate LLM
 stages, followed by deterministic assembly and validation that never consults a model:
@@ -529,3 +529,28 @@ Validation-repair retries stay off (`max_retries=0`) so bad answers surface as
   `require_parameters` — DeepSeek routes would disappear.
 - `LLMRequestError` vs `MalformedModelOutputError` remain distinct.
 - Callers depend on `StructuredLLMClient`, never on Instructor or OpenAI types.
+
+---
+
+## ADR-021 — Curriculum comes from fixed taxonomy uploads
+
+**Status:** accepted
+
+Professors provide a strict JSON Topic → Subtopic taxonomy. A valid upload is persisted as an
+approved curriculum version; an invalid upload writes nothing. The application does not propose
+curriculum from books or through an LLM.
+
+**Why:** the fixed taxonomy is the intended adaptive knowledge-component model. Keeping a second,
+LLM-derived route creates competing definitions of curriculum and leaves an expensive proposal
+path available even though its output is no longer part of the product workflow.
+
+**Implications:**
+
+- The former Stage A/B extraction, normalization, draft assembly and structural-check modules are
+  deleted, along with their configuration limits and proposal-specific error.
+- `app/curriculum/` exports taxonomy import, schema version and display decoders only.
+- Existing LLM-generated database rows remain renderable; the display decoders tolerate null or
+  malformed legacy metadata without restoring any generation capability.
+- Taxonomy pages do not imply that uploaded subtopics contain textbook evidence, grouping
+  rationales or model metadata.
+- `app/llm/` remains because structured LLM access will be used by question generation.

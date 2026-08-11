@@ -8,12 +8,11 @@ work, and the two adaptation loops must stay independent.
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.adaptive import get_adaptive_engine
-from app.curriculum import get_curriculum_proposer
 from app.domain.enums import Difficulty, GeneratorKind
 from app.errors import ConfigurationError, FeatureNotAvailableError
 from app.generation import GenerationRequest, GeneratorDescriptor, get_question_generator
@@ -114,20 +113,33 @@ def test_no_pdf_parser_is_installed_for_the_application() -> None:
         assert forbidden not in declared, f"{forbidden} must not be a dependency"
 
 
-def test_curriculum_proposal_is_implemented_but_needs_credentials(session: Session) -> None:
-    """Curriculum proposal is no longer a placeholder.
+def test_curriculum_boundary_only_exports_taxonomy_import_and_display_helpers() -> None:
+    import app.curriculum as curriculum
 
-    Replaces the previous "fails loudly with FeatureNotAvailableError" assertion,
-    which held while proposal was deferred. The feature now exists, so the honest
-    failure for an unconfigured install is a *configuration* error, raised before
-    any book is read rather than part-way through a paid run.
-    """
-    from app.curriculum import CurriculumProposalService
+    assert curriculum.__all__ == [
+        "SCHEMA_VERSION",
+        "TaxonomyImportService",
+        "decode_json_list",
+        "decode_metadata",
+        "decode_proposal_warnings",
+        "parse_taxonomy_document",
+    ]
+    assert not hasattr(curriculum, "CurriculumProposalService")
+    assert not hasattr(curriculum, "get_curriculum_proposer")
 
-    with pytest.raises(ConfigurationError):
-        get_curriculum_proposer(session)
 
-    assert callable(CurriculumProposalService.propose)
+def test_llm_curriculum_proposal_modules_stay_removed() -> None:
+    curriculum_root = Path(importlib.import_module("app.curriculum").__file__).parent
+    for removed in (
+        "candidates.py",
+        "checks.py",
+        "draft.py",
+        "extraction.py",
+        "normalization.py",
+        "schema.py",
+        "service.py",
+    ):
+        assert not (curriculum_root / removed).exists(), f"{removed} must stay removed"
 
 
 def test_question_generation_fails_loudly() -> None:

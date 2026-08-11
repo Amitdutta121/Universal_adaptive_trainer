@@ -5,13 +5,15 @@
 {% block subheading %}
   <p class="lede">
     {{ topic.name }}
-    · {{ evidence | length }} supporting section{{ "" if evidence | length == 1 else "s" }}
-    / {{ book_count }} book{{ "" if book_count == 1 else "s" }}
+    {% if not is_taxonomy_upload %}
+      · {{ evidence | length }} supporting section{{ "" if evidence | length == 1 else "s" }}
+      / {{ book_count }} book{{ "" if book_count == 1 else "s" }}
+    {% endif %}
     {% if subtopic.confidence %}
       · <span class="status {{ 'status-ok' if subtopic.confidence | string == 'high' else ('status-bad' if subtopic.confidence | string == 'low' else 'status-warn') }}">{{ subtopic.confidence }} confidence</span>
     {% endif %}
   </p>
-  <p><a class="back-link" href="/curriculum/versions/{{ version_id }}">← Back to the proposal</a></p>
+  <p><a class="back-link" href="/curriculum/versions/{{ version_id }}">← Back to the curriculum</a></p>
 {% endblock %}
 
 {% block content %}
@@ -24,11 +26,16 @@
       <li><span>Stable id</span><strong><code>{{ subtopic.stable_id }}</code></strong></li>
     </ul>
     <p class="hint">
-      The stable id is derived from the source material this subtopic was built from, not from its
-      name, so renaming it will not detach its evidence or its future weakness tracking.
+      {% if is_taxonomy_upload %}
+        The stable id preserves this subtopic's identity if its display name is edited later.
+      {% else %}
+        The stable id is derived from the source material this subtopic was built from, not from its
+        name, so renaming it will not detach its evidence or its future weakness tracking.
+      {% endif %}
     </p>
   </section>
 
+  {% if not is_taxonomy_upload %}
   <section class="panel">
     <h2>Why these were grouped</h2>
     {% if candidate_labels %}
@@ -47,6 +54,7 @@
       <p class="empty">No grouping rationale was recorded.</p>
     {% endif %}
   </section>
+  {% endif %}
 
   <section class="panel">
     <h2>Supporting sections</h2>
@@ -73,7 +81,13 @@
         {% endfor %}
       </ol>
     {% else %}
-      <p class="empty">No supporting sections were recorded for this subtopic.</p>
+      <p class="empty">
+        {% if is_taxonomy_upload %}
+          Uploaded taxonomies do not include textbook evidence.
+        {% else %}
+          No supporting sections were recorded for this subtopic.
+        {% endif %}
+      </p>
     {% endif %}
   </section>
 {% endblock %}

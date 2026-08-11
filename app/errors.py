@@ -118,18 +118,6 @@ class MalformedModelOutputError(AdaptiveTrainerError):
     code = "malformed_model_output"
 
 
-class CurriculumProposalError(AdaptiveTrainerError):
-    """A proposed curriculum failed a deterministic structural check.
-
-    The proposal is discarded whole. A curriculum with an orphaned subtopic or a
-    duplicate identifier would break question grounding (ADR-002) and adaptive
-    weakness tracking, so it must never reach the database.
-    """
-
-    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
-    code = "curriculum_proposal_failed"
-
-
 class SchemaOutOfDateError(AdaptiveTrainerError):
     """The SQLite file predates the current ORM models.
 

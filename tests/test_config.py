@@ -27,6 +27,12 @@ def test_llm_defaults_are_openrouter_deepseek() -> None:
     assert settings.llm_model == "deepseek/deepseek-chat"
 
 
+def test_llm_curriculum_proposal_limits_are_removed() -> None:
+    settings = _settings()
+    assert not hasattr(settings, "curriculum_max_sections")
+    assert not hasattr(settings, "curriculum_section_char_budget")
+
+
 def test_anthropic_and_openai_providers_are_rejected() -> None:
     with pytest.raises(ValidationError):
         _settings(llm_provider="anthropic")

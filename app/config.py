@@ -76,17 +76,6 @@ class Settings(BaseSettings):
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)
 
-    # -- Curriculum proposal ------------------------------------------------
-    #: Upper bound on sections analysed in one proposal run. Stage A is one LLM
-    #: call per section, so an unbounded run over several textbooks is a large,
-    #: silent bill. Sections beyond the limit are skipped and *reported* on the
-    #: resulting version rather than dropped quietly.
-    curriculum_max_sections: int = Field(default=150, gt=0)
-    #: Characters of section text sent to Stage A. Chunking for a model context
-    #: window is allowed and never persisted (ADR-015); the stored section stays
-    #: whole. A truncated section is reported on the version.
-    curriculum_section_char_budget: int = Field(default=6000, gt=0)
-
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalise_log_level(cls, value: object) -> object:

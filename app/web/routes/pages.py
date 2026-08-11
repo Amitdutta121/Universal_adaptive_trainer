@@ -315,6 +315,9 @@ def curriculum_subtopic(request: Request, session: DbSession, subtopic_id: int) 
             "subtopic": subtopic,
             "topic": subtopic.topic,
             "version_id": subtopic.topic.curriculum_version_id,
+            "is_taxonomy_upload": (
+                subtopic.topic.curriculum_version.generated_by == "taxonomy-upload"
+            ),
             "candidate_labels": decode_json_list(subtopic.candidate_labels_json),
             "evidence": evidence,
             "book_count": len({item.book_id for item in subtopic.evidence}),
