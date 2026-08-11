@@ -83,6 +83,17 @@ class InvalidBookDocumentError(AdaptiveTrainerError):
     code = "invalid_book_document"
 
 
+class InvalidTaxonomyDocumentError(AdaptiveTrainerError):
+    """An uploaded taxonomy JSON document does not satisfy the schema.
+
+    Rejected in full, before any row is written, with the offending fields named
+    in ``detail`` so the document's producer can be corrected.
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "invalid_taxonomy_document"
+
+
 class LLMRequestError(AdaptiveTrainerError):
     """The LLM provider could not be reached, or refused the request.
 

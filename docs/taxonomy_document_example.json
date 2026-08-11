@@ -1,0 +1,38 @@
+{
+  "schema_version": "1",
+  "label": "Introductory Python",
+  "topics": [
+    {
+      "name": "Variables",
+      "description": "Creating names, assigning values, and understanding types.",
+      "subtopics": [
+        {
+          "name": "Assignment and rebinding",
+          "description": "Using = to bind a name to a value and reassign it later."
+        },
+        {
+          "name": "Basic types",
+          "description": "Working with int, float, str, and bool values."
+        }
+      ]
+    },
+    {
+      "name": "Loops",
+      "description": "Repeating actions with for and while loops.",
+      "subtopics": [
+        {
+          "name": "for loops over sequences",
+          "description": "Iterating over strings, lists, and other iterables."
+        },
+        {
+          "name": "while loops",
+          "description": "Repeating while a condition remains true."
+        },
+        {
+          "name": "Loop control",
+          "description": "Using break and continue to alter loop flow."
+        }
+      ]
+    }
+  ]
+}
