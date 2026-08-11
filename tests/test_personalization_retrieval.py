@@ -1,0 +1,436 @@
+"""Example retrieval for personalized question generation."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import book_documents as docs
+import pytest
+from sqlalchemy.orm import Session
+
+from app.curriculum import TaxonomyImportService
+from app.domain.enums import (
+    Difficulty,
+    QuestionStatus,
+    QuestionType,
+    RejectionReason,
+    ReviewDecision,
+)
+from app.feedback import submit_review
+from app.generation.spec import QuestionSpec
+from app.ingestion import BookImportService
+from app.persistence.models import QuestionRow
+from app.persistence.repositories import QuestionRepository, ReviewEmbeddingRepository
+from app.personalization.embeddings import FakeEmbedder
+from app.personalization.retrieval import retrieve_examples
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    return FakeEmbedder(dim=8)
+
+
+@dataclass(frozen=True)
+class SeededReviews:
+    version_id: int
+    topic_id: int
+    subtopic_a_id: int
+    subtopic_b_id: int
+    section_id: int
+    same_subtopic_review_id: int
+    other_subtopic_review_id: int
+    edit_review_id: int
+    approve_review_id: int
+    reject_review_id: int
+
+
+def _question(session: Session, **overrides: object) -> QuestionRow:
+    values = {
+        "prompt": "Write a loop.",
+        "original_prompt": "Write a loop.",
+        "reference_solution": "pass",
+        "original_reference_solution": "pass",
+        "tests": "assert True",
+        "original_tests": "assert True",
+        "generator_name": "base-gen",
+        "generator_version": "1",
+        "status": QuestionStatus.VALIDATION_PASSED,
+    }
+    values.update(overrides)
+    row = QuestionRepository(session).add(QuestionRow(**values))
+    session.commit()
+    assert row.id is not None
+    return row
+
+
+def _seed_reviews(session: Session, settings) -> SeededReviews:
+    book = BookImportService(session, settings).import_upload(
+        filename="book.json", data=docs.to_bytes(docs.minimal())
+    )
+    taxonomy = (
+        b'{"schema_version":"1","label":"T","topics":['
+        b'{"name":"Strings","subtopics":['
+        b'{"name":"Immutability"},{"name":"Methods"}'
+        b"]}]}"
+    )
+    version = TaxonomyImportService(session, settings).import_upload(
+        filename="tax.json", data=taxonomy
+    )
+    session.commit()
+    topic = version.topics[0]
+    sub_a = topic.subtopics[0]
+    sub_b = topic.subtopics[1]
+    section_id = book.chapters[0].sections[0].id
+
+    base = {
+        "curriculum_version_id": version.id,
+        "topic_id": topic.id,
+        "question_type": QuestionType.DEBUGGING,
+        "difficulty": Difficulty.MEDIUM,
+    }
+
+    q_same = _question(
+        session,
+        **base,
+        subtopic_id=sub_a.id,
+        prompt="Immutability debugging prompt about strings.",
+    )
+    review_same = submit_review(
+        session,
+        question_id=q_same.id,
+        decision=ReviewDecision.APPROVE,
+        comment="Good immutability example.",
+    )
+
+    q_other = _question(
+        session,
+        **base,
+        subtopic_id=sub_b.id,
+        prompt="Methods debugging prompt about string methods.",
+    )
+    review_other = submit_review(
+        session,
+        question_id=q_other.id,
+        decision=ReviewDecision.APPROVE,
+        comment="Good methods example.",
+    )
+
+    q_edit = _question(
+        session,
+        **base,
+        subtopic_id=sub_a.id,
+        prompt="Original edit prompt.",
+    )
+    review_edit = submit_review(
+        session,
+        question_id=q_edit.id,
+        decision=ReviewDecision.EDIT,
+        prompt="Edited immutability prompt.",
+        reference_solution="pass",
+        tests="assert True",
+        reasons=[RejectionReason.POOR_WORDING],
+        comment="Tighten wording.",
+    )
+
+    q_approve = _question(
+        session,
+        **base,
+        subtopic_id=sub_a.id,
+        prompt="Plain approve prompt.",
+    )
+    review_approve = submit_review(
+        session,
+        question_id=q_approve.id,
+        decision=ReviewDecision.APPROVE,
+        comment="Fine as-is.",
+    )
+
+    q_reject = _question(
+        session,
+        **base,
+        subtopic_id=sub_a.id,
+        prompt="Reject this prompt.",
+    )
+    review_reject = submit_review(
+        session,
+        question_id=q_reject.id,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.TOO_EASY],
+        comment="Too simple.",
+    )
+    session.commit()
+
+    assert review_same.id is not None
+    assert review_other.id is not None
+    assert review_edit.id is not None
+    assert review_approve.id is not None
+    assert review_reject.id is not None
+
+    return SeededReviews(
+        version_id=version.id,
+        topic_id=topic.id,
+        subtopic_a_id=sub_a.id,
+        subtopic_b_id=sub_b.id,
+        section_id=section_id,
+        same_subtopic_review_id=review_same.id,
+        other_subtopic_review_id=review_other.id,
+        edit_review_id=review_edit.id,
+        approve_review_id=review_approve.id,
+        reject_review_id=review_reject.id,
+    )
+
+
+def _spec(seed: SeededReviews) -> QuestionSpec:
+    return QuestionSpec(
+        curriculum_version_id=seed.version_id,
+        topic_id=seed.topic_id,
+        subtopic_ids=[seed.subtopic_a_id],
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        source_section_ids=[seed.section_id],
+    )
+
+
+def _retrieve(
+    session: Session,
+    seed: SeededReviews,
+    *,
+    embedder: FakeEmbedder | None,
+) -> object:
+    spec = _spec(seed)
+    return retrieve_examples(
+        session,
+        spec=spec,
+        topic_id=seed.topic_id,
+        topic_name="Strings",
+        subtopic_names=["Immutability"],
+        citation="Book ch.1 sec.1",
+        embedder=embedder,
+    )
+
+
+def test_retrieval_prefers_same_subtopic(
+    session: Session, settings, fake_embedder: FakeEmbedder
+) -> None:
+    seed = _seed_reviews(session, settings)
+    result = _retrieve(session, seed, embedder=fake_embedder)
+    positive_ids = [ex.review_id for ex in result.approved_or_edited]
+    assert positive_ids.index(seed.same_subtopic_review_id) < positive_ids.index(
+        seed.other_subtopic_review_id
+    )
+
+
+def test_retrieval_prefers_edit_over_approve(
+    session: Session, settings, fake_embedder: FakeEmbedder
+) -> None:
+    seed = _seed_reviews(session, settings)
+    result = _retrieve(session, seed, embedder=None)
+    positive_ids = [ex.review_id for ex in result.approved_or_edited]
+    assert positive_ids.index(seed.edit_review_id) < positive_ids.index(seed.approve_review_id)
+
+
+def test_retrieval_reject_pool_ordered_by_metadata(
+    session: Session, settings, fake_embedder: FakeEmbedder
+) -> None:
+    seed = _seed_reviews(session, settings)
+    result = _retrieve(session, seed, embedder=None)
+    assert len(result.rejected) == 1
+    assert result.rejected[0].review_id == seed.reject_review_id
+    assert result.rejected[0].decision == ReviewDecision.REJECT
+
+
+def test_combined_score_uses_fake_embeddings(
+    session: Session, settings, fake_embedder: FakeEmbedder
+) -> None:
+    book = BookImportService(session, settings).import_upload(
+        filename="book.json", data=docs.to_bytes(docs.minimal())
+    )
+    taxonomy = (
+        b'{"schema_version":"1","label":"T","topics":['
+        b'{"name":"Strings","subtopics":[{"name":"Immutability"}]}]}'
+    )
+    version = TaxonomyImportService(session, settings).import_upload(
+        filename="tax.json", data=taxonomy
+    )
+    session.commit()
+    topic = version.topics[0]
+    sub = topic.subtopics[0]
+    section_id = book.chapters[0].sections[0].id
+    spec = QuestionSpec(
+        curriculum_version_id=version.id,
+        topic_id=topic.id,
+        subtopic_ids=[sub.id],
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        source_section_ids=[section_id],
+    )
+    similar_prompt = "Immutability debugging prompt about strings."
+    base = {
+        "curriculum_version_id": version.id,
+        "topic_id": topic.id,
+        "subtopic_id": sub.id,
+        "question_type": QuestionType.DEBUGGING,
+        "difficulty": Difficulty.MEDIUM,
+    }
+    q_similar = _question(session, **base, prompt=similar_prompt)
+    review_similar = submit_review(
+        session,
+        question_id=q_similar.id,
+        decision=ReviewDecision.APPROVE,
+        comment="Semantically close.",
+    )
+    q_far = _question(session, **base, prompt="Totally unrelated quantum physics question.")
+    review_far = submit_review(
+        session,
+        question_id=q_far.id,
+        decision=ReviewDecision.APPROVE,
+        comment="Unrelated.",
+    )
+    session.commit()
+    assert review_similar.id is not None
+    assert review_far.id is not None
+
+    result = retrieve_examples(
+        session,
+        spec=spec,
+        topic_id=topic.id,
+        topic_name="Strings",
+        subtopic_names=["Immutability"],
+        citation="Book ch.1 sec.1",
+        embedder=fake_embedder,
+    )
+    positive_ids = [ex.review_id for ex in result.approved_or_edited]
+    assert positive_ids.index(review_similar.id) < positive_ids.index(review_far.id)
+
+    emb_repo = ReviewEmbeddingRepository(session)
+    similar_row = emb_repo.get_for_review(review_similar.id)
+    far_row = emb_repo.get_for_review(review_far.id)
+    assert similar_row is not None
+    assert far_row is not None
+    assert similar_row.model_id == fake_embedder.model_id
+
+
+def test_retrieval_empty_history(session: Session, fake_embedder: FakeEmbedder) -> None:
+    spec = QuestionSpec(
+        curriculum_version_id=1,
+        topic_id=1,
+        subtopic_ids=[1],
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        source_section_ids=[1],
+    )
+    result = retrieve_examples(
+        session,
+        spec=spec,
+        topic_id=1,
+        topic_name="Strings",
+        subtopic_names=["Immutability"],
+        citation="Book ch.1 sec.1",
+        embedder=fake_embedder,
+    )
+    assert result.approved_or_edited == []
+    assert result.rejected == []
+
+
+def _seed_single_approve(session: Session, settings) -> tuple[SeededReviews, QuestionSpec]:
+    book = BookImportService(session, settings).import_upload(
+        filename="book.json", data=docs.to_bytes(docs.minimal())
+    )
+    taxonomy = (
+        b'{"schema_version":"1","label":"T","topics":['
+        b'{"name":"Strings","subtopics":[{"name":"Immutability"}]}]}'
+    )
+    version = TaxonomyImportService(session, settings).import_upload(
+        filename="tax.json", data=taxonomy
+    )
+    session.commit()
+    topic = version.topics[0]
+    sub = topic.subtopics[0]
+    section_id = book.chapters[0].sections[0].id
+    q = _question(
+        session,
+        curriculum_version_id=version.id,
+        topic_id=topic.id,
+        subtopic_id=sub.id,
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        prompt="Only one positive.",
+    )
+    submit_review(session, question_id=q.id, decision=ReviewDecision.APPROVE)
+    session.commit()
+    seed = SeededReviews(
+        version_id=version.id,
+        topic_id=topic.id,
+        subtopic_a_id=sub.id,
+        subtopic_b_id=sub.id,
+        section_id=section_id,
+        same_subtopic_review_id=0,
+        other_subtopic_review_id=0,
+        edit_review_id=0,
+        approve_review_id=0,
+        reject_review_id=0,
+    )
+    spec = QuestionSpec(
+        curriculum_version_id=version.id,
+        topic_id=topic.id,
+        subtopic_ids=[sub.id],
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        source_section_ids=[section_id],
+    )
+    return seed, spec
+
+
+def test_partial_history_shrinks_budget(
+    session: Session, settings, fake_embedder: FakeEmbedder
+) -> None:
+    seed, spec = _seed_single_approve(session, settings)
+    result = retrieve_examples(
+        session,
+        spec=spec,
+        topic_id=seed.topic_id,
+        topic_name="Strings",
+        subtopic_names=["Immutability"],
+        citation="Book ch.1 sec.1",
+        embedder=fake_embedder,
+    )
+    assert len(result.approved_or_edited) == 1
+    assert result.rejected == []
+
+
+def test_never_exceed_caps(session: Session, settings, fake_embedder: FakeEmbedder) -> None:
+    seed = _seed_reviews(session, settings)
+    base = {
+        "curriculum_version_id": seed.version_id,
+        "topic_id": seed.topic_id,
+        "subtopic_id": seed.subtopic_a_id,
+        "question_type": QuestionType.DEBUGGING,
+        "difficulty": Difficulty.MEDIUM,
+    }
+    for i in range(10):
+        q = _question(session, **base, prompt=f"Positive overflow {i}.")
+        submit_review(session, question_id=q.id, decision=ReviewDecision.APPROVE)
+    for i in range(5):
+        q = _question(session, **base, prompt=f"Negative overflow {i}.")
+        submit_review(
+            session,
+            question_id=q.id,
+            decision=ReviewDecision.REJECT,
+            reasons=[RejectionReason.OTHER],
+        )
+    session.commit()
+
+    result = _retrieve(session, seed, embedder=fake_embedder)
+    assert len(result.approved_or_edited) <= 4
+    assert len(result.rejected) <= 2
+
+
+def test_retrieved_example_fields(session: Session, settings, fake_embedder: FakeEmbedder) -> None:
+    seed = _seed_reviews(session, settings)
+    result = _retrieve(session, seed, embedder=fake_embedder)
+    edit = next(ex for ex in result.approved_or_edited if ex.review_id == seed.edit_review_id)
+    assert edit.prompt == "Edited immutability prompt."
+    assert edit.decision == ReviewDecision.EDIT
+    assert RejectionReason.POOR_WORDING in edit.reasons
+    assert edit.comment == "Tighten wording."
+    assert edit.score >= 0.05
