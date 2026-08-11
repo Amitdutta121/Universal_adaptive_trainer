@@ -200,6 +200,7 @@ def _parsons(content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
     order_consistent = (
         valid_blocks
         and isinstance(order, list)
+        and all(isinstance(block_id, str) for block_id in order)
         and all(isinstance(block_id, str) for block_id in block_ids)
         and len(set(block_ids)) == len(block_ids)
         and len(order) == len(block_ids)

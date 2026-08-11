@@ -128,6 +128,20 @@ def test_invalid_fixture_fails_named_check(
     assert _checks(question_type, content)[failed_check].passed is False
 
 
+def test_parsons_non_string_order_id_fails_consistency_check() -> None:
+    content = {
+        "blocks": [{"id": "only", "text": "print(3)", "indent": 0}],
+        "correct_order": [{}],
+    }
+    question = _question(QuestionType.PARSONS, content)
+    checks = {
+        check.name: check
+        for check in check_type(question, json.loads(question.content_json), RUNNER)
+    }
+
+    assert checks["parsons_order_consistent"].passed is False
+
+
 @pytest.mark.parametrize(
     ("question_type", "content", "expected_names", "expected_details"),
     [
