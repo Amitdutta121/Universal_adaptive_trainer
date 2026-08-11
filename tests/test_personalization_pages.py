@@ -198,6 +198,33 @@ def test_preferences_confirm_correct_remove(client, session) -> None:
     assert PreferenceRepository(session).get(row.id).active is False
 
 
+def test_preferences_correct_empty_rule_shows_error(client, session) -> None:
+    row = PreferenceRepository(session).add(
+        PreferenceStatementRow(
+            rule_text="Prefer application over recall.",
+            category=PreferenceCategory.EMPHASIS,
+            evidence_count=2,
+            confidence=0.4,
+            supporting_review_ids_json=encode_review_ids([1, 2]),
+            confirmation_state=PreferenceConfirmationState.INFERRED,
+        )
+    )
+    session.commit()
+    assert row.id is not None
+
+    response = client.post(
+        f"/preferences/{row.id}/correct",
+        data={"rule_text": "   "},
+        follow_redirects=False,
+    )
+    assert response.status_code == 422
+    assert "Corrected preference text must not be empty." in response.text
+    assert "panel-error" in response.text
+
+    session.expire_all()
+    assert PreferenceRepository(session).get(row.id).rule_text == "Prefer application over recall."
+
+
 def test_questions_form_shows_generator_choice(client, session, settings) -> None:
     book_id, _, _, _, _ = _seed_generation_context(session, settings)
     response = client.get(f"/questions?book_id={book_id}")

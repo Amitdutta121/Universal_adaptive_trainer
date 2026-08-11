@@ -255,6 +255,18 @@ nav { display: flex; flex-direction: column; gap: 2px; }
   margin: 10px 0;
 }
 
+/* ---------- preferences: inline actions ---------- */
+.inline-form { display: inline-block; margin: 0 8px 8px 0; vertical-align: top; }
+.inline-form.stack { display: block; margin: 8px 0 0; }
+.inline-form label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.inline-form input[type="text"] {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font: inherit;
+  min-width: 220px;
+}
+
 /* ---------- misc ---------- */
 .button {
   display: inline-block;
