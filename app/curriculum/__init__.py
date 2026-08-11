@@ -54,14 +54,19 @@ from app.curriculum.service import (
     decode_metadata,
     decode_proposal_warnings,
 )
+from app.curriculum.taxonomy_import import TaxonomyImportService
+from app.curriculum.taxonomy_schema import SCHEMA_VERSION, parse_taxonomy_document
 from app.llm import StructuredLLMClient
 
 __all__ = [
+    "SCHEMA_VERSION",
     "CurriculumProposalService",
+    "TaxonomyImportService",
     "decode_json_list",
     "decode_metadata",
     "decode_proposal_warnings",
     "get_curriculum_proposer",
+    "parse_taxonomy_document",
 ]
 
 
