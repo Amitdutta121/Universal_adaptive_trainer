@@ -623,8 +623,8 @@ by ADR-004.
 
 **Implications:** every generated question is validated before its generation transaction commits.
 The complete `QuestionValidationReport` is stored on the question, and its deterministic result
-sets the question's validation status. The question detail page renders the stored report in an
-**Automatic Checks** panel, including failure evidence when available.
+sets the question's validation status. The question detail page renders the stored report in a
+**Deterministic checks** panel, including failure evidence when available.
 
 This runner is local research-prototype isolation, not multi-tenant security isolation. `-I`, a
 temporary working directory, and a timeout reduce accidental interference, but generated code can

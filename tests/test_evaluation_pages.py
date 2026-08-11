@@ -90,6 +90,7 @@ def test_question_detail_shows_completed_pedagogical_evaluation(
     assert "Status: completed" in response.text
     assert "source_grounding:" in response.text
     assert "4/5" in response.text
+    assert "Confidence: 0.9" in response.text
     assert "Grounded in the supplied section." in response.text
     assert "Could cite a more specific example." in response.text
     assert "Overall advisory mean:" in response.text
@@ -120,3 +121,25 @@ def test_question_detail_shows_skipped_pedagogical_evaluation(
     assert response.status_code == 200
     assert "Status: skipped" in response.text
     assert "Skipped: deterministic_failed" in response.text
+
+
+def test_question_detail_shows_pedagogical_evaluation_error(
+    client: TestClient,
+    session: Session,
+    settings: Any,
+) -> None:
+    question_id = _seed_question(
+        session,
+        settings,
+        PedagogicalEvaluation(
+            status=PedagogicalEvalStatus.ERROR,
+            error_detail="Judge service unavailable.",
+            overall_advisory_status=AdvisoryStatus.ERROR,
+        ),
+    )
+
+    response = client.get(f"/questions/{question_id}")
+
+    assert response.status_code == 200
+    assert "Status: error" in response.text
+    assert "Error: Judge service unavailable." in response.text

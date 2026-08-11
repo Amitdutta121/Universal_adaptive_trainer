@@ -18,8 +18,8 @@ Key rules
       remain distinguishable in stored data.
 
 Allowed dependencies
-    ``app.config``, ``app.domain``, ``app.errors``, ``app.ingestion``, ``app.llm``,
-    ``app.persistence``, ``app.validation``.
+    ``app.config``, ``app.domain``, ``app.errors``, ``app.evaluation``, ``app.ingestion``,
+    ``app.llm``, ``app.persistence``, ``app.validation``.
     Must not import ``app.adaptive`` or ``app.web``.
 """
 

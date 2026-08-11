@@ -44,7 +44,7 @@
     {% endif %}
   </section>
 
-  <section class="panel {% if pedagogical_eval and pedagogical_eval.status == "completed" %}panel-success{% elif pedagogical_eval and pedagogical_eval.status == "error" %}panel-error{% elif pedagogical_eval and pedagogical_eval.status == "skipped" %}panel-warn{% endif %}">
+  <section class="panel {% if pedagogical_eval and pedagogical_eval.status == "completed" and pedagogical_eval.overall_advisory_status in ["weak", "uncertain"] %}panel-warn{% elif pedagogical_eval and pedagogical_eval.status == "completed" %}panel-success{% elif pedagogical_eval and pedagogical_eval.status == "error" %}panel-error{% elif pedagogical_eval and pedagogical_eval.status == "skipped" %}panel-warn{% endif %}">
     <h2>LLM pedagogical evaluation</h2>
     {% if pedagogical_eval %}
       <p>Status: {{ pedagogical_eval.status }}</p>
@@ -60,6 +60,7 @@
               {% if not dimension.applicable %}—{% elif dimension.score is not none and dimension.score >= 4 %}✓{% elif dimension.score is not none and dimension.score >= 3 %}⚠{% else %}✗{% endif %}
               {{ dimension.dimension }}:
               {% if dimension.applicable %}{{ dimension.score }}/5{% else %}n/a{% endif %}
+              · Confidence: {{ dimension.confidence }}
               <span class="evaluation-rationale">{{ dimension.rationale }}</span>
               {% if dimension.issues %}
                 <ul class="evaluation-issues">
@@ -72,7 +73,7 @@
           {% endfor %}
         </ul>
         <p class="evaluation-summary">
-          Overall advisory mean: {{ pedagogical_eval.overall_advisory_score }}
+          Overall advisory mean: {% if pedagogical_eval.overall_advisory_score is not none %}{{ "%.1f"|format(pedagogical_eval.overall_advisory_score) }}{% else %}n/a{% endif %}
           ({{ pedagogical_eval.overall_advisory_status }}) — summary only
         </p>
       {% elif pedagogical_eval.status == "skipped" %}

@@ -8,7 +8,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.domain.questions import Question
-from app.errors import LLMRequestError, MalformedModelOutputError
+from app.errors import (
+    AdaptiveTrainerError,
+    LLMRequestError,
+    MalformedModelOutputError,
+    NotFoundError,
+)
 from app.evaluation.rubric import build_judge_system_prompt, build_judge_user_prompt
 from app.evaluation.schema import (
     JudgeModelResponse,
@@ -34,13 +39,20 @@ class PedagogicalJudge:
 
     def evaluate(self, question: Question) -> PedagogicalEvaluation:
         """Return completed evaluation or an advisory error after bounded retries."""
-        artifact, sources, taxonomy = self._load_context(question)
-        system = build_judge_system_prompt()
-        prompt = build_judge_user_prompt(
-            question_artifact=artifact,
-            source_sections=sources,
-            taxonomy=taxonomy,
-        )
+        try:
+            artifact, sources, taxonomy = self._load_context(question)
+            system = build_judge_system_prompt()
+            prompt = build_judge_user_prompt(
+                question_artifact=artifact,
+                source_sections=sources,
+                taxonomy=taxonomy,
+            )
+        except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
+            return error_evaluation(
+                question_id=question.id,
+                detail=_error_detail(exc),
+                judge_model=self._client.description,
+            )
         last_detail = "unknown"
         for _ in range(JUDGE_MAX_ATTEMPTS):
             try:
@@ -86,10 +98,21 @@ class PedagogicalJudge:
             )
 
         version = self._curriculum.get_with_tree(question.curriculum_version_id)
-        topic = next(topic for topic in version.topics if topic.id == question.topic_id)
+        topic = next((topic for topic in version.topics if topic.id == question.topic_id), None)
+        if topic is None:
+            raise NotFoundError(
+                "Question topic is not in its curriculum version.",
+                detail=f"topic_id={question.topic_id}, curriculum_version_id={version.id}",
+            )
         subtopic = next(
-            subtopic for subtopic in topic.subtopics if subtopic.id == question.subtopic_id
+            (subtopic for subtopic in topic.subtopics if subtopic.id == question.subtopic_id),
+            None,
         )
+        if subtopic is None:
+            raise NotFoundError(
+                "Question subtopic is not in its topic.",
+                detail=f"subtopic_id={question.subtopic_id}, topic_id={topic.id}",
+            )
         taxonomy = {
             "topic_name": topic.name,
             "subtopic_name": subtopic.name,
@@ -124,3 +147,9 @@ def _source_section_ids(question: Question) -> list[int]:
                 if type(value) is int and value not in section_ids:
                     section_ids.append(value)
     return section_ids
+
+
+def _error_detail(exc: Exception) -> str:
+    """Return a bounded diagnostic for persisted advisory failures."""
+    detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
+    return detail[:400]

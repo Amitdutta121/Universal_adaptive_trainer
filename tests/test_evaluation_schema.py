@@ -51,6 +51,27 @@ def test_dimension_score_must_be_in_range() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("score", "applicable"),
+    [
+        (None, True),
+        (3, False),
+    ],
+)
+def test_dimension_score_must_match_applicability(
+    score: int | None,
+    applicable: bool,
+) -> None:
+    with pytest.raises(ValidationError):
+        DimensionEvaluation(
+            dimension=JudgeDimensionId.CLARITY,
+            score=score,
+            applicable=applicable,
+            confidence=0.5,
+            rationale="inconsistent",
+        )
+
+
 def test_mean_ignores_non_applicable() -> None:
     dims = [
         _dim(JudgeDimensionId.CLARITY, score=5),
@@ -88,6 +109,15 @@ def test_advisory_status_bands_and_uncertain() -> None:
             overall_score=None,
         )
         is AdvisoryStatus.SKIPPED
+    )
+
+    assert (
+        derive_advisory_status(
+            status=PedagogicalEvalStatus.COMPLETED,
+            dimensions=[_dim(JudgeDimensionId.DISTRACTOR_QUALITY, score=None, applicable=False)],
+            overall_score=None,
+        )
+        is AdvisoryStatus.UNCERTAIN
     )
 
 

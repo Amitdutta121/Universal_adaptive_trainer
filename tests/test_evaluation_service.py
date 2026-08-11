@@ -150,3 +150,14 @@ def test_judge_returns_error_after_max_attempts(session: Session, settings: Any)
     assert result.status is PedagogicalEvalStatus.ERROR
     assert client.calls == JUDGE_MAX_ATTEMPTS
     assert result.error_detail
+
+
+def test_judge_returns_error_when_context_cannot_be_loaded(session: Session, settings: Any) -> None:
+    client = GoodJudgeClient()
+    question = _seed_question(session, settings).model_copy(update={"topic_id": 999})
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
+    assert result.status is PedagogicalEvalStatus.ERROR
+    assert result.error_detail
+    assert client.calls == 0

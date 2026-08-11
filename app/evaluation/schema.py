@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.evaluation.rubric import RUBRIC_VERSION, JudgeDimensionId
 
@@ -21,6 +21,15 @@ class DimensionEvaluation(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = Field(min_length=1)
     issues: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def score_matches_applicability(self) -> DimensionEvaluation:
+        """Keep aggregate scoring unambiguous for non-applicable dimensions."""
+        if self.applicable and self.score is None:
+            raise ValueError("Applicable dimensions require a score from 1 to 5.")
+        if not self.applicable and self.score is not None:
+            raise ValueError("Non-applicable dimensions must not have a score.")
+        return self
 
 
 class JudgeModelResponse(BaseModel):
@@ -91,7 +100,7 @@ def derive_advisory_status(
         return AdvisoryStatus.UNCERTAIN
 
     if overall_score is None:
-        return AdvisoryStatus.WEAK
+        return AdvisoryStatus.UNCERTAIN
     if overall_score >= 4:
         return AdvisoryStatus.STRONG
     if overall_score >= 3:
