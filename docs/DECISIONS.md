@@ -560,3 +560,45 @@ path available even though its output is no longer part of the product workflow.
 - Taxonomy pages do not imply that uploaded subtopics contain textbook evidence, grouping
   rationales or model metadata.
 - `app/llm/` remains because structured LLM access will be used by question generation.
+
+---
+
+## ADR-022 — Base questions are generated section-first as typed specifications
+
+**Status:** accepted
+
+Cold-start question generation resolves a `QuestionSpec` before making an LLM request. The spec
+must name an approved curriculum version, one topic, one or more subtopics belonging to that
+topic, a difficulty, a question type, and exactly one source section. A base-generation request
+with several selected sections is therefore expanded into one independently validated spec and one
+generated question per section.
+
+**Why:** generation needs a stable, auditable contract shared by the base generator and future
+personalized generators. Grounding a question in one instructional section keeps its source
+citation meaningful and prevents a later invalid selection from producing a partially grounded
+batch. It also makes the cold-start path deterministic around the LLM boundary: all database
+relationships are checked before the first model call.
+
+**Implications:**
+
+- `QuestionType` describes the assessment format (multiple choice, true/false, output prediction,
+  code completion, debugging, Parsons, or coding). `QuestionKind` remains a separate scoring
+  classification: naturally discrete formats score `0` or `100`, while programming formats are
+  testable programs. The type-to-kind mapping is fixed in `app/generation/schemas.py`.
+- Each type has its own strict Pydantic response model. The model output is retained in
+  `questions.content_json` with its source citation and model provenance, while the stable
+  `prompt`, `reference_solution`, and `tests` columns remain available to existing review and
+  adaptive paths.
+- The section-first base generator is identified as `base@1` on every persisted question. A
+  future personalized generator must use the same `QuestionSpec` contract and a distinct,
+  versioned descriptor (ADR-005).
+- `GenerationService` validates all selected sections before it calls the LLM, persists each
+  generated question, and commits only after the batch succeeds. A model or provider failure does
+  not claim that generation succeeded.
+- The professor workflow is: import a book JSON document and taxonomy JSON, open `/questions`,
+  choose a book, then select topic, subtopic, difficulty, type, and one or more sections. The
+  generated question detail shows its prompt, typed content, answer/tests when applicable,
+  curriculum, difficulty, type, generator, and source citation.
+- Automatic validation, professor review writes, personalization, and database migrations remain
+  deferred. Existing local SQLite databases that predate question-generation columns must be
+  recreated until migrations are introduced (ADR-008 and ADR-014).

@@ -39,8 +39,9 @@ app = ["web/templates/*.html", "web/static/css/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not integration'"
 filterwarnings = ["error::DeprecationWarning:app.*"]
+markers = ["integration: hits a real LLM provider"]
 
 [tool.ruff]
 line-length = 100

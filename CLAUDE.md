@@ -175,7 +175,7 @@ app/
     taxonomy_ids.py     Stable identity assigned during import
     taxonomy_import.py  The workflow: validate and persist approved versions
     display.py          Safe display decoding for current and legacy rows
-  generation/         Question generation                       (boundary only)
+  generation/         Section-first base question generation    (IMPLEMENTED)
   validation/         Automatic question validation             (boundary only)
   feedback/           Professor approve/reject/edit records     (recording implemented)
   personalization/    Professor preference learning             (boundary only)
