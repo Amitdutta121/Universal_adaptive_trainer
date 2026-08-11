@@ -6,8 +6,8 @@ Responsibility
     validation; it never overrides a failed deterministic check.
 
 Status
-    Schema, rubric constants, and summary helpers are implemented.
-    :class:`PedagogicalJudge` is deferred to a later task.
+    Schema, rubric constants, summary helpers, and the advisory judge service
+    are implemented.
 
 Key rules
     * Overall advisory score is an unweighted arithmetic mean of applicable
@@ -36,8 +36,10 @@ from app.evaluation.schema import (
     mean_applicable_score,
     skipped_evaluation,
 )
+from app.evaluation.service import JUDGE_MAX_ATTEMPTS, PedagogicalJudge
 
 __all__ = [
+    "JUDGE_MAX_ATTEMPTS",
     "RUBRIC_VERSION",
     "AdvisoryStatus",
     "DimensionEvaluation",
@@ -45,6 +47,7 @@ __all__ = [
     "JudgeModelResponse",
     "PedagogicalEvalStatus",
     "PedagogicalEvaluation",
+    "PedagogicalJudge",
     "derive_advisory_status",
     "error_evaluation",
     "evaluation_from_judge_response",
