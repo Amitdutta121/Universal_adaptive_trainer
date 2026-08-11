@@ -63,6 +63,10 @@ class OpenRouterEmbedder:
             api_key=key.get_secret_value(),
             base_url=self._settings.llm_base_url or OPENROUTER_BASE_URL,
             timeout=self._settings.llm_timeout_seconds,
+            default_headers={
+                "HTTP-Referer": "https://localhost/adaptive-trainer",
+                "X-Title": "Adaptive Trainer",
+            },
         )
         self._model = self._settings.embedding_model
 
