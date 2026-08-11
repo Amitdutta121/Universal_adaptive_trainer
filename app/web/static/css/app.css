@@ -1,0 +1,315 @@
+/* Adaptive Trainer - single stylesheet, no build step, no external assets. */
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #16181d;
+  --ink-soft: #5b6070;
+  --line: #e2e5ea;
+  --accent: #2f5bd7;
+  --accent-soft: #eaf0ff;
+  --ok: #1c7a4a;
+  --off: #8a6d10;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+a { color: var(--accent); }
+
+code {
+  font-family: "Cascadia Mono", Consolas, "SF Mono", monospace;
+  font-size: 0.9em;
+  background: #f0f2f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ---------- layout ---------- */
+.layout { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 236px;
+  flex: 0 0 236px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+.brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+.brand-text small { color: var(--ink-soft); font-size: 11px; }
+
+nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-link {
+  padding: 8px 10px;
+  border-radius: 7px;
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+.nav-link:hover { background: #f2f4f8; color: var(--ink); }
+.nav-link.is-active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.sidebar-foot { margin-top: auto; }
+.pill {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.content { flex: 1; padding: 28px 34px 60px; max-width: 1100px; }
+
+.page-head h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.2px; }
+.lede { margin: 0 0 4px; color: var(--ink-soft); max-width: 70ch; }
+
+/* ---------- cards ---------- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+  margin: 22px 0;
+}
+.card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 15px 16px;
+  text-decoration: none;
+  color: inherit;
+}
+.card:hover { border-color: var(--accent); }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.card h2 { margin: 0; font-size: 16px; }
+.card p { margin: 6px 0 0; color: var(--ink-soft); font-size: 13px; }
+.count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ---------- panels ---------- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin: 16px 0;
+}
+.panel h2 { margin: 0 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--ink-soft); }
+.panel-deferred { border-style: dashed; background: #fcfcfd; }
+
+.empty { color: var(--ink-soft); font-style: italic; margin: 0; }
+.note { color: var(--ink-soft); font-size: 13px; margin: 10px 0 0; }
+
+.checklist { margin: 0; padding-left: 20px; color: var(--ink-soft); }
+.checklist li { margin: 4px 0; }
+
+.kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
+.kv dt { color: var(--ink-soft); }
+.kv dd { margin: 0; }
+
+/* ---------- tables ---------- */
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th, .table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.table th { color: var(--ink-soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+.status {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f0f2f6;
+  color: var(--ink-soft);
+}
+.status-ok { background: #e5f6ec; color: var(--ok); }
+.status-off { background: #fdf5e0; color: var(--off); }
+.status-warn { background: #fdf1dc; color: #8a5a10; }
+.status-bad { background: #fdeaea; color: #9c2b2b; }
+.status-busy { background: #eaf0ff; color: var(--accent); }
+
+/* ---------- books: upload form ---------- */
+.upload-form { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.field { display: flex; flex-direction: column; gap: 5px; width: 100%; max-width: 520px; }
+.field label { font-weight: 600; font-size: 13px; }
+.field input[type="text"], .field input[type="file"] {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font: inherit;
+  background: #fff;
+  width: 100%;
+}
+.field input[type="text"]:focus, .field input[type="file"]:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+.optional { color: var(--ink-soft); font-weight: 400; }
+.hint { color: var(--ink-soft); font-size: 12px; margin: 0; }
+
+.panel-error { border-color: #e9b3b3; background: #fffafa; }
+.panel-warn { border-color: #ecd3a4; background: #fffdf7; }
+.error-message { margin: 0; font-weight: 600; color: #9c2b2b; }
+
+.warning-list { margin: 0; padding-left: 20px; font-size: 14px; }
+.warning-list li { margin: 5px 0; }
+.warning-where { color: var(--ink-soft); font-size: 12px; margin-left: 6px; }
+.warning-code {
+  font-size: 11px;
+  margin-left: 6px;
+  background: #f0f2f6;
+  color: var(--ink-soft);
+}
+
+/* ---------- books: structure tree ---------- */
+.back-link { font-size: 13px; text-decoration: none; }
+
+.structure { list-style: none; margin: 0; padding: 0; }
+.structure-chapter { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.structure-chapter:last-child { border-bottom: 0; }
+.structure-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chapter-title { font-weight: 700; }
+
+.structure-sections { list-style: none; margin: 8px 0 0; padding: 0 0 0 18px; }
+.structure-sections li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+}
+.structure-sections a { text-decoration: none; font-weight: 500; }
+.structure-sections a:hover { text-decoration: underline; }
+
+.pages, .chars { color: var(--ink-soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.source-note { color: var(--ink-soft); font-size: 12px; font-style: italic; }
+
+/* ---------- books: section text ---------- */
+.section-text {
+  background: #fbfbfc;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 14px 16px;
+  margin: 0;
+  max-height: 32em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.citation { font-size: 13px; }
+.checksum { font-size: 11px; word-break: break-all; }
+
+/* ---------- books: schema help ---------- */
+.schema-details { margin-top: 12px; }
+.schema-details summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.schema-example {
+  background: #f7f8fa;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: "Cascadia Mono", Consolas, "SF Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 10px 0;
+}
+
+/* ---------- misc ---------- */
+.button {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 7px;
+  font-weight: 600;
+}
+.detail {
+  background: #f0f2f6;
+  border-radius: 7px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+/* ---------- curriculum proposal ---------- */
+.counts {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin-left: 8px;
+}
+.stable-id {
+  color: var(--ink-soft);
+  font-family: "Cascadia Mono", Consolas, "SF Mono", monospace;
+  font-size: 11.5px;
+  margin-left: 8px;
+}
+.subtopic-description {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin: 4px 0 0;
+  max-width: 70ch;
+}
+.candidate-labels {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.evidence-quotes {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+}
+.evidence-quotes blockquote {
+  margin: 6px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent-soft);
+  background: #fafbfd;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .layout { flex-direction: column; }
+  .sidebar { width: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  nav { flex-direction: row; flex-wrap: wrap; }
+  .content { padding: 20px 18px 40px; }
+}

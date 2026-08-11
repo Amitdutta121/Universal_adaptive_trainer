@@ -1,0 +1,52 @@
+{# Shared rendering of a proposed Topic → Subtopic hierarchy, so the index and
+   the full proposal page cannot drift apart. #}
+
+{% macro subtopic_counts(subtopic) -%}
+  {%- set sections = subtopic.evidence | map(attribute="section_id") | unique | list -%}
+  {%- set books = subtopic.evidence | map(attribute="book_id") | unique | list -%}
+  <span class="counts">
+    {{ sections | length }} supporting section{{ "" if sections | length == 1 else "s" }}
+    / {{ books | length }} book{{ "" if books | length == 1 else "s" }}
+  </span>
+  {%- if books | length > 1 %}
+    <span class="status status-ok" title="This subtopic merged wordings from more than one book">cross-book</span>
+  {%- endif %}
+{%- endmacro %}
+
+{% macro hierarchy(topics) -%}
+  {% if topics %}
+    <ol class="structure">
+      {% for topic in topics %}
+        <li class="structure-chapter">
+          <div class="structure-head">
+            <span class="chapter-title">{{ topic.name }}</span>
+            <span class="counts">{{ topic.subtopics | length }} subtopic{{ "" if topic.subtopics | length == 1 else "s" }}</span>
+            <code class="stable-id" title="Stable identifier, derived from the source material rather than the name">{{ topic.stable_id }}</code>
+          </div>
+
+          {% if topic.subtopics %}
+            <ul class="structure-sections">
+              {% for subtopic in topic.subtopics %}
+                <li>
+                  <a href="/curriculum/subtopics/{{ subtopic.id }}">{{ subtopic.name }}</a>
+                  {{ subtopic_counts(subtopic) }}
+                  {% if subtopic.confidence and subtopic.confidence | string != "high" %}
+                    <span class="status {{ 'status-bad' if subtopic.confidence | string == 'low' else 'status-warn' }}"
+                          title="How sure the analysis is that this grouping is correct">{{ subtopic.confidence }} confidence</span>
+                  {% endif %}
+                  {% if subtopic.description %}
+                    <p class="subtopic-description">{{ subtopic.description }}</p>
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="empty">No subtopics were proposed for this topic.</p>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="empty">This version contains no topics.</p>
+  {% endif %}
+{%- endmacro %}

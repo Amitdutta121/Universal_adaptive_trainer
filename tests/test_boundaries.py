@@ -1,0 +1,219 @@
+"""Module boundaries.
+
+These tests protect the *shape* of the architecture rather than any behaviour:
+the deferred subsystems must exist, must fail loudly instead of pretending to
+work, and the two adaptation loops must stay independent.
+"""
+
+from __future__ import annotations
+
+import importlib
+
+import pytest
+from sqlalchemy.orm import Session
+
+from app.adaptive import get_adaptive_engine
+from app.curriculum import get_curriculum_proposer
+from app.domain.enums import Difficulty, GeneratorKind
+from app.errors import ConfigurationError, FeatureNotAvailableError
+from app.generation import GenerationRequest, GeneratorDescriptor, get_question_generator
+from app.llm import describe_availability, require_llm
+from app.personalization import get_preference_learner
+from app.validation import get_question_validator
+
+BOUNDARY_MODULES = [
+    "app.ingestion",
+    "app.curriculum",
+    "app.generation",
+    "app.validation",
+    "app.feedback",
+    "app.personalization",
+    "app.adaptive",
+    "app.persistence",
+    "app.llm",
+    "app.web",
+]
+
+
+@pytest.mark.parametrize("module_name", BOUNDARY_MODULES)
+def test_boundary_module_exists_and_is_documented(module_name: str) -> None:
+    module = importlib.import_module(module_name)
+    assert module.__doc__, f"{module_name} must document its responsibility"
+
+
+def test_book_ingestion_is_implemented() -> None:
+    """Ingestion is no longer a placeholder: it validates and stores for real.
+
+    Replaces the previous "fails loudly" assertion, which held while ingestion was
+    deferred. The remaining subsystems below are still placeholders.
+    """
+    import book_documents as docs
+
+    from app.domain.enums import SourceFormat
+    from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename, parse_book_document
+
+    assert SUPPORTED_EXTENSIONS == (".json",)
+    assert format_for_filename("book.json") is SourceFormat.BOOK_JSON
+    assert parse_book_document(docs.to_bytes(docs.minimal())).section_count == 1
+
+
+def test_unsupported_uploads_are_rejected() -> None:
+    from app.errors import UnsupportedFileError
+    from app.ingestion import format_for_filename
+
+    with pytest.raises(UnsupportedFileError):
+        format_for_filename("book.docx")
+
+
+def test_the_application_does_no_heuristic_extraction() -> None:
+    """Structure must be declared by the input, not inferred by this code.
+
+    Guards ADR-015 and ADR-016: the removed heuristic modules must not reappear,
+    and nothing under ``app/`` may reach for a PDF parser or a document-conversion
+    step. Producing a book document is out of scope for this codebase.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    app_root = Path(importlib.util.find_spec("app").origin).parent  # type: ignore[arg-type]
+    for removed in (
+        "ingestion/headings.py",
+        "ingestion/pdf.py",
+        "ingestion/text.py",
+        "ingestion/assembly.py",
+    ):
+        assert not (app_root / removed).exists(), f"{removed} must stay removed"
+
+    sources = list(app_root.rglob("*.py"))
+    assert sources
+    for forbidden in ("pypdf", "PdfReader", "fitz", "pdfplumber", "pdfminer"):
+        offenders = [
+            path.relative_to(app_root).as_posix()
+            for path in sources
+            if forbidden in path.read_text(encoding="utf-8")
+        ]
+        assert offenders == [], f"the application must not use {forbidden}: {offenders}"
+
+
+def test_no_pdf_parser_is_installed_for_the_application() -> None:
+    """The app's dependency set must not include a PDF parser at all.
+
+    Absence of the import is easy to reintroduce by accident; absence of the
+    dependency makes it impossible without a deliberate change to pyproject.
+    """
+    import importlib.util
+    import tomllib
+    from pathlib import Path
+
+    assert importlib.util.find_spec("pypdf") is None, "pypdf must not be installed"
+
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    declared = " ".join(config["project"]["dependencies"]).lower()
+    for forbidden in ("pypdf", "pdfplumber", "pdfminer", "pymupdf"):
+        assert forbidden not in declared, f"{forbidden} must not be a dependency"
+
+
+def test_curriculum_proposal_is_implemented_but_needs_credentials(session: Session) -> None:
+    """Curriculum proposal is no longer a placeholder.
+
+    Replaces the previous "fails loudly with FeatureNotAvailableError" assertion,
+    which held while proposal was deferred. The feature now exists, so the honest
+    failure for an unconfigured install is a *configuration* error, raised before
+    any book is read rather than part-way through a paid run.
+    """
+    from app.curriculum import CurriculumProposalService
+
+    with pytest.raises(ConfigurationError):
+        get_curriculum_proposer(session)
+
+    assert callable(CurriculumProposalService.propose)
+
+
+def test_question_generation_fails_loudly() -> None:
+    request = GenerationRequest(
+        curriculum_version_id=1, subtopic_id=2, difficulty=Difficulty.EASY, count=3
+    )
+    with pytest.raises(FeatureNotAvailableError):
+        get_question_generator().generate(request)
+
+
+def test_generation_request_requires_curriculum_grounding() -> None:
+    """Generation must always name an approved curriculum version and subtopic."""
+    with pytest.raises(ValueError):
+        GenerationRequest(subtopic_id=2, difficulty=Difficulty.EASY)  # type: ignore[call-arg]
+    with pytest.raises(ValueError):
+        GenerationRequest(curriculum_version_id=1, difficulty=Difficulty.EASY)  # type: ignore[call-arg]
+
+
+def test_base_and_personalized_generators_are_distinguishable() -> None:
+    base = GeneratorDescriptor(kind=GeneratorKind.BASE, name="grounded", version="1")
+    personalized = GeneratorDescriptor(
+        kind=GeneratorKind.PERSONALIZED, name="grounded", version="1"
+    )
+    assert base.label() != personalized.label()
+    assert base.label() == "base:grounded@1"
+
+
+def test_question_validation_fails_loudly() -> None:
+    from app.domain.questions import Question
+
+    with pytest.raises(FeatureNotAvailableError):
+        get_question_validator().validate(Question(prompt="Anything"))
+
+
+def test_preference_learning_fails_loudly() -> None:
+    with pytest.raises(FeatureNotAvailableError):
+        get_preference_learner().build_profile(1)
+
+
+def test_adaptive_engine_fails_loudly() -> None:
+    engine = get_adaptive_engine()
+    with pytest.raises(FeatureNotAvailableError):
+        engine.select_next_question(1)
+    with pytest.raises(FeatureNotAvailableError):
+        engine.record_score(1, 1, 90.0)
+
+
+class TestLLMBoundary:
+    def test_require_llm_raises_when_unconfigured(self) -> None:
+        from app.config import LLMProvider, Settings
+
+        settings = Settings(_env_file=None, llm_provider=LLMProvider.NONE)  # type: ignore[call-arg]
+        with pytest.raises(ConfigurationError):
+            require_llm(settings)
+
+    def test_require_llm_passes_when_configured(self) -> None:
+        from app.config import LLMProvider, Settings
+
+        settings = Settings(  # type: ignore[call-arg]
+            _env_file=None, llm_provider=LLMProvider.ANTHROPIC, llm_api_key="sk-test"
+        )
+        assert require_llm(settings) is settings
+
+    def test_availability_description_hides_the_key(self) -> None:
+        from app.config import LLMProvider, Settings
+
+        settings = Settings(  # type: ignore[call-arg]
+            _env_file=None, llm_provider=LLMProvider.ANTHROPIC, llm_api_key="sk-hidden"
+        )
+        configured, description = describe_availability(settings)
+        assert configured is True
+        assert "sk-hidden" not in description
+
+
+def test_the_two_loops_do_not_import_each_other() -> None:
+    """Student adaptation and professor content optimization stay separate."""
+    adaptive_source = importlib.import_module("app.adaptive").__file__
+    personalization_source = importlib.import_module("app.personalization").__file__
+    assert adaptive_source and personalization_source
+
+    from pathlib import Path
+
+    adaptive_text = Path(adaptive_source).read_text(encoding="utf-8")
+    personalization_text = Path(personalization_source).read_text(encoding="utf-8")
+
+    assert "import app.personalization" not in adaptive_text
+    assert "from app.personalization" not in adaptive_text
+    assert "import app.adaptive" not in personalization_text
+    assert "from app.adaptive" not in personalization_text

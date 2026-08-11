@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_placeholder.html" import deferred %}
+
+{% block subheading %}
+  <p class="lede">The student adaptive-training loop. Separate from the professor content loop.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Enrolled students</h2>
+    <p class="empty">
+      No student records exist yet. The adaptive engine is intentionally out of scope for
+      this foundation task, so nothing here is simulated.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Fixed adaptive mechanism</h2>
+    <p class="note">This design is settled and is not to be redesigned without an explicit instruction.</p>
+    <ul class="checklist">
+      <li>Topic mastery is tracked with BKT.</li>
+      <li>Every subtopic carries a weakness value; all weaknesses start equal.</li>
+      <li>Weakness-weighted roulette selection chooses the next subtopic — exploiting weak areas while still exploring.</li>
+      <li>BKT topic mastery sets difficulty: low → easy, medium → medium, high → hard.</li>
+      <li>A question is selected by desired subtopic, desired difficulty, then priority.</li>
+      <li>A served question drops to lowest priority, so unused questions are preferred; reuse resumes once the others have been used.</li>
+      <li>Scores run 0–100. Testable programming questions score <code>passed_tests / total_tests × 100</code>; naturally discrete questions score 0 or 100.</li>
+      <li>A score updates the topic's BKT state and the weaknesses of the question's subtopics.</li>
+    </ul>
+  </section>
+
+  {{ deferred("Planned for this section", [
+    "Implement selection: weakness-weighted roulette, then difficulty, then priority.",
+    "Implement BKT and weakness updates from submitted scores.",
+    "Add student progress storage (BKT state, subtopic weakness, attempt history).",
+  ]) }}
+{% endblock %}

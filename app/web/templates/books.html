@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+
+{% block subheading %}
+  <p class="lede">
+    Introductory Python textbooks that ground curriculum proposal and question generation.
+    Books are imported as structured JSON documents that declare their own chapters and sections.
+  </p>
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+    <section class="panel panel-error" role="alert">
+      <h2>Upload rejected</h2>
+      <p class="error-message">{{ error }}</p>
+      {% if error_detail %}<p class="note">{{ error_detail }}</p>{% endif %}
+      <p class="note">Nothing was stored. Correct the document and upload it again.</p>
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Import a book document</h2>
+    <form class="upload-form" action="/books/upload" method="post" enctype="multipart/form-data">
+      <div class="field">
+        <label for="file">Book JSON document</label>
+        <input type="file" id="file" name="file" required
+               accept="{{ supported_extensions | join(',') }}">
+        <p class="hint">
+          Accepted: {{ supported_extensions | join(', ') }} (schema version {{ schema_version }})
+          · up to {{ max_upload_mb }} MB.
+        </p>
+      </div>
+      <div class="field">
+        <label for="title">Title <span class="optional">(optional)</span></label>
+        <input type="text" id="title" name="title" maxlength="500"
+               placeholder="Leave blank to use the title inside the document">
+      </div>
+      <button class="button" type="submit">Import</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Imported books</h2>
+    {% if books %}
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>Title</th><th>Author</th><th>Status</th>
+              <th>Pages</th><th>Producer</th><th>Added</th></tr>
+        </thead>
+        <tbody>
+          {% for book in books %}
+            <tr>
+              <td>{{ book.id }}</td>
+              <td><a href="/books/{{ book.id }}">{{ book.title }}</a></td>
+              <td>{{ book.author or "—" }}</td>
+              <td>{{ status_badge(book.status) }}</td>
+              <td>{{ book.page_count if book.page_count is not none else "—" }}</td>
+              <td>{{ book.producer or "—" }}</td>
+              <td>{{ book.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No books have been imported yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Why JSON</h2>
+    <p class="note">
+      Structure is <strong>declared</strong> by the document, never guessed here. Heading
+      heuristics are not deterministic across books: rules that work on one textbook
+      mis-segment the next, and the result still looks like a valid structure, so the mistake
+      goes unnoticed. Producing the document is therefore outside this application — supply one
+      that already states the book's chapters, sections and section text.
+    </p>
+    <p class="note">
+      Validation is strict and total: unknown fields are rejected rather than ignored, every
+      section needs non-empty <code>text</code>, and an invalid document is refused in full
+      before anything is stored. Nothing is ever partially imported.
+    </p>
+    <details class="schema-details">
+      <summary>Document shape</summary>
+      <pre class="schema-example">{
+  "schema_version": "{{ schema_version }}",
+  "title": "Think Python",
+  "author": "Allen B. Downey",
+  "producer": "my-converter 1.0",
+  "page_count": 292,
+  "chapters": [
+    {
+      "number": "1",
+      "title": "The Way of the Program",
+      "start_page": 17,
+      "sections": [
+        {
+          "number": "1.1",
+          "title": "What Is a Program?",
+          "start_page": 17,
+          "end_page": 18,
+          "text": "A program is a sequence of instructions ...",
+          "structure_source": "pdf_outline"
+        }
+      ]
+    }
+  ]
+}</pre>
+      <p class="hint">
+        Every chapter needs at least one section, and every section needs non-empty
+        <code>text</code>. <code>title</code> may be <code>null</code> when the source printed no
+        heading — never invent one; the interface then labels the unit by its number or page
+        range. <code>structure_source</code> is one of <code>pdf_outline</code>,
+        <code>markdown_heading</code>, <code>manual</code>, <code>structured_json</code> or
+        <code>producer_inferred</code> — the last marks a boundary you had to guess, which shows
+        as low confidence and makes the book <em>partial</em>.
+        See <code>docs/book_document_example.json</code> for a complete example.
+      </p>
+    </details>
+  </section>
+{% endblock %}

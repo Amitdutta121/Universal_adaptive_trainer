@@ -1,0 +1,75 @@
+{
+  "schema_version": "1",
+  "title": "Think Python",
+  "author": "Allen B. Downey",
+  "source_filename": "think_python.pdf",
+  "producer": "example-converter 1.0",
+  "page_count": 292,
+  "chapters": [
+    {
+      "number": "1",
+      "title": "The Way of the Program",
+      "start_page": 17,
+      "end_page": 30,
+      "structure_source": "pdf_outline",
+      "sections": [
+        {
+          "number": "1.1",
+          "title": "What Is a Program?",
+          "start_page": 17,
+          "end_page": 18,
+          "text": "A program is a sequence of instructions that specifies how to perform a computation.",
+          "structure_source": "pdf_outline"
+        },
+        {
+          "number": "1.2",
+          "title": "Running Python",
+          "start_page": 18,
+          "end_page": 20,
+          "text": "You can run Python in an interpreter, which lets you type a statement and see the result immediately.",
+          "structure_source": "pdf_outline"
+        }
+      ]
+    },
+    {
+      "number": "2",
+      "title": "Variables, Expressions and Statements",
+      "start_page": 31,
+      "end_page": 44,
+      "structure_source": "pdf_outline",
+      "sections": [
+        {
+          "number": "2.1",
+          "title": "Values and Types",
+          "start_page": 31,
+          "end_page": 33,
+          "text": "A value is one of the basic things a program works with, like a letter or a number.",
+          "structure_source": "pdf_outline"
+        },
+        {
+          "number": null,
+          "title": null,
+          "start_page": 34,
+          "end_page": 35,
+          "text": "This unit had no printed heading in the source. Its title is null rather than invented, and the interface labels it by its page range.",
+          "structure_source": "producer_inferred",
+          "confidence": "low",
+          "warnings": [
+            {
+              "code": "missing_heading",
+              "message": "No heading was printed at this boundary.",
+              "severity": "defect"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "no_page_numbers",
+      "message": "Example only: this warning is informational, so it does not mark the book as partial.",
+      "severity": "info"
+    }
+  ]
+}

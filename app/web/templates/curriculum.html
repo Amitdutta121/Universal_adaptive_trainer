@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_macros.html" import confidence_badge %}
+{% from "_curriculum.html" import hierarchy %}
+
+{% block subheading %}
+  <p class="lede">Versioned Topic → Subtopic structure, derived from your uploaded books.
+     Only an approved version may ground question generation.</p>
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+    <section class="panel panel-error">
+      <h2>Could not generate a curriculum</h2>
+      <p class="error-message">{{ error }}</p>
+      {% if error_detail %}<p class="detail">{{ error_detail }}</p>{% endif %}
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Generate a curriculum</h2>
+    <p>
+      The system reads every section of your imported books, works out what each one teaches,
+      then consolidates the results across books so that differently-worded descriptions of the
+      same skill become one subtopic. You review the proposal afterwards — nothing is approved
+      automatically.
+    </p>
+    <ul class="kv">
+      <li><span>Books available</span><strong>{{ book_count }}</strong></li>
+      <li><span>Analysis model</span><strong>{{ llm_status }}</strong></li>
+    </ul>
+
+    {# Both blockers are reported, not just the first: a professor who fixes the
+       one they were shown should not then discover the other. #}
+    {% if book_count == 0 %}
+      <p class="empty">Upload at least one book document on the <a href="/books">Books</a> page first.</p>
+    {% endif %}
+    {% if not llm_available %}
+      <p class="empty">
+        Curriculum proposal needs an LLM provider and API key. Set <code>LLM_PROVIDER</code>,
+        <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> in your <code>.env</code> file, then
+        restart the server.
+      </p>
+    {% endif %}
+    {% if book_count > 0 and llm_available %}
+      <form method="post" action="/curriculum/generate">
+        <button class="button" type="submit">Generate Curriculum</button>
+        <p class="hint">
+          Analyses one section at a time, so this can take several minutes across a whole
+          textbook.
+        </p>
+      </form>
+    {% endif %}
+  </section>
+
+  {% if latest_version %}
+    <section class="panel">
+      <h2>Latest proposal</h2>
+      <p>
+        <strong>{{ latest_version.label }}</strong>
+        <span class="status">{{ latest_version.status }}</span>
+        · <a href="/curriculum/versions/{{ latest_version.id }}">Open full proposal</a>
+      </p>
+      {{ hierarchy(latest_version.topics) }}
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Approved version</h2>
+    {% if approved_version %}
+      <p><strong>{{ approved_version.label }}</strong> (id {{ approved_version.id }}),
+         {{ approved_version.topics | length }} topic(s).</p>
+    {% else %}
+      <p class="empty">No curriculum version has been approved yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>All versions</h2>
+    {% if versions %}
+      <table class="table">
+        <thead><tr><th>#</th><th>Label</th><th>Status</th><th>Topics</th><th>Created</th></tr></thead>
+        <tbody>
+          {% for version in versions %}
+            <tr>
+              <td>{{ version.id }}</td>
+              <td><a href="/curriculum/versions/{{ version.id }}">{{ version.label }}</a></td>
+              <td><span class="status">{{ version.status }}</span></td>
+              <td>{{ version.topics | length }}</td>
+              <td>{{ version.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No curriculum versions exist yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel panel-deferred">
+    <h2>Not implemented yet</h2>
+    <ul class="checklist">
+      <li>Editing a proposed topic or subtopic, and approving a version.</li>
+      <li>Editing an approved curriculum, which will create a new version rather than mutate it.</li>
+    </ul>
+    <p class="note">Nothing on this page is simulated. Every proposal shown was derived from your books.</p>
+  </section>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_macros.html" import confidence_badge, source_note, warning_list %}
+
+{% block heading %}{{ section.display_title() }}{% endblock %}
+
+{% block subheading %}
+  <p class="lede">
+    {% if not section.has_detected_heading %}
+      This unit had no heading in the document, so it is identified by its location.
+    {% else %}
+      Section of <a href="/books/{{ book.id }}">{{ book.title }}</a>.
+    {% endif %}
+  </p>
+  <p><a class="back-link" href="/books/{{ book.id }}">← {{ book.title }}</a></p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Source</h2>
+    <dl class="kv">
+      <dt>Book</dt>
+      <dd><a href="/books/{{ source.book_id }}">{{ source.book_title }}</a>
+          {% if source.book_author %}· {{ source.book_author }}{% endif %}</dd>
+      <dt>Chapter</dt>
+      <dd>
+        {% if source.chapter_label %}
+          {{ source.chapter_label }}
+        {% else %}
+          <span class="empty">Not grouped under a chapter</span>
+        {% endif %}
+      </dd>
+      <dt>Section</dt>
+      <dd>
+        {% if source.section_label %}
+          {{ source.section_label }}
+        {% else %}
+          <span class="empty">No heading found in the document</span>
+        {% endif %}
+      </dd>
+      <dt>Location</dt>
+      <dd>{{ source.location_label or "This format carries no page numbers" }}</dd>
+      <dt>Boundary</dt>
+      <dd>{{ confidence_badge(source.structure_confidence) }} {{ source_note(source.structure_source) }}</dd>
+      <dt>Citation</dt>
+      <dd><code class="citation">{{ source.citation() }}</code></dd>
+    </dl>
+  </section>
+
+  {{ warning_list(section.warnings, title="Warnings for this section") }}
+
+  <section class="panel">
+    <h2>Extracted text <span class="chars">{{ section.char_count }} characters</span></h2>
+    {% if section.is_empty %}
+      <p class="empty">
+        No text was extracted for this section. The heading was detected but nothing followed it.
+      </p>
+    {% else %}
+      <pre class="section-text">{{ section.text }}</pre>
+    {% endif %}
+  </section>
+{% endblock %}

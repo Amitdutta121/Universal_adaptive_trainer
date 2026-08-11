@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block heading %}{{ subtopic.name }}{% endblock %}
+
+{% block subheading %}
+  <p class="lede">
+    {{ topic.name }}
+    · {{ evidence | length }} supporting section{{ "" if evidence | length == 1 else "s" }}
+    / {{ book_count }} book{{ "" if book_count == 1 else "s" }}
+    {% if subtopic.confidence %}
+      · <span class="status {{ 'status-ok' if subtopic.confidence | string == 'high' else ('status-bad' if subtopic.confidence | string == 'low' else 'status-warn') }}">{{ subtopic.confidence }} confidence</span>
+    {% endif %}
+  </p>
+  <p><a class="back-link" href="/curriculum/versions/{{ version_id }}">← Back to the proposal</a></p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Definition</h2>
+    <p>{{ subtopic.description or "No definition was recorded." }}</p>
+    <ul class="kv">
+      <li><span>Topic</span><strong>{{ topic.name }}</strong></li>
+      <li><span>Review status</span><strong>{{ subtopic.review_status }}</strong></li>
+      <li><span>Stable id</span><strong><code>{{ subtopic.stable_id }}</code></strong></li>
+    </ul>
+    <p class="hint">
+      The stable id is derived from the source material this subtopic was built from, not from its
+      name, so renaming it will not detach its evidence or its future weakness tracking.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Why these were grouped</h2>
+    {% if candidate_labels %}
+      <p>These wordings from the books were judged to describe the same skill:</p>
+      <ul class="candidate-labels">
+        {% for label in candidate_labels %}
+          <li><span class="pill">{{ label }}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No candidate labels were recorded.</p>
+    {% endif %}
+    {% if subtopic.grouping_reason %}
+      <p class="citation">{{ subtopic.grouping_reason }}</p>
+    {% else %}
+      <p class="empty">No grouping rationale was recorded.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Supporting sections</h2>
+    {% if evidence %}
+      <ol class="structure">
+        {% for item in evidence %}
+          <li class="structure-chapter">
+            <div class="structure-head">
+              <a href="/books/{{ item.row.book_id }}/sections/{{ item.row.section_id }}">{{ item.row.citation }}</a>
+            </div>
+            <p><strong>Called here:</strong> {{ item.row.candidate_label }}</p>
+            {% if item.row.definition %}
+              <p>{{ item.row.definition }}</p>
+            {% endif %}
+            {% if item.quotes %}
+              <p class="hint">Representative evidence from this section:</p>
+              <ul class="evidence-quotes">
+                {% for quote in item.quotes %}
+                  <li><blockquote>{{ quote }}</blockquote></li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="empty">No supporting sections were recorded for this subtopic.</p>
+    {% endif %}
+  </section>
+{% endblock %}

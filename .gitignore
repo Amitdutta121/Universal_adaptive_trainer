@@ -1,0 +1,28 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local configuration and secrets
+.env
+.env.local
+
+# Runtime data (SQLite database, uploaded books, generated artifacts)
+data/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+# Superpowers SDD scratch (progress ledgers, review packages)
+.superpowers/

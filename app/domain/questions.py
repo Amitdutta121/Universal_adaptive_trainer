@@ -1,0 +1,149 @@
+"""Question entities and validation reports.
+
+Two invariants are encoded here because both the professor pipeline and the
+student engine depend on them:
+
+1. A question always remembers the text that was *generated*, even after the
+   professor edits it (``original_*`` fields; see :func:`apply_professor_edit`).
+2. A question records which generator produced it, by kind *and* version, so
+   base and personalized generators stay distinguishable.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.domain.enums import Difficulty, GeneratorKind, QuestionKind, QuestionStatus
+
+#: Priority given to a question that has just been served. Lower is served later;
+#: the adaptive engine picks the highest-priority candidate for a subtopic and
+#: difficulty, so a used question sinks to the back of the queue.
+LOWEST_PRIORITY = 0
+
+#: Priority assigned to a freshly approved, never-served question.
+DEFAULT_PRIORITY = 100
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+class Question(BaseModel):
+    """An assessment question grounded in an approved curriculum subtopic."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+
+    # Grounding: which approved curriculum this question belongs to.
+    curriculum_version_id: int | None = None
+    subtopic_id: int | None = None
+
+    kind: QuestionKind = QuestionKind.TESTABLE_PROGRAM
+    difficulty: Difficulty = Difficulty.EASY
+    status: QuestionStatus = QuestionStatus.GENERATED
+
+    prompt: str = Field(min_length=1)
+    reference_solution: str | None = None
+    #: Serialized test cases for ``TESTABLE_PROGRAM`` questions. Kept opaque
+    #: (text) at this stage; the executable format is decided with the validator.
+    tests: str | None = None
+
+    # Retained generated originals. Never overwritten by professor edits.
+    original_prompt: str | None = None
+    original_reference_solution: str | None = None
+    original_tests: str | None = None
+
+    # Provenance.
+    generator_kind: GeneratorKind = GeneratorKind.BASE
+    generator_name: str = "unset"
+    generator_version: str = "0"
+
+    #: Selection priority; lowered to :data:`LOWEST_PRIORITY` once served.
+    priority: int = DEFAULT_PRIORITY
+    times_used: int = Field(default=0, ge=0)
+
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _seed_originals(self) -> Question:
+        """Capture the generated text as the original on first construction."""
+        if self.original_prompt is None:
+            self.original_prompt = self.prompt
+        if self.original_reference_solution is None and self.reference_solution is not None:
+            self.original_reference_solution = self.reference_solution
+        if self.original_tests is None and self.tests is not None:
+            self.original_tests = self.tests
+        return self
+
+    @property
+    def was_edited_by_professor(self) -> bool:
+        return (
+            self.prompt != self.original_prompt
+            or self.reference_solution != self.original_reference_solution
+            or self.tests != self.original_tests
+        )
+
+
+def apply_professor_edit(
+    question: Question,
+    *,
+    prompt: str | None = None,
+    reference_solution: str | None = None,
+    tests: str | None = None,
+) -> Question:
+    """Return a copy of ``question`` with professor edits applied.
+
+    The ``original_*`` fields are preserved untouched, which is what makes
+    "generated vs. accepted" comparisons possible for later generator
+    optimization.
+    """
+    updates: dict[str, object] = {"updated_at": _now()}
+    if prompt is not None:
+        updates["prompt"] = prompt
+    if reference_solution is not None:
+        updates["reference_solution"] = reference_solution
+    if tests is not None:
+        updates["tests"] = tests
+    return question.model_copy(update=updates)
+
+
+class QuestionCheck(BaseModel):
+    """One deterministic or LLM check performed on a question."""
+
+    name: str = Field(min_length=1)
+    passed: bool
+    #: Deterministic checks (syntax, execution, tests) outrank LLM judgment.
+    deterministic: bool = True
+    detail: str | None = None
+
+
+class QuestionValidationReport(BaseModel):
+    """Outcome of validating a single question."""
+
+    question_id: int | None = None
+    checks: list[QuestionCheck] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_now)
+
+    @property
+    def deterministic_checks(self) -> list[QuestionCheck]:
+        return [c for c in self.checks if c.deterministic]
+
+    @property
+    def passed(self) -> bool:
+        """A report passes only if every deterministic check passed.
+
+        A failing deterministic check cannot be overridden by a positive LLM
+        judgment; if there are no deterministic checks at all, the report does
+        not pass.
+        """
+        deterministic = self.deterministic_checks
+        if not deterministic:
+            return False
+        return all(check.passed for check in deterministic)
+
+    def resulting_status(self) -> QuestionStatus:
+        return QuestionStatus.VALIDATION_PASSED if self.passed else QuestionStatus.VALIDATION_FAILED

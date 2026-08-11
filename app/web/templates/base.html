@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ page_title }} · {{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="/">
+        <span class="brand-mark">AT</span>
+        <span class="brand-text">
+          <strong>{{ app_name }}</strong>
+          <small>v{{ app_version }} · {{ environment }}</small>
+        </span>
+      </a>
+
+      <nav>
+        <a class="nav-link {% if active_section is none %}is-active{% endif %}" href="/">Dashboard</a>
+        {% for section in nav_sections %}
+          <a class="nav-link {% if active_section == section.key %}is-active{% endif %}"
+             href="{{ section.path }}">{{ section.label }}</a>
+        {% endfor %}
+      </nav>
+
+      <div class="sidebar-foot">
+        <span class="pill">Professor workspace</span>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="page-head">
+        <h1>{% block heading %}{{ page_title }}{% endblock %}</h1>
+        {% block subheading %}{% endblock %}
+      </header>
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

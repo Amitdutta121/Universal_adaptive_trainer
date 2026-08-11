@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block heading %}Adaptive Trainer{% endblock %}
+
+{% block subheading %}
+  <p class="lede">
+    Professor content generation and student adaptive training. This is the project
+    foundation: the sections below are reachable, the storage layer is live, and the
+    generation features are not implemented yet.
+  </p>
+{% endblock %}
+
+{% block content %}
+  <section class="cards">
+    {% for section in nav_sections %}
+      <a class="card" href="{{ section.path }}">
+        <div class="card-head">
+          <h2>{{ section.label }}</h2>
+          <span class="count">{{ counts.get(section.key, 0) }}</span>
+        </div>
+        <p>{{ section.summary }}</p>
+      </a>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <h2>Environment</h2>
+    <dl class="kv">
+      <dt>Environment</dt><dd>{{ environment }}</dd>
+      <dt>Database</dt><dd><code>{{ database_url }}</code></dd>
+      <dt>LLM</dt>
+      <dd>
+        {% if llm_configured %}
+          <span class="status status-ok">configured</span> {{ llm_status }}
+        {% else %}
+          <span class="status status-off">not configured</span> {{ llm_status }}
+        {% endif %}
+      </dd>
+      <dt>API health</dt><dd><a href="/api/health"><code>/api/health</code></a></dd>
+    </dl>
+    {% if not llm_configured %}
+      <p class="note">
+        LLM-backed features stay unavailable until <code>LLM_PROVIDER</code>,
+        <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> are set in <code>.env</code>
+        (copy <code>.env.example</code>). The rest of the application runs without them.
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Two separate loops</h2>
+    <p>
+      The <strong>professor loop</strong> turns textbooks into an approved curriculum and a
+      reviewed question bank, and learns the professor's preferences from those reviews.
+      The <strong>student loop</strong> tracks BKT topic mastery and subtopic weakness to
+      choose what to ask next. They share only the question bank; see
+      <code>docs/DECISIONS.md</code>.
+    </p>
+  </section>
+{% endblock %}

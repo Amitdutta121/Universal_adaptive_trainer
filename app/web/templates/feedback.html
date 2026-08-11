@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_placeholder.html" import deferred %}
+
+{% block subheading %}
+  <p class="lede">Professor reviews are the authority for professor preference. They are append-only.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Review history</h2>
+    {% if reviews %}
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>Question</th><th>Decision</th><th>Reviewed generator</th>
+              <th>Comment</th><th>When</th></tr>
+        </thead>
+        <tbody>
+          {% for review in reviews %}
+            <tr>
+              <td>{{ review.id }}</td>
+              <td>{{ review.question_id }}</td>
+              <td><span class="status">{{ review.decision }}</span></td>
+              <td><code>{{ review.reviewed_generator_name }}@{{ review.reviewed_generator_version }}</code></td>
+              <td>{{ review.comment or "—" }}</td>
+              <td>{{ review.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No professor reviews have been recorded yet.</p>
+    {% endif %}
+  </section>
+
+  {{ deferred("Planned for this section", [
+    "Learn a preference profile from the accumulated approve / reject / edit history.",
+    "Serve questions from a personalized generator that stays versioned and distinguishable from the base generator.",
+    "Later, optimize the generator itself using the accumulated feedback.",
+  ]) }}
+{% endblock %}

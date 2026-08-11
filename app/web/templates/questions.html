@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_placeholder.html" import deferred %}
+
+{% block subheading %}
+  <p class="lede">Assessment questions generated against an approved curriculum, automatically validated, then reviewed.</p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Generation readiness</h2>
+    {% if approved_curriculum %}
+      <p>Grounding curriculum: <strong>{{ approved_curriculum.label }}</strong> (id {{ approved_curriculum.id }}).</p>
+    {% else %}
+      <p class="empty">
+        No approved curriculum, so no question may be generated yet — generation always
+        references approved curriculum IDs.
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Question bank</h2>
+    {% if questions %}
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>Subtopic</th><th>Difficulty</th><th>Kind</th><th>Status</th>
+              <th>Generator</th><th>Priority</th><th>Edited</th></tr>
+        </thead>
+        <tbody>
+          {% for question in questions %}
+            <tr>
+              <td>{{ question.id }}</td>
+              <td>{{ question.subtopic_id if question.subtopic_id is not none else "—" }}</td>
+              <td>{{ question.difficulty }}</td>
+              <td>{{ question.kind }}</td>
+              <td><span class="status">{{ question.status }}</span></td>
+              <td><code>{{ question.generator_kind }}:{{ question.generator_name }}@{{ question.generator_version }}</code></td>
+              <td>{{ question.priority }}</td>
+              <td>{{ "yes" if question.prompt != question.original_prompt else "no" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if status_counts %}
+        <p class="note">By status:
+          {% for status, count in status_counts.items() %}{{ status }}={{ count }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </p>
+      {% endif %}
+    {% else %}
+      <p class="empty">No questions have been generated yet.</p>
+    {% endif %}
+  </section>
+
+  {{ deferred("Planned for this section", [
+    "Generate questions grounded in the approved books and curriculum.",
+    "Validate automatically — deterministic checks decide; LLM judgment is advisory only.",
+    "Approve, reject or edit each question; the generated original is always retained.",
+  ]) }}
+{% endblock %}
