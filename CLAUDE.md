@@ -177,6 +177,7 @@ app/
     display.py          Safe display decoding for current and legacy rows
   generation/         Section-first base question generation    (IMPLEMENTED)
   validation/         Automatic question validation             (boundary only)
+  evaluation/         Advisory structured LLM pedagogical evaluation (IMPLEMENTED)
   feedback/           Professor approve/reject/edit records     (recording implemented)
   personalization/    Professor preference learning             (boundary only)
   adaptive/           Student adaptive engine                   (boundary only, by instruction)

@@ -630,3 +630,29 @@ This runner is local research-prototype isolation, not multi-tenant security iso
 temporary working directory, and a timeout reduce accidental interference, but generated code can
 still reach the filesystem and other same-user process capabilities in theory. Untrusted
 multi-tenant execution requires a stronger sandbox outside this design.
+
+---
+
+## ADR-024 — Advisory structured LLM pedagogical evaluation supplements deterministic validation
+
+**Status:** accepted
+
+After deterministic validation completes, every generated question receives a structured LLM
+pedagogical evaluation stored in `pedagogical_eval_json`. The evaluation records the judge model,
+rubric version, and timestamp alongside per-dimension scores and rationales. When deterministic
+validation fails, `GenerationService` skips the judge and stores a `skipped` evaluation; the judge
+never overrides a failed deterministic check (ADR-004).
+
+**Why:** deterministic checks catch invalid Python, broken tests, and incorrect expected output,
+but they cannot assess pedagogical quality — clarity, alignment with source material, difficulty
+appropriateness, or whether a question teaches the intended concept. A separate advisory judge
+gives professors structured feedback without conflating runtime correctness with instructional
+value.
+
+**Implications:** `app/evaluation/` owns the rubric, schema, and `PedagogicalJudge` service.
+`app/validation/` remains LLM-free (ADR-023). Individual dimension results are the primary
+evaluation output; the overall advisory score is an unweighted arithmetic mean of applicable
+dimension scores, provided as a summary only. A completed or glowing pedagogical evaluation
+cannot change a failed deterministic result to passed; an `error` evaluation cannot fail a question
+that passed deterministic checks. The question detail page renders deterministic checks and LLM
+pedagogical evaluation in separate panels.

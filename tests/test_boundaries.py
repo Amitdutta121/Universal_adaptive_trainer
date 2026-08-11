@@ -29,6 +29,7 @@ BOUNDARY_MODULES = [
     "app.curriculum",
     "app.generation",
     "app.validation",
+    "app.evaluation",
     "app.feedback",
     "app.personalization",
     "app.adaptive",
