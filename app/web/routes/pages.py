@@ -336,6 +336,8 @@ def _questions_page(
     session: Session,
     *,
     selected_book_id: int | None = None,
+    created_count: int | None = None,
+    created_ids: list[int] | None = None,
     error: str | None = None,
     error_detail: str | None = None,
     status_code: int = 200,
@@ -363,6 +365,8 @@ def _questions_page(
             "selected_sections": selected_sections,
             "difficulty_options": list(Difficulty),
             "question_type_options": list(QuestionType),
+            "created_count": created_count,
+            "created_ids": created_ids,
             "error": error,
             "error_detail": error_detail,
         },
@@ -371,8 +375,23 @@ def _questions_page(
 
 
 @router.get("/questions", response_class=HTMLResponse, name="questions")
-def questions(request: Request, session: DbSession, book_id: int | None = None) -> HTMLResponse:
-    return _questions_page(request, session, selected_book_id=book_id)
+def questions(
+    request: Request,
+    session: DbSession,
+    book_id: int | None = None,
+    created: int | None = None,
+    ids: str | None = None,
+) -> HTMLResponse:
+    created_ids: list[int] | None = None
+    if ids:
+        created_ids = [int(part) for part in ids.split(",") if part.strip()]
+    return _questions_page(
+        request,
+        session,
+        selected_book_id=book_id,
+        created_count=created,
+        created_ids=created_ids,
+    )
 
 
 @router.post("/questions/generate", name="generate_questions")
@@ -419,9 +438,12 @@ def generate_questions(
             status_code=exc.status_code,
         )
 
-    return RedirectResponse(
-        url=f"/questions/{generated[0].id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    if len(generated) == 1:
+        url = f"/questions/{generated[0].id}"
+    else:
+        id_list = ",".join(str(row.id) for row in generated)
+        url = f"/questions?created={len(generated)}&ids={id_list}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _approved_curriculum_id(session: Session) -> int:

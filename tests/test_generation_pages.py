@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.curriculum import TaxonomyImportService
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
+from app.ingestion import BookImportService, SourceRetrieval
 
 
 class FakeClient:
@@ -97,6 +97,43 @@ def test_generate_post_creates_question(client, session, settings, monkeypatch) 
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/questions/")
+
+
+def test_generate_post_multiple_sections_redirects_to_bank(
+    client, session, settings, monkeypatch
+) -> None:
+    book_id, _, topic_id, subtopic_id, _ = _seed(session, settings)
+    section_ids = [section.id for section in SourceRetrieval(session).sections_in_book(book_id)[:2]]
+
+    import app.web.routes.pages as pages
+
+    monkeypatch.setattr(
+        pages,
+        "GenerationService",
+        lambda request_session: GenerationService(request_session, client=FakeClient()),
+    )
+
+    response = client.post(
+        "/questions/generate",
+        data={
+            "topic_id": str(topic_id),
+            "subtopic_id": str(subtopic_id),
+            "difficulty": "medium",
+            "question_type": "debugging",
+            "book_id": str(book_id),
+            "section_ids": [str(section_id) for section_id in section_ids],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/questions?created=2&ids=")
+    assert not location.startswith("/questions/")
+
+    body = client.get(location).text
+    assert "Questions generated" in body
+    assert "Created 2 questions" in body
 
 
 def test_detail_shows_prompt_and_source(client, session, settings, monkeypatch) -> None:

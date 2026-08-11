@@ -6,6 +6,20 @@
 {% endblock %}
 
 {% block content %}
+  {% if created_count %}
+    <section class="panel panel-success" role="status">
+      <h2>Questions generated</h2>
+      <p>
+        Created {{ created_count }} question{% if created_count != 1 %}s{% endif %}
+        {% if created_ids %}:
+          {% for qid in created_ids %}
+            <a href="/questions/{{ qid }}">{{ qid }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% endif %}.
+      </p>
+    </section>
+  {% endif %}
+
   {% if error %}
     <section class="panel panel-error" role="alert">
       <h2>Generation failed</h2>
