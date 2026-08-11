@@ -5,7 +5,8 @@ Responsibility
     grounded in the approved curriculum and the ingested books.
 
 Status
-    **Not implemented in this task.** Only the seam exists.
+    The section-first base generator is implemented. Personalized generation is
+    deferred; callers use :class:`GenerationService` for persisted generation.
 
 Key rules
     * A generation request always carries an *approved* curriculum version id
@@ -17,7 +18,8 @@ Key rules
       remain distinguishable in stored data.
 
 Allowed dependencies
-    ``app.config``, ``app.domain``, ``app.errors``, ``app.llm``, ``app.persistence``.
+    ``app.config``, ``app.domain``, ``app.errors``, ``app.ingestion``, ``app.llm``,
+    ``app.persistence``.
     Must not import ``app.adaptive`` or ``app.web``.
 """
 
@@ -27,9 +29,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 
-from app.domain.enums import Difficulty, GeneratorKind, QuestionKind
+from app.domain.enums import Difficulty, GeneratorKind, QuestionKind, QuestionType
 from app.domain.questions import Question
-from app.errors import FeatureNotAvailableError
 
 
 class GeneratorDescriptor(BaseModel):
@@ -44,10 +45,16 @@ class GeneratorDescriptor(BaseModel):
 
 
 class GenerationRequest(BaseModel):
-    """What to generate. Curriculum ids are required, not optional."""
+    """Legacy request shape retained for generator selection compatibility.
+
+    Section-first callers use :class:`app.generation.service.GenerationService`;
+    its ``subtopic_id`` maps to the single-item ``QuestionSpec.subtopic_ids``.
+    """
 
     curriculum_version_id: int
     subtopic_id: int
+    question_type: QuestionType
+    source_section_ids: list[int] = Field(min_length=1)
     difficulty: Difficulty
     kind: QuestionKind = QuestionKind.TESTABLE_PROGRAM
     count: int = Field(default=1, ge=1, le=50)
@@ -65,24 +72,27 @@ class QuestionGenerator(Protocol):
     def generate(self, request: GenerationRequest) -> list[Question]: ...
 
 
-class NullQuestionGenerator:
-    """Placeholder generator. Raises so no unvalidated content is invented."""
+def get_question_generator(professor_id: int | None = None):
+    """Return the lazy base generator for callers selecting a generator.
 
-    @property
-    def descriptor(self) -> GeneratorDescriptor:
-        return GeneratorDescriptor(kind=GeneratorKind.BASE, name="null", version="0")
-
-    def generate(self, request: GenerationRequest) -> list[Question]:
-        raise FeatureNotAvailableError(
-            "Question generation is not implemented yet.",
-            detail=f"Requested {request.count} question(s) for subtopic {request.subtopic_id}.",
-        )
-
-
-def get_question_generator(professor_id: int | None = None) -> QuestionGenerator:
-    """Return the generator to use.
-
-    Will later return a personalized generator when one exists for
-    ``professor_id`` and fall back to the base generator otherwise.
+    ``professor_id`` remains reserved for the future personalized path. The LLM
+    client is not constructed here, so an application can start without its
+    credentials; ``generate_one`` resolves it only when generation is requested.
     """
-    return NullQuestionGenerator()
+    del professor_id
+    from app.generation.base import BaseQuestionGenerator
+
+    return BaseQuestionGenerator()
+
+
+from app.generation.base import BaseQuestionGenerator  # noqa: E402
+from app.generation.service import GenerationService  # noqa: E402
+
+__all__ = [
+    "BaseQuestionGenerator",
+    "GenerationRequest",
+    "GenerationService",
+    "GeneratorDescriptor",
+    "QuestionGenerator",
+    "get_question_generator",
+]

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.adaptive import get_adaptive_engine
-from app.domain.enums import Difficulty, GeneratorKind
+from app.domain.enums import Difficulty, GeneratorKind, QuestionType
 from app.errors import ConfigurationError, FeatureNotAvailableError
 from app.generation import GenerationRequest, GeneratorDescriptor, get_question_generator
 from app.llm import describe_availability, require_llm
@@ -142,20 +142,47 @@ def test_llm_curriculum_proposal_modules_stay_removed() -> None:
         assert not (curriculum_root / removed).exists(), f"{removed} must stay removed"
 
 
-def test_question_generation_fails_loudly() -> None:
+def test_question_generator_is_base_and_requires_llm_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "none")
+    monkeypatch.setenv("LLM_API_KEY", "")
+    get_settings.cache_clear()
     request = GenerationRequest(
-        curriculum_version_id=1, subtopic_id=2, difficulty=Difficulty.EASY, count=3
+        curriculum_version_id=1,
+        subtopic_id=2,
+        question_type=QuestionType.DEBUGGING,
+        source_section_ids=[3],
+        difficulty=Difficulty.EASY,
+        count=3,
     )
-    with pytest.raises(FeatureNotAvailableError):
-        get_question_generator().generate(request)
+    generator = get_question_generator()
+    assert generator.descriptor == GeneratorDescriptor(
+        kind=GeneratorKind.BASE, name="base", version="1"
+    )
+    with pytest.raises(ConfigurationError):
+        generator.generate(request)
+    get_settings.cache_clear()
 
 
 def test_generation_request_requires_curriculum_grounding() -> None:
     """Generation must always name an approved curriculum version and subtopic."""
     with pytest.raises(ValueError):
-        GenerationRequest(subtopic_id=2, difficulty=Difficulty.EASY)  # type: ignore[call-arg]
+        GenerationRequest(  # type: ignore[call-arg]
+            subtopic_id=2,
+            question_type=QuestionType.DEBUGGING,
+            source_section_ids=[3],
+            difficulty=Difficulty.EASY,
+        )
     with pytest.raises(ValueError):
-        GenerationRequest(curriculum_version_id=1, difficulty=Difficulty.EASY)  # type: ignore[call-arg]
+        GenerationRequest(  # type: ignore[call-arg]
+            curriculum_version_id=1,
+            question_type=QuestionType.DEBUGGING,
+            source_section_ids=[3],
+            difficulty=Difficulty.EASY,
+        )
 
 
 def test_base_and_personalized_generators_are_distinguishable() -> None:
