@@ -60,6 +60,8 @@ class Question(BaseModel):
     content_json: str | None = None
     #: Serialized deterministic validation outcome for display and review.
     validation_report_json: str | None = None
+    #: Serialized LLM pedagogical evaluation for display and review.
+    pedagogical_eval_json: str | None = None
 
     # Retained generated originals. Never overwritten by professor edits.
     original_prompt: str | None = None

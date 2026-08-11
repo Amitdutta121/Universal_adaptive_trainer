@@ -113,6 +113,7 @@ class GenerationService:
             spec_json=question.spec_json,
             content_json=question.content_json,
             validation_report_json=question.validation_report_json,
+            pedagogical_eval_json=question.pedagogical_eval_json,
             original_prompt=question.original_prompt,
             original_reference_solution=question.original_reference_solution,
             original_tests=question.original_tests,

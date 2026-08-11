@@ -201,6 +201,7 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
         spec_json='{"topic_id":1}',
         content_json='{"explanation":"because..."}',
         validation_report_json='{"checks":[]}',
+        pedagogical_eval_json='{"status":"skipped"}',
         generator_kind=GeneratorKind.BASE,
         generator_name="base",
         generator_version="1",
@@ -211,3 +212,4 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
     assert loaded.question_type == QuestionType.TRUE_FALSE
     assert loaded.spec_json and loaded.content_json
     assert loaded.validation_report_json == '{"checks":[]}'
+    assert loaded.pedagogical_eval_json == '{"status":"skipped"}'
