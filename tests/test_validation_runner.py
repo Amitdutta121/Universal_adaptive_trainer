@@ -18,6 +18,13 @@ def test_run_script_captures_stdout() -> None:
     assert normalize_output(result.stdout) == "3"
 
 
+def test_run_script_captures_non_ascii_stdout() -> None:
+    result = LocalCodeRunner(timeout_seconds=2).run_script('print("café")')
+
+    assert result.exit_code == 0
+    assert normalize_output(result.stdout) == "café"
+
+
 def test_run_script_times_out() -> None:
     result = LocalCodeRunner(timeout_seconds=0.3).run_script("import time; time.sleep(5)")
     assert result.timed_out is True

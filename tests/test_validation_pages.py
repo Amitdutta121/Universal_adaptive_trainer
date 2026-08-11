@@ -39,6 +39,7 @@ def _seed_question(
                 name="approved_taxonomy_ids",
                 passed=check_passed,
                 detail="Approved curriculum IDs",
+                evidence=None if check_passed else "wanted 3 got 4",
             )
         ]
     )
@@ -88,3 +89,5 @@ def test_question_detail_shows_failing_automatic_checks(
     assert response.status_code == 200
     assert "Automatic Checks" in response.text
     assert "✗" in response.text
+    assert "check-evidence" in response.text
+    assert "wanted 3 got 4" in response.text

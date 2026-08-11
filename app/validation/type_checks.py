@@ -12,7 +12,7 @@ from app.domain.enums import QuestionType
 from app.domain.questions import Question, QuestionCheck
 from app.generation.schemas import ExecutableTestCase
 from app.validation.report import make_check
-from app.validation.runner import LocalCodeRunner, TestRunSummary, normalize_output
+from app.validation.runner import EVIDENCE_LIMIT, LocalCodeRunner, TestRunSummary, normalize_output
 
 
 def load_content(question: Question) -> dict | None:
@@ -301,11 +301,13 @@ def _script_evidence(result: object, expected: str) -> str:
     if result.timed_out:
         return "Execution timed out."
     if result.exit_code != 0:
-        return f"Exited with code {result.exit_code}. {result.stderr}".strip()
-    return (
-        f"stdout mismatch; expected {normalize_output(expected)!r}, "
-        f"got {normalize_output(result.stdout)!r}."
-    )
+        evidence = f"Exited with code {result.exit_code}. {result.stderr}".strip()
+    else:
+        evidence = (
+            f"stdout mismatch; expected {normalize_output(expected)!r}, "
+            f"got {normalize_output(result.stdout)!r}."
+        )
+    return evidence[:EVIDENCE_LIMIT]
 
 
 TypeChecker = Callable[[dict, LocalCodeRunner], list[QuestionCheck]]

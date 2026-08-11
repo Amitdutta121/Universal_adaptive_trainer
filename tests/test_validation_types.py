@@ -8,7 +8,7 @@ import pytest
 
 from app.domain.enums import QuestionType
 from app.domain.questions import Question
-from app.validation.runner import LocalCodeRunner
+from app.validation.runner import EVIDENCE_LIMIT, LocalCodeRunner
 from app.validation.type_checks import check_type, load_content
 
 RUNNER = LocalCodeRunner(timeout_seconds=2)
@@ -140,6 +140,18 @@ def test_parsons_non_string_order_id_fails_consistency_check() -> None:
     }
 
     assert checks["parsons_order_consistent"].passed is False
+
+
+def test_output_prediction_mismatch_evidence_is_bounded() -> None:
+    content = {
+        "code": f"print({'x' * (EVIDENCE_LIMIT * 2)!r})",
+        "expected_output": "short",
+    }
+
+    evidence = _checks(QuestionType.OUTPUT_PREDICTION, content)["expected_output_verified"].evidence
+
+    assert evidence is not None
+    assert len(evidence) <= EVIDENCE_LIMIT
 
 
 @pytest.mark.parametrize(

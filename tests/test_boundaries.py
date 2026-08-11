@@ -8,6 +8,9 @@ work, and the two adaptation loops must stay independent.
 from __future__ import annotations
 
 import importlib
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,6 +36,19 @@ BOUNDARY_MODULES = [
     "app.llm",
     "app.web",
 ]
+
+
+def test_validation_package_imports_in_a_clean_process() -> None:
+    root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, "-c", "from app.validation import get_question_validator"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(root)},
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 @pytest.mark.parametrize("module_name", BOUNDARY_MODULES)

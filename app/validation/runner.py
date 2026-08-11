@@ -65,11 +65,13 @@ class LocalCodeRunner:
             path.write_text(source, encoding="utf-8")
             try:
                 completed = subprocess.run(
-                    [sys.executable, "-I", str(path)],
+                    [sys.executable, "-I", "-X", "utf8", str(path)],
                     cwd=directory,
                     input=stdin,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=self._timeout_seconds,
                     env=_minimal_environment(),
                     check=False,

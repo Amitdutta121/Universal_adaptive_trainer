@@ -13,7 +13,6 @@ from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import CurriculumRepository, QuestionRepository
-from app.validation import get_question_validator
 
 
 class GenerationService:
@@ -27,7 +26,6 @@ class GenerationService:
         )
         self._curriculum = CurriculumRepository(session)
         self._questions = QuestionRepository(session)
-        self._validator = get_question_validator(session)
 
     def generate_for_sections(
         self,
@@ -46,6 +44,9 @@ class GenerationService:
         All specs are validated before the first model call, preventing partial
         generation when a later selected id is invalid.
         """
+        from app.validation import get_question_validator
+
+        validator = get_question_validator(self._session)
         section_ids = self._resolve_section_ids(source_section_ids, book_id)
         specs = [
             build_question_spec(
@@ -76,7 +77,7 @@ class GenerationService:
                     )
                 )
             )
-            report = self._validator.validate(Question.model_validate(row))
+            report = validator.validate(Question.model_validate(row))
             row.validation_report_json = report.model_dump_json()
             row.status = report.resulting_status()
             rows.append(row)
