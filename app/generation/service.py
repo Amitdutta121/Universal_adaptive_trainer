@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, QuestionType
@@ -14,16 +16,30 @@ from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import CurriculumRepository, QuestionRepository
+from app.personalization.embeddings import Embedder
+from app.personalization.generator import PersonalizedContextGenerator
 
 
 class GenerationService:
     """Validate a section set, generate one question per section, and store it."""
 
-    def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        client: StructuredLLMClient | None = None,
+        embedder: Embedder | None = None,
+    ) -> None:
         self._session = session
         self._retrieval = SourceRetrieval(session)
-        self._generator = BaseQuestionGenerator(
+        self._base = BaseQuestionGenerator(
             session=session, client=client, retrieval=self._retrieval
+        )
+        self._personalized = PersonalizedContextGenerator(
+            session=session,
+            client=client,
+            retrieval=self._retrieval,
+            embedder=embedder,
         )
         self._judge = PedagogicalJudge(session, client=client)
         self._curriculum = CurriculumRepository(session)
@@ -40,6 +56,7 @@ class GenerationService:
         source_section_ids: list[int] | None = None,
         book_id: int | None = None,
         seed: str | None = None,
+        generator: Literal["base", "personalized"] = "base",
     ) -> list[QuestionRow]:
         """Generate and persist one question for each explicit or book section.
 
@@ -68,11 +85,12 @@ class GenerationService:
         subtopic_names = [
             subtopic.name for subtopic in topic.subtopics if subtopic.id == subtopic_id
         ]
+        active = self._personalized if generator == "personalized" else self._base
         rows = []
         for spec in specs:
             row = self._questions.add(
                 self._row_from_question(
-                    self._generator.generate_one(
+                    active.generate_one(
                         spec,
                         topic_name=topic.name,
                         subtopic_names=subtopic_names,

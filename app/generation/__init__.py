@@ -5,8 +5,9 @@ Responsibility
     grounded in the approved curriculum and the ingested books.
 
 Status
-    The section-first base generator is implemented. Personalized generation is
-    deferred; callers use :class:`GenerationService` for persisted generation.
+    The section-first base generator and personalized-context generator are
+    implemented. :class:`GenerationService` selects between them via an explicit
+    ``generator`` flag; callers use it for persisted generation.
 
 Key rules
     * A generation request always carries an *approved* curriculum version id
@@ -16,10 +17,14 @@ Key rules
       :class:`GeneratorDescriptor` (kind + name + version), which is stamped on
       each produced question. Base and personalized generators must therefore
       remain distinguishable in stored data.
+    * Generator selection is explicit on :meth:`GenerationService.generate_for_sections`
+      (``generator="base"`` or ``"personalized"``). The UI flag drives selection;
+      ``professor_id`` on :class:`GenerationRequest` is reserved and does not
+      switch generators here.
 
 Allowed dependencies
     ``app.config``, ``app.domain``, ``app.errors``, ``app.evaluation``, ``app.ingestion``,
-    ``app.llm``, ``app.persistence``, ``app.validation``.
+    ``app.llm``, ``app.persistence``, ``app.personalization``, ``app.validation``.
     Must not import ``app.adaptive`` or ``app.web``.
 """
 
@@ -76,10 +81,12 @@ class QuestionGenerator(Protocol):
 def get_question_generator(professor_id: int | None = None):
     """Return an unconfigured base generator for descriptor and selection checks.
 
-    ``professor_id`` remains reserved for the future personalized path. The LLM
-    client is not constructed here, so an application can start without its
-    credentials. ``generate`` requires a generator constructed with ``session``;
-    use ``BaseQuestionGenerator(session=...)`` for unpersisted questions or
+    ``professor_id`` is ignored for v1: generator selection happens explicitly
+    on :meth:`GenerationService.generate_for_sections` via the ``generator``
+    flag (UI-driven), not through this helper. The LLM client is not constructed
+    here, so an application can start without its credentials. ``generate``
+    requires a generator constructed with ``session``; use
+    ``BaseQuestionGenerator(session=...)`` for unpersisted questions or
     :class:`GenerationService` to persist them.
     """
     del professor_id

@@ -7,8 +7,11 @@ Responsibility
     generator itself.
 
 Status
-    Preference extraction, merge, refresh, and professor confirm/correct/remove
-    actions are implemented. Personalized generation is deferred.
+    Preference extraction, merge, refresh, professor confirm/correct/remove
+    actions, and personalized-context generation are implemented.
+    :class:`~app.personalization.generator.PersonalizedContextGenerator` is
+    wired through :class:`~app.generation.GenerationService` when
+    ``generator="personalized"``.
 
 Key rules
     * Input is professor feedback only. Student performance belongs to the
