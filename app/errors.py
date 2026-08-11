@@ -94,6 +94,13 @@ class InvalidTaxonomyDocumentError(AdaptiveTrainerError):
     code = "invalid_taxonomy_document"
 
 
+class InvalidQuestionSpecError(AdaptiveTrainerError):
+    """A generation QuestionSpec names ids that are missing or not approved."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "invalid_question_spec"
+
+
 class LLMRequestError(AdaptiveTrainerError):
     """The LLM provider could not be reached, or refused the request.
 
