@@ -25,7 +25,8 @@ from app.curriculum import (
     decode_proposal_warnings,
 )
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
-from app.domain.enums import Difficulty, QuestionType
+from app.domain.enums import Difficulty, QuestionType, RejectionReason, ReviewDecision
+from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import QuestionValidationReport
 from app.errors import (
     ConfigurationError,
@@ -43,6 +44,7 @@ from app.evaluation import (
     PedagogicalEvaluation,
     humanize_judge_error_detail,
 )
+from app.feedback import submit_review
 from app.generation import GenerationService
 from app.ingestion import (
     SCHEMA_VERSION,
@@ -493,6 +495,11 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
         content = {}
     if not isinstance(content, dict):
         content = {}
+    spec = None
+    if question.spec_json:
+        with suppress(json.JSONDecodeError, TypeError):
+            parsed_spec = json.loads(question.spec_json)
+            spec = parsed_spec if isinstance(parsed_spec, dict) else None
     sources = content.get("sources", [])
     taxonomy = {
         "curriculum": str(question.curriculum_version_id or "—"),
@@ -522,6 +529,8 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "active_section": "questions",
             "question": question,
             "content": content,
+            "spec": spec,
+            "rejection_reasons": list(REJECTION_REASON_LABELS.items()),
             "sources": sources if isinstance(sources, list) else [],
             "taxonomy": taxonomy,
             "validation_checks": validation_report.checks if validation_report else [],
@@ -535,6 +544,45 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             ),
         },
     )
+
+
+@router.post("/questions/{question_id}/review", name="review_question")
+def review_question(
+    session: DbSession,
+    question_id: int,
+    decision: Annotated[str, Form()],
+    comment: Annotated[str, Form()] = "",
+    reasons: Annotated[list[str] | None, Form()] = None,
+    prompt: Annotated[str, Form()] = "",
+    reference_solution: Annotated[str, Form()] = "",
+    tests: Annotated[str, Form()] = "",
+) -> RedirectResponse:
+    """Record a professor verdict and return to the reviewed question."""
+    decision_enum = ReviewDecision(decision)
+    parsed_reasons = [RejectionReason(value) for value in (reasons or [])]
+    if decision_enum is ReviewDecision.EDIT:
+        submit_review(
+            session,
+            question_id=question_id,
+            decision=decision_enum,
+            reasons=parsed_reasons,
+            comment=comment or None,
+            prompt=prompt,
+            reference_solution=reference_solution,
+            tests=tests,
+            professor_id=None,
+        )
+    else:
+        submit_review(
+            session,
+            question_id=question_id,
+            decision=decision_enum,
+            reasons=parsed_reasons,
+            comment=comment or None,
+            professor_id=None,
+        )
+    session.commit()
+    return RedirectResponse(url=f"/questions/{question_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/feedback", response_class=HTMLResponse, name="feedback")
