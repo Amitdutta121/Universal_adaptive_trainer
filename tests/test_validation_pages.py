@@ -1,4 +1,4 @@
-"""Professor page rendering for stored automatic validation reports."""
+"""Professor page rendering for stored deterministic validation reports."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _seed_question(
     return question.id
 
 
-def test_question_detail_shows_passing_automatic_checks(
+def test_question_detail_shows_passing_deterministic_checks(
     client: TestClient,
     session: Session,
     settings: Any,
@@ -72,12 +72,12 @@ def test_question_detail_shows_passing_automatic_checks(
     response = client.get(f"/questions/{question_id}")
 
     assert response.status_code == 200
-    assert "Automatic Checks" in response.text
+    assert "Deterministic checks" in response.text
     assert "Approved curriculum IDs" in response.text
     assert "✓" in response.text
 
 
-def test_question_detail_shows_failing_automatic_checks(
+def test_question_detail_shows_failing_deterministic_checks(
     client: TestClient,
     session: Session,
     settings: Any,
@@ -87,7 +87,7 @@ def test_question_detail_shows_failing_automatic_checks(
     response = client.get(f"/questions/{question_id}")
 
     assert response.status_code == 200
-    assert "Automatic Checks" in response.text
+    assert "Deterministic checks" in response.text
     assert "✗" in response.text
     assert "check-evidence" in response.text
     assert "wanted 3 got 4" in response.text

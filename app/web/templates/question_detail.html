@@ -27,7 +27,7 @@
   </section>
 
   <section class="panel {% if validation_passed is none %}{% elif validation_passed %}panel-success{% else %}panel-error{% endif %}">
-    <h2>Automatic Checks</h2>
+    <h2>Deterministic checks</h2>
     {% if validation_checks %}
       <ul class="checklist">
         {% for check in validation_checks %}
@@ -40,7 +40,48 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="empty">Automatic checks have not been recorded.</p>
+      <p class="empty">Deterministic checks have not been recorded.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel {% if pedagogical_eval and pedagogical_eval.status == "completed" %}panel-success{% elif pedagogical_eval and pedagogical_eval.status == "error" %}panel-error{% elif pedagogical_eval and pedagogical_eval.status == "skipped" %}panel-warn{% endif %}">
+    <h2>LLM pedagogical evaluation</h2>
+    {% if pedagogical_eval %}
+      <p>Status: {{ pedagogical_eval.status }}</p>
+      <p class="meta">
+        Judge model: {{ pedagogical_eval.judge_model or "—" }} ·
+        Rubric: {{ pedagogical_eval.rubric_version }} ·
+        Recorded: {{ pedagogical_eval.created_at.strftime("%Y-%m-%d %H:%M UTC") }}
+      </p>
+      {% if pedagogical_eval.status == "completed" %}
+        <ul class="checklist">
+          {% for dimension in pedagogical_eval.dimensions %}
+            <li>
+              {% if not dimension.applicable %}—{% elif dimension.score is not none and dimension.score >= 4 %}✓{% elif dimension.score is not none and dimension.score >= 3 %}⚠{% else %}✗{% endif %}
+              {{ dimension.dimension }}:
+              {% if dimension.applicable %}{{ dimension.score }}/5{% else %}n/a{% endif %}
+              <span class="evaluation-rationale">{{ dimension.rationale }}</span>
+              {% if dimension.issues %}
+                <ul class="evaluation-issues">
+                  {% for issue in dimension.issues %}
+                    <li>{{ issue }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="evaluation-summary">
+          Overall advisory mean: {{ pedagogical_eval.overall_advisory_score }}
+          ({{ pedagogical_eval.overall_advisory_status }}) — summary only
+        </p>
+      {% elif pedagogical_eval.status == "skipped" %}
+        <p>Skipped: {{ pedagogical_eval.skip_reason or "No reason was recorded." }}</p>
+      {% else %}
+        <p>Error: {{ pedagogical_eval.error_detail or "No error detail was recorded." }}</p>
+      {% endif %}
+    {% else %}
+      <p class="empty">Pedagogical evaluation has not been recorded.</p>
     {% endif %}
   </section>
 

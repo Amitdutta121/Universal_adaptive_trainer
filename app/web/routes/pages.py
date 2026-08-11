@@ -38,6 +38,7 @@ from app.errors import (
     NotFoundError,
     UnsupportedFileError,
 )
+from app.evaluation import PedagogicalEvaluation
 from app.generation import GenerationService
 from app.ingestion import (
     SCHEMA_VERSION,
@@ -476,6 +477,12 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             validation_report = QuestionValidationReport.model_validate_json(
                 question.validation_report_json
             )
+    pedagogical_eval = None
+    if question.pedagogical_eval_json:
+        with suppress(ValidationError):
+            pedagogical_eval = PedagogicalEvaluation.model_validate_json(
+                question.pedagogical_eval_json
+            )
     try:
         content = json.loads(question.content_json or "{}")
     except json.JSONDecodeError:
@@ -515,6 +522,7 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "taxonomy": taxonomy,
             "validation_checks": validation_report.checks if validation_report else [],
             "validation_passed": validation_report.passed if validation_report else None,
+            "pedagogical_eval": pedagogical_eval,
         },
     )
 
