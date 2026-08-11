@@ -48,10 +48,11 @@ def build_question_spec(
     structure = BookStructureRepository(session)
 
     version = curriculum.get_with_tree(curriculum_version_id)
-    if version.status is not CurriculumStatus.APPROVED:
+    status = CurriculumStatus(version.status)
+    if status is not CurriculumStatus.APPROVED:
         raise InvalidQuestionSpecError(
             "Question generation requires an approved curriculum version.",
-            detail=f"Version {curriculum_version_id} has status {version.status.value}.",
+            detail=f"Version {curriculum_version_id} has status {status.value}.",
         )
 
     topic = next((row for row in version.topics if row.id == topic_id), None)

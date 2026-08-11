@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block heading %}Question {{ question.id }}{% endblock %}
+
+{% block subheading %}
+  <p class="lede">Generated {{ question.created_at.strftime("%Y-%m-%d %H:%M") }} · {{ question.status }}</p>
+  <p><a class="back-link" href="/questions">← Question bank</a></p>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Question</h2>
+    <p class="section-text">{{ question.prompt }}</p>
+  </section>
+
+  <section class="panel">
+    <h2>Assessment details</h2>
+    <dl class="kv">
+      <dt>Difficulty</dt><dd>{{ question.difficulty }}</dd>
+      <dt>Type</dt><dd>{{ question.question_type or "—" }}</dd>
+      <dt>Scoring kind</dt><dd>{{ question.kind }}</dd>
+      <dt>Curriculum</dt><dd>{{ taxonomy.curriculum }}</dd>
+      <dt>Topic</dt><dd>{{ taxonomy.topic }}</dd>
+      <dt>Subtopic</dt><dd>{{ taxonomy.subtopic }}</dd>
+      <dt>Generator</dt><dd><code>{{ question.generator_kind }}:{{ question.generator_name }}@{{ question.generator_version }}</code></dd>
+    </dl>
+  </section>
+
+  {% if content.code %}
+    <section class="panel">
+      <h2>Code</h2>
+      <pre class="detail">{{ content.code }}</pre>
+    </section>
+  {% endif %}
+
+  {% if content.options %}
+    <section class="panel">
+      <h2>Options</h2>
+      <ol>
+        {% for option in content.options %}
+          <li>{{ option }}</li>
+        {% endfor %}
+      </ol>
+    </section>
+  {% endif %}
+
+  {% if content.blocks %}
+    <section class="panel">
+      <h2>Parsons blocks</h2>
+      <ol>
+        {% for block in content.blocks %}
+          <li><code>{{ block.id }}</code> (indent {{ block.indent }}): <code>{{ block.text }}</code></li>
+        {% endfor %}
+      </ol>
+    </section>
+  {% endif %}
+
+  {% if question.reference_solution %}
+    <section class="panel">
+      <h2>Answer</h2>
+      <pre class="detail">{{ question.reference_solution }}</pre>
+    </section>
+  {% endif %}
+
+  {% if question.tests %}
+    <section class="panel">
+      <h2>Tests</h2>
+      <pre class="detail">{{ question.tests }}</pre>
+    </section>
+  {% endif %}
+
+  {% if content.explanation %}
+    <section class="panel">
+      <h2>Explanation</h2>
+      <p>{{ content.explanation }}</p>
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Source citations</h2>
+    {% if sources %}
+      <ul class="citation">
+        {% for source in sources %}
+          <li>{{ source.citation }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No source citation was retained for this question.</p>
+    {% endif %}
+  </section>
+{% endblock %}

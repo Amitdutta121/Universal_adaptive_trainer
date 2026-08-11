@@ -7,6 +7,7 @@ Showing genuine empty state rather than mock data keeps the UI honest.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated
 
@@ -22,13 +23,18 @@ from app.curriculum import (
     decode_proposal_warnings,
 )
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
+from app.domain.enums import Difficulty, QuestionType
 from app.errors import (
+    ConfigurationError,
     FileTooLargeError,
     InvalidBookDocumentError,
+    InvalidQuestionSpecError,
     InvalidTaxonomyDocumentError,
+    LLMRequestError,
     NotFoundError,
     UnsupportedFileError,
 )
+from app.generation import GenerationService
 from app.ingestion import (
     SCHEMA_VERSION,
     SUPPORTED_EXTENSIONS,
@@ -325,8 +331,23 @@ def curriculum_subtopic(request: Request, session: DbSession, subtopic_id: int) 
     )
 
 
-@router.get("/questions", response_class=HTMLResponse, name="questions")
-def questions(request: Request, session: DbSession) -> HTMLResponse:
+def _questions_page(
+    request: Request,
+    session: Session,
+    *,
+    selected_book_id: int | None = None,
+    error: str | None = None,
+    error_detail: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render the question bank and its section-first generation form."""
+    curriculum = CurriculumRepository(session)
+    approved = curriculum.get_approved()
+    selected_sections = (
+        SourceRetrieval(session).sections_in_book(selected_book_id)
+        if selected_book_id is not None
+        else []
+    )
     repo = QuestionRepository(session)
     return render(
         request,
@@ -336,7 +357,125 @@ def questions(request: Request, session: DbSession) -> HTMLResponse:
             "active_section": "questions",
             "questions": repo.list_recent(),
             "status_counts": repo.count_by_status(),
-            "approved_curriculum": CurriculumRepository(session).get_approved(),
+            "approved_curriculum": curriculum.get_with_tree(approved.id) if approved else None,
+            "books": BookRepository(session).list_usable(),
+            "selected_book_id": selected_book_id,
+            "selected_sections": selected_sections,
+            "difficulty_options": list(Difficulty),
+            "question_type_options": list(QuestionType),
+            "error": error,
+            "error_detail": error_detail,
+        },
+        status_code=status_code,
+    )
+
+
+@router.get("/questions", response_class=HTMLResponse, name="questions")
+def questions(request: Request, session: DbSession, book_id: int | None = None) -> HTMLResponse:
+    return _questions_page(request, session, selected_book_id=book_id)
+
+
+@router.post("/questions/generate", name="generate_questions")
+def generate_questions(
+    request: Request,
+    session: DbSession,
+    topic_id: Annotated[int, Form()],
+    subtopic_id: Annotated[int, Form()],
+    difficulty: Annotated[str, Form()],
+    question_type: Annotated[str, Form()],
+    book_id: Annotated[int, Form()],
+    section_ids: Annotated[list[int] | None, Form()] = None,
+    all_sections: Annotated[str | None, Form()] = None,
+) -> Response:
+    """Generate one persisted question for every selected source section."""
+    try:
+        generated = GenerationService(session).generate_for_sections(
+            curriculum_version_id=_approved_curriculum_id(session),
+            topic_id=topic_id,
+            subtopic_id=subtopic_id,
+            question_type=QuestionType(question_type),
+            difficulty=Difficulty(difficulty),
+            source_section_ids=None if all_sections is not None else section_ids,
+            book_id=book_id if all_sections is not None else None,
+        )
+    except ValueError as exc:
+        session.rollback()
+        return _questions_page(
+            request,
+            session,
+            selected_book_id=book_id,
+            error="Choose a supported difficulty and question type.",
+            error_detail=str(exc),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    except (InvalidQuestionSpecError, ConfigurationError, LLMRequestError) as exc:
+        session.rollback()
+        return _questions_page(
+            request,
+            session,
+            selected_book_id=book_id,
+            error=exc.message,
+            error_detail=exc.detail,
+            status_code=exc.status_code,
+        )
+
+    return RedirectResponse(
+        url=f"/questions/{generated[0].id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+def _approved_curriculum_id(session: Session) -> int:
+    """Return the approved curriculum id or raise an actionable generation error."""
+    approved = CurriculumRepository(session).get_approved()
+    if approved is None:
+        raise InvalidQuestionSpecError(
+            "No approved curriculum is available.",
+            detail="Upload a valid taxonomy before generating questions.",
+        )
+    return approved.id
+
+
+@router.get("/questions/{question_id}", response_class=HTMLResponse, name="question_detail")
+def question_detail(request: Request, session: DbSession, question_id: int) -> HTMLResponse:
+    """Show generated content and the citation(s) that ground one question."""
+    question = QuestionRepository(session).get(question_id)
+    try:
+        content = json.loads(question.content_json or "{}")
+    except json.JSONDecodeError:
+        content = {}
+    if not isinstance(content, dict):
+        content = {}
+    sources = content.get("sources", [])
+    taxonomy = {
+        "curriculum": str(question.curriculum_version_id or "—"),
+        "topic": str(question.topic_id or "—"),
+        "subtopic": str(question.subtopic_id or "—"),
+    }
+    if question.curriculum_version_id is not None:
+        try:
+            version = CurriculumRepository(session).get_with_tree(question.curriculum_version_id)
+        except NotFoundError:
+            pass
+        else:
+            taxonomy["curriculum"] = version.label
+            topic = next((item for item in version.topics if item.id == question.topic_id), None)
+            if topic is not None:
+                taxonomy["topic"] = topic.name
+                subtopic = next(
+                    (item for item in topic.subtopics if item.id == question.subtopic_id), None
+                )
+                if subtopic is not None:
+                    taxonomy["subtopic"] = subtopic.name
+    return render(
+        request,
+        "question_detail.html",
+        {
+            "page_title": f"Question {question.id}",
+            "active_section": "questions",
+            "question": question,
+            "content": content,
+            "sources": sources if isinstance(sources, list) else [],
+            "taxonomy": taxonomy,
         },
     )
 
