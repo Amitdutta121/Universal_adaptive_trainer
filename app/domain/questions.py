@@ -62,6 +62,7 @@ class Question(BaseModel):
     validation_report_json: str | None = None
     #: Serialized LLM pedagogical evaluation for display and review.
     pedagogical_eval_json: str | None = None
+    personalization_context_json: str | None = None
 
     # Retained generated originals. Never overwritten by professor edits.
     original_prompt: str | None = None

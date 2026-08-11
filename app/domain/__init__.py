@@ -28,6 +28,8 @@ from app.domain.enums import (
     ExtractionWarningCode,
     GeneratorKind,
     MasteryBand,
+    PreferenceCategory,
+    PreferenceConfirmationState,
     QuestionKind,
     QuestionStatus,
     RejectionReason,
@@ -48,6 +50,13 @@ from app.domain.mastery import (
     mastery_band,
     score_from_tests,
 )
+from app.domain.preferences import (
+    PROFILE_VERSION,
+    PreferenceStatement,
+    confidence_from_evidence,
+    decode_review_ids,
+    encode_review_ids,
+)
 from app.domain.questions import Question, QuestionCheck, QuestionValidationReport
 
 __all__ = [
@@ -55,6 +64,7 @@ __all__ = [
     "INITIAL_SUBTOPIC_WEAKNESS",
     "MAX_SCORE",
     "MIN_SCORE",
+    "PROFILE_VERSION",
     "BKTParameters",
     "Book",
     "BookChapter",
@@ -67,6 +77,9 @@ __all__ = [
     "ExtractionWarningCode",
     "GeneratorKind",
     "MasteryBand",
+    "PreferenceCategory",
+    "PreferenceConfirmationState",
+    "PreferenceStatement",
     "ProfessorReview",
     "Question",
     "QuestionCheck",
@@ -82,7 +95,10 @@ __all__ = [
     "Subtopic",
     "Topic",
     "WarningSeverity",
+    "confidence_from_evidence",
+    "decode_review_ids",
     "difficulty_for_mastery",
+    "encode_review_ids",
     "mastery_band",
     "score_from_tests",
 ]

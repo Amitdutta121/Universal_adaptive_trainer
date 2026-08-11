@@ -246,3 +246,18 @@ class GeneratorKind(StrEnum):
 
     BASE = "base"
     PERSONALIZED = "personalized"
+
+
+class PreferenceCategory(StrEnum):
+    WORDING = "wording"
+    SCENARIO_STYLE = "scenario_style"
+    EMPHASIS = "emphasis"
+    DISLIKE = "dislike"
+    EXAMPLE_PATTERN = "example_pattern"
+    OTHER = "other"
+
+
+class PreferenceConfirmationState(StrEnum):
+    INFERRED = "inferred"
+    CONFIRMED = "confirmed"
+    CORRECTED = "corrected"
