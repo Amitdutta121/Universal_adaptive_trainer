@@ -22,7 +22,13 @@ from app.ingestion import BookImportService
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import QuestionRepository, ReviewEmbeddingRepository
 from app.personalization.embeddings import FakeEmbedder
-from app.personalization.retrieval import retrieve_examples
+from app.personalization.retrieval import (
+    MIN_SCORE_FLOOR,
+    MAX_POSITIVE,
+    _ScoredCandidate,
+    _fill_ranked_pool,
+    retrieve_examples,
+)
 
 
 @pytest.fixture
@@ -423,6 +429,45 @@ def test_never_exceed_caps(session: Session, settings, fake_embedder: FakeEmbedd
     result = _retrieve(session, seed, embedder=fake_embedder)
     assert len(result.approved_or_edited) <= 4
     assert len(result.rejected) <= 2
+
+
+def test_fill_ranked_pool_backfills_after_floor_skips() -> None:
+    """Slice-first would stop after budget slots even when later candidates pass the floor."""
+
+    def _candidate(final: float) -> _ScoredCandidate:
+        return _ScoredCandidate(
+            review=object(),  # type: ignore[arg-type]
+            question=object(),  # type: ignore[arg-type]
+            meta_raw=0.0,
+            semantic=0.0,
+            final=final,
+            prompt="",
+            reasons=[],
+        )
+
+    # Deliberately unsorted: early slice holds sub-floor scores; later entries backfill.
+    ranked = [
+        _candidate(0.10),
+        _candidate(0.03),
+        _candidate(0.03),
+        _candidate(0.03),
+        _candidate(0.08),
+        _candidate(0.07),
+        _candidate(0.06),
+    ]
+    budget = 4
+    floor = MIN_SCORE_FLOOR
+
+    slice_first_count = sum(
+        1 for candidate in ranked[:budget] if candidate.final >= floor
+    )
+    assert slice_first_count == 1
+
+    selected = _fill_ranked_pool(ranked, budget, floor=floor)
+    assert len(selected) == budget
+    assert [candidate.final for candidate in selected] == [0.10, 0.08, 0.07, 0.06]
+    assert all(candidate.final >= floor for candidate in selected)
+    assert len(selected) <= MAX_POSITIVE
 
 
 def test_retrieved_example_fields(session: Session, settings, fake_embedder: FakeEmbedder) -> None:

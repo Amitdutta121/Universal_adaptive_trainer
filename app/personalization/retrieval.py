@@ -139,6 +139,22 @@ def _meta_raw_score(
     return score
 
 
+def _fill_ranked_pool(
+    ranked: list[_ScoredCandidate],
+    budget: int,
+    *,
+    floor: float = MIN_SCORE_FLOOR,
+) -> list[_ScoredCandidate]:
+    pool: list[_ScoredCandidate] = []
+    for candidate in ranked:
+        if candidate.final < floor:
+            continue
+        pool.append(candidate)
+        if len(pool) >= budget:
+            break
+    return pool
+
+
 def _ensure_embeddings(
     session: Session,
     *,
@@ -258,9 +274,7 @@ def retrieve_examples(
             key=lambda c: c.final,
             reverse=True,
         )
-        for candidate in ranked[:budget]:
-            if candidate.final < MIN_SCORE_FLOOR:
-                continue
+        for candidate in _fill_ranked_pool(ranked, budget):
             pool.append(
                 RetrievedExample(
                     review_id=candidate.review.id,
