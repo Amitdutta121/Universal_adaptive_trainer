@@ -3,11 +3,13 @@
 Each draft model is the structured output schema for one :class:`~app.domain.enums.QuestionType`.
 They are kept plain and field-based so Instructor can validate LLM responses without unions.
 
-Storage encoding and mapping into domain :class:`~app.domain.questions.Question` fields is
-handled in a later task.
+Storage encoding maps drafts into domain :class:`~app.domain.questions.Question` fields and
+``content_json``.
 """
 
 from __future__ import annotations
+
+import json
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -116,3 +118,36 @@ RESPONSE_MODEL_FOR: dict[QuestionType, type[BaseModel]] = {
     QuestionType.PARSONS: ParsonsDraft,
     QuestionType.CODING: CodingDraft,
 }
+
+
+def prompt_fields_from_draft(draft: BaseModel) -> tuple[str, str | None, str | None]:
+    """Map a validated draft into legacy prompt columns for edit/review invariants."""
+    if isinstance(draft, MultipleChoiceDraft):
+        return draft.prompt, draft.options[draft.correct_option_index], None
+    if isinstance(draft, TrueFalseDraft):
+        return draft.prompt, "true" if draft.correct_answer else "false", None
+    if isinstance(draft, OutputPredictionDraft):
+        return draft.prompt, draft.expected_output, None
+    if isinstance(draft, ParsonsDraft):
+        indents = {block.id: block.indent for block in draft.blocks}
+        reference = json.dumps({"correct_order": draft.correct_order, "indents": indents})
+        return draft.prompt, reference, None
+    if isinstance(draft, CodeCompletionDraft | DebuggingDraft | CodingDraft):
+        return draft.prompt, draft.reference_solution, json.dumps(draft.tests)
+    msg = f"Unsupported draft type: {type(draft).__name__}"
+    raise TypeError(msg)
+
+
+def encode_content(
+    draft: BaseModel,
+    *,
+    sources: list[dict[str, object]] | None = None,
+    model: str | None = None,
+) -> str:
+    """Serialize a draft and optional grounding metadata for ``content_json``."""
+    payload: dict[str, object] = draft.model_dump(mode="json")
+    if sources is not None:
+        payload["sources"] = sources
+    if model is not None:
+        payload["model"] = model
+    return json.dumps(payload, ensure_ascii=False)

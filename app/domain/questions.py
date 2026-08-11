@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.enums import Difficulty, GeneratorKind, QuestionKind, QuestionStatus
+from app.domain.enums import Difficulty, GeneratorKind, QuestionKind, QuestionStatus, QuestionType
 
 #: Priority given to a question that has just been served. Lower is served later;
 #: the adaptive engine picks the highest-priority candidate for a subtopic and
@@ -39,9 +39,11 @@ class Question(BaseModel):
 
     # Grounding: which approved curriculum this question belongs to.
     curriculum_version_id: int | None = None
+    topic_id: int | None = None
     subtopic_id: int | None = None
 
     kind: QuestionKind = QuestionKind.TESTABLE_PROGRAM
+    question_type: QuestionType | None = None
     difficulty: Difficulty = Difficulty.EASY
     status: QuestionStatus = QuestionStatus.GENERATED
 
@@ -50,6 +52,11 @@ class Question(BaseModel):
     #: Serialized test cases for ``TESTABLE_PROGRAM`` questions. Kept opaque
     #: (text) at this stage; the executable format is decided with the validator.
     tests: str | None = None
+
+    #: Frozen generation request (``QuestionSpec`` JSON) for later comparison.
+    spec_json: str | None = None
+    #: Full typed draft plus grounding metadata for display and scoring.
+    content_json: str | None = None
 
     # Retained generated originals. Never overwritten by professor edits.
     original_prompt: str | None = None

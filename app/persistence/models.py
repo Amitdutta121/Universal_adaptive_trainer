@@ -23,6 +23,7 @@ from app.domain.enums import (
     GeneratorKind,
     QuestionKind,
     QuestionStatus,
+    QuestionType,
     ReviewDecision,
     SourceFormat,
     StructureConfidence,
@@ -280,17 +281,24 @@ class QuestionRow(TimestampMixin, Base):
     curriculum_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("curriculum_versions.id", ondelete="SET NULL"), default=None
     )
+    topic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL"), default=None
+    )
     subtopic_id: Mapped[int | None] = mapped_column(
         ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
     )
 
     kind: Mapped[QuestionKind] = mapped_column(String(32), default=QuestionKind.TESTABLE_PROGRAM)
+    question_type: Mapped[QuestionType | None] = mapped_column(String(32), default=None)
     difficulty: Mapped[Difficulty] = mapped_column(String(16), default=Difficulty.EASY)
     status: Mapped[QuestionStatus] = mapped_column(String(32), default=QuestionStatus.GENERATED)
 
     prompt: Mapped[str] = mapped_column(Text)
     reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     tests: Mapped[str | None] = mapped_column(Text, default=None)
+
+    spec_json: Mapped[str | None] = mapped_column(Text, default=None)
+    content_json: Mapped[str | None] = mapped_column(Text, default=None)
 
     # Retained generated originals -- never overwritten by professor edits.
     original_prompt: Mapped[str | None] = mapped_column(Text, default=None)

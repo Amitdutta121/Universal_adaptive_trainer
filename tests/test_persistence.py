@@ -6,7 +6,15 @@ import pytest
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.orm import Session
 
-from app.domain.enums import CurriculumStatus, GeneratorKind, ReviewDecision
+from app.domain.enums import (
+    CurriculumStatus,
+    Difficulty,
+    GeneratorKind,
+    QuestionKind,
+    QuestionStatus,
+    QuestionType,
+    ReviewDecision,
+)
 from app.errors import NotFoundError, SchemaOutOfDateError
 from app.feedback import record_review
 from app.persistence.database import init_db, verify_schema
@@ -176,3 +184,28 @@ def test_reviews_are_append_only(session: Session) -> None:
 def test_record_review_rejects_an_unknown_question(session: Session) -> None:
     with pytest.raises(NotFoundError):
         record_review(session, question_id=999, decision=ReviewDecision.APPROVE)
+
+
+def test_question_row_stores_spec_and_content(session: Session) -> None:
+    row = QuestionRow(
+        curriculum_version_id=None,
+        topic_id=None,
+        subtopic_id=None,
+        kind=QuestionKind.DISCRETE,
+        question_type=QuestionType.TRUE_FALSE,
+        difficulty=Difficulty.EASY,
+        status=QuestionStatus.GENERATED,
+        prompt="Strings are immutable.",
+        reference_solution="true",
+        tests=None,
+        spec_json='{"topic_id":1}',
+        content_json='{"explanation":"because..."}',
+        generator_kind=GeneratorKind.BASE,
+        generator_name="base",
+        generator_version="1",
+    )
+    saved = QuestionRepository(session).add(row)
+    session.commit()
+    loaded = QuestionRepository(session).get(saved.id)
+    assert loaded.question_type == QuestionType.TRUE_FALSE
+    assert loaded.spec_json and loaded.content_json

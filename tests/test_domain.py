@@ -83,6 +83,20 @@ class TestQuestionOriginals:
         assert question.original_tests == "assert True"
         assert question.was_edited_by_professor is False
 
+    def test_prompt_fields_seed_originals(self) -> None:
+        from app.generation.schemas import TrueFalseDraft, prompt_fields_from_draft
+
+        draft = TrueFalseDraft(
+            prompt="Lists are mutable.",
+            correct_answer=False,
+            explanation="Lists support item assignment.",
+        )
+        prompt, reference, tests = prompt_fields_from_draft(draft)
+        question = Question(prompt=prompt, reference_solution=reference, tests=tests)
+        assert question.original_prompt == "Lists are mutable."
+        assert question.original_reference_solution == "false"
+        assert question.original_tests is None
+
     def test_edit_keeps_the_generated_original(self) -> None:
         question = Question(prompt="Write a loop.", reference_solution="pass")
         edited = apply_professor_edit(

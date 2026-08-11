@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -7,9 +9,14 @@ from app.domain.enums import QuestionKind, QuestionType
 from app.generation.schemas import (
     RESPONSE_MODEL_FOR,
     CodingDraft,
+    DebuggingDraft,
     MultipleChoiceDraft,
+    OutputPredictionDraft,
     ParsonsBlock,
     ParsonsDraft,
+    TrueFalseDraft,
+    encode_content,
+    prompt_fields_from_draft,
     scoring_kind_for,
 )
 
@@ -75,3 +82,65 @@ def test_parsons_rejects_unknown_order_id() -> None:
             correct_order=["a", "missing"],
             explanation="x",
         )
+
+
+def test_prompt_fields_from_true_false_draft() -> None:
+    draft = TrueFalseDraft(
+        prompt="Strings are immutable.",
+        correct_answer=True,
+        explanation="Assignment to str items fails.",
+    )
+    prompt, reference, tests = prompt_fields_from_draft(draft)
+    assert prompt == "Strings are immutable."
+    assert reference == "true"
+    assert tests is None
+
+
+def test_prompt_fields_from_testable_draft() -> None:
+    draft = DebuggingDraft(
+        prompt="Find the bug.",
+        code="s = 'ab'\ns[0] = 'c'",
+        reference_solution="Build a new string.",
+        tests=[{"call": "explain", "expected": "TypeError"}],
+        explanation="Item assignment on str fails.",
+    )
+    prompt, reference, tests = prompt_fields_from_draft(draft)
+    assert prompt == "Find the bug."
+    assert reference == "Build a new string."
+    assert json.loads(tests or "") == [{"call": "explain", "expected": "TypeError"}]
+
+
+def test_prompt_fields_from_parsons_draft() -> None:
+    draft = ParsonsDraft(
+        prompt="Arrange the function.",
+        blocks=[
+            ParsonsBlock(id="a", text="def f(x):", indent=0),
+            ParsonsBlock(id="b", text="return x + 1", indent=1),
+        ],
+        correct_order=["a", "b"],
+        explanation="Body is indented.",
+    )
+    prompt, reference, tests = prompt_fields_from_draft(draft)
+    assert prompt == "Arrange the function."
+    assert tests is None
+    parsed = json.loads(reference or "")
+    assert parsed["correct_order"] == ["a", "b"]
+    assert parsed["indents"] == {"a": 0, "b": 1}
+
+
+def test_encode_content_includes_draft_and_metadata() -> None:
+    draft = OutputPredictionDraft(
+        prompt="What prints?",
+        code="print(1 + 2)",
+        expected_output="3",
+        explanation="Addition.",
+    )
+    content = encode_content(
+        draft,
+        sources=[{"section_id": 7, "citation": "Book, ch.1, sec.2"}],
+        model="fake/test-model",
+    )
+    parsed = json.loads(content)
+    assert parsed["expected_output"] == "3"
+    assert parsed["sources"][0]["section_id"] == 7
+    assert parsed["model"] == "fake/test-model"
