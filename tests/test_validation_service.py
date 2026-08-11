@@ -41,6 +41,29 @@ class FakeClient:
         )
 
 
+class FailingFakeClient:
+    """Return one output-prediction draft that fails deterministic validation."""
+
+    @property
+    def description(self) -> str:
+        return "fake/failing-test-model"
+
+    def complete_structured(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        response_model: type[BaseModel],
+    ) -> BaseModel:
+        del system, prompt, response_model
+        return OutputPredictionDraft(
+            prompt="What is printed?",
+            code="print(4)",
+            expected_output="3",
+            explanation="The literal integer is printed.",
+        )
+
+
 def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]:
     book = BookImportService(session, settings).import_upload(
         filename="book.json", data=docs.to_bytes(docs.minimal())
@@ -87,3 +110,20 @@ def test_generation_persists_passing_validation_report(session: Session, setting
     loaded = QuestionRepository(session).get(rows[0].id)
     assert loaded.validation_report_json
     assert loaded.status is QuestionStatus.VALIDATION_PASSED
+
+
+def test_generation_persists_failing_validation_report(session: Session, settings: Any) -> None:
+    version, topic, subtopic, section_id = _seed(session, settings)
+
+    rows = GenerationService(session, client=FailingFakeClient()).generate_for_sections(
+        curriculum_version_id=version.id,
+        topic_id=topic.id,
+        subtopic_id=subtopic.id,
+        question_type=QuestionType.OUTPUT_PREDICTION,
+        difficulty=Difficulty.EASY,
+        source_section_ids=[section_id],
+    )
+
+    loaded = QuestionRepository(session).get(rows[0].id)
+    assert loaded.validation_report_json
+    assert loaded.status is QuestionStatus.VALIDATION_FAILED

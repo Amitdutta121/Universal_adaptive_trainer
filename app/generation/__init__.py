@@ -19,7 +19,7 @@ Key rules
 
 Allowed dependencies
     ``app.config``, ``app.domain``, ``app.errors``, ``app.ingestion``, ``app.llm``,
-    ``app.persistence``.
+    ``app.persistence``, ``app.validation``.
     Must not import ``app.adaptive`` or ``app.web``.
 """
 
