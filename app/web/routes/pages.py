@@ -669,8 +669,23 @@ def preferences(
 
 
 @router.post("/preferences/refresh", name="refresh_preferences_page")
-def refresh_preferences_page(session: DbSession) -> RedirectResponse:
-    count = refresh_preferences(session)
+def refresh_preferences_page(request: Request, session: DbSession) -> Response:
+    try:
+        count = refresh_preferences(session)
+    except (ConfigurationError, LLMRequestError) as exc:
+        session.rollback()
+        return render(
+            request,
+            "preferences.html",
+            {
+                "page_title": "Preferences",
+                "active_section": "preferences",
+                "preferences": _preference_rows(session),
+                "error": exc.message,
+                "error_detail": exc.detail,
+            },
+            status_code=exc.status_code,
+        )
     return RedirectResponse(
         url=f"/preferences?refreshed={count}",
         status_code=status.HTTP_303_SEE_OTHER,

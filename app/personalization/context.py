@@ -6,6 +6,7 @@ import json
 
 from app.domain.enums import ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
+from app.domain.preferences import PROFILE_VERSION
 from app.persistence.models import PreferenceStatementRow
 from app.personalization.retrieval import RetrievalResult, RetrievedExample
 
@@ -83,7 +84,7 @@ def transparency_payload(
         {
             "preference_ids": preference_ids,
             "retrieved_review_ids": review_ids,
-            "profile_version": "1",
+            "profile_version": PROFILE_VERSION,
             "generator": "personalized-context@1",
         },
         separators=(",", ":"),

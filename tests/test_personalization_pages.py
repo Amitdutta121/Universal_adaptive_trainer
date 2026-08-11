@@ -18,6 +18,7 @@ from app.domain.enums import (
     ReviewDecision,
 )
 from app.domain.preferences import encode_review_ids
+from app.errors import ConfigurationError
 from app.feedback import submit_review
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
@@ -157,6 +158,27 @@ def test_refresh_preferences_post(client, session, monkeypatch) -> None:
     response = client.post("/preferences/refresh", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"].startswith("/preferences")
+
+
+def test_refresh_preferences_llm_unavailable_shows_error(client, session, monkeypatch) -> None:
+    _seed_reviews(session)
+
+    import app.web.routes.pages as pages
+
+    def fake_refresh(request_session, **kwargs):
+        del request_session, kwargs
+        raise ConfigurationError(
+            "No LLM API key is configured.",
+            detail="Set OPENROUTER_API_KEY in the environment.",
+        )
+
+    monkeypatch.setattr(pages, "refresh_preferences", fake_refresh)
+
+    response = client.post("/preferences/refresh", follow_redirects=False)
+    assert response.status_code == 500
+    assert "panel-error" in response.text
+    assert "No LLM API key is configured." in response.text
+    assert "OPENROUTER_API_KEY" in response.text
 
 
 def test_preferences_confirm_correct_remove(client, session) -> None:
