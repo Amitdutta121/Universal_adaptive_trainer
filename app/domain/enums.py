@@ -218,6 +218,25 @@ class ReviewDecision(StrEnum):
     EDIT = "edit"
 
 
+class RejectionReason(StrEnum):
+    """Structured professor rationale for reject or edit decisions."""
+
+    TECHNICALLY_INCORRECT = "technically_incorrect"
+    INCORRECT_ANSWER = "incorrect_answer"
+    INCORRECT_TESTS = "incorrect_tests"
+    NOT_GROUNDED_IN_SOURCE = "not_grounded_in_source"
+    WRONG_TOPIC_SUBTOPIC = "wrong_topic_subtopic"
+    TOO_EASY = "too_easy"
+    TOO_DIFFICULT = "too_difficult"
+    AMBIGUOUS = "ambiguous"
+    POOR_WORDING = "poor_wording"
+    POOR_DISTRACTORS = "poor_distractors"
+    POOR_TESTS = "poor_tests"
+    NOT_PEDAGOGICALLY_USEFUL = "not_pedagogically_useful"
+    TOO_SIMILAR_REPETITIVE = "too_similar_repetitive"
+    OTHER = "other"
+
+
 class GeneratorKind(StrEnum):
     """Which generator produced a question.
 

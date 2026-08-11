@@ -7,15 +7,57 @@ signals such as student performance.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.enums import ReviewDecision
+from app.domain.enums import RejectionReason, ReviewDecision
+
+REJECTION_REASON_LABELS: dict[RejectionReason, str] = {
+    RejectionReason.TECHNICALLY_INCORRECT: "Technically incorrect",
+    RejectionReason.INCORRECT_ANSWER: "Incorrect answer",
+    RejectionReason.INCORRECT_TESTS: "Incorrect tests",
+    RejectionReason.NOT_GROUNDED_IN_SOURCE: "Not grounded in source",
+    RejectionReason.WRONG_TOPIC_SUBTOPIC: "Wrong topic/subtopic",
+    RejectionReason.TOO_EASY: "Too easy",
+    RejectionReason.TOO_DIFFICULT: "Too difficult",
+    RejectionReason.AMBIGUOUS: "Ambiguous",
+    RejectionReason.POOR_WORDING: "Poor wording",
+    RejectionReason.POOR_DISTRACTORS: "Poor distractors",
+    RejectionReason.POOR_TESTS: "Poor tests",
+    RejectionReason.NOT_PEDAGOGICALLY_USEFUL: "Not pedagogically useful",
+    RejectionReason.TOO_SIMILAR_REPETITIVE: "Too similar/repetitive",
+    RejectionReason.OTHER: "Other",
+}
+
+_CHANGED_FIELD_NAMES = frozenset({"prompt", "reference_solution", "tests"})
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def encode_reasons(reasons: list[RejectionReason]) -> str:
+    return json.dumps([reason.value for reason in reasons])
+
+
+def decode_reasons(raw: str | None) -> list[RejectionReason]:
+    if not raw:
+        return []
+    values = json.loads(raw)
+    return [RejectionReason(value) for value in values]
+
+
+def encode_changed_fields(fields: list[str]) -> str:
+    return json.dumps(fields)
+
+
+def decode_changed_fields(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    values = json.loads(raw)
+    return [str(item) for item in values if str(item) in _CHANGED_FIELD_NAMES]
 
 
 class ProfessorReview(BaseModel):
@@ -30,11 +72,13 @@ class ProfessorReview(BaseModel):
     id: int | None = None
     question_id: int | None = None
     decision: ReviewDecision
-    #: Free-text rationale. The most valuable preference signal, so it is kept
-    #: verbatim rather than being reduced to tags at write time.
+    reasons: list[RejectionReason] = Field(default_factory=list)
     comment: str | None = None
-    #: Which generator produced the reviewed question, copied at review time so
-    #: the signal survives regeneration of the question row.
+    edited_prompt: str | None = None
+    edited_reference_solution: str | None = None
+    edited_tests: str | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    professor_id: int | None = None
     reviewed_generator_name: str | None = None
     reviewed_generator_version: str | None = None
     created_at: datetime = Field(default_factory=_now)
