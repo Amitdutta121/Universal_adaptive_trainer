@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     def llm_configured(self) -> bool:
         """True when an LLM provider *and* credentials are both available.
 
-        LLM-backed features (curriculum proposal, question generation) must
+        LLM-backed features (question generation and later LLM features) must
         check this and degrade gracefully instead of raising at import time.
         """
         return self.llm_provider is not LLMProvider.NONE and self.llm_api_key is not None
