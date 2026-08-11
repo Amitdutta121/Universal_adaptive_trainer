@@ -23,10 +23,10 @@ from app.persistence.models import QuestionRow
 from app.persistence.repositories import QuestionRepository, ReviewEmbeddingRepository
 from app.personalization.embeddings import FakeEmbedder
 from app.personalization.retrieval import (
-    MIN_SCORE_FLOOR,
     MAX_POSITIVE,
-    _ScoredCandidate,
+    MIN_SCORE_FLOOR,
     _fill_ranked_pool,
+    _ScoredCandidate,
     retrieve_examples,
 )
 
@@ -458,9 +458,7 @@ def test_fill_ranked_pool_backfills_after_floor_skips() -> None:
     budget = 4
     floor = MIN_SCORE_FLOOR
 
-    slice_first_count = sum(
-        1 for candidate in ranked[:budget] if candidate.final >= floor
-    )
+    slice_first_count = sum(1 for candidate in ranked[:budget] if candidate.final >= floor)
     assert slice_first_count == 1
 
     selected = _fill_ranked_pool(ranked, budget, floor=floor)
