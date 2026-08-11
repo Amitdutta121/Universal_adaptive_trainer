@@ -26,8 +26,9 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.domain.enums import ReviewDecision
+from app.errors import DomainRuleError
+from app.feedback.service import submit_review
 from app.persistence.models import ProfessorReviewRow
-from app.persistence.repositories import ProfessorReviewRepository, QuestionRepository
 
 
 def record_review(
@@ -37,20 +38,16 @@ def record_review(
     decision: ReviewDecision,
     comment: str | None = None,
 ) -> ProfessorReviewRow:
-    """Append a professor review for ``question_id``.
-
-    Copies the reviewed question's generator identity onto the review so the
-    preference signal survives later changes to the question row.
-
-    Raises:
-        NotFoundError: if the question does not exist.
-    """
-    question = QuestionRepository(session).get(question_id)
-    review = ProfessorReviewRow(
-        question_id=question.id,
+    """Backward-compatible approve helper; new callers should use ``submit_review``."""
+    if decision is ReviewDecision.REJECT:
+        raise DomainRuleError(
+            "record_review no longer supports reject without reasons; use submit_review."
+        )
+    if decision is ReviewDecision.EDIT:
+        raise DomainRuleError("record_review no longer supports edit; use submit_review.")
+    return submit_review(
+        session,
+        question_id=question_id,
         decision=decision,
         comment=comment,
-        reviewed_generator_name=question.generator_name,
-        reviewed_generator_version=question.generator_version,
     )
-    return ProfessorReviewRepository(session).add(review)

@@ -13,10 +13,11 @@ from app.domain.enums import (
     QuestionKind,
     QuestionStatus,
     QuestionType,
+    RejectionReason,
     ReviewDecision,
 )
 from app.errors import NotFoundError, SchemaOutOfDateError
-from app.feedback import record_review
+from app.feedback import submit_review
 from app.persistence.database import init_db, verify_schema
 from app.persistence.models import (
     BookRow,
@@ -144,7 +145,7 @@ def test_question_generator_provenance_is_stored(session: Session) -> None:
     assert repo.count_by_status() == {"generated": 1}
 
 
-def test_record_review_copies_the_generator_identity(session: Session) -> None:
+def test_submit_review_copies_the_generator_identity(session: Session) -> None:
     question = QuestionRepository(session).add(
         QuestionRow(
             prompt="Sum a list.",
@@ -156,8 +157,14 @@ def test_record_review_copies_the_generator_identity(session: Session) -> None:
     session.commit()
     assert question.id is not None
 
-    review = record_review(
-        session, question_id=question.id, decision=ReviewDecision.EDIT, comment="Too easy."
+    review = submit_review(
+        session,
+        question_id=question.id,
+        decision=ReviewDecision.EDIT,
+        comment="Too easy.",
+        prompt="Sum every value in a list.",
+        reference_solution="",
+        tests="",
     )
     session.commit()
 
@@ -173,17 +180,22 @@ def test_reviews_are_append_only(session: Session) -> None:
     session.commit()
     assert question.id is not None
 
-    record_review(session, question_id=question.id, decision=ReviewDecision.REJECT)
-    record_review(session, question_id=question.id, decision=ReviewDecision.APPROVE)
+    submit_review(
+        session,
+        question_id=question.id,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.TOO_EASY],
+    )
+    submit_review(session, question_id=question.id, decision=ReviewDecision.APPROVE)
     session.commit()
 
     decisions = {r.decision for r in ProfessorReviewRepository(session).list_recent()}
     assert decisions == {ReviewDecision.REJECT, ReviewDecision.APPROVE}
 
 
-def test_record_review_rejects_an_unknown_question(session: Session) -> None:
+def test_submit_review_rejects_an_unknown_question(session: Session) -> None:
     with pytest.raises(NotFoundError):
-        record_review(session, question_id=999, decision=ReviewDecision.APPROVE)
+        submit_review(session, question_id=999, decision=ReviewDecision.APPROVE)
 
 
 def test_question_row_stores_spec_and_content(session: Session) -> None:
