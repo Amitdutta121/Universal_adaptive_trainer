@@ -51,6 +51,26 @@ def test_multiple_choice_requires_options_and_answer() -> None:
     assert draft.correct_option_index == 1
 
 
+def test_multiple_choice_rejects_correct_index_outside_options() -> None:
+    with pytest.raises(ValidationError, match="correct_option_index"):
+        MultipleChoiceDraft(
+            prompt="What does s[1:3] return for s='abcd'?",
+            options=["ab", "bc"],
+            correct_option_index=2,
+            explanation="Slice end is exclusive.",
+        )
+
+
+def test_output_prediction_requires_expected_output() -> None:
+    with pytest.raises(ValidationError):
+        OutputPredictionDraft(
+            prompt="What prints?",
+            code="print(1 + 2)",
+            expected_output="",
+            explanation="Addition.",
+        )
+
+
 def test_parsons_supports_order_and_indent() -> None:
     draft = ParsonsDraft(
         prompt="Arrange the function.",

@@ -31,6 +31,7 @@ from app.errors import (
     InvalidQuestionSpecError,
     InvalidTaxonomyDocumentError,
     LLMRequestError,
+    MalformedModelOutputError,
     NotFoundError,
     UnsupportedFileError,
 )
@@ -427,7 +428,12 @@ def generate_questions(
             error_detail=str(exc),
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
-    except (InvalidQuestionSpecError, ConfigurationError, LLMRequestError) as exc:
+    except (
+        InvalidQuestionSpecError,
+        ConfigurationError,
+        LLMRequestError,
+        MalformedModelOutputError,
+    ) as exc:
         session.rollback()
         return _questions_page(
             request,

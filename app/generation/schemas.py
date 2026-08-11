@@ -10,6 +10,7 @@ Storage encoding maps drafts into domain :class:`~app.domain.questions.Question`
 from __future__ import annotations
 
 import json
+from typing import assert_never
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -18,14 +19,18 @@ from app.domain.enums import QuestionKind, QuestionType
 
 def scoring_kind_for(question_type: QuestionType) -> QuestionKind:
     """Map assessment format to the fixed scoring mode for that type."""
-    if question_type in {
-        QuestionType.MULTIPLE_CHOICE,
-        QuestionType.TRUE_FALSE,
-        QuestionType.OUTPUT_PREDICTION,
-        QuestionType.PARSONS,
-    }:
-        return QuestionKind.DISCRETE
-    return QuestionKind.TESTABLE_PROGRAM
+    match question_type:
+        case (
+            QuestionType.MULTIPLE_CHOICE
+            | QuestionType.TRUE_FALSE
+            | QuestionType.OUTPUT_PREDICTION
+            | QuestionType.PARSONS
+        ):
+            return QuestionKind.DISCRETE
+        case QuestionType.CODE_COMPLETION | QuestionType.DEBUGGING | QuestionType.CODING:
+            return QuestionKind.TESTABLE_PROGRAM
+        case _:
+            assert_never(question_type)
 
 
 class MultipleChoiceDraft(BaseModel):
@@ -35,6 +40,13 @@ class MultipleChoiceDraft(BaseModel):
     options: list[str] = Field(min_length=2)
     correct_option_index: int = Field(ge=0)
     explanation: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _correct_option_index_is_within_options(self) -> MultipleChoiceDraft:
+        if self.correct_option_index >= len(self.options):
+            msg = "correct_option_index must refer to an option."
+            raise ValueError(msg)
+        return self
 
 
 class TrueFalseDraft(BaseModel):
@@ -50,7 +62,7 @@ class OutputPredictionDraft(BaseModel):
 
     prompt: str = Field(min_length=1)
     code: str = Field(min_length=1)
-    expected_output: str
+    expected_output: str = Field(min_length=1)
     explanation: str = Field(min_length=1)
 
 
