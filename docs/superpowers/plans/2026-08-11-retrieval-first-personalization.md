@@ -349,11 +349,21 @@ def test_preference_round_trip(session: Session) -> None:
 
 
 def test_embedding_upsert(session: Session) -> None:
-    # requires a professor_reviews row — create minimal question+review via existing helpers
-    ...
+    review = _seed_reviewed_question(session)  # helper: question + approve review
+    repo = ReviewEmbeddingRepository(session)
+    row = repo.upsert(
+        ReviewEmbeddingRow(
+            review_id=review.id,
+            model_id="fake/embeddings",
+            vector_json="[0.1, 0.2]",
+            content_hash="abc",
+        )
+    )
+    session.commit()
+    assert ReviewEmbeddingRepository(session).get_for_review(review.id).id == row.id
 ```
 
-Use existing feedback test fixtures/helpers from `tests/test_feedback_service.py` patterns to create a review, then upsert embedding.
+Implement `_seed_reviewed_question` using the same patterns as `tests/test_feedback_service.py` (create question row + `submit_review`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
