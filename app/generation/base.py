@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from sqlalchemy.orm import Session
+
 from app.domain.enums import GeneratorKind
 from app.domain.questions import Question
+from app.errors import DomainRuleError, InvalidQuestionSpecError
 from app.generation import GeneratorDescriptor
 from app.generation.prompts import build_prompt
 from app.generation.schemas import (
@@ -14,9 +17,10 @@ from app.generation.schemas import (
     prompt_fields_from_draft,
     scoring_kind_for,
 )
-from app.generation.spec import QuestionSpec
+from app.generation.spec import QuestionSpec, build_question_spec
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
+from app.persistence.repositories import CurriculumRepository
 
 if TYPE_CHECKING:
     from app.generation import GenerationRequest
@@ -25,16 +29,19 @@ DESCRIPTOR = GeneratorDescriptor(kind=GeneratorKind.BASE, name="base", version="
 
 
 class BaseQuestionGenerator:
-    """Generate one textbook-grounded question for one validated section spec."""
+    """Generate unpersisted textbook-grounded questions from one section each."""
 
     def __init__(
         self,
         *,
+        session: Session | None = None,
         client: StructuredLLMClient | None = None,
         retrieval: SourceRetrieval | None = None,
     ) -> None:
+        self._session = session
         self._client = client
-        self._retrieval = retrieval
+        self._retrieval = retrieval or (SourceRetrieval(session) if session is not None else None)
+        self._curriculum = CurriculumRepository(session) if session is not None else None
 
     @property
     def descriptor(self) -> GeneratorDescriptor:
@@ -42,16 +49,58 @@ class BaseQuestionGenerator:
         return DESCRIPTOR
 
     def generate(self, request: GenerationRequest) -> list[Question]:
-        """Check lazy LLM configuration for the legacy generator-selection seam.
+        """Generate one unpersisted question for every requested source section.
 
-        A legacy request omits the topic name needed for a grounded prompt and
-        cannot carry a database session. Persisted section-first generation is
-        therefore deliberately performed by :class:`GenerationService`.
+        ``request.count`` remains part of the selection boundary, but the
+        section-first base generator deliberately emits exactly one question per
+        source section. Persisting results remains :class:`GenerationService`'s
+        responsibility.
         """
-        del request
-        if self._client is None:
-            get_structured_client()
-        raise RuntimeError("Use GenerationService to generate persisted section-first questions.")
+        client = self._client or get_structured_client()
+        self._client = client
+        if self._session is None or self._retrieval is None or self._curriculum is None:
+            raise DomainRuleError(
+                "BaseQuestionGenerator.generate requires a database session.",
+                detail="Construct BaseQuestionGenerator(session=...) to generate questions.",
+            )
+
+        version = self._curriculum.get_with_tree(request.curriculum_version_id)
+        topic = next(
+            (
+                candidate
+                for candidate in version.topics
+                if any(subtopic.id == request.subtopic_id for subtopic in candidate.subtopics)
+            ),
+            None,
+        )
+        if topic is None:
+            raise InvalidQuestionSpecError(
+                "Subtopic is not part of the requested curriculum version.",
+                detail=(
+                    f"Subtopic {request.subtopic_id} is not in version "
+                    f"{request.curriculum_version_id}."
+                ),
+            )
+        subtopic = next(
+            candidate for candidate in topic.subtopics if candidate.id == request.subtopic_id
+        )
+
+        specs = [
+            build_question_spec(
+                self._session,
+                curriculum_version_id=request.curriculum_version_id,
+                topic_id=topic.id,
+                subtopic_ids=[request.subtopic_id],
+                question_type=request.question_type,
+                difficulty=request.difficulty,
+                source_section_ids=[section_id],
+            )
+            for section_id in request.source_section_ids
+        ]
+        return [
+            self.generate_one(spec, topic_name=topic.name, subtopic_names=[subtopic.name])
+            for spec in specs
+        ]
 
     def generate_one(
         self,
@@ -62,12 +111,9 @@ class BaseQuestionGenerator:
     ) -> Question:
         """Generate a typed question grounded in the spec's sole source section."""
         if self._retrieval is None:
-            raise RuntimeError(
-                "BaseQuestionGenerator needs SourceRetrieval to generate a question."
-            )
-        if len(spec.source_section_ids) != 1:
-            raise ValueError(
-                "BaseQuestionGenerator generates exactly one question per source section."
+            raise DomainRuleError(
+                "BaseQuestionGenerator.generate_one requires source retrieval.",
+                detail="Construct it with session=... or retrieval=....",
             )
 
         section_id = spec.source_section_ids[0]

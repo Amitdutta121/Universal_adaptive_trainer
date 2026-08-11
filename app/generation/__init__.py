@@ -45,10 +45,11 @@ class GeneratorDescriptor(BaseModel):
 
 
 class GenerationRequest(BaseModel):
-    """Legacy request shape retained for generator selection compatibility.
+    """Public request shape for unpersisted, section-first base generation.
 
-    Section-first callers use :class:`app.generation.service.GenerationService`;
-    its ``subtopic_id`` maps to the single-item ``QuestionSpec.subtopic_ids``.
+    ``BaseQuestionGenerator.generate`` makes one question for each supplied
+    source section; ``count`` is retained for generator-selection compatibility.
+    Its ``subtopic_id`` maps to the single-item ``QuestionSpec.subtopic_ids``.
     """
 
     curriculum_version_id: int
@@ -73,11 +74,13 @@ class QuestionGenerator(Protocol):
 
 
 def get_question_generator(professor_id: int | None = None):
-    """Return the lazy base generator for callers selecting a generator.
+    """Return an unconfigured base generator for descriptor and selection checks.
 
     ``professor_id`` remains reserved for the future personalized path. The LLM
     client is not constructed here, so an application can start without its
-    credentials; ``generate_one`` resolves it only when generation is requested.
+    credentials. ``generate`` requires a generator constructed with ``session``;
+    use ``BaseQuestionGenerator(session=...)`` for unpersisted questions or
+    :class:`GenerationService` to persist them.
     """
     del professor_id
     from app.generation.base import BaseQuestionGenerator

@@ -7,7 +7,7 @@ foreign or missing references before any LLM call.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionType
@@ -23,7 +23,7 @@ class QuestionSpec(BaseModel):
     subtopic_ids: list[int] = Field(min_length=1)
     question_type: QuestionType
     difficulty: Difficulty
-    source_section_ids: list[int] = Field(min_length=1)
+    source_section_ids: list[int] = Field(min_length=1, max_length=1)
     seed: str | None = None
 
 
@@ -78,12 +78,18 @@ def build_question_spec(
                 detail=f"Section {section_id} does not exist.",
             ) from None
 
-    return QuestionSpec(
-        curriculum_version_id=curriculum_version_id,
-        topic_id=topic_id,
-        subtopic_ids=subtopic_ids,
-        question_type=question_type,
-        difficulty=difficulty,
-        source_section_ids=source_section_ids,
-        seed=seed,
-    )
+    try:
+        return QuestionSpec(
+            curriculum_version_id=curriculum_version_id,
+            topic_id=topic_id,
+            subtopic_ids=subtopic_ids,
+            question_type=question_type,
+            difficulty=difficulty,
+            source_section_ids=source_section_ids,
+            seed=seed,
+        )
+    except ValidationError as exc:
+        raise InvalidQuestionSpecError(
+            "A cold-start question spec needs exactly one source section.",
+            detail=str(exc.errors()),
+        ) from None

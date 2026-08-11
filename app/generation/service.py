@@ -21,7 +21,9 @@ class GenerationService:
     def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
         self._session = session
         self._retrieval = SourceRetrieval(session)
-        self._generator = BaseQuestionGenerator(client=client, retrieval=self._retrieval)
+        self._generator = BaseQuestionGenerator(
+            session=session, client=client, retrieval=self._retrieval
+        )
         self._curriculum = CurriculumRepository(session)
         self._questions = QuestionRepository(session)
 

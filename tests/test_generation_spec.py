@@ -43,6 +43,21 @@ def test_build_spec_accepts_approved_ids(session: Session, settings) -> None:
     assert spec.source_section_ids == [section_id]
 
 
+def test_build_spec_rejects_multiple_source_sections(session: Session, settings) -> None:
+    version, topic, sub, section_id = _seed(session, settings)
+
+    with pytest.raises(InvalidQuestionSpecError):
+        build_question_spec(
+            session,
+            curriculum_version_id=version.id,
+            topic_id=topic.id,
+            subtopic_ids=[sub.id],
+            question_type=QuestionType.DEBUGGING,
+            difficulty=Difficulty.MEDIUM,
+            source_section_ids=[section_id, section_id],
+        )
+
+
 def test_rejects_unapproved_topic(session: Session, settings) -> None:
     version, _topic, sub, section_id = _seed(session, settings)
     with pytest.raises(InvalidQuestionSpecError):

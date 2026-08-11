@@ -100,6 +100,32 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
     assert "section text" in client.calls[0]["prompt"].lower()
 
 
+def test_base_generator_generates_one_unpersisted_question_per_section(
+    session: Session, settings
+) -> None:
+    from app.generation import GenerationRequest
+
+    version, topic, subtopic, section_ids = _seed(session, settings)
+    client = FakeClient(_debugging_draft())
+
+    questions = BaseQuestionGenerator(session=session, client=client).generate(
+        GenerationRequest(
+            curriculum_version_id=version.id,
+            subtopic_id=subtopic.id,
+            question_type=QuestionType.DEBUGGING,
+            source_section_ids=section_ids[:2],
+            difficulty=Difficulty.MEDIUM,
+            count=1,
+        )
+    )
+
+    assert len(questions) == 2
+    assert [question.topic_id for question in questions] == [topic.id, topic.id]
+    assert [question.subtopic_id for question in questions] == [subtopic.id, subtopic.id]
+    assert all(question.id is None for question in questions)
+    assert len(client.calls) == 2
+
+
 def test_service_persists_one_question_per_selected_section(session, settings) -> None:
     version, topic, subtopic, section_ids = _seed(session, settings)
     client = FakeClient(_debugging_draft())
