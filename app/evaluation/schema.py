@@ -24,11 +24,11 @@ class DimensionEvaluation(BaseModel):
 
     @model_validator(mode="after")
     def score_matches_applicability(self) -> DimensionEvaluation:
-        """Keep aggregate scoring unambiguous for non-applicable dimensions."""
-        if self.applicable and self.score is None:
-            raise ValueError("Applicable dimensions require a score from 1 to 5.")
-        if not self.applicable and self.score is not None:
-            raise ValueError("Non-applicable dimensions must not have a score.")
+        """Coerce inconsistent score/applicability pairs for stored or LLM output."""
+        if self.score is None:
+            self.applicable = False
+        elif not self.applicable:
+            self.score = None
         return self
 
 

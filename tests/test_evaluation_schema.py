@@ -52,24 +52,27 @@ def test_dimension_score_must_be_in_range() -> None:
 
 
 @pytest.mark.parametrize(
-    ("score", "applicable"),
+    ("score", "applicable", "expected_score", "expected_applicable"),
     [
-        (None, True),
-        (3, False),
+        (None, True, None, False),
+        (3, False, None, False),
     ],
 )
-def test_dimension_score_must_match_applicability(
+def test_dimension_coerces_score_applicability_inconsistency(
     score: int | None,
     applicable: bool,
+    expected_score: int | None,
+    expected_applicable: bool,
 ) -> None:
-    with pytest.raises(ValidationError):
-        DimensionEvaluation(
-            dimension=JudgeDimensionId.CLARITY,
-            score=score,
-            applicable=applicable,
-            confidence=0.5,
-            rationale="inconsistent",
-        )
+    dim = DimensionEvaluation(
+        dimension=JudgeDimensionId.CLARITY,
+        score=score,
+        applicable=applicable,
+        confidence=0.5,
+        rationale="inconsistent",
+    )
+    assert dim.score == expected_score
+    assert dim.applicable is expected_applicable
 
 
 def test_mean_ignores_non_applicable() -> None:
