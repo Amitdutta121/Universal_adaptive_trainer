@@ -7,12 +7,47 @@
 
 {% block content %}
   <section class="panel">
+    <h2>Review summary</h2>
+    <dl class="kv">
+      <dt>Reviewed</dt>
+      <dd>{{ stats.reviewed }}</dd>
+      <dt>Approved</dt>
+      <dd>{{ stats.approved }}</dd>
+      <dt>Rejected</dt>
+      <dd>{{ stats.rejected }}</dd>
+      <dt>Edited</dt>
+      <dd>{{ stats.edited }}</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Rejection reasons</h2>
+    {% if reason_distribution %}
+      <table class="table">
+        <thead>
+          <tr><th>Reason</th><th>Count</th></tr>
+        </thead>
+        <tbody>
+          {% for reason in reason_distribution %}
+            <tr>
+              <td>{{ reason.label }}</td>
+              <td>{{ reason.count }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No rejection reasons have been recorded yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
     <h2>Review history</h2>
     {% if reviews %}
       <table class="table">
         <thead>
-          <tr><th>#</th><th>Question</th><th>Decision</th><th>Reviewed generator</th>
-              <th>Comment</th><th>When</th></tr>
+          <tr><th>#</th><th>Question</th><th>Decision</th><th>Reasons</th>
+              <th>Reviewed generator</th><th>Comment</th><th>When</th></tr>
         </thead>
         <tbody>
           {% for review in reviews %}
@@ -20,7 +55,8 @@
               <td>{{ review.id }}</td>
               <td>{{ review.question_id }}</td>
               <td><span class="status">{{ review.decision }}</span></td>
-              <td><code>{{ review.reviewed_generator_name }}@{{ review.reviewed_generator_version }}</code></td>
+              <td>{{ review.reasons | join(", ") if review.reasons else "—" }}</td>
+              <td><code>{{ review.generator }}</code></td>
               <td>{{ review.comment or "—" }}</td>
               <td>{{ review.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
             </tr>

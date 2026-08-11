@@ -26,7 +26,7 @@ from app.curriculum import (
 )
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.domain.enums import Difficulty, QuestionType, RejectionReason, ReviewDecision
-from app.domain.feedback import REJECTION_REASON_LABELS
+from app.domain.feedback import REJECTION_REASON_LABELS, decode_reasons
 from app.domain.questions import QuestionValidationReport
 from app.errors import (
     ConfigurationError,
@@ -587,13 +587,46 @@ def review_question(
 
 @router.get("/feedback", response_class=HTMLResponse, name="feedback")
 def feedback(request: Request, session: DbSession) -> HTMLResponse:
+    repo = ProfessorReviewRepository(session)
+    by_decision = repo.count_by_decision()
+    reason_counts = repo.reason_counts()
+    review_rows = [
+        {
+            "id": review.id,
+            "question_id": review.question_id,
+            "decision": review.decision,
+            "reasons": [
+                REJECTION_REASON_LABELS[reason] for reason in decode_reasons(review.reasons_json)
+            ],
+            "comment": review.comment,
+            "generator": (f"{review.reviewed_generator_name}@{review.reviewed_generator_version}"),
+            "created_at": review.created_at,
+        }
+        for review in repo.list_recent()
+    ]
     return render(
         request,
         "feedback.html",
         {
             "page_title": "Professor Feedback",
             "active_section": "feedback",
-            "reviews": ProfessorReviewRepository(session).list_recent(),
+            "stats": {
+                "reviewed": repo.count(),
+                "approved": by_decision.get(ReviewDecision.APPROVE.value, 0),
+                "rejected": by_decision.get(ReviewDecision.REJECT.value, 0),
+                "edited": by_decision.get(ReviewDecision.EDIT.value, 0),
+            },
+            "reason_distribution": [
+                {
+                    "code": code,
+                    "label": REJECTION_REASON_LABELS[RejectionReason(code)],
+                    "count": count,
+                }
+                for code, count in sorted(
+                    reason_counts.items(), key=lambda item: (-item[1], item[0])
+                )
+            ],
+            "reviews": review_rows,
         },
     )
 

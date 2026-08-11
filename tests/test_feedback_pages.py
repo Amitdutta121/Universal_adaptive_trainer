@@ -108,3 +108,37 @@ def test_post_edit_preserves_original(client: TestClient, session: Session) -> N
     assert question.prompt == "Improved prompt"
     assert question.original_prompt == "Seed prompt"
     assert question.status == QuestionStatus.APPROVED
+
+
+def test_feedback_dashboard_counts_reasons_and_recent_reviews(
+    client: TestClient, session: Session
+) -> None:
+    question_id = _seed_question(session)
+    client.post(f"/questions/{question_id}/review", data={"decision": "approve"})
+    client.post(
+        f"/questions/{question_id}/review",
+        data={"decision": "reject", "reasons": ["too_easy", "other"]},
+    )
+    client.post(
+        f"/questions/{question_id}/review",
+        data={
+            "decision": "edit",
+            "reasons": ["poor_wording"],
+            "prompt": "Improved prompt",
+            "reference_solution": "true",
+            "tests": "",
+        },
+    )
+
+    response = client.get("/feedback")
+
+    assert response.status_code == 200
+    body = " ".join(response.text.split())
+    assert "<dt>Reviewed</dt> <dd>3</dd>" in body
+    assert "<dt>Approved</dt> <dd>1</dd>" in body
+    assert "<dt>Rejected</dt> <dd>1</dd>" in body
+    assert "<dt>Edited</dt> <dd>1</dd>" in body
+    assert "<td>Too easy</td> <td>1</td>" in body
+    assert "<td>Other</td> <td>1</td>" in body
+    assert "<th>Reasons</th>" in body
+    assert body.count("Poor wording") == 2
