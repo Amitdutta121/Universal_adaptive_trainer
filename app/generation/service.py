@@ -130,6 +130,7 @@ class GenerationService:
             generator_version=question.generator_version,
             priority=question.priority,
             times_used=question.times_used,
+            personalization_context_json=question.personalization_context_json,
             created_at=question.created_at,
             updated_at=question.updated_at,
         )

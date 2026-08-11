@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.enums import (
@@ -21,6 +21,8 @@ from app.domain.enums import (
     CurriculumStatus,
     Difficulty,
     GeneratorKind,
+    PreferenceCategory,
+    PreferenceConfirmationState,
     QuestionKind,
     QuestionStatus,
     QuestionType,
@@ -313,6 +315,7 @@ class QuestionRow(TimestampMixin, Base):
 
     priority: Mapped[int] = mapped_column(Integer, default=DEFAULT_PRIORITY)
     times_used: Mapped[int] = mapped_column(Integer, default=0)
+    personalization_context_json: Mapped[str | None] = mapped_column(Text, default=None)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     reviews: Mapped[list[ProfessorReviewRow]] = relationship(
@@ -339,3 +342,32 @@ class ProfessorReviewRow(TimestampMixin, Base):
     reviewed_generator_version: Mapped[str | None] = mapped_column(String(50), default=None)
 
     question: Mapped[QuestionRow] = relationship(back_populates="reviews")
+
+
+class PreferenceStatementRow(TimestampMixin, Base):
+    __tablename__ = "preference_statements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_text: Mapped[str] = mapped_column(Text)
+    category: Mapped[PreferenceCategory] = mapped_column(String(32))
+    evidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    supporting_review_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    active: Mapped[bool] = mapped_column(default=True)
+    confirmation_state: Mapped[PreferenceConfirmationState] = mapped_column(
+        String(16), default=PreferenceConfirmationState.INFERRED
+    )
+    profile_version: Mapped[str] = mapped_column(String(50), default="1")
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class ReviewEmbeddingRow(TimestampMixin, Base):
+    __tablename__ = "review_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    review_id: Mapped[int] = mapped_column(
+        ForeignKey("professor_reviews.id", ondelete="CASCADE"), unique=True
+    )
+    model_id: Mapped[str] = mapped_column(String(200))
+    vector_json: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))

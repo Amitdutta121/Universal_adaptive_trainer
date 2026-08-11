@@ -17,8 +17,10 @@ from app.persistence.models import (
     BookRow,
     BookSectionRow,
     CurriculumVersionRow,
+    PreferenceStatementRow,
     ProfessorReviewRow,
     QuestionRow,
+    ReviewEmbeddingRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
@@ -334,3 +336,76 @@ class ProfessorReviewRepository:
                 key = reason.value
                 counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def list_with_questions(self, limit: int = 50) -> list[ProfessorReviewRow]:
+        stmt = (
+            select(ProfessorReviewRow)
+            .options(joinedload(ProfessorReviewRow.question))
+            .order_by(ProfessorReviewRow.created_at.desc(), ProfessorReviewRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt).unique())
+
+
+class PreferenceRepository:
+    """Professor preference statements inferred from review history."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: PreferenceStatementRow) -> PreferenceStatementRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, preference_id: int) -> PreferenceStatementRow:
+        row = self._session.get(PreferenceStatementRow, preference_id)
+        if row is None:
+            raise NotFoundError(f"Preference {preference_id} does not exist.")
+        return row
+
+    def list_all(self, *, active_only: bool = False) -> list[PreferenceStatementRow]:
+        stmt = select(PreferenceStatementRow).order_by(
+            PreferenceStatementRow.confidence.desc(),
+            PreferenceStatementRow.id.desc(),
+        )
+        if active_only:
+            stmt = stmt.where(PreferenceStatementRow.active.is_(True))
+        return list(self._session.scalars(stmt))
+
+    def list_for_generation(self, *, soft_floor: float) -> list[PreferenceStatementRow]:
+        stmt = (
+            select(PreferenceStatementRow)
+            .where(
+                PreferenceStatementRow.active.is_(True),
+                PreferenceStatementRow.confidence >= soft_floor,
+            )
+            .order_by(
+                PreferenceStatementRow.confidence.desc(),
+                PreferenceStatementRow.id.desc(),
+            )
+        )
+        return list(self._session.scalars(stmt))
+
+
+class ReviewEmbeddingRepository:
+    """Cached embedding vectors for professor reviews."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_for_review(self, review_id: int) -> ReviewEmbeddingRow | None:
+        stmt = select(ReviewEmbeddingRow).where(ReviewEmbeddingRow.review_id == review_id)
+        return self._session.scalars(stmt).first()
+
+    def upsert(self, row: ReviewEmbeddingRow) -> ReviewEmbeddingRow:
+        existing = self.get_for_review(row.review_id)
+        if existing is None:
+            self._session.add(row)
+            self._session.flush()
+            return row
+        existing.model_id = row.model_id
+        existing.vector_json = row.vector_json
+        existing.content_hash = row.content_hash
+        self._session.flush()
+        return existing
