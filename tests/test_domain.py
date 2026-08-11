@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from app.domain import (
     INITIAL_SUBTOPIC_WEAKNESS,
@@ -161,3 +162,7 @@ class TestValidationPrecedence:
         assert check.severity == "error"
         assert check.evidence == "wanted '3' got '4'"
         assert check.deterministic is True
+
+    def test_check_rejects_non_error_severity(self) -> None:
+        with pytest.raises(ValidationError):
+            QuestionCheck(name="expected_output_verified", passed=False, severity="warning")

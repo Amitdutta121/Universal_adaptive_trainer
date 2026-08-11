@@ -12,6 +12,7 @@ student engine depend on them:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -127,7 +128,7 @@ class QuestionCheck(BaseModel):
     passed: bool
     #: Deterministic checks (syntax, execution, tests) outrank LLM judgment.
     deterministic: bool = True
-    severity: str = "error"
+    severity: Literal["error"] = "error"
     detail: str | None = None
     evidence: str | None = None
 
