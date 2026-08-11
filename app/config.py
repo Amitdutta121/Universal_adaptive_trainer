@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_output_tokens: int = Field(default=4096, gt=0)
+    validation_timeout_seconds: float = Field(default=2.0, gt=0)
 
     # -- Book ingestion -----------------------------------------------------
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"

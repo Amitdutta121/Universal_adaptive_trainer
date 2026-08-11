@@ -149,3 +149,15 @@ class TestValidationPrecedence:
 
     def test_an_empty_report_does_not_pass(self) -> None:
         assert QuestionValidationReport().passed is False
+
+    def test_check_records_severity_and_evidence(self) -> None:
+        check = QuestionCheck(
+            name="expected_output_verified",
+            passed=False,
+            severity="error",
+            detail="Expected output verified",
+            evidence="wanted '3' got '4'",
+        )
+        assert check.severity == "error"
+        assert check.evidence == "wanted '3' got '4'"
+        assert check.deterministic is True

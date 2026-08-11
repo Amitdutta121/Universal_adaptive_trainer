@@ -67,7 +67,7 @@ def _debugging_draft() -> DebuggingDraft:
         prompt="Find the bug.",
         code="s = 'ab'\ns[0] = 'c'",
         reference_solution="Strings are immutable; build a new string.",
-        tests=[{"call": "explain", "expected": "TypeError"}],
+        tests=[{"assert": "assert True"}],
         explanation="Item assignment on str fails.",
     )
 
@@ -94,7 +94,7 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
     assert question.generator_name == "base"
     assert question.generator_version == "1"
     assert question.content_json and f'"section_id": {section_ids[0]}' in question.content_json
-    assert question.tests and "TypeError" in question.tests
+    assert question.tests and '"assert": "assert True"' in question.tests
     assert client.calls[0]["model"] is RESPONSE_MODEL_FOR[QuestionType.DEBUGGING]
     assert "Immutability" in client.calls[0]["prompt"]
     assert "section text" in client.calls[0]["prompt"].lower()

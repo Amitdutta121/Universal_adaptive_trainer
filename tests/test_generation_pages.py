@@ -36,7 +36,7 @@ class FakeClient:
             prompt="Find the bug.",
             code="s = 'ab'\ns[0] = 'c'",
             reference_solution="Strings are immutable; build a new string.",
-            tests=[{"call": "explain", "expected": "TypeError"}],
+            tests=[{"assert": "assert True"}],
             explanation="Item assignment on str fails.",
         )
 

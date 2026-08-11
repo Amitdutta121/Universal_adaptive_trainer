@@ -10,6 +10,7 @@ from app.generation.schemas import (
     RESPONSE_MODEL_FOR,
     CodingDraft,
     DebuggingDraft,
+    ExecutableTestCase,
     MultipleChoiceDraft,
     OutputPredictionDraft,
     ParsonsBlock,
@@ -88,10 +89,26 @@ def test_coding_requires_tests() -> None:
     draft = CodingDraft(
         prompt="Write add(a, b).",
         reference_solution="def add(a, b):\n    return a + b",
-        tests=[{"stdin": "", "call": "add(1, 2)", "expected": "3"}],
+        tests=[{"stdin": "", "stdout": "3\n"}],
         explanation="Simple addition.",
     )
     assert len(draft.tests) >= 1
+
+
+def test_executable_test_case_requires_stdout_or_assert() -> None:
+    with pytest.raises(ValidationError):
+        ExecutableTestCase(stdin="1\n")
+
+
+def test_executable_test_case_allows_empty_stdout() -> None:
+    case = ExecutableTestCase(stdout="")
+    assert case.stdout == ""
+    assert case.assert_code is None
+
+
+def test_executable_test_case_accepts_assert_alias() -> None:
+    case = ExecutableTestCase.model_validate({"assert": "assert add(1, 2) == 3"})
+    assert case.assert_code == "assert add(1, 2) == 3"
 
 
 def test_parsons_rejects_unknown_order_id() -> None:
@@ -121,13 +138,13 @@ def test_prompt_fields_from_testable_draft() -> None:
         prompt="Find the bug.",
         code="s = 'ab'\ns[0] = 'c'",
         reference_solution="Build a new string.",
-        tests=[{"call": "explain", "expected": "TypeError"}],
+        tests=[{"assert": "assert True"}],
         explanation="Item assignment on str fails.",
     )
     prompt, reference, tests = prompt_fields_from_draft(draft)
     assert prompt == "Find the bug."
     assert reference == "Build a new string."
-    assert json.loads(tests or "") == [{"call": "explain", "expected": "TypeError"}]
+    assert json.loads(tests or "") == [{"stdin": "", "stdout": None, "assert": "assert True"}]
 
 
 def test_prompt_fields_from_parsons_draft() -> None:

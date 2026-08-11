@@ -57,6 +57,8 @@ class Question(BaseModel):
     spec_json: str | None = None
     #: Full typed draft plus grounding metadata for display and scoring.
     content_json: str | None = None
+    #: Serialized deterministic validation outcome for display and review.
+    validation_report_json: str | None = None
 
     # Retained generated originals. Never overwritten by professor edits.
     original_prompt: str | None = None
@@ -125,7 +127,9 @@ class QuestionCheck(BaseModel):
     passed: bool
     #: Deterministic checks (syntax, execution, tests) outrank LLM judgment.
     deterministic: bool = True
+    severity: str = "error"
     detail: str | None = None
+    evidence: str | None = None
 
 
 class QuestionValidationReport(BaseModel):

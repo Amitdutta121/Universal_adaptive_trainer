@@ -27,6 +27,10 @@ def test_llm_defaults_are_openrouter_deepseek() -> None:
     assert settings.llm_model == "deepseek/deepseek-chat"
 
 
+def test_validation_timeout_default() -> None:
+    assert _settings().validation_timeout_seconds == 2.0
+
+
 def test_llm_curriculum_proposal_limits_are_removed() -> None:
     settings = _settings()
     assert not hasattr(settings, "curriculum_max_sections")

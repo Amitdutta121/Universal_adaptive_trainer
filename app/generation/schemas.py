@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import assert_never
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import QuestionKind, QuestionType
 
@@ -66,13 +66,29 @@ class OutputPredictionDraft(BaseModel):
     explanation: str = Field(min_length=1)
 
 
+class ExecutableTestCase(BaseModel):
+    """One hybrid stdin/stdout/assert case for executable question types."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    stdin: str = ""
+    stdout: str | None = None
+    assert_code: str | None = Field(default=None, alias="assert")
+
+    @model_validator(mode="after")
+    def _requires_stdout_or_assert(self) -> ExecutableTestCase:
+        if self.stdout is None and self.assert_code is None:
+            raise ValueError("each test needs stdout or assert")
+        return self
+
+
 class CodeCompletionDraft(BaseModel):
     """Code-completion question draft."""
 
     prompt: str = Field(min_length=1)
     code: str = Field(min_length=1)
     reference_solution: str = Field(min_length=1)
-    tests: list[dict[str, str]] = Field(min_length=1)
+    tests: list[ExecutableTestCase] = Field(min_length=1)
     explanation: str = Field(min_length=1)
 
 
@@ -82,7 +98,7 @@ class DebuggingDraft(BaseModel):
     prompt: str = Field(min_length=1)
     code: str = Field(min_length=1)
     reference_solution: str = Field(min_length=1)
-    tests: list[dict[str, str]] = Field(min_length=1)
+    tests: list[ExecutableTestCase] = Field(min_length=1)
     explanation: str = Field(min_length=1)
 
 
@@ -117,7 +133,7 @@ class CodingDraft(BaseModel):
 
     prompt: str = Field(min_length=1)
     reference_solution: str = Field(min_length=1)
-    tests: list[dict[str, str]] = Field(min_length=1)
+    tests: list[ExecutableTestCase] = Field(min_length=1)
     explanation: str = Field(min_length=1)
 
 
@@ -145,7 +161,11 @@ def prompt_fields_from_draft(draft: BaseModel) -> tuple[str, str | None, str | N
         reference = json.dumps({"correct_order": draft.correct_order, "indents": indents})
         return draft.prompt, reference, None
     if isinstance(draft, CodeCompletionDraft | DebuggingDraft | CodingDraft):
-        return draft.prompt, draft.reference_solution, json.dumps(draft.tests)
+        return (
+            draft.prompt,
+            draft.reference_solution,
+            json.dumps([case.model_dump(mode="json", by_alias=True) for case in draft.tests]),
+        )
     msg = f"Unsupported draft type: {type(draft).__name__}"
     raise TypeError(msg)
 
