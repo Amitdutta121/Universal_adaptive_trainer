@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.curriculum.taxonomy_import import TaxonomyImportService
 from app.domain.enums import CurriculumItemStatus, CurriculumStatus
-from app.errors import UnsupportedFileError
+from app.errors import InvalidTaxonomyDocumentError, UnsupportedFileError
 from app.persistence.repositories import CurriculumRepository
 
 VALID = (
@@ -53,6 +53,17 @@ def test_identical_document_reimport_keeps_same_stable_ids(
     assert CurriculumRepository(session).get_approved().id == second.id
 
 
+def test_invalid_document_creates_no_curriculum_version(
+    session: Session, settings: Settings
+) -> None:
+    with pytest.raises(InvalidTaxonomyDocumentError):
+        TaxonomyImportService(session, settings).import_upload(
+            filename="bad.json", data=b'{"schema_version":"1","label":"X","topics":[]}'
+        )
+    assert CurriculumRepository(session).count() == 0
+
+
 def test_non_json_extension_rejected(session: Session, settings: Settings) -> None:
     with pytest.raises(UnsupportedFileError):
         TaxonomyImportService(session, settings).import_upload(filename="taxonomy.txt", data=VALID)
+    assert CurriculumRepository(session).count() == 0
