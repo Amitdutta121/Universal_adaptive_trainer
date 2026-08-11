@@ -656,3 +656,64 @@ dimension scores, provided as a summary only. A completed or glowing pedagogical
 cannot change a failed deterministic result to passed; an `error` evaluation cannot fail a question
 that passed deterministic checks. The question detail page renders deterministic checks and LLM
 pedagogical evaluation in separate panels.
+
+---
+
+## ADR-025 — Retrieval-first personalization with dual stores and soft activation
+
+**Status:** accepted
+
+Professor personalization is **retrieval-first**: at generation time the personalized generator
+(`personalized-context@1`) augments the same section-first base prompt with (a) ranked
+professor-reviewed examples and (b) active preference statements. It does **not** replace the
+base generator (`base@1`), rewrite the base prompt contract, or run a separate optimization loop.
+
+**Dual stores**
+
+- **Review history** — append-only `ProfessorReviewRow` records (approve / reject / edit) are the
+  authoritative source of examples. Reviews are never mutated when preferences are refreshed.
+- **Preference statements** — `PreferenceStatementRow` holds inferred rules extracted from that
+  history. Professors refresh manually, then confirm, correct, or remove individual statements.
+
+**Retrieval**
+
+- Up to 200 recent reviews are scored per request. Final rank combines normalized metadata
+  (subtopic/topic match, question type, difficulty adjacency, decision weight, recency) at weight
+  **0.6** with cosine similarity of review embeddings to the current generation query at weight
+  **0.4**.
+- Budgets: up to **4** approved/edited examples and **2** rejected examples; minimum score floor
+  **0.05**. Embeddings are cached in `ReviewEmbeddingRow` keyed by review and content hash.
+- Up to **5** preference statements with confidence ≥ **0.35** (soft floor) are included in the
+  prompt. If retrieval and preferences both yield nothing, the prompt stays base-like — only the
+  style/pedagogy disclaimer is added.
+
+**Preference learning**
+
+- On manual **Refresh preferences**, recent reviews are serialized and sent through Instructor
+  structured extraction. A candidate rule requires **≥ 2** supporting review ids; single-evidence
+  rules are dropped. Confidence is derived from evidence count; professor **confirm** boosts it.
+- No automatic refresh on every review; no student data; no GEPA or other offline generator
+  optimization in this repository.
+
+**Generator identity and pipeline**
+
+- Base: `base@1` via `BaseQuestionGenerator`. Personalized:
+  `personalized-context@1` via `PersonalizedContextGenerator`.
+- Selection is explicit (`generator="base"` | `"personalized"`) on
+  `GenerationService.generate_for_sections`; the UI drives the flag.
+- Personalized questions reuse the same deterministic validation and advisory pedagogical judge
+  as base questions. `personalization_context_json` on each question records
+  `preference_ids`, `retrieved_review_ids`, `profile_version`, and `generator` for transparency.
+
+**Why:** retrieval over concrete reviewed examples is traceable and conservative — the professor
+can see which reviews and preferences influenced a question. Separating history from inferred
+statements lets the system learn without overwriting feedback. Soft activation avoids blocking
+personalized generation when signal is thin while keeping weak rules out of the prompt. Keeping
+`base@1` unchanged preserves A/B comparison and avoids silent generator swaps (ADR-005).
+
+**Implications:** `app/personalization/` owns retrieval, embeddings, preference extraction,
+refresh/confirm/correct/remove, and `PersonalizedContextGenerator`. `app/generation/` owns
+`GenerationService` selection and the base generator. `app/personalization/` must not import
+`app/adaptive/` (ADR-001). Future generator optimization (including any GEPA-style procedure) is
+out of scope until explicitly requested; it would be a new ADR and a new generator version, not an
+in-place change to `personalized-context@1`.
