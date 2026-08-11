@@ -149,6 +149,32 @@
     {% endif %}
   </section>
 
+  {% if personalization_evidence %}
+    <section class="panel">
+      <h2>Personalization evidence</h2>
+      <p class="note">Preferences and retrieved reviews that shaped this question (no chain-of-thought).</p>
+      {% if personalization_evidence.preference_ids %}
+        <h3>Preferences applied</h3>
+        <ul>
+          {% for pref_id in personalization_evidence.preference_ids %}
+            <li><a href="/preferences#pref-{{ pref_id }}">Preference {{ pref_id }}</a></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if personalization_evidence.review_ids %}
+        <h3>Retrieved reviews</h3>
+        <ul>
+          {% for review_id in personalization_evidence.review_ids %}
+            <li><a href="/feedback">Review {{ review_id }}</a></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if not personalization_evidence.preference_ids and not personalization_evidence.review_ids %}
+        <p class="empty">No preference or review evidence was recorded.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
   <section class="panel">
     <h2>Source citations</h2>
     {% if sources %}

@@ -7,10 +7,17 @@ from fastapi.testclient import TestClient
 
 from app.web.navigation import NAV_SECTIONS
 
-REQUIRED_LABELS = ("Books", "Curriculum", "Questions", "Professor Feedback", "Students")
+REQUIRED_LABELS = (
+    "Books",
+    "Curriculum",
+    "Questions",
+    "Professor Feedback",
+    "Preferences",
+    "Students",
+)
 
 
-def test_navigation_declares_exactly_the_five_required_sections() -> None:
+def test_navigation_declares_exactly_the_six_required_sections() -> None:
     assert tuple(section.label for section in NAV_SECTIONS) == REQUIRED_LABELS
 
 
@@ -45,6 +52,7 @@ def test_section_pages_report_honest_empty_state(client: TestClient) -> None:
     assert "No curriculum version has been approved yet." in client.get("/curriculum").text
     assert "No questions have been generated yet." in client.get("/questions").text
     assert "No professor reviews have been recorded yet." in client.get("/feedback").text
+    assert "No preference rules have been inferred yet." in client.get("/preferences").text
 
 
 def test_students_page_states_the_fixed_adaptive_mechanism(client: TestClient) -> None:

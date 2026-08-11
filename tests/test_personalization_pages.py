@@ -1,0 +1,271 @@
+"""Professor pages for preferences and personalized question generation."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import book_documents as docs
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.curriculum import TaxonomyImportService
+from app.domain.enums import (
+    PreferenceCategory,
+    PreferenceConfirmationState,
+    QuestionStatus,
+    RejectionReason,
+    ReviewDecision,
+)
+from app.domain.preferences import encode_review_ids
+from app.feedback import submit_review
+from app.generation.schemas import DebuggingDraft
+from app.generation.service import GenerationService
+from app.ingestion import BookImportService
+from app.persistence.models import PreferenceStatementRow, QuestionRow
+from app.persistence.repositories import PreferenceRepository, QuestionRepository
+from app.personalization.embeddings import FakeEmbedder
+from app.personalization.learner import PreferenceCandidate, PreferenceExtractionResult
+
+
+class FakeClient:
+    """Return one typed draft without making a network request."""
+
+    @property
+    def description(self) -> str:
+        return "fake/test-model"
+
+    def complete_structured(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        response_model: type[BaseModel],
+    ) -> BaseModel:
+        del system, prompt
+        if response_model is PreferenceExtractionResult:
+            return PreferenceExtractionResult(
+                preferences=[
+                    PreferenceCandidate(
+                        rule_text="Prefer concise prompts.",
+                        category=PreferenceCategory.WORDING,
+                        supporting_review_ids=[1],
+                    )
+                ]
+            )
+        from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
+
+        if response_model is JudgeModelResponse:
+            return JudgeModelResponse(
+                dimensions=[
+                    DimensionEvaluation(
+                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
+                        score=5,
+                        applicable=True,
+                        confidence=1.0,
+                        rationale="Aligned.",
+                    )
+                ]
+            )
+        return DebuggingDraft(
+            prompt="Find the bug.",
+            code="s = 'ab'\ns[0] = 'c'",
+            reference_solution="Strings are immutable; build a new string.",
+            tests=[{"assert": "assert True"}],
+            explanation="Item assignment on str fails.",
+        )
+
+
+def _seed_generation_context(session: Session, settings: Any) -> tuple[int, int, int, int, int]:
+    book = BookImportService(session, settings).import_upload(
+        filename="book.json", data=docs.to_bytes(docs.think_python())
+    )
+    version = TaxonomyImportService(session, settings).import_upload(
+        filename="taxonomy.json",
+        data=(
+            b'{"schema_version":"1","label":"Python","topics":['
+            b'{"name":"Strings","subtopics":[{"name":"Immutability"}]}]}'
+        ),
+    )
+    session.commit()
+    return (
+        book.id,
+        version.topics[0].id,
+        version.topics[0].subtopics[0].id,
+        book.chapters[0].sections[0].id,
+        version.id,
+    )
+
+
+def _seed_reviews(session: Session) -> list[int]:
+    row = QuestionRepository(session).add(
+        QuestionRow(
+            prompt="Write a loop.",
+            original_prompt="Write a loop.",
+            reference_solution="pass",
+            original_reference_solution="pass",
+            tests="assert True",
+            original_tests="assert True",
+            generator_name="base",
+            generator_version="1",
+            status=QuestionStatus.VALIDATION_PASSED,
+        )
+    )
+    session.commit()
+    assert row.id is not None
+    review = submit_review(
+        session,
+        question_id=row.id,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.POOR_WORDING],
+        comment="Too verbose.",
+    )
+    session.commit()
+    assert review.id is not None
+    return [review.id]
+
+
+def test_preferences_page_ok(client) -> None:
+    response = client.get("/preferences")
+    assert response.status_code == 200
+    assert "Preferences" in response.text
+    assert "Refresh preferences" in response.text
+
+
+def test_refresh_preferences_post(client, session, monkeypatch) -> None:
+    _seed_reviews(session)
+
+    import app.web.routes.pages as pages
+
+    def fake_refresh(request_session, **kwargs):
+        repo = PreferenceRepository(request_session)
+        if not repo.list_all(active_only=True):
+            repo.add(
+                PreferenceStatementRow(
+                    rule_text="Prefer concise prompts.",
+                    category=PreferenceCategory.WORDING,
+                    evidence_count=1,
+                    confidence=0.4,
+                    supporting_review_ids_json=encode_review_ids([1]),
+                )
+            )
+            request_session.commit()
+        return len(repo.list_all(active_only=True))
+
+    monkeypatch.setattr(pages, "refresh_preferences", fake_refresh)
+
+    response = client.post("/preferences/refresh", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/preferences")
+
+
+def test_preferences_confirm_correct_remove(client, session) -> None:
+    row = PreferenceRepository(session).add(
+        PreferenceStatementRow(
+            rule_text="Prefer application over recall.",
+            category=PreferenceCategory.EMPHASIS,
+            evidence_count=2,
+            confidence=0.4,
+            supporting_review_ids_json=encode_review_ids([1, 2]),
+            confirmation_state=PreferenceConfirmationState.INFERRED,
+        )
+    )
+    session.commit()
+    assert row.id is not None
+
+    confirm = client.post(f"/preferences/{row.id}/confirm", follow_redirects=False)
+    assert confirm.status_code == 303
+    session.expire_all()
+    assert (
+        PreferenceRepository(session).get(row.id).confirmation_state
+        == PreferenceConfirmationState.CONFIRMED
+    )
+
+    correct = client.post(
+        f"/preferences/{row.id}/correct",
+        data={"rule_text": "Prefer short realistic programs."},
+        follow_redirects=False,
+    )
+    assert correct.status_code == 303
+    session.expire_all()
+    corrected = PreferenceRepository(session).get(row.id)
+    assert corrected.rule_text == "Prefer short realistic programs."
+    assert corrected.confirmation_state == PreferenceConfirmationState.CORRECTED
+
+    remove = client.post(f"/preferences/{row.id}/remove", follow_redirects=False)
+    assert remove.status_code == 303
+    session.expire_all()
+    assert PreferenceRepository(session).get(row.id).active is False
+
+
+def test_questions_form_shows_generator_choice(client, session, settings) -> None:
+    book_id, _, _, _, _ = _seed_generation_context(session, settings)
+    response = client.get(f"/questions?book_id={book_id}")
+    assert response.status_code == 200
+    assert 'name="generator"' in response.text
+    assert 'value="base"' in response.text
+    assert 'value="personalized"' in response.text
+
+
+def test_generate_form_accepts_personalized(client, session, settings, monkeypatch) -> None:
+    book_id, topic_id, subtopic_id, section_id, _ = _seed_generation_context(session, settings)
+
+    import app.web.routes.pages as pages
+
+    def fake_generation_service(request_session, **kwargs):
+        return GenerationService(request_session, client=FakeClient(), **kwargs)
+
+    monkeypatch.setattr(pages, "GenerationService", fake_generation_service)
+    monkeypatch.setattr(pages, "get_embedder", lambda settings=None: FakeEmbedder(dim=8))
+
+    response = client.post(
+        "/questions/generate",
+        data={
+            "topic_id": str(topic_id),
+            "subtopic_id": str(subtopic_id),
+            "difficulty": "medium",
+            "question_type": "debugging",
+            "book_id": str(book_id),
+            "section_ids": str(section_id),
+            "generator": "personalized",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    question_id = int(response.headers["location"].split("/")[-1])
+    question = QuestionRepository(session).get(question_id)
+    assert question.generator_name == "personalized-context"
+
+
+def test_question_detail_shows_personalization_evidence(client, session) -> None:
+    context = json.dumps(
+        {
+            "preference_ids": [7],
+            "retrieved_review_ids": [3, 5],
+            "profile_version": "1",
+            "generator": "personalized-context@1",
+        }
+    )
+    row = QuestionRepository(session).add(
+        QuestionRow(
+            prompt="Personalized prompt.",
+            original_prompt="Personalized prompt.",
+            reference_solution="pass",
+            original_reference_solution="pass",
+            tests="",
+            original_tests="",
+            generator_name="personalized-context",
+            generator_version="1",
+            status=QuestionStatus.VALIDATION_PASSED,
+            personalization_context_json=context,
+        )
+    )
+    session.commit()
+    assert row.id is not None
+
+    html = client.get(f"/questions/{row.id}").text
+    assert "Personalization evidence" in html
+    assert "Preference 7" in html or ">7<" in html
+    assert "Review 3" in html or ">3<" in html
+    assert "Review 5" in html or ">5<" in html

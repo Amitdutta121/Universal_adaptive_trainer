@@ -99,6 +99,12 @@
               {% endfor %}
             </select>
           </div>
+          <fieldset class="field">
+            <legend>Generator</legend>
+            <label><input type="radio" name="generator" value="base" checked> Base</label>
+            <label><input type="radio" name="generator" value="personalized"> Personalized</label>
+            <p class="hint">Personalized uses learned preferences and retrieved review examples.</p>
+          </fieldset>
           <div class="field">
             <label for="section-ids">Sections</label>
             <select id="section-ids" name="section_ids" multiple size="8">

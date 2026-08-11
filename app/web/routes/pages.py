@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import suppress
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -27,9 +27,11 @@ from app.curriculum import (
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.domain.enums import Difficulty, QuestionType, RejectionReason, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS, decode_reasons
+from app.domain.preferences import decode_review_ids
 from app.domain.questions import QuestionValidationReport
 from app.errors import (
     ConfigurationError,
+    DomainRuleError,
     FileTooLargeError,
     InvalidBookDocumentError,
     InvalidQuestionSpecError,
@@ -59,9 +61,17 @@ from app.persistence.repositories import (
     BookRepository,
     BookStructureRepository,
     CurriculumRepository,
+    PreferenceRepository,
     ProfessorReviewRepository,
     QuestionRepository,
 )
+from app.personalization import (
+    confirm_preference,
+    correct_preference,
+    refresh_preferences,
+    remove_preference,
+)
+from app.personalization.embeddings import get_embedder
 from app.web.templating import render
 
 logger = logging.getLogger(__name__)
@@ -416,10 +426,28 @@ def generate_questions(
     book_id: Annotated[int, Form()],
     section_ids: Annotated[list[int] | None, Form()] = None,
     all_sections: Annotated[str | None, Form()] = None,
+    generator: Annotated[str, Form()] = "base",
 ) -> Response:
     """Generate one persisted question for every selected source section."""
+    selected_generator: Literal["base", "personalized"] = (
+        "personalized" if generator == "personalized" else "base"
+    )
+    service_kwargs: dict[str, object] = {}
+    if selected_generator == "personalized":
+        try:
+            service_kwargs["embedder"] = get_embedder()
+        except ConfigurationError as exc:
+            session.rollback()
+            return _questions_page(
+                request,
+                session,
+                selected_book_id=book_id,
+                error=exc.message,
+                error_detail=exc.detail,
+                status_code=exc.status_code,
+            )
     try:
-        generated = GenerationService(session).generate_for_sections(
+        generated = GenerationService(session, **service_kwargs).generate_for_sections(
             curriculum_version_id=_approved_curriculum_id(session),
             topic_id=topic_id,
             subtopic_id=subtopic_id,
@@ -427,6 +455,7 @@ def generate_questions(
             difficulty=Difficulty(difficulty),
             source_section_ids=None if all_sections is not None else section_ids,
             book_id=book_id if all_sections is not None else None,
+            generator=selected_generator,
         )
     except ValueError as exc:
         session.rollback()
@@ -521,6 +550,17 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
                 )
                 if subtopic is not None:
                     taxonomy["subtopic"] = subtopic.name
+    personalization_evidence = None
+    if question.generator_name == "personalized-context" and question.personalization_context_json:
+        with suppress(json.JSONDecodeError, TypeError):
+            payload = json.loads(question.personalization_context_json)
+            if isinstance(payload, dict):
+                preference_ids = payload.get("preference_ids", [])
+                review_ids = payload.get("retrieved_review_ids", [])
+                personalization_evidence = {
+                    "preference_ids": preference_ids if isinstance(preference_ids, list) else [],
+                    "review_ids": review_ids if isinstance(review_ids, list) else [],
+                }
     return render(
         request,
         "question_detail.html",
@@ -542,6 +582,7 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
                 and pedagogical_eval.status is PedagogicalEvalStatus.ERROR
                 else None
             ),
+            "personalization_evidence": personalization_evidence,
         },
     )
 
@@ -583,6 +624,95 @@ def review_question(
         )
     session.commit()
     return RedirectResponse(url=f"/questions/{question_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _preference_rows(session: Session) -> list[dict[str, object]]:
+    rows = []
+    for pref in PreferenceRepository(session).list_all():
+        category = pref.category.value if hasattr(pref.category, "value") else pref.category
+        state = (
+            pref.confirmation_state.value
+            if hasattr(pref.confirmation_state, "value")
+            else pref.confirmation_state
+        )
+        rows.append(
+            {
+                "id": pref.id,
+                "rule_text": pref.rule_text,
+                "category_label": str(category).replace("_", " "),
+                "evidence_count": pref.evidence_count,
+                "confidence": pref.confidence,
+                "state": state,
+                "active": pref.active,
+                "review_ids": decode_review_ids(pref.supporting_review_ids_json),
+            }
+        )
+    return rows
+
+
+@router.get("/preferences", response_class=HTMLResponse, name="preferences")
+def preferences(
+    request: Request,
+    session: DbSession,
+    refreshed: int | None = None,
+) -> HTMLResponse:
+    return render(
+        request,
+        "preferences.html",
+        {
+            "page_title": "Preferences",
+            "active_section": "preferences",
+            "preferences": _preference_rows(session),
+            "refreshed_count": refreshed,
+        },
+    )
+
+
+@router.post("/preferences/refresh", name="refresh_preferences_page")
+def refresh_preferences_page(session: DbSession) -> RedirectResponse:
+    count = refresh_preferences(session)
+    return RedirectResponse(
+        url=f"/preferences?refreshed={count}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/preferences/{preference_id}/confirm", name="confirm_preference_page")
+def confirm_preference_page(session: DbSession, preference_id: int) -> RedirectResponse:
+    confirm_preference(session, preference_id)
+    return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/preferences/{preference_id}/correct", name="correct_preference_page")
+def correct_preference_page(
+    request: Request,
+    session: DbSession,
+    preference_id: int,
+    rule_text: Annotated[str, Form()],
+) -> Response:
+    try:
+        correct_preference(session, preference_id, rule_text)
+    except DomainRuleError as exc:
+        session.rollback()
+        return render(
+            request,
+            "preferences.html",
+            {
+                "page_title": "Preferences",
+                "active_section": "preferences",
+                "preferences": _preference_rows(session),
+                "error": exc.message,
+                "error_detail": exc.detail,
+            },
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/preferences/{preference_id}/remove", name="remove_preference_page")
+def remove_preference_page(session: DbSession, preference_id: int) -> RedirectResponse:
+    remove_preference(session, preference_id)
+    return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/feedback", response_class=HTMLResponse, name="feedback")

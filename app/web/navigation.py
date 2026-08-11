@@ -46,6 +46,12 @@ NAV_SECTIONS: tuple[NavSection, ...] = (
         summary="The approve / reject / edit history that teaches the generator your preferences.",
     ),
     NavSection(
+        key="preferences",
+        label="Preferences",
+        path="/preferences",
+        summary="Learned professor preferences from review history (manual refresh).",
+    ),
+    NavSection(
         key="students",
         label="Students",
         path="/students",
