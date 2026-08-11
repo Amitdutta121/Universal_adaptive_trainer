@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
 from app.errors import MalformedModelOutputError
+from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
 from app.ingestion import BookImportService, SourceRetrieval
@@ -32,6 +33,19 @@ class FakeClient:
         response_model: type[BaseModel],
     ) -> BaseModel:
         """Return the debugging draft used by the page tests."""
+        del system, prompt
+        if response_model is JudgeModelResponse:
+            return JudgeModelResponse(
+                dimensions=[
+                    DimensionEvaluation(
+                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
+                        score=5,
+                        applicable=True,
+                        confidence=1.0,
+                        rationale="Aligned.",
+                    )
+                ]
+            )
         return DebuggingDraft(
             prompt="Find the bug.",
             code="s = 'ab'\ns[0] = 'c'",

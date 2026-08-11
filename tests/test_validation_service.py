@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, QuestionStatus, QuestionType
 from app.domain.questions import Question
+from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.generation.schemas import OutputPredictionDraft
 from app.generation.service import GenerationService
 from app.ingestion import BookImportService
@@ -32,7 +33,19 @@ class FakeClient:
         prompt: str,
         response_model: type[BaseModel],
     ) -> BaseModel:
-        del system, prompt, response_model
+        del system, prompt
+        if response_model is JudgeModelResponse:
+            return JudgeModelResponse(
+                dimensions=[
+                    DimensionEvaluation(
+                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
+                        score=5,
+                        applicable=True,
+                        confidence=1.0,
+                        rationale="Aligned.",
+                    )
+                ]
+            )
         return OutputPredictionDraft(
             prompt="What is printed?",
             code="print(3)",

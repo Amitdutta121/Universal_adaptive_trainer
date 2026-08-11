@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, QuestionKind, QuestionType
+from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.generation.base import BaseQuestionGenerator
 from app.generation.schemas import RESPONSE_MODEL_FOR, DebuggingDraft
 from app.generation.service import GenerationService
@@ -39,6 +40,18 @@ class FakeClient:
     ) -> BaseModel:
         """Record the requested schema and return the configured typed draft."""
         self.calls.append({"system": system, "prompt": prompt, "model": response_model})
+        if response_model is JudgeModelResponse:
+            return JudgeModelResponse(
+                dimensions=[
+                    DimensionEvaluation(
+                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
+                        score=5,
+                        applicable=True,
+                        confidence=1.0,
+                        rationale="Aligned.",
+                    )
+                ]
+            )
         return self.draft
 
 

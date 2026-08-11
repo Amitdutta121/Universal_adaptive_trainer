@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.domain.enums import Difficulty, QuestionType
 from app.domain.questions import Question
 from app.errors import InvalidQuestionSpecError
+from app.evaluation import PedagogicalJudge, skipped_evaluation
 from app.generation.base import BaseQuestionGenerator
 from app.generation.spec import build_question_spec
 from app.ingestion import SourceRetrieval
@@ -24,6 +25,7 @@ class GenerationService:
         self._generator = BaseQuestionGenerator(
             session=session, client=client, retrieval=self._retrieval
         )
+        self._judge = PedagogicalJudge(session, client=client)
         self._curriculum = CurriculumRepository(session)
         self._questions = QuestionRepository(session)
 
@@ -80,6 +82,12 @@ class GenerationService:
             report = validator.validate(Question.model_validate(row))
             row.validation_report_json = report.model_dump_json()
             row.status = report.resulting_status()
+            if report.passed:
+                row.pedagogical_eval_json = self._judge.evaluate(
+                    Question.model_validate(row)
+                ).model_dump_json()
+            else:
+                row.pedagogical_eval_json = skipped_evaluation(question_id=row.id).model_dump_json()
             rows.append(row)
         self._session.commit()
         return rows
