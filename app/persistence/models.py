@@ -328,7 +328,13 @@ class ProfessorReviewRow(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"))
     decision: Mapped[ReviewDecision] = mapped_column(String(16))
+    reasons_json: Mapped[str | None] = mapped_column(Text, default="[]")
     comment: Mapped[str | None] = mapped_column(Text, default=None)
+    edited_prompt: Mapped[str | None] = mapped_column(Text, default=None)
+    edited_reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
+    edited_tests: Mapped[str | None] = mapped_column(Text, default=None)
+    changed_fields_json: Mapped[str | None] = mapped_column(Text, default=None)
+    professor_id: Mapped[int | None] = mapped_column(Integer, default=None)
     reviewed_generator_name: Mapped[str | None] = mapped_column(String(200), default=None)
     reviewed_generator_version: Mapped[str | None] = mapped_column(String(50), default=None)
 

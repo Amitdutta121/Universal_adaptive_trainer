@@ -316,3 +316,21 @@ class ProfessorReviewRepository:
         self._session.add(review)
         self._session.flush()
         return review
+
+    def count_by_decision(self) -> dict[str, int]:
+        stmt = select(ProfessorReviewRow.decision, func.count()).group_by(
+            ProfessorReviewRow.decision
+        )
+        return {str(decision): count for decision, count in self._session.execute(stmt)}
+
+    def reason_counts(self) -> dict[str, int]:
+        """Count structured reasons across all reviews (Python-side JSON parse)."""
+        from app.domain.feedback import decode_reasons
+
+        counts: dict[str, int] = {}
+        rows = self._session.scalars(select(ProfessorReviewRow.reasons_json)).all()
+        for raw in rows:
+            for reason in decode_reasons(raw):
+                key = reason.value
+                counts[key] = counts.get(key, 0) + 1
+        return counts
