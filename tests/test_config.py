@@ -21,14 +21,27 @@ def test_defaults_are_development_and_sqlite() -> None:
     assert settings.port == 8000
 
 
+def test_llm_defaults_are_openrouter_deepseek() -> None:
+    settings = _settings()
+    assert settings.llm_provider is LLMProvider.OPENROUTER
+    assert settings.llm_model == "deepseek/deepseek-chat"
+
+
+def test_anthropic_and_openai_providers_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _settings(llm_provider="anthropic")
+    with pytest.raises(ValidationError):
+        _settings(llm_provider="openai")
+
+
 def test_llm_is_not_configured_without_a_key() -> None:
-    settings = _settings(llm_provider=LLMProvider.ANTHROPIC, llm_api_key=None)
+    settings = _settings(llm_provider=LLMProvider.OPENROUTER, llm_api_key=None)
     assert settings.llm_configured is False
     assert "no API key configured" in settings.describe_llm()
 
 
 def test_llm_is_configured_with_provider_and_key() -> None:
-    settings = _settings(llm_provider=LLMProvider.ANTHROPIC, llm_api_key="sk-test-123")
+    settings = _settings(llm_provider=LLMProvider.OPENROUTER, llm_api_key="sk-test-123")
     assert settings.llm_configured is True
 
 
@@ -40,7 +53,7 @@ def test_llm_provider_none_is_never_configured() -> None:
 
 def test_describe_llm_never_leaks_the_key() -> None:
     secret = "sk-super-secret-value"
-    settings = _settings(llm_provider=LLMProvider.ANTHROPIC, llm_api_key=secret)
+    settings = _settings(llm_provider=LLMProvider.OPENROUTER, llm_api_key=secret)
     assert secret not in settings.describe_llm()
     assert secret not in repr(settings)
 

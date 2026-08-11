@@ -29,20 +29,11 @@ class Environment(StrEnum):
 class LLMProvider(StrEnum):
     """Supported LLM providers.
 
-    ``NONE`` is a first-class value: the professor UI must remain runnable with
-    no credentials configured, with LLM-backed features reported as unavailable
-    rather than crashing.
-
-    ``OPENROUTER`` is a separate value rather than "OpenAI with a base URL"
-    because the two differ in ways the client must know about: OpenRouter's model
-    names are namespaced (``deepseek/deepseek-chat``), it wants its own
-    attribution headers, and not every model it routes to honours strict JSON
-    Schema. Folding it into ``OPENAI`` would hide those differences behind a
-    setting the professor has to get right by hand.
+    ``NONE`` keeps the UI runnable without credentials (ADR-010).
+    ``OPENROUTER`` is the only live transport (ADR-020): DeepSeek and other
+    routes are selected with ``LLM_MODEL``, not with extra provider values.
     """
 
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
     OPENROUTER = "openrouter"
     NONE = "none"
 
@@ -74,8 +65,8 @@ class Settings(BaseSettings):
     database_echo: bool = False
 
     # -- LLM provider -------------------------------------------------------
-    llm_provider: LLMProvider = LLMProvider.ANTHROPIC
-    llm_model: str = "claude-sonnet-5"
+    llm_provider: LLMProvider = LLMProvider.OPENROUTER
+    llm_model: str = "deepseek/deepseek-chat"
     llm_api_key: SecretStr | None = None
     llm_base_url: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0)

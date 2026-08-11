@@ -187,7 +187,7 @@ class TestLLMBoundary:
         from app.config import LLMProvider, Settings
 
         settings = Settings(  # type: ignore[call-arg]
-            _env_file=None, llm_provider=LLMProvider.ANTHROPIC, llm_api_key="sk-test"
+            _env_file=None, llm_provider=LLMProvider.OPENROUTER, llm_api_key="sk-test"
         )
         assert require_llm(settings) is settings
 
@@ -195,7 +195,7 @@ class TestLLMBoundary:
         from app.config import LLMProvider, Settings
 
         settings = Settings(  # type: ignore[call-arg]
-            _env_file=None, llm_provider=LLMProvider.ANTHROPIC, llm_api_key="sk-hidden"
+            _env_file=None, llm_provider=LLMProvider.OPENROUTER, llm_api_key="sk-hidden"
         )
         configured, description = describe_availability(settings)
         assert configured is True
