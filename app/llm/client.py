@@ -62,6 +62,25 @@ def _as_request_error(exc: openai.OpenAIError) -> LLMRequestError:
     )
 
 
+def _find_wrapped_openai_error(exc: BaseException) -> openai.OpenAIError | None:
+    """Return an SDK failure preserved by an Instructor exception, if any."""
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, openai.OpenAIError):
+            return current
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        failed_attempts = getattr(current, "failed_attempts", None)
+        if failed_attempts:
+            pending.extend(attempt.exception for attempt in failed_attempts)
+    return None
+
+
 class InstructorStructuredClient:
     """Structured Pydantic completion through Instructor and OpenRouter."""
 
@@ -119,6 +138,8 @@ class InstructorStructuredClient:
             ResponseParsingError,
             ValidationError,
         ) as exc:
+            if provider_error := _find_wrapped_openai_error(exc):
+                raise _as_request_error(provider_error) from exc
             raise MalformedModelOutputError(
                 "The model did not return a usable structured answer.",
                 detail=f"{type(exc).__name__}: {str(exc)[:400]}",

@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import openai
 import pytest
+from instructor.core import InstructorRetryException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.config import LLMProvider, Settings
@@ -109,6 +110,28 @@ class TestInstructorStructuredClient:
         client, _, _ = client_with_create(monkeypatch, create)
 
         with pytest.raises(LLMRequestError):
+            complete(client)
+
+    def test_maps_instructor_wrapped_openai_failure_to_request_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def create(**kwargs: Any) -> Answer:
+            request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+            provider_error = openai.APIStatusError(
+                "OpenRouter is unavailable.",
+                response=httpx.Response(503, request=request),
+                body={"error": "Service unavailable."},
+            )
+            retry_error = InstructorRetryException(
+                "Instructor request failed.",
+                n_attempts=1,
+                total_usage=0,
+            )
+            raise retry_error from provider_error
+
+        client, _, _ = client_with_create(monkeypatch, create)
+
+        with pytest.raises(LLMRequestError, match="HTTP 503"):
             complete(client)
 
     def test_uses_default_openrouter_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
