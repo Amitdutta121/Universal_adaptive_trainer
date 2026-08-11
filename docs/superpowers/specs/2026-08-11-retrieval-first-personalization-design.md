@@ -154,7 +154,7 @@ For one `QuestionSpec`, retrieve up to:
 
 **Combined:**  
 `final = 0.6 * meta_normalized + 0.4 * cosine`  
-(weights fixed in code; tunable later via settings if needed)
+(weights fixed as constants in v1)
 
 Within each outcome bucket (approved/edited vs rejected), take top-N by `final`.
 
