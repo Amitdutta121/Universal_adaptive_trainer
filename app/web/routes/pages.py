@@ -529,7 +529,8 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "pedagogical_eval": pedagogical_eval,
             "pedagogical_error_message": (
                 humanize_judge_error_detail(pedagogical_eval.error_detail)
-                if pedagogical_eval is not None and pedagogical_eval.status.value == "error"
+                if pedagogical_eval is not None
+                and pedagogical_eval.status is PedagogicalEvalStatus.ERROR
                 else None
             ),
         },
