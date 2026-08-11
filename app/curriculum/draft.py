@@ -152,7 +152,7 @@ class ExtractionMetadata(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    #: Provider and model, e.g. "anthropic/claude-sonnet-5". Never a credential.
+    #: Provider and model, e.g. "openrouter/deepseek/deepseek-chat". Never a credential.
     generated_by: str = Field(min_length=1)
     stage_a_version: str = Field(min_length=1)
     stage_b_version: str = Field(min_length=1)

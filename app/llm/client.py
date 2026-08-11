@@ -7,14 +7,7 @@ from typing import Protocol, TypeVar
 
 import instructor
 import openai
-from instructor.core import (
-    IncompleteOutputException,
-    InstructorRetryException,
-    ResponseParsingError,
-)
-from instructor.core import (
-    ValidationError as InstructorValidationError,
-)
+from instructor.core import InstructorError
 from pydantic import BaseModel, ValidationError
 
 from app.config import LLMProvider, Settings, get_settings
@@ -81,6 +74,15 @@ def _find_wrapped_openai_error(exc: BaseException) -> openai.OpenAIError | None:
     return None
 
 
+def _malformed_output_detail(exc: BaseException) -> str:
+    """Return the most useful bounded detail from a structured-output failure."""
+    failed_attempts = getattr(exc, "failed_attempts", None)
+    if failed_attempts:
+        last_exception = failed_attempts[-1].exception
+        return f"{type(last_exception).__name__}: {str(last_exception)[:400]}"
+    return f"{type(exc).__name__}: {str(exc)[:400]}"
+
+
 class InstructorStructuredClient:
     """Structured Pydantic completion through Instructor and OpenRouter."""
 
@@ -131,23 +133,12 @@ class InstructorStructuredClient:
             )
         except openai.OpenAIError as exc:
             raise _as_request_error(exc) from exc
-        except (
-            IncompleteOutputException,
-            InstructorRetryException,
-            InstructorValidationError,
-            ResponseParsingError,
-            ValidationError,
-        ) as exc:
+        except (InstructorError, ValidationError) as exc:
             if provider_error := _find_wrapped_openai_error(exc):
                 raise _as_request_error(provider_error) from exc
             raise MalformedModelOutputError(
                 "The model did not return a usable structured answer.",
-                detail=f"{type(exc).__name__}: {str(exc)[:400]}",
-            ) from exc
-        except Exception as exc:
-            raise MalformedModelOutputError(
-                "The model did not return a usable structured answer.",
-                detail=f"{type(exc).__name__}: {str(exc)[:400]}",
+                detail=_malformed_output_detail(exc),
             ) from exc
 
 

@@ -155,7 +155,7 @@ class CurriculumVersionRow(TimestampMixin, Base):
     #: Which books grounded this proposal, JSON-encoded list of book ids. A
     #: professor reviewing a proposal needs to know what it was derived from.
     source_book_ids_json: Mapped[str | None] = mapped_column(Text, default=None)
-    #: Provider and model that produced it, e.g. "anthropic/claude-sonnet-5".
+    #: Provider and model that produced it, e.g. "openrouter/deepseek/deepseek-chat".
     #: Never a credential. Empty for a version not built by the proposer.
     generated_by: Mapped[str | None] = mapped_column(String(200), default=None)
     #: Stage versions, counts and timings, JSON-encoded. Proposals must stay

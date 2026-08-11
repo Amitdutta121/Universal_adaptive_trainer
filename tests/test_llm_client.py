@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import instructor
 import openai
 import pytest
-from instructor.core import InstructorRetryException
+from instructor.core import FailedAttempt, InstructorRetryException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.config import LLMProvider, Settings
@@ -134,6 +135,38 @@ class TestInstructorStructuredClient:
         with pytest.raises(LLMRequestError, match="HTTP 503"):
             complete(client)
 
+    def test_unexpected_errors_propagate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def create(**kwargs: Any) -> Answer:
+            raise RuntimeError("unexpected implementation failure")
+
+        client, _, _ = client_with_create(monkeypatch, create)
+
+        with pytest.raises(RuntimeError, match="unexpected implementation failure"):
+            complete(client)
+
+    def test_uses_last_instructor_attempt_for_malformed_output_detail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def create(**kwargs: Any) -> Answer:
+            raise InstructorRetryException(
+                "Instructor request failed.",
+                n_attempts=1,
+                total_usage=0,
+                failed_attempts=[
+                    FailedAttempt(
+                        attempt_number=1,
+                        exception=ValueError("response omitted required value"),
+                    )
+                ],
+            )
+
+        client, _, _ = client_with_create(monkeypatch, create)
+
+        with pytest.raises(MalformedModelOutputError) as error:
+            complete(client)
+
+        assert error.value.detail == "ValueError: response omitted required value"
+
     def test_uses_default_openrouter_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client, openai_kwargs, _ = client_with_create(
             monkeypatch, lambda **kwargs: Answer(value="42")
@@ -142,6 +175,69 @@ class TestInstructorStructuredClient:
         assert client.description == "openrouter/deepseek/deepseek-chat"
         assert openai_kwargs["base_url"] == OPENROUTER_BASE_URL
         assert openai_kwargs["max_retries"] == 1
+
+    def test_uses_configured_openrouter_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        custom_url = "https://openrouter.example/api/v1"
+        openai_calls: list[dict[str, Any]] = []
+
+        def build_openai(**kwargs: Any) -> object:
+            openai_calls.append(kwargs)
+            return object()
+
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **kwargs: Answer(value="42"))
+            )
+        )
+        monkeypatch.setattr(client_module.openai, "OpenAI", build_openai)
+        monkeypatch.setattr(
+            client_module.instructor, "from_openai", lambda raw, *, mode: fake_client
+        )
+
+        InstructorStructuredClient(openrouter_settings(llm_base_url=custom_url))
+
+        assert openai_calls[0]["base_url"] == custom_url
+
+    def test_sends_openrouter_json_request_without_retries(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "deepseek/deepseek-chat",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": '{"value": "42"}'},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+
+        client = InstructorStructuredClient(openrouter_settings())
+        raw = openai.OpenAI(
+            api_key="sk-or-test",
+            base_url=OPENROUTER_BASE_URL,
+            max_retries=0,
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        client._client = instructor.from_openai(raw, mode=instructor.Mode.JSON)
+
+        assert complete(client).value == "42"
+        assert len(requests) == 1
+        assert str(requests[0].url) == "https://openrouter.ai/api/v1/chat/completions"
+
+        body = httpx.Response(200, content=requests[0].content).json()
+        assert body["provider"] == {"data_collection": "deny"}
+        assert "require_parameters" not in body
+        assert body["response_format"]["type"] == "json_object"
 
     def test_description_never_contains_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client, _, _ = client_with_create(monkeypatch, lambda **kwargs: Answer(value="42"))

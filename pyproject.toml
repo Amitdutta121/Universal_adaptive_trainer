@@ -13,12 +13,13 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     # Structured LLM calls via Instructor over OpenRouter (app/llm/client.py).
     # See docs/DECISIONS.md ADR-020.
-    "instructor>=1.7",
+    "instructor>=1.15",
     "openai>=1.60",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.27",
     "pytest>=8.3",
     "ruff>=0.7",
 ]
