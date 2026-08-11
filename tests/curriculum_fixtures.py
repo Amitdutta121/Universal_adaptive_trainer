@@ -16,6 +16,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
+from app.curriculum.schema import SectionAnalysis
+from app.errors import MalformedModelOutputError
+
 SCHEMA_VERSION = "1"
 
 
@@ -172,14 +177,20 @@ class ScriptedClient:
         *,
         system: str,
         prompt: str,
-        schema_name: str,
-        schema_description: str,
-        json_schema: dict[str, Any],
-    ) -> dict[str, Any]:
-        self.prompts.append((schema_name, prompt))
-        if schema_name == "record_section_analysis":
-            return self._analyse(prompt)
-        return self._normalize(prompt)
+        response_model: type[BaseModel],
+    ) -> BaseModel:
+        self.prompts.append((response_model.__name__, prompt))
+        if response_model is SectionAnalysis or response_model.__name__ == "SectionAnalysis":
+            payload = self._analyse(prompt)
+        else:
+            payload = self._normalize(prompt)
+        try:
+            return response_model.model_validate(payload)
+        except ValidationError as exc:
+            raise MalformedModelOutputError(
+                "The model did not return a usable structured answer.",
+                detail=str(exc)[:400],
+            ) from exc
 
     def _analyse(self, prompt: str) -> dict[str, Any]:
         if self._stage_a_override is not None:

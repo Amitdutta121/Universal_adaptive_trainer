@@ -43,20 +43,12 @@ from app.curriculum.draft import (
 from app.curriculum.schema import (
     ConceptGroup,
     NormalizationResult,
-    json_schema_for,
-    parse_structured,
 )
 from app.curriculum.stable_ids import normalize_label, subtopic_stable_id, topic_stable_id
 from app.errors import MalformedModelOutputError
 from app.llm import StructuredLLMClient
 
 logger = logging.getLogger(__name__)
-
-SCHEMA_NAME = "record_normalized_concepts"
-SCHEMA_DESCRIPTION = (
-    "Consolidate candidate concepts collected from several textbooks into one "
-    "Topic -> Subtopic vocabulary."
-)
 
 #: Definitions are shortened in the Stage B prompt: the model needs enough to
 #: judge equivalence, not the whole analysis of every section in every book.
@@ -118,14 +110,11 @@ class CrossBookNormalizer:
                 "Cannot normalise an empty candidate set.",
                 detail="Stage A produced no candidate concepts.",
             )
-        payload = self._client.complete_structured(
+        result = self._client.complete_structured(
             system=SYSTEM_PROMPT,
             prompt=build_normalization_prompt(candidates),
-            schema_name=SCHEMA_NAME,
-            schema_description=SCHEMA_DESCRIPTION,
-            json_schema=json_schema_for(NormalizationResult),
+            response_model=NormalizationResult,
         )
-        result = parse_structured(NormalizationResult, payload, stage="normalization")
         logger.debug(
             "Normalised %d candidate(s) into %d group(s)", len(candidates), len(result.groups)
         )

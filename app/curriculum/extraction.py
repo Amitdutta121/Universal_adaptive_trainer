@@ -29,18 +29,11 @@ from app.config import Settings, get_settings
 from app.curriculum.schema import (
     MAX_CONCEPTS_PER_SECTION,
     SectionAnalysis,
-    json_schema_for,
-    parse_structured,
 )
 from app.domain.books import BookSection, SectionSource
 from app.llm import StructuredLLMClient
 
 logger = logging.getLogger(__name__)
-
-SCHEMA_NAME = "record_section_analysis"
-SCHEMA_DESCRIPTION = (
-    "Record what one textbook section teaches, and the assessable concepts it introduces."
-)
 
 SYSTEM_PROMPT = """\
 You are helping build a knowledge-component model for an introductory Python \
@@ -109,14 +102,11 @@ class SectionConceptExtractor:
             MalformedModelOutputError: the response did not satisfy the schema.
         """
         text, truncated = self._fit_to_budget(section.text)
-        payload = self._client.complete_structured(
+        analysis = self._client.complete_structured(
             system=SYSTEM_PROMPT.format(max_concepts=MAX_CONCEPTS_PER_SECTION),
             prompt=_build_prompt(section, source, text, truncated),
-            schema_name=SCHEMA_NAME,
-            schema_description=SCHEMA_DESCRIPTION,
-            json_schema=json_schema_for(SectionAnalysis),
+            response_model=SectionAnalysis,
         )
-        analysis = parse_structured(SectionAnalysis, payload, stage="section analysis")
         logger.debug(
             "Analysed section %s: instructional=%s, %d concept(s)",
             source.section_id,

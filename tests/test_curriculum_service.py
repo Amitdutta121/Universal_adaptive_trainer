@@ -144,7 +144,7 @@ class TestNonInstructionalContent:
         client = fixtures.ScriptedClient()
         version = propose(three_books, settings, client=client)
 
-        analysed = [prompt for name, prompt in client.prompts if name == "record_section_analysis"]
+        analysed = [prompt for name, prompt in client.prompts if name == "SectionAnalysis"]
         assert any("About This Book" in prompt for prompt in analysed)
 
         labels = {
