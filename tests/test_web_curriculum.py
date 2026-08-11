@@ -43,8 +43,19 @@ def test_taxonomy_upload_creates_approved_version(client: TestClient, session: S
     version_page = client.get(response.headers["location"])
     assert version_page.status_code == 200
     assert "Uploaded fixed taxonomy" in version_page.text
+    assert "Loops" in version_page.text
+    assert "While loops" in version_page.text
+    assert "0 supporting sections" not in version_page.text
+    assert "Stable identifier (survives display-name edits)" in version_page.text
     assert "Section analysis" not in version_page.text
     assert "Cross-book normalization" not in version_page.text
+
+    tree = CurriculumRepository(session).get_with_tree(version.id)
+    subtopic_page = client.get(f"/curriculum/subtopics/{tree.topics[0].subtopics[0].id}")
+    assert subtopic_page.status_code == 200
+    assert "While loops" in subtopic_page.text
+    assert "No supporting sections were recorded for this subtopic." in subtopic_page.text
+    assert "No grouping rationale was recorded." in subtopic_page.text
 
 
 def test_invalid_taxonomy_json_stays_on_curriculum_page(client: TestClient) -> None:
@@ -53,7 +64,7 @@ def test_invalid_taxonomy_json_stays_on_curriculum_page(client: TestClient) -> N
         files={"file": ("taxonomy.json", b"{not json", "application/json")},
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert "Could not upload taxonomy" in response.text
     assert "not valid UTF-8 JSON" in response.text
     assert "No curriculum versions exist yet" in response.text

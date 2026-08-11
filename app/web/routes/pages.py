@@ -249,11 +249,7 @@ def upload_taxonomy(
             session,
             error=exc.message,
             error_detail=exc.detail,
-            status_code=(
-                status.HTTP_400_BAD_REQUEST
-                if isinstance(exc, InvalidTaxonomyDocumentError)
-                else exc.status_code
-            ),
+            status_code=exc.status_code,
         )
 
     session.commit()
