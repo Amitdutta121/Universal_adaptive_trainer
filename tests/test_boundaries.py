@@ -221,9 +221,10 @@ def test_question_validation_returns_a_report() -> None:
     assert report.passed is False
 
 
-def test_preference_learning_fails_loudly() -> None:
-    with pytest.raises(FeatureNotAvailableError):
-        get_preference_learner().build_profile(1)
+def test_preference_learning_builds_profile(session) -> None:
+    profile = get_preference_learner().build_profile(1)
+    assert profile.profile_version == "1"
+    assert profile.review_count >= 0
 
 
 def test_adaptive_engine_fails_loudly() -> None:
@@ -263,16 +264,15 @@ class TestLLMBoundary:
 
 def test_the_two_loops_do_not_import_each_other() -> None:
     """Student adaptation and professor content optimization stay separate."""
-    adaptive_source = importlib.import_module("app.adaptive").__file__
-    personalization_source = importlib.import_module("app.personalization").__file__
-    assert adaptive_source and personalization_source
+    adaptive_root = Path(importlib.import_module("app.adaptive").__file__).parent
+    personalization_root = Path(importlib.import_module("app.personalization").__file__).parent
 
-    from pathlib import Path
+    for path in adaptive_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "import app.personalization" not in text
+        assert "from app.personalization" not in text
 
-    adaptive_text = Path(adaptive_source).read_text(encoding="utf-8")
-    personalization_text = Path(personalization_source).read_text(encoding="utf-8")
-
-    assert "import app.personalization" not in adaptive_text
-    assert "from app.personalization" not in adaptive_text
-    assert "import app.adaptive" not in personalization_text
-    assert "from app.adaptive" not in personalization_text
+    for path in personalization_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "import app.adaptive" not in text
+        assert "from app.adaptive" not in text

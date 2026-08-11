@@ -7,7 +7,8 @@ Responsibility
     generator itself.
 
 Status
-    **Not implemented in this task.** Only the seam exists.
+    Preference extraction, merge, refresh, and professor confirm/correct/remove
+    actions are implemented. Personalized generation is deferred.
 
 Key rules
     * Input is professor feedback only. Student performance belongs to the
@@ -28,7 +29,16 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 
-from app.errors import FeatureNotAvailableError
+from app.domain.preferences import PROFILE_VERSION
+from app.persistence.database import session_scope
+from app.persistence.repositories import ProfessorReviewRepository
+from app.personalization.service import (
+    confirm_preference,
+    correct_preference,
+    list_active_preferences,
+    refresh_preferences,
+    remove_preference,
+)
 
 
 class ProfessorPreferenceProfile(BaseModel):
@@ -55,16 +65,32 @@ class PreferenceLearner(Protocol):
     def build_profile(self, professor_id: int) -> ProfessorPreferenceProfile: ...
 
 
-class NullPreferenceLearner:
-    """Placeholder learner. Raises rather than returning an empty profile."""
+class ReviewPreferenceLearner:
+    """Build a thin profile summary from stored review history."""
 
     def build_profile(self, professor_id: int) -> ProfessorPreferenceProfile:
-        raise FeatureNotAvailableError(
-            "Professor preference learning is not implemented yet.",
-            detail=f"Requested profile for professor {professor_id}.",
+        with session_scope() as session:
+            count = ProfessorReviewRepository(session).count()
+        return ProfessorPreferenceProfile(
+            professor_id=professor_id,
+            review_count=count,
+            profile_version=PROFILE_VERSION,
         )
 
 
 def get_preference_learner() -> PreferenceLearner:
-    """Return the configured learner. Currently always the null implementation."""
-    return NullPreferenceLearner()
+    """Return the configured learner."""
+    return ReviewPreferenceLearner()
+
+
+__all__ = [
+    "PreferenceLearner",
+    "ProfessorPreferenceProfile",
+    "ReviewPreferenceLearner",
+    "confirm_preference",
+    "correct_preference",
+    "get_preference_learner",
+    "list_active_preferences",
+    "refresh_preferences",
+    "remove_preference",
+]
