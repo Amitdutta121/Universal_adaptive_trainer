@@ -12,10 +12,12 @@ Implemented so far:
 - the project foundation — module boundaries, configuration, logging, error handling, persistence,
   tests;
 - **textbook ingestion** — import a structured book JSON document, then browse its chapters and
-  sections with full source traceability.
+  sections with full source traceability;
+- **curriculum taxonomy upload** — import a fixed Topic → Subtopic taxonomy JSON on
+  `/curriculum`; a valid upload becomes the approved curriculum version immediately.
 
-Not implemented yet: curriculum extraction, LLM question generation, question validation,
-professor preference learning, and the student adaptive engine — see `docs/DECISIONS.md` (ADR-009).
+Not implemented yet: LLM question generation, question validation, professor preference learning,
+and the student adaptive engine — see `docs/DECISIONS.md` (ADR-009).
 
 ### Books are imported as JSON
 
@@ -50,6 +52,39 @@ Every chapter needs ≥1 section and every section needs non-empty `text`. `titl
 the source printed no heading — never invent one. Unknown fields are rejected rather than ignored,
 and an invalid document is refused in full before anything is stored.
 
+### Curriculum is uploaded as JSON
+
+The application accepts **only structured taxonomy JSON**: a document that declares its own
+Topic → Subtopic hierarchy. Supply a valid document on `/curriculum` and it is validated
+strictly, then stored as an **approved** curriculum version. The application does **not** derive
+curriculum from books or through an LLM (`docs/DECISIONS.md` ADR-021).
+
+`docs/taxonomy_document_example.json` is a complete, valid example, and the Curriculum page shows
+the required shape inline. In brief:
+
+```json
+{
+  "schema_version": "1",
+  "label": "Introductory Python",
+  "topics": [
+    {
+      "name": "Variables",
+      "description": "Creating names, assigning values, and understanding types.",
+      "subtopics": [
+        {
+          "name": "Assignment and rebinding",
+          "description": "Using = to bind a name to a value and reassign it later."
+        }
+      ]
+    }
+  ]
+}
+```
+
+Every topic needs ≥1 subtopic. Unknown fields are rejected rather than ignored, and an invalid
+document is refused in full before anything is stored. Each valid upload creates a new approved
+version; the latest approved version is used for question generation.
+
 > **Note:** this stage changed the `books`, `book_chapters` and `book_sections` tables and there is
 > no migration tool yet. If you have an older `data/adaptive_trainer.db`, delete it and let it be
 > recreated. The app tells you so explicitly at startup rather than failing later (ADR-014).
@@ -73,7 +108,8 @@ Copy-Item .env.example .env
 
 ### LLM provider
 
-Curriculum proposal (and later question generation) needs a provider. Set these in `.env`:
+Question generation (when implemented) needs a provider. Curriculum upload does not. Set these
+in `.env`:
 
 | Provider   | `LLM_PROVIDER` | `LLM_MODEL` example      | Key format   |
 | ---------- | -------------- | ------------------------ | ------------ |
@@ -116,7 +152,7 @@ Equivalent, if you prefer driving uvicorn directly:
 | -------------------------------------------------------- | ------------------------------------------------ |
 | [/](http://127.0.0.1:8000/)                              | Dashboard: counts, environment, LLM status       |
 | [/books](http://127.0.0.1:8000/books)                    | Import book JSON; browse chapters and sections   |
-| [/curriculum](http://127.0.0.1:8000/curriculum)          | Versioned Topic → Subtopic curriculum            |
+| [/curriculum](http://127.0.0.1:8000/curriculum)          | Upload taxonomy JSON; browse approved versions   |
 | [/questions](http://127.0.0.1:8000/questions)            | Generated question bank                          |
 | [/feedback](http://127.0.0.1:8000/feedback)              | Professor approve / reject / edit history         |
 | [/students](http://127.0.0.1:8000/students)              | Adaptive training (fixed mechanism, not built)   |

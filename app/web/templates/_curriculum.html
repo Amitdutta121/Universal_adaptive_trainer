@@ -1,5 +1,5 @@
 {# Shared rendering of a proposed Topic → Subtopic hierarchy, so the index and
-   the full proposal page cannot drift apart. #}
+   the full version page cannot drift apart. #}
 
 {% macro subtopic_counts(subtopic) -%}
   {%- set sections = subtopic.evidence | map(attribute="section_id") | unique | list -%}

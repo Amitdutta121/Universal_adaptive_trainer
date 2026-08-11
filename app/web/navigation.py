@@ -31,7 +31,7 @@ NAV_SECTIONS: tuple[NavSection, ...] = (
         key="curriculum",
         label="Curriculum",
         path="/curriculum",
-        summary="Review, edit and approve the proposed Topic → Subtopic curriculum.",
+        summary="Upload a fixed Topic → Subtopic taxonomy JSON for adaptive training.",
     ),
     NavSection(
         key="questions",

@@ -549,6 +549,12 @@ path available even though its output is no longer part of the product workflow.
 - The former Stage A/B extraction, normalization, draft assembly and structural-check modules are
   deleted, along with their configuration limits and proposal-specific error.
 - `app/curriculum/` exports taxonomy import, schema version and display decoders only.
+- A valid upload is written as **APPROVED** immediately; question generation and the UI treat the
+  latest approved version as authoritative (ADR-002).
+- Stable ids are assigned from topic and subtopic names at import (`app/curriculum/taxonomy_ids.py`)
+  and survive later display-name edits.
+- Uploaded taxonomies do not require textbook evidence, candidate labels, grouping rationales or
+  model metadata.
 - Existing LLM-generated database rows remain renderable; the display decoders tolerate null or
   malformed legacy metadata without restoring any generation capability.
 - Taxonomy pages do not imply that uploaded subtopics contain textbook evidence, grouping

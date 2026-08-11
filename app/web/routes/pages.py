@@ -264,7 +264,7 @@ def upload_taxonomy(
     name="curriculum_version",
 )
 def curriculum_version(request: Request, session: DbSession, version_id: int) -> HTMLResponse:
-    """One proposal: the Topic -> Subtopic hierarchy with its supporting evidence."""
+    """One curriculum version: the Topic -> Subtopic hierarchy."""
     repo = CurriculumRepository(session)
     version = repo.get_with_tree(version_id)
     book_ids = decode_json_list(version.source_book_ids_json)
@@ -273,8 +273,8 @@ def curriculum_version(request: Request, session: DbSession, version_id: int) ->
         try:
             books.append(BookRepository(session).get(int(book_id)))
         except (NotFoundError, ValueError, TypeError):
-            # A book removed after the proposal was made: show what remains
-            # rather than failing the page the professor came to review.
+            # A book removed after a legacy version was created: show what remains
+            # rather than failing the page the professor came to inspect.
             continue
     return render(
         request,
@@ -297,7 +297,7 @@ def curriculum_version(request: Request, session: DbSession, version_id: int) ->
     name="curriculum_subtopic",
 )
 def curriculum_subtopic(request: Request, session: DbSession, subtopic_id: int) -> HTMLResponse:
-    """One proposed subtopic: definition, sources, evidence and why it was merged."""
+    """One subtopic: definition and, for legacy rows, textbook evidence."""
     subtopic = CurriculumRepository(session).get_subtopic(subtopic_id)
     evidence = [
         {

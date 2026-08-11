@@ -12,8 +12,8 @@ A professor should eventually be able to:
 
 1. upload several introductory Python textbooks;
 2. inspect the extracted textbook structure;
-3. have the system automatically propose a Topic → Subtopic curriculum;
-4. review, edit and approve that curriculum;
+3. upload a fixed Topic → Subtopic taxonomy JSON;
+4. inspect the approved curriculum hierarchy;
 5. generate Python assessment questions grounded in the approved books and curriculum;
 6. have those questions validated automatically;
 7. approve, reject or edit generated questions;
@@ -184,7 +184,8 @@ app/
   web/                Routers, templates, static assets, middleware
 tests/                pytest suite mirroring the modules above
 docs/DECISIONS.md     Architectural decision log
-docs/book_document_example.json  A valid book document, kept valid by a test
+docs/book_document_example.json     A valid book document, kept valid by a test
+docs/taxonomy_document_example.json A valid taxonomy document, kept valid by a test
 ```
 
 Dependency direction: `web` → subsystems → `domain` / `persistence` / `config`. `domain` imports
