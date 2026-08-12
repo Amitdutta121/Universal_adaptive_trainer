@@ -89,6 +89,22 @@ def test_environment_variables_are_read(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings.llm_model == "some-model"
 
 
+def test_cors_origins_default_to_the_react_dev_servers() -> None:
+    assert _settings().cors_allow_origins == [
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
+
+
+def test_cors_origins_are_read_as_a_comma_separated_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ALLOW_ORIGINS", "http://localhost:5173, https://app.example.com/ ")
+    assert Settings().cors_allow_origins == ["http://localhost:5173", "https://app.example.com"]
+
+
+def test_empty_cors_origins_disable_cors() -> None:
+    assert _settings(cors_allow_origins="").cors_allow_origins == []
+
+
 def test_invalid_port_is_rejected() -> None:
     with pytest.raises(ValidationError):
         _settings(port=0)

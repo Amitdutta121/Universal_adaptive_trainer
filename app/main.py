@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -60,6 +61,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     app.add_middleware(RequestLoggingMiddleware)
+    if settings.cors_allow_origins:
+        # Added last so it is the outermost middleware: an error response must
+        # still carry the CORS headers, or the browser reports a CORS failure
+        # instead of the actual status the API returned.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_allow_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     app.include_router(pages_router)

@@ -32,6 +32,7 @@ TEST_ENV: dict[str, str] = {
     "LLM_PROVIDER": "none",
     "LLM_API_KEY": "",
     "LLM_BASE_URL": "",
+    "CORS_ALLOW_ORIGINS": "http://localhost:5173",
 }
 
 

@@ -11,9 +11,10 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, SecretStr, computed_field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -78,6 +79,16 @@ class Settings(BaseSettings):
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)
 
+    # -- Browser clients ----------------------------------------------------
+    # Origins allowed to call /api from a browser. Defaults cover the Vite and
+    # create-react-app development servers; set explicitly in production.
+    # ``NoDecode`` keeps pydantic-settings from JSON-decoding the raw value so
+    # that a plain comma-separated list works in a ``.env`` file.
+    cors_allow_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalise_log_level(cls, value: object) -> object:
@@ -91,6 +102,14 @@ class Settings(BaseSettings):
         """Treat ``KEY=`` in a ``.env`` file as "not configured"."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        """Accept ``CORS_ALLOW_ORIGINS=http://a,http://b`` from the environment."""
+        if isinstance(value, str):
+            return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
         return value
 
     @computed_field  # type: ignore[prop-decorator]

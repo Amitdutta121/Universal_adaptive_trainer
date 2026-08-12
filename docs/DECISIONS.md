@@ -829,3 +829,32 @@ change a shape a client depends on.
   hard-codes them.
 - The API mirrors current capability only. Filtering, batch generation and a
   review queue are not part of it yet.
+
+---
+
+## ADR-028 — CORS is configuration, with an explicit origin allow-list
+
+**Status:** accepted
+
+The application enables `CORSMiddleware` when `CORS_ALLOW_ORIGINS` names at least one origin, so a
+React front end served from its own host can call `/api`. The default is the two React development
+server origins (`http://localhost:5173`, `http://localhost:3000`); an empty value disables CORS
+entirely.
+
+**Why:** the JSON API is meant to serve a browser client (ADR-027), and a browser refuses a
+cross-origin call without these headers. The allow-list is configuration rather than a hard-coded
+constant because the production origin is not known here, and it is an explicit list rather than
+`*` because credentials are allowed — a wildcard origin plus credentials is exactly the
+combination that makes any site able to act as a logged-in user.
+
+**Implications:**
+
+- The middleware is added *after* `RequestLoggingMiddleware`, which makes it the outermost layer,
+  so an error response still carries the CORS headers. Without that the browser reports a CORS
+  failure and the client never sees the status or the JSON error body the API actually returned.
+- `CORS_ALLOW_ORIGINS` is read as a comma-separated list, not JSON, so the field is annotated with
+  pydantic-settings' `NoDecode` and split by a validator. Trailing slashes are stripped: an origin
+  header never carries one and `http://localhost:3000/` would silently never match.
+- Methods and request headers are allowed wholesale. Narrowing them buys nothing while every
+  professor capability is unauthenticated; when authentication arrives, that is the point to
+  revisit both this and `allow_credentials`.

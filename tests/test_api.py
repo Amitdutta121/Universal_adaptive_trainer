@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.domain.enums import CurriculumStatus, ReviewDecision
 from app.persistence.repositories import BookRepository, CurriculumRepository
 
@@ -417,3 +418,57 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/preferences/{preference_id}/remove",
     ):
         assert path in paths, f"{path} is missing from the OpenAPI schema"
+
+
+# ------------------------------------------------------------------------- cors
+
+
+ALLOWED_ORIGIN = "http://localhost:5173"
+
+
+def test_preflight_from_an_allowed_origin_is_accepted(client: TestClient) -> None:
+    response = client.options(
+        "/api/questions/generate",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_a_get_from_an_allowed_origin_carries_the_cors_header(client: TestClient) -> None:
+    response = client.get("/api/health", headers={"Origin": ALLOWED_ORIGIN})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+
+
+def test_an_error_response_still_carries_the_cors_header(client: TestClient) -> None:
+    """Without this the browser reports a CORS failure instead of the 404."""
+    response = client.get("/api/questions/999", headers={"Origin": ALLOWED_ORIGIN})
+
+    assert response.status_code == 404
+    assert response.headers["access-control-allow-origin"] == ALLOWED_ORIGIN
+
+
+def test_an_unlisted_origin_gets_no_cors_header(client: TestClient) -> None:
+    response = client.get("/api/health", headers={"Origin": "http://evil.example.com"})
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_cors_middleware_is_absent_when_no_origins_are_configured(settings: Settings) -> None:
+    from app.main import create_app
+
+    app = create_app(settings.model_copy(update={"cors_allow_origins": []}))
+    with TestClient(app) as bare_client:
+        response = bare_client.get("/api/health", headers={"Origin": ALLOWED_ORIGIN})
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
