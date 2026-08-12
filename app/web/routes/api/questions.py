@@ -36,6 +36,8 @@ from app.web.routes.api.schemas import (
     QuestionSummary,
     QuestionTaxonomy,
     ReviewOut,
+    ReviewQueueMode,
+    ReviewQueueResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,53 @@ def approved_curriculum_id(session: Session) -> int:
             detail="Upload a valid taxonomy before generating questions.",
         )
     return approved.id
+
+
+# Declared before "/{question_id}": FastAPI matches in registration order, so a
+# literal path added after it would be parsed as a question id and 422.
+@router.get("/review-queue", response_model=ReviewQueueResponse)
+def review_queue(
+    session: DbSession, after: int | None = None, mode: ReviewQueueMode = "all"
+) -> ReviewQueueResponse:
+    """The next question awaiting a professor verdict, plus progress counts.
+
+    The queue holds no state. ``after`` is a plain cursor over question ids,
+    which is what lets a professor skip a question -- and lets a submitted
+    review advance to the next one -- without a stored position per professor.
+    """
+    repo = QuestionRepository(session)
+    scoreable = [row for row in repo.list_unreviewed(require_evaluation=True) if _is_scoreable(row)]
+
+    candidates = repo.list_unreviewed(after_id=after, require_evaluation=mode == "scoreable")
+    if mode == "scoreable":
+        candidates = [row for row in candidates if _is_scoreable(row)]
+
+    total = repo.count()
+    reviewed = repo.count_reviewed()
+    return ReviewQueueResponse(
+        mode=mode,
+        total=total,
+        reviewed=reviewed,
+        remaining=total - reviewed,
+        scoreable_remaining=len(scoreable),
+        question=get_question(session, candidates[0].id) if candidates else None,
+    )
+
+
+def _is_scoreable(question: QuestionRow) -> bool:
+    """Whether this question's stored evaluation can pair with a review.
+
+    Calibration counts a question only when the judge actually reached a verdict,
+    so an evaluation that errored, was skipped, or no longer validates is not a
+    question worth reviewing *for alignment* -- it can never become a pair.
+    """
+    if question.pedagogical_eval is None:
+        return False
+    try:
+        evaluation = PedagogicalEvaluation.model_validate(question.pedagogical_eval)
+    except ValidationError:
+        return False
+    return evaluation.status is PedagogicalEvalStatus.COMPLETED
 
 
 @router.get("/{question_id}", response_model=QuestionDetail)

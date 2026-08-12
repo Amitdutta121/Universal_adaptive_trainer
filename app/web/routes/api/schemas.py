@@ -551,6 +551,28 @@ class QuestionListResponse(BaseModel):
     total: int
 
 
+#: Which unreviewed questions the review queue offers. ``scoreable`` restricts
+#: the pass to questions the judge has already ruled on, because only those can
+#: become a calibration pair -- reviewing the rest teaches the professor's
+#: preferences but moves no alignment figure.
+ReviewQueueMode = Literal["all", "scoreable"]
+
+
+class ReviewQueueResponse(BaseModel):
+    """The next question to review, with enough counts to show progress."""
+
+    mode: ReviewQueueMode
+    total: int
+    reviewed: int
+    remaining: int
+    #: Unreviewed questions carrying a completed judge verdict, ignoring the
+    #: cursor: the size of the pool this pass can still add to calibration.
+    scoreable_remaining: int
+    #: ``None`` once the cursor passes the last match. With ``remaining`` above
+    #: zero that means questions were skipped, not that the bank is finished.
+    question: QuestionDetail | None
+
+
 class GenerateQuestionsRequest(BaseModel):
     """A generation request.
 

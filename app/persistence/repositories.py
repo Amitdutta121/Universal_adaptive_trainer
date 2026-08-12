@@ -312,6 +312,33 @@ class QuestionRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def count_reviewed(self) -> int:
+        """How many questions carry at least one professor verdict."""
+        stmt = select(func.count()).select_from(QuestionRow).where(QuestionRow.reviews.any())
+        return self._session.scalar(stmt) or 0
+
+    def list_unreviewed(
+        self, *, after_id: int | None = None, require_evaluation: bool = False
+    ) -> list[QuestionRow]:
+        """Questions no professor has ruled on yet, lowest id first.
+
+        ``after_id`` is the review queue's cursor: it is how skipping a question
+        moves past it without a stored position. Ordering by id rather than by
+        recency keeps that cursor monotonic, so a pass over the bank cannot
+        revisit a question it already offered.
+
+        ``require_evaluation`` narrows to questions carrying a stored judge
+        evaluation. Whether that evaluation actually *completed* lives inside the
+        JSON column and is the caller's to decide: that vocabulary belongs to
+        :mod:`app.evaluation`, which persistence must not import (ADR-026).
+        """
+        stmt = select(QuestionRow).where(~QuestionRow.reviews.any()).order_by(QuestionRow.id)
+        if after_id is not None:
+            stmt = stmt.where(QuestionRow.id > after_id)
+        if require_evaluation:
+            stmt = stmt.where(QuestionRow.pedagogical_eval.is_not(None))
+        return list(self._session.scalars(stmt))
+
     def list_judgeable(self) -> list[QuestionRow]:
         """Questions the pedagogical judge is allowed to score.
 

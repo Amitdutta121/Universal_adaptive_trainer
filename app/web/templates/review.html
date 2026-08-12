@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block heading %}Review queue{% endblock %}
+
+{% block subheading %}
+  <p class="lede">
+    One question per screen. Submitting a verdict moves straight to the next one.
+  </p>
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+    <div class="banner banner-error" role="alert">
+      <p><strong>{{ error }}</strong></p>
+      {% if error_detail %}<p class="meta">{{ error_detail }}</p>{% endif %}
+    </div>
+  {% endif %}
+
+  <section class="panel review-progress">
+    <div class="review-progress-head">
+      <div>
+        <strong>{{ queue.reviewed }}</strong> of {{ queue.total }} reviewed ·
+        {{ queue.remaining }} left
+      </div>
+      <div class="review-modes">
+        <a class="{% if mode == 'all' %}is-current{% endif %}" href="/review">All</a>
+        <a class="{% if mode == 'scoreable' %}is-current{% endif %}"
+           href="/review?mode=scoreable">Judged only ({{ queue.scoreable_remaining }})</a>
+      </div>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill"
+           style="width: {% if queue.total %}{{ (queue.reviewed / queue.total * 100)|round(1) }}{% else %}0{% endif %}%"></div>
+    </div>
+    <p class="note">
+      “Judged only” restricts the pass to questions the judge has already ruled on. Only those
+      can become a calibration pair, so they are the ones that move the alignment figures.
+    </p>
+  </section>
+
+  {% if question is none %}
+    <section class="panel">
+      {% if queue.remaining == 0 %}
+        <h2>Nothing left to review</h2>
+        <p>Every question in the bank has a verdict.</p>
+      {% else %}
+        <h2>End of this pass</h2>
+        <p>
+          No further match after this point. {{ queue.remaining }} question(s) are still
+          unreviewed — skipped during this pass, or filtered out by the current mode.
+        </p>
+        <p><a class="button" href="/review{% if mode == 'scoreable' %}?mode=scoreable{% endif %}">
+          Start again from the first unreviewed question</a></p>
+      {% endif %}
+      <p><a class="back-link" href="/feedback">See judge alignment →</a></p>
+    </section>
+  {% else %}
+    <form method="post" action="/review/{{ question.id }}" class="review-form" id="review-form">
+      <input type="hidden" name="mode" value="{{ mode }}">
+
+      <section class="panel review-question">
+        <div class="review-question-head">
+          <h2>Question {{ question.id }}</h2>
+          <span class="meta">
+            {{ question.difficulty }} · {{ question.question_type or question.kind }} ·
+            {{ detail.taxonomy.topic }} / {{ detail.taxonomy.subtopic }}
+          </span>
+        </div>
+
+        {# A fenced snippet is shown as code rather than as literal backticks, so a
+           formatting artefact is not mistaken for a defect. Display only. #}
+        {% for kind, body in question.prompt | fenced_segments %}
+          {% if kind == "code" %}
+            <pre class="detail">{{ body }}</pre>
+          {% else %}
+            <p class="section-text review-prompt">{{ body }}</p>
+          {% endif %}
+        {% endfor %}
+
+        {% if content.code %}
+          <h3>Code</h3>
+          <pre class="detail">{{ content.code }}</pre>
+        {% endif %}
+
+        {% if content.options %}
+          <h3>Options</h3>
+          <ol class="review-options">
+            {% for option in content.options %}<li>{{ option }}</li>{% endfor %}
+          </ol>
+        {% endif %}
+
+        {% if content.blocks %}
+          <h3>Parsons blocks</h3>
+          <ol class="review-options">
+            {% for block in content.blocks %}
+              <li><code>{{ block.text }}</code> (indent {{ block.indent }})</li>
+            {% endfor %}
+          </ol>
+        {% endif %}
+
+        {% if detail.reference_solution %}
+          <h3>Answer</h3>
+          <pre class="detail">{{ detail.reference_solution }}</pre>
+        {% endif %}
+
+        {% if detail.tests %}
+          <h3>Tests</h3>
+          <pre class="detail">{{ detail.tests }}</pre>
+        {% endif %}
+
+        {% if content.explanation %}
+          <h3>Explanation</h3>
+          <p>{{ content.explanation }}</p>
+        {% endif %}
+
+        {% if detail.sources %}
+          <h3>Source</h3>
+          <ul class="citation">
+            {% for source in detail.sources %}<li>{{ source.citation }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </section>
+
+      {% if detail.validation_passed is false %}
+        <section class="panel panel-error">
+          <h2>Deterministic checks failed</h2>
+          <ul class="checklist">
+            {% for check in detail.validation_checks if not check.passed %}
+              <li>✗ {{ check.detail or check.name }}
+                {% if check.evidence %}<pre class="check-evidence">{{ check.evidence }}</pre>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+
+      <section class="panel review-verdict">
+        <h2>Your verdict</h2>
+
+        <div class="verdict-options">
+          <label class="verdict-option verdict-approve">
+            <input type="radio" name="decision" value="approve" required>
+            <span>Approve <kbd>a</kbd></span>
+          </label>
+          <label class="verdict-option verdict-reject">
+            <input type="radio" name="decision" value="reject">
+            <span>Reject <kbd>r</kbd></span>
+          </label>
+          <label class="verdict-option verdict-edit">
+            <input type="radio" name="decision" value="edit">
+            <span>Edit <kbd>e</kbd></span>
+          </label>
+        </div>
+
+        <fieldset class="reason-grid">
+          <legend>Reasons (required to reject, optional to edit)</legend>
+          {% for value, label in rejection_reasons %}
+            <label><input type="checkbox" name="reasons" value="{{ value }}"> {{ label }}</label>
+          {% endfor %}
+        </fieldset>
+
+        <label class="review-comment">Comment
+          <textarea name="comment" rows="3"
+                    placeholder="Why. This text trains the judge later — say what is wrong, in your words."></textarea>
+        </label>
+
+        <details class="review-edit">
+          <summary>Edit the question (only used when the verdict is Edit)</summary>
+          <label>Prompt
+            <textarea name="prompt" rows="6">{{ question.prompt }}</textarea>
+          </label>
+          <label>Reference / answer
+            <textarea name="reference_solution" rows="4">{{ detail.reference_solution or "" }}</textarea>
+          </label>
+          <label>Tests
+            <textarea name="tests" rows="4">{{ detail.tests or "" }}</textarea>
+          </label>
+        </details>
+
+        <div class="review-actions">
+          <button type="submit">Submit and continue <kbd>Ctrl</kbd>+<kbd>↵</kbd></button>
+          <a class="button-secondary"
+             href="/review?after={{ question.id }}&mode={{ mode }}">Skip <kbd>s</kbd></a>
+          <a class="back-link" href="/questions/{{ question.id }}">Full detail page</a>
+        </div>
+      </section>
+    </form>
+
+    <section class="panel review-judge">
+      <details>
+        <summary>Show what the judge said</summary>
+        <p class="note">
+          Kept closed on purpose. If you read the judge's verdict before deciding your own, the
+          agreement figures measure how far you followed the judge, not whether the judge is
+          right. Open it after you have submitted, or when you want to inspect a disagreement.
+        </p>
+        {% if detail.pedagogical_eval %}
+          <p>
+            Status: {{ detail.pedagogical_eval.status }} ·
+            Advisory: {{ detail.pedagogical_eval.overall_advisory_status }}
+            {% if detail.pedagogical_eval.overall_advisory_score is not none %}
+              ({{ "%.1f"|format(detail.pedagogical_eval.overall_advisory_score) }}/5)
+            {% endif %}
+          </p>
+          {% if detail.pedagogical_eval.status == "completed" %}
+            <ul class="checklist">
+              {% for dimension in detail.pedagogical_eval.dimensions %}
+                <li>
+                  {{ dimension.dimension }}:
+                  {% if dimension.applicable %}{{ dimension.score }}/5{% else %}n/a{% endif %}
+                  <span class="evaluation-rationale">{{ dimension.rationale }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% else %}
+          <p class="empty">This question has no judge evaluation.</p>
+        {% endif %}
+      </details>
+    </section>
+
+    <script>
+      // Progressive enhancement only: every action here has a control above that
+      // works without it. Keys are ignored while typing into a field.
+      (function () {
+        var form = document.getElementById("review-form");
+        if (!form) { return; }
+        var decisions = { a: "approve", r: "reject", e: "edit" };
+
+        document.addEventListener("keydown", function (event) {
+          var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
+
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            form.requestSubmit();
+            return;
+          }
+          if (typing || event.ctrlKey || event.metaKey || event.altKey) { return; }
+
+          var decision = decisions[event.key.toLowerCase()];
+          if (decision) {
+            event.preventDefault();
+            var radio = form.querySelector('input[name="decision"][value="' + decision + '"]');
+            radio.checked = true;
+            if (decision === "edit") {
+              form.querySelector(".review-edit").open = true;
+            }
+            form.querySelector('textarea[name="comment"]').focus();
+          } else if (event.key.toLowerCase() === "s") {
+            event.preventDefault();
+            window.location.href =
+              "/review?after={{ question.id }}&mode={{ mode }}";
+          }
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

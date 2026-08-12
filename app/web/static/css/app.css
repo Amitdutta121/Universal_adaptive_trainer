@@ -331,3 +331,81 @@ nav { display: flex; flex-direction: column; gap: 2px; }
   nav { flex-direction: row; flex-wrap: wrap; }
   .content { padding: 20px 18px 40px; }
 }
+
+/* --- Review queue ------------------------------------------------------- */
+
+.banner { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px; }
+.banner p { margin: 0; }
+.banner-error { border-color: #e9b3b3; background: #fffafa; color: #9c2b2b; }
+
+.review-progress-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; flex-wrap: wrap; font-size: 14px;
+}
+.review-modes { display: flex; gap: 6px; }
+.review-modes a {
+  font-size: 12px; text-decoration: none; padding: 3px 9px;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft);
+}
+.review-modes a.is-current { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+.progress-track { height: 6px; background: var(--line); border-radius: 999px; margin: 10px 0 0; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); transition: width 0.2s; }
+
+.review-question-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.review-question-head h2 { margin: 0; }
+.review-question h3 {
+  margin: 16px 0 6px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--ink-soft);
+}
+.review-prompt { font-size: 16px; line-height: 1.55; }
+.review-options { margin: 0; padding-left: 22px; }
+.review-options li { margin: 4px 0; }
+
+.verdict-options { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.verdict-option {
+  flex: 1 1 150px; border: 2px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; cursor: pointer; font-weight: 600; background: #fff;
+  display: flex; align-items: center; gap: 8px;
+}
+.verdict-option:hover { border-color: var(--ink-soft); }
+.verdict-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.verdict-approve:has(input:checked) { border-color: var(--ok); background: #eef8f2; color: var(--ok); }
+.verdict-reject:has(input:checked) { border-color: #9c2b2b; background: #fdeaea; color: #9c2b2b; }
+
+.reason-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; margin: 0 0 14px;
+}
+.reason-grid legend { font-size: 12px; color: var(--ink-soft); padding: 0 6px; }
+.reason-grid label { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+
+.review-comment { display: block; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+.review-comment textarea, .review-edit textarea {
+  display: block; width: 100%; margin-top: 5px; padding: 8px 10px; font: inherit;
+  border: 1px solid var(--line); border-radius: 8px; box-sizing: border-box;
+}
+.review-edit textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.review-edit { margin-bottom: 14px; }
+.review-edit summary { cursor: pointer; font-size: 13px; color: var(--ink-soft); }
+.review-edit label { display: block; font-size: 12px; font-weight: 600; margin-top: 10px; }
+
+.review-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.review-actions button {
+  background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+  padding: 11px 20px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.review-actions button:hover { filter: brightness(1.08); }
+.button-secondary {
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px;
+  text-decoration: none; color: var(--ink); font-size: 14px;
+}
+.button-secondary:hover { border-color: var(--ink-soft); }
+
+.review-judge summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+
+kbd {
+  font: inherit; font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 4px; background: #fbfbfc; color: var(--ink-soft);
+}

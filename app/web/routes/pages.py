@@ -61,6 +61,7 @@ from app.web.routes.api import system as api_system
 from app.web.routes.api.schemas import (
     CorrectPreferenceRequest,
     GenerateQuestionsRequest,
+    ReviewQueueMode,
     ReviewRequest,
 )
 from app.web.templating import render
@@ -568,6 +569,104 @@ def review_question(
         ),
     )
     return RedirectResponse(url=f"/questions/{question_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _review_queue_page(
+    request: Request,
+    session: Session,
+    *,
+    after: int | None,
+    mode: str,
+    error: str | None = None,
+    error_detail: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render the review queue at its current cursor.
+
+    An unknown mode falls back to ``all`` rather than 422: this route is reached
+    by hand-editable links, and a mistyped one should still show a question.
+    """
+    queue_mode: ReviewQueueMode = "scoreable" if mode == "scoreable" else "all"
+    queue = api_questions.review_queue(session, after=after, mode=queue_mode)
+    detail = queue.question
+    return render(
+        request,
+        "review.html",
+        {
+            "page_title": "Review queue",
+            "active_section": "questions",
+            "queue": queue,
+            "mode": queue_mode,
+            "after": after,
+            "detail": detail,
+            "question": detail.question if detail else None,
+            "content": (detail.content or {}) if detail else {},
+            "rejection_reasons": list(REJECTION_REASON_LABELS.items()),
+            "error": error,
+            "error_detail": error_detail,
+        },
+        status_code=status_code,
+    )
+
+
+@router.get("/review", response_class=HTMLResponse, name="review_queue")
+def review_queue_page(
+    request: Request,
+    session: DbSession,
+    after: int | None = None,
+    mode: str = "all",
+) -> HTMLResponse:
+    """Review one question at a time, in one screen, without leaving the queue."""
+    return _review_queue_page(request, session, after=after, mode=mode)
+
+
+@router.post("/review/{question_id}", name="submit_queue_review")
+def submit_queue_review(
+    request: Request,
+    session: DbSession,
+    question_id: int,
+    decision: Annotated[str, Form()],
+    comment: Annotated[str, Form()] = "",
+    reasons: Annotated[list[str] | None, Form()] = None,
+    prompt: Annotated[str, Form()] = "",
+    reference_solution: Annotated[str, Form()] = "",
+    tests: Annotated[str, Form()] = "",
+    mode: Annotated[str, Form()] = "all",
+) -> Response:
+    """Record a verdict and advance to the next question in one step.
+
+    Advancing on submit is the point of this route: the question detail page
+    returns to the question just reviewed, which costs two navigations per
+    verdict and makes a hundred-question pass far slower than it needs to be.
+    """
+    try:
+        api_feedback.create_review(
+            session,
+            question_id,
+            ReviewRequest(
+                decision=ReviewDecision(decision),
+                reasons=[RejectionReason(value) for value in (reasons or [])],
+                comment=comment or None,
+                prompt=prompt,
+                reference_solution=reference_solution,
+                tests=tests,
+            ),
+        )
+    except (DomainRuleError, NotFoundError) as exc:
+        # Re-offer the same question: the cursor must not advance past a verdict
+        # that was never recorded.
+        return _review_queue_page(
+            request,
+            session,
+            after=question_id - 1,
+            mode=mode,
+            error=exc.message,
+            error_detail=exc.detail,
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"/review?after={question_id}&mode={mode}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 def _preferences_page(
