@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% from "_placeholder.html" import deferred %}
 
+{% macro rate(value) -%}
+  {%- if value is none -%}
+    <span class="muted">—</span>
+  {%- else -%}
+    {{ "%.1f%%"|format(value * 100) }}
+  {%- endif -%}
+{%- endmacro %}
+
 {% block subheading %}
   <p class="lede">Professor reviews are the authority for professor preference. They are append-only.</p>
 {% endblock %}
@@ -18,6 +26,78 @@
       <dt>Edited</dt>
       <dd>{{ stats.edited }}</dd>
     </dl>
+  </section>
+
+  <section class="panel" id="calibration">
+    <h2>Judge calibration</h2>
+    <p class="note">
+      How often the advisory pedagogical judge agreed with your <strong>first</strong> review of the
+      same question. A question you edited and then approved counts as <em>needs review</em>, because
+      the judge scored the question as generated. Read-only: nothing here changes a question or a
+      review. Raw JSON: <a href="/api/calibration/results"><code>/api/calibration/results</code></a>.
+    </p>
+
+    {% if calibration.n == 0 %}
+      <p class="empty">
+        No question has both a completed judge evaluation and a professor review yet, so there is
+        nothing to measure.
+      </p>
+    {% else %}
+      <dl class="kv">
+        <dt>Questions measured</dt>
+        <dd>{{ calibration.n }}</dd>
+        <dt>Agreement</dt>
+        <dd>{{ rate(calibration.agreement) }} of {{ calibration.n }}</dd>
+        <dt>Judge said accept</dt>
+        <dd>{{ calibration.judge_accept_count }}</dd>
+        <dt>Auto-accept precision</dt>
+        <dd>
+          {{ rate(calibration.auto_accept_precision) }}
+          <span class="note">— you approved this share of what the judge called strong</span>
+        </dd>
+        <dt>Unsafe auto-accept rate</dt>
+        <dd>
+          {{ rate(calibration.unsafe_auto_accept_rate) }}
+          <span class="note">— you rejected or edited this share of it, so auto-acceptance would
+          have shipped those unreviewed</span>
+        </dd>
+      </dl>
+
+      {% if calibration.n < min_informative_sample %}
+        <p class="note" role="status">
+          <span class="status status-warn">small sample</span>
+          {{ calibration.n }} measured question{{ "" if calibration.n == 1 else "s" }} is below the
+          {{ min_informative_sample }} these rates would need before they describe the judge rather
+          than whichever questions happened to be reviewed. Read them as a first look, not a result.
+        </p>
+      {% endif %}
+
+      <table class="table">
+        <thead>
+          <tr><th>Question</th><th>Judge</th><th>First review</th><th>Outcome</th></tr>
+        </thead>
+        <tbody>
+          {% for pair in calibration_pairs %}
+            <tr>
+              <td><a href="/questions/{{ pair.question_id }}">#{{ pair.question_id }}</a></td>
+              <td><span class="status">{{ pair.judge }}</span></td>
+              <td><span class="status">{{ pair.professor }}</span></td>
+              <td>
+                {% if pair.agrees %}
+                  <span class="status status-ok">agree</span>
+                {% else %}
+                  <span class="status status-bad">disagree</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="note">
+        Excluded from the table and from every figure above: questions whose judge was skipped or
+        errored, questions with no review yet, and any stored evaluation too old to still validate.
+      </p>
+    {% endif %}
   </section>
 
   <section class="panel">

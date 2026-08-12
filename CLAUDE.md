@@ -179,10 +179,14 @@ app/
   generation/         Section-first base question generation    (IMPLEMENTED)
   validation/         Automatic question validation             (boundary only)
   evaluation/         Advisory structured LLM pedagogical evaluation (IMPLEMENTED)
+    batch_service.py  Bulk async re-runs + retained evaluation history. ADR-030.
   feedback/           Professor approve/reject/edit records     (recording implemented)
+  calibration/        Judge vs professor agreement, read-only   (IMPLEMENTED)
   personalization/    Professor preference learning             (boundary only)
   adaptive/           Student adaptive engine                   (boundary only, by instruction)
   llm/                All outbound LLM traffic                  (STRUCTURED OUTPUT IMPLEMENTED)
+    client.py         Synchronous structured output via Instructor. ADR-020.
+    batch.py          Asynchronous batch jobs, built by hand. ADR-030.
   web/                Routers, templates, static assets, middleware
     routes/api/       The JSON API under /api. One module per resource. ADR-027.
     routes/pages.py   Server-rendered pages. Delegates every action to routes/api/.

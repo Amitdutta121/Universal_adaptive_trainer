@@ -300,6 +300,86 @@ def test_unknown_question_is_a_json_404(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
+# --------------------------------------------------------------------- evaluation
+
+
+def test_batch_run_list_is_empty_before_any_rerun(client: TestClient) -> None:
+    assert client.get("/api/evaluation/batch-runs").json() == {"runs": [], "total": 0}
+
+
+def test_submitting_a_rerun_without_configuration_is_json(client: TestClient) -> None:
+    """Test settings leave the batch judge disabled, so this reports that."""
+    response = client.post("/api/evaluation/batch-runs")
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "configuration_error"
+
+
+def test_unknown_batch_run_is_a_json_404(client: TestClient) -> None:
+    response = client.get("/api/evaluation/batch-runs/does-not-exist")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_polling_an_unknown_batch_run_is_a_json_404(client: TestClient) -> None:
+    response = client.post("/api/evaluation/batch-runs/does-not-exist/poll")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_evaluation_history_of_an_unknown_question_is_a_json_404(client: TestClient) -> None:
+    response = client.get("/api/questions/4242/evaluations")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_evaluation_history_is_newest_first_and_flags_the_current_one(
+    client: TestClient, session: Session
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.domain.enums import EvaluationTrigger
+    from app.evaluation import record_evaluation
+    from app.evaluation.schema import PedagogicalEvalStatus, PedagogicalEvaluation
+    from app.persistence.models import QuestionRow
+
+    question = QuestionRow(prompt="What is printed?")
+    session.add(question)
+    session.flush()
+    older = datetime.now(UTC) - timedelta(days=1)
+    for created_at, model, trigger in (
+        (older, "old/model", EvaluationTrigger.GENERATION),
+        (datetime.now(UTC), "new/model", EvaluationTrigger.BATCH_RERUN),
+    ):
+        record_evaluation(
+            session,
+            question.id,
+            PedagogicalEvaluation(
+                question_id=question.id,
+                status=PedagogicalEvalStatus.SKIPPED,
+                overall_advisory_status="skipped",
+                judge_model=model,
+                created_at=created_at,
+            ),
+            run_id=f"run-{model}",
+            trigger=trigger,
+        )
+    session.commit()
+
+    payload = client.get(f"/api/questions/{question.id}/evaluations").json()
+
+    assert payload["total"] == 2
+    assert [entry["judge_model"] for entry in payload["evaluations"]] == [
+        "new/model",
+        "old/model",
+    ]
+    assert [entry["is_current"] for entry in payload["evaluations"]] == [True, False]
+    assert payload["evaluations"][0]["trigger"] == "batch_rerun"
+
+
 # ----------------------------------------------------------------------- feedback
 
 
@@ -379,6 +459,9 @@ def test_correcting_with_empty_text_is_refused_by_the_request_model(client: Test
         "/api/reviews",
         "/api/reviews/stats",
         "/api/preferences",
+        "/api/calibration/results",
+        "/api/calibration/pairs",
+        "/api/evaluation/batch-runs",
     ],
 )
 def test_every_read_endpoint_answers_with_json(client: TestClient, path: str) -> None:
@@ -416,6 +499,12 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/preferences/{preference_id}/confirm",
         "/api/preferences/{preference_id}/correct",
         "/api/preferences/{preference_id}/remove",
+        "/api/calibration/results",
+        "/api/calibration/pairs",
+        "/api/evaluation/batch-runs",
+        "/api/evaluation/batch-runs/{run_id}",
+        "/api/evaluation/batch-runs/{run_id}/poll",
+        "/api/questions/{question_id}/evaluations",
     ):
         assert path in paths, f"{path} is missing from the OpenAPI schema"
 

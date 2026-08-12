@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.books import ExtractionWarning
@@ -21,7 +21,9 @@ from app.domain.enums import (
     CurriculumItemStatus,
     CurriculumStatus,
     Difficulty,
+    EvaluationTrigger,
     GeneratorKind,
+    JudgeBatchStatus,
     PreferenceCategory,
     PreferenceConfirmationState,
     QuestionKind,
@@ -382,6 +384,94 @@ class QuestionRow(TimestampMixin, Base):
     reviews: Mapped[list[ProfessorReviewRow]] = relationship(
         back_populates="question", cascade="all, delete-orphan"
     )
+    #: Append-only judge history. ``pedagogical_eval`` above stays the current
+    #: one; these are every evaluation this question has ever received.
+    evaluations: Mapped[list[QuestionEvaluationRow]] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="QuestionEvaluationRow.created_at.desc(), QuestionEvaluationRow.id.desc()",
+    )
+
+
+class QuestionEvaluationRow(TimestampMixin, Base):
+    """One pedagogical evaluation of a question, retained forever (ADR-030).
+
+    ``questions.pedagogical_eval_json`` holds only the *current* evaluation, so
+    re-judging a question used to overwrite what the judge said the first time.
+    This table is the append-only history behind that single value: every
+    evaluation ever recorded, whichever run produced it.
+
+    The four denormalised columns (``judge_model``, ``rubric_version``,
+    ``eval_status``, ``advisory_status``) are plain strings rather than mapped
+    enums because their vocabularies belong to :mod:`app.evaluation`, which
+    persistence must not import (ADR-026). They are copies of values inside
+    ``evaluation``, kept so a run can be summarised without decoding every blob.
+    """
+
+    __tablename__ = "question_evaluations"
+    __table_args__ = (
+        # One evaluation per question per run. This is what makes re-polling a
+        # completed batch a no-op instead of a second set of history rows.
+        UniqueConstraint("run_id", "question_id", name="uq_question_evaluations_run_question"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    #: The full evaluation, in the shape :mod:`app.evaluation` writes and reads.
+    evaluation: Mapped[dict | None] = mapped_column(
+        "evaluation_json", JsonObject, default=None, nullable=True
+    )
+
+    judge_model: Mapped[str | None] = mapped_column(String(200), default=None)
+    rubric_version: Mapped[str | None] = mapped_column(String(50), default=None)
+    eval_status: Mapped[str | None] = mapped_column(String(32), default=None)
+    advisory_status: Mapped[str | None] = mapped_column(String(32), default=None)
+
+    #: Groups the evaluations produced together, whether by one generation call
+    #: or by one bulk re-run. Indexed because ingest and status both read by it.
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    trigger: Mapped[EvaluationTrigger] = mapped_column(
+        StrEnumType(EvaluationTrigger, 32), default=EvaluationTrigger.GENERATION
+    )
+
+    question: Mapped[QuestionRow] = relationship(back_populates="evaluations")
+
+
+class JudgeBatchRunRow(TimestampMixin, Base):
+    """One bulk judge re-run over the question bank (ADR-030).
+
+    A run is the professor-facing unit; the provider may hold it as several
+    jobs, because a bank larger than the per-job cap is split at submission.
+    ``provider_batch_ids`` is therefore a list rather than the single id the
+    provider returns per job -- polling has to ask about all of them before the
+    run itself can be called complete.
+    """
+
+    __tablename__ = "judge_batch_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    provider_batch_ids: Mapped[list[str]] = mapped_column(
+        "provider_batch_ids_json", JsonList, default=list, nullable=True
+    )
+
+    status: Mapped[JudgeBatchStatus] = mapped_column(
+        StrEnumType(JudgeBatchStatus, 32), default=JudgeBatchStatus.SUBMITTED
+    )
+    model: Mapped[str] = mapped_column(String(200), default="")
+    rubric_version: Mapped[str] = mapped_column(String(50), default="")
+
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    question_count: Mapped[int] = mapped_column(Integer, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    #: Why a run failed or expired, in the professor's terms. Never a credential.
+    error_detail: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class ProfessorReviewRow(TimestampMixin, Base):

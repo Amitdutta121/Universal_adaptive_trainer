@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.calibration import MIN_INFORMATIVE_SAMPLE
 from app.config import get_settings
 from app.curriculum import extraction_metadata, proposal_warnings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
@@ -49,7 +51,9 @@ from app.persistence.repositories import (
     QuestionRepository,
 )
 from app.web.routes.api import books as api_books
+from app.web.routes.api import calibration as api_calibration
 from app.web.routes.api import curriculum as api_curriculum
+from app.web.routes.api import evaluation as api_evaluation
 from app.web.routes.api import feedback as api_feedback
 from app.web.routes.api import preferences as api_preferences
 from app.web.routes.api import questions as api_questions
@@ -335,6 +339,7 @@ def _questions_page(
     selected_book_id: int | None = None,
     created_count: int | None = None,
     created_ids: list[int] | None = None,
+    judge_notice: str | None = None,
     error: str | None = None,
     error_detail: str | None = None,
     status_code: int = 200,
@@ -364,6 +369,10 @@ def _questions_page(
             "question_type_options": list(QuestionType),
             "created_count": created_count,
             "created_ids": created_ids,
+            "judge_runs": api_evaluation.list_batch_runs(session).runs,
+            "judge_batch_status": get_settings().describe_judge_batch(),
+            "judge_batch_enabled": get_settings().judge_batch_enabled,
+            "judge_notice": judge_notice,
             "error": error,
             "error_detail": error_detail,
         },
@@ -378,6 +387,7 @@ def questions(
     book_id: int | None = None,
     created: int | None = None,
     ids: str | None = None,
+    judge_notice: str | None = None,
 ) -> HTMLResponse:
     created_ids: list[int] | None = None
     if ids:
@@ -388,6 +398,61 @@ def questions(
         selected_book_id=book_id,
         created_count=created,
         created_ids=created_ids,
+        judge_notice=judge_notice,
+    )
+
+
+@router.post("/questions/judge-runs", name="submit_judge_run_page")
+def submit_judge_run_page(request: Request, session: DbSession) -> Response:
+    """Submit a bulk judge re-run, then return to the question bank.
+
+    The re-run is asynchronous, so this redirects with a notice rather than
+    results: nothing has been judged yet when the professor lands back here.
+    """
+    try:
+        result = api_evaluation.submit_batch_run(session)
+    except (ConfigurationError, DomainRuleError, LLMRequestError) as exc:
+        return _questions_page(
+            request,
+            session,
+            error=exc.message,
+            error_detail=exc.detail,
+            status_code=exc.status_code,
+        )
+    notice = (
+        f"Submitted {result.submitted} question(s) for re-judging as run "
+        f"{result.run.run_id}. Results arrive within 24 hours; use "
+        f"“Check for results” to collect them."
+    )
+    if result.backfilled:
+        notice += f" Recorded {result.backfilled} earlier evaluation(s) into history first."
+    if result.skipped:
+        notice += f" Skipped {result.skipped} question(s) whose source context is unavailable."
+    return RedirectResponse(
+        url=f"/questions?judge_notice={quote(notice)}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/questions/judge-runs/{run_id}/poll", name="poll_judge_run_page")
+def poll_judge_run_page(request: Request, session: DbSession, run_id: str) -> Response:
+    """Collect whatever a re-run has finished, then return to the question bank."""
+    try:
+        result = api_evaluation.poll_batch_run(session, run_id)
+    except (ConfigurationError, NotFoundError, LLMRequestError) as exc:
+        return _questions_page(
+            request,
+            session,
+            error=exc.message,
+            error_detail=exc.detail,
+            status_code=exc.status_code,
+        )
+    if result.ingested or result.failed:
+        notice = f"Run {run_id} is {result.status.value}: recorded {result.ingested} evaluation(s)"
+        notice += f" and {result.failed} failure(s)." if result.failed else "."
+    else:
+        notice = f"Run {run_id} is {result.status.value}. No new results yet."
+    return RedirectResponse(
+        url=f"/questions?judge_notice={quote(notice)}", status_code=status.HTTP_303_SEE_OTHER
     )
 
 
@@ -473,6 +538,7 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "pedagogical_eval": detail.pedagogical_eval,
             "pedagogical_error_message": detail.pedagogical_error_message,
             "personalization_evidence": detail.personalization,
+            "judge_history": api_evaluation.question_evaluations(session, question_id).evaluations,
         },
     )
 
@@ -610,6 +676,11 @@ def feedback(request: Request, session: DbSession) -> HTMLResponse:
             "stats": stats,
             "reason_distribution": stats.reason_distribution,
             "reviews": api_feedback.list_reviews(session).reviews,
+            # Calibration reads the same review history this page already shows,
+            # so it belongs here rather than behind a section of its own.
+            "calibration": api_calibration.calibration_results(session),
+            "calibration_pairs": api_calibration.calibration_pairs(session).pairs,
+            "min_informative_sample": MIN_INFORMATIVE_SAMPLE,
         },
     )
 

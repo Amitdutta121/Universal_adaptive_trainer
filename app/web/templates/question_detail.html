@@ -86,6 +86,47 @@
     {% endif %}
   </section>
 
+  <section class="panel">
+    <h2>Judge history</h2>
+    {% if judge_history %}
+      <p class="note">
+        Every evaluation this question has received, newest first. The panel above shows
+        the current one; earlier evaluations are retained rather than overwritten.
+      </p>
+      <table class="table">
+        <thead>
+          <tr><th>Recorded</th><th>Trigger</th><th>Status</th><th>Advisory</th>
+              <th>Mean</th><th>Model</th><th>Rubric</th><th>Run</th></tr>
+        </thead>
+        <tbody>
+          {% for entry in judge_history %}
+            <tr>
+              <td>
+                {{ entry.created_at.strftime("%Y-%m-%d %H:%M UTC") }}
+                {% if entry.is_current %}<strong>(current)</strong>{% endif %}
+              </td>
+              <td>{{ entry.trigger }}</td>
+              <td><span class="status">{{ entry.eval_status or "—" }}</span></td>
+              <td>{{ entry.advisory_status or "—" }}</td>
+              <td>
+                {% if entry.overall_advisory_score is not none %}
+                  {{ "%.1f"|format(entry.overall_advisory_score) }}
+                {% else %}—{% endif %}
+              </td>
+              <td><code>{{ entry.judge_model or "—" }}</code></td>
+              <td><code>{{ entry.rubric_version or "—" }}</code></td>
+              <td><code>{{ entry.run_id[:12] }}</code></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">
+        No evaluation history has been recorded for this question yet.
+      </p>
+    {% endif %}
+  </section>
+
   {% if content.code %}
     <section class="panel">
       <h2>Code</h2>

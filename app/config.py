@@ -75,6 +75,22 @@ class Settings(BaseSettings):
     embedding_model: str = "openai/text-embedding-3-small"
     validation_timeout_seconds: float = Field(default=2.0, gt=0)
 
+    # -- Bulk judge re-run (ADR-030) ----------------------------------------
+    # OpenRouter's batch jobs are asynchronous and live under /api/beta, not
+    # under the /api/v1 path the synchronous client uses. Off by default: a run
+    # costs real money and completes over hours, so it is opted into.
+    judge_batch_enabled: bool = False
+    judge_batch_base_url: str = "https://openrouter.ai/api/beta"
+    #: Falls back to ``llm_model`` so the re-run judges with the same route that
+    #: generation used unless a cheaper one is named deliberately.
+    judge_batch_model: str | None = None
+    #: Falls back to ``llm_api_key``. Separate so a batch-scoped key can be used.
+    judge_batch_api_key: SecretStr | None = None
+    #: Requests per provider job. A larger bank is split across several jobs
+    #: under one run id rather than submitted as one oversized body.
+    judge_batch_max_requests_per_job: int = Field(default=200, gt=0)
+    judge_batch_timeout_seconds: float = Field(default=120.0, gt=0)
+
     # -- Book ingestion -----------------------------------------------------
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)
@@ -96,7 +112,9 @@ class Settings(BaseSettings):
             return value.strip().upper()
         return value
 
-    @field_validator("llm_api_key", "llm_base_url", mode="before")
+    @field_validator(
+        "llm_api_key", "llm_base_url", "judge_batch_api_key", "judge_batch_model", mode="before"
+    )
     @classmethod
     def _blank_is_none(cls, value: object) -> object:
         """Treat ``KEY=`` in a ``.env`` file as "not configured"."""
@@ -125,6 +143,24 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment is Environment.DEVELOPMENT
+
+    @property
+    def judge_batch_route(self) -> str:
+        """The model the bulk judge re-run submits under."""
+        return self.judge_batch_model or self.llm_model
+
+    @property
+    def judge_batch_credential(self) -> SecretStr | None:
+        """The key the bulk judge re-run authenticates with, or ``None``."""
+        return self.judge_batch_api_key or self.llm_api_key
+
+    def describe_judge_batch(self) -> str:
+        """Human-readable batch re-run status. Never leaks the credential."""
+        if not self.judge_batch_enabled:
+            return "disabled (JUDGE_BATCH_ENABLED=false)"
+        if self.judge_batch_credential is None:
+            return f"{self.judge_batch_route} (no API key configured)"
+        return self.judge_batch_route
 
     def describe_llm(self) -> str:
         """Human-readable LLM status for the UI. Never leaks the credential."""

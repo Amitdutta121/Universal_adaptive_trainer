@@ -20,6 +20,13 @@
     </section>
   {% endif %}
 
+  {% if judge_notice %}
+    <section class="panel panel-success" role="status">
+      <h2>Judge re-run</h2>
+      <p>{{ judge_notice }}</p>
+    </section>
+  {% endif %}
+
   {% if error %}
     <section class="panel panel-error" role="alert">
       <h2>Generation failed</h2>
@@ -164,8 +171,68 @@
     {% endif %}
   </section>
 
+  <section class="panel">
+    <h2>Bulk judge re-run</h2>
+    <p class="note">
+      Re-judges every question that passed deterministic validation, as an asynchronous
+      batch job at roughly half the synchronous token price. Questions that failed or
+      skipped validation are excluded — the judge never scored those.
+    </p>
+    <p class="note">Batch judge: <code>{{ judge_batch_status }}</code></p>
+
+    {% if judge_batch_enabled %}
+      <form class="upload-form" action="/questions/judge-runs" method="post">
+        <button class="button" type="submit">Re-judge question bank</button>
+      </form>
+    {% else %}
+      <p class="empty">
+        Bulk re-run is disabled. Set <code>JUDGE_BATCH_ENABLED=true</code> and an API key
+        in your <code>.env</code> file to enable it.
+      </p>
+    {% endif %}
+
+    {% if judge_runs %}
+      <table class="table">
+        <thead>
+          <tr><th>Run</th><th>Status</th><th>Model</th><th>Questions</th>
+              <th>Recorded</th><th>Failed</th><th>Submitted</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for run in judge_runs %}
+            <tr>
+              <td><code>{{ run.run_id[:12] }}</code></td>
+              <td><span class="status">{{ run.status }}</span></td>
+              <td><code>{{ run.model }}</code></td>
+              <td>{{ run.question_count }}</td>
+              <td>{{ run.completed_count }}</td>
+              <td>{{ run.failed_count }}</td>
+              <td>{{ run.submitted_at.strftime("%Y-%m-%d %H:%M UTC") if run.submitted_at else "—" }}</td>
+              <td>
+                {% if run.status in ["submitted", "in_progress"] %}
+                  <form action="/questions/judge-runs/{{ run.run_id }}/poll" method="post">
+                    <button class="button" type="submit">Check for results</button>
+                  </form>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+            {% if run.error_detail %}
+              <tr><td colspan="8" class="note">{{ run.error_detail }}</td></tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="note">
+        Results are collected only when you ask for them; there is no scheduler.
+        A run stays collectable for 24 hours before the provider expires it.
+      </p>
+    {% else %}
+      <p class="empty">No judge re-run has been submitted yet.</p>
+    {% endif %}
+  </section>
+
   {{ deferred("Planned for this section", [
-    "Validate automatically — deterministic checks decide; LLM judgment is advisory only.",
     "Approve, reject or edit each question; the generated original is always retained.",
   ]) }}
 {% endblock %}

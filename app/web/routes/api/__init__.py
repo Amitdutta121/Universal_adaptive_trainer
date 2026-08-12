@@ -13,7 +13,16 @@ paths and as an HTML error page elsewhere.
 
 from fastapi import APIRouter
 
-from app.web.routes.api import books, curriculum, feedback, preferences, questions, system
+from app.web.routes.api import (
+    books,
+    calibration,
+    curriculum,
+    evaluation,
+    feedback,
+    preferences,
+    questions,
+    system,
+)
 
 router = APIRouter(prefix="/api")
 router.include_router(system.router)
@@ -22,5 +31,19 @@ router.include_router(curriculum.router)
 router.include_router(questions.router)
 router.include_router(feedback.router)
 router.include_router(preferences.router)
+router.include_router(calibration.router)
+# After ``questions``: this router also serves /questions/{id}/evaluations, and
+# including it first would let that path shadow /questions/{question_id}.
+router.include_router(evaluation.router)
 
-__all__ = ["books", "curriculum", "feedback", "preferences", "questions", "router", "system"]
+__all__ = [
+    "books",
+    "calibration",
+    "curriculum",
+    "evaluation",
+    "feedback",
+    "preferences",
+    "questions",
+    "router",
+    "system",
+]

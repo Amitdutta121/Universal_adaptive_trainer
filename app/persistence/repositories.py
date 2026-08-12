@@ -19,8 +19,10 @@ from app.persistence.models import (
     BookRow,
     BookSectionRow,
     CurriculumVersionRow,
+    JudgeBatchRunRow,
     PreferenceStatementRow,
     ProfessorReviewRow,
+    QuestionEvaluationRow,
     QuestionRow,
     ReviewEmbeddingRow,
     SubtopicEvidenceRow,
@@ -293,10 +295,146 @@ class QuestionRepository:
             raise NotFoundError(f"Question {question_id} does not exist.")
         return row
 
+    def list_reviewed_with_evaluation(self) -> list[QuestionRow]:
+        """Questions carrying both a stored judge evaluation and a review.
+
+        The reviews are eager-loaded in one further query, because calibration
+        reads every review of every matching question and would otherwise issue
+        one query per question. Unbounded on purpose: a sample restricted to the
+        newest questions would report a rate for a slice while naming it the
+        judge's accuracy.
+        """
+        stmt = (
+            select(QuestionRow)
+            .where(QuestionRow.pedagogical_eval.is_not(None), QuestionRow.reviews.any())
+            .options(selectinload(QuestionRow.reviews))
+            .order_by(QuestionRow.id)
+        )
+        return list(self._session.scalars(stmt))
+
+    def list_judgeable(self) -> list[QuestionRow]:
+        """Questions the pedagogical judge is allowed to score.
+
+        The judge never runs on a question that failed or skipped deterministic
+        validation (ADR-024), so a bulk re-run must exclude them rather than
+        re-deciding that rule for itself. ``passed`` lives inside a JSON column,
+        so the SQL narrows to questions that have a report at all and the flag
+        is read from the decoded model.
+        """
+        stmt = (
+            select(QuestionRow)
+            .where(QuestionRow.validation_report.is_not(None))
+            .order_by(QuestionRow.id)
+        )
+        return [
+            row
+            for row in self._session.scalars(stmt)
+            if row.validation_report is not None and row.validation_report.passed
+        ]
+
+    def list_evaluated_without_history(self) -> list[QuestionRow]:
+        """Questions carrying a current evaluation that no history row records.
+
+        The backfill set (ADR-030): evaluations written before this table
+        existed. Empty once a backfill pass has run, which is what makes the
+        pass idempotent without a marker row.
+        """
+        recorded = select(QuestionEvaluationRow.question_id).distinct()
+        stmt = (
+            select(QuestionRow)
+            .where(
+                QuestionRow.pedagogical_eval.is_not(None),
+                QuestionRow.id.not_in(recorded),
+            )
+            .order_by(QuestionRow.id)
+        )
+        return list(self._session.scalars(stmt))
+
     def add(self, question: QuestionRow) -> QuestionRow:
         self._session.add(question)
         self._session.flush()
         return question
+
+
+class QuestionEvaluationRepository:
+    """Append-only pedagogical evaluation history (ADR-030).
+
+    There is no update or delete here on purpose: an evaluation records what the
+    judge said at a moment, and a later run disagreeing with it is a second row,
+    never an edit of the first.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: QuestionEvaluationRow) -> QuestionEvaluationRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def list_for_question(self, question_id: int) -> list[QuestionEvaluationRow]:
+        """Every evaluation of one question, newest first."""
+        stmt = (
+            select(QuestionEvaluationRow)
+            .where(QuestionEvaluationRow.question_id == question_id)
+            .order_by(
+                QuestionEvaluationRow.created_at.desc(),
+                QuestionEvaluationRow.id.desc(),
+            )
+        )
+        return list(self._session.scalars(stmt))
+
+    def get_for_run(self, run_id: str, question_id: int) -> QuestionEvaluationRow | None:
+        """The row a given run already wrote for a question, if any.
+
+        Consulted before ingesting a result so that re-polling a completed run
+        adds nothing rather than raising on the unique constraint.
+        """
+        stmt = select(QuestionEvaluationRow).where(
+            QuestionEvaluationRow.run_id == run_id,
+            QuestionEvaluationRow.question_id == question_id,
+        )
+        return self._session.scalars(stmt).first()
+
+    def question_ids_for_run(self, run_id: str) -> set[int]:
+        stmt = select(QuestionEvaluationRow.question_id).where(
+            QuestionEvaluationRow.run_id == run_id
+        )
+        return set(self._session.scalars(stmt))
+
+    def count(self) -> int:
+        return self._session.scalar(select(func.count()).select_from(QuestionEvaluationRow)) or 0
+
+
+class JudgeBatchRunRepository:
+    """Bulk judge re-runs and their provider job ids (ADR-030)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: JudgeBatchRunRow) -> JudgeBatchRunRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, run_id: str) -> JudgeBatchRunRow:
+        stmt = select(JudgeBatchRunRow).where(JudgeBatchRunRow.run_id == run_id)
+        row = self._session.scalars(stmt).first()
+        if row is None:
+            raise NotFoundError(f"Judge batch run {run_id!r} does not exist.")
+        return row
+
+    def find(self, run_id: str) -> JudgeBatchRunRow | None:
+        stmt = select(JudgeBatchRunRow).where(JudgeBatchRunRow.run_id == run_id)
+        return self._session.scalars(stmt).first()
+
+    def list_recent(self, limit: int = 20) -> list[JudgeBatchRunRow]:
+        stmt = (
+            select(JudgeBatchRunRow)
+            .order_by(JudgeBatchRunRow.created_at.desc(), JudgeBatchRunRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt))
 
 
 class ProfessorReviewRepository:

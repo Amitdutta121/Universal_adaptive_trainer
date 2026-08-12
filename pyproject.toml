@@ -15,11 +15,13 @@ dependencies = [
     # See docs/DECISIONS.md ADR-020.
     "instructor>=1.15",
     "openai>=1.60",
+    # Asynchronous judge batch jobs (app/llm/batch.py). Instructor cannot wrap a
+    # job that is submitted now and collected later. See docs/DECISIONS.md ADR-030.
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "httpx>=0.27",
     "pytest>=8.3",
     "ruff>=0.7",
 ]

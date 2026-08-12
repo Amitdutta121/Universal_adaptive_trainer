@@ -144,3 +144,99 @@ def test_question_detail_shows_pedagogical_evaluation_error(
     assert "Status: error" in response.text
     assert "Judge service unavailable." in response.text
     assert "Error: Judge service unavailable." not in response.text
+
+
+def test_question_detail_shows_an_empty_judge_history_panel(
+    client: TestClient,
+    session: Session,
+    settings: Any,
+) -> None:
+    """A question judged before history existed still gets the panel, not an error."""
+    question_id = _seed_question(
+        session,
+        settings,
+        PedagogicalEvaluation(
+            status=PedagogicalEvalStatus.SKIPPED,
+            skip_reason="deterministic_failed",
+            overall_advisory_status=AdvisoryStatus.SKIPPED,
+        ),
+    )
+
+    response = client.get(f"/questions/{question_id}")
+
+    assert response.status_code == 200
+    assert "Judge history" in response.text
+    assert "No evaluation history has been recorded" in response.text
+
+
+def test_question_detail_lists_retained_evaluations_newest_first(
+    client: TestClient,
+    session: Session,
+    settings: Any,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.domain.enums import EvaluationTrigger
+    from app.evaluation import record_evaluation
+
+    question_id = _seed_question(
+        session,
+        settings,
+        PedagogicalEvaluation(
+            status=PedagogicalEvalStatus.COMPLETED,
+            overall_advisory_score=4.0,
+            overall_advisory_status=AdvisoryStatus.STRONG,
+            judge_model="first/model",
+        ),
+    )
+    for created_at, model, trigger in (
+        (datetime.now(UTC) - timedelta(days=1), "first/model", EvaluationTrigger.GENERATION),
+        (datetime.now(UTC), "second/model", EvaluationTrigger.BATCH_RERUN),
+    ):
+        record_evaluation(
+            session,
+            question_id,
+            PedagogicalEvaluation(
+                question_id=question_id,
+                status=PedagogicalEvalStatus.COMPLETED,
+                overall_advisory_score=4.0,
+                overall_advisory_status=AdvisoryStatus.STRONG,
+                judge_model=model,
+                created_at=created_at,
+            ),
+            run_id=f"run-{model}",
+            trigger=trigger,
+        )
+    session.commit()
+
+    response = client.get(f"/questions/{question_id}")
+
+    assert response.status_code == 200
+    assert "Judge history" in response.text
+    assert "batch_rerun" in response.text
+    # Newest first: the re-run row is rendered above the generation row.
+    assert response.text.index("second/model") < response.text.index("first/model")
+    assert "(current)" in response.text
+
+
+def test_questions_page_offers_a_bulk_rerun_and_reports_it_disabled(
+    client: TestClient,
+) -> None:
+    """Test settings leave the batch judge off, so the page must say so."""
+    response = client.get("/questions")
+
+    assert response.status_code == 200
+    assert "Bulk judge re-run" in response.text
+    assert "JUDGE_BATCH_ENABLED" in response.text
+    assert "No judge re-run has been submitted yet." in response.text
+
+
+def test_submitting_a_rerun_from_the_page_reports_the_configuration_error(
+    client: TestClient,
+) -> None:
+    response = client.post("/questions/judge-runs")
+
+    assert response.status_code == 500
+    assert "Bulk judge re-run is disabled." in response.text
+    # Stays on the questions page as an inline banner, not a whole error page.
+    assert "Question bank" in response.text

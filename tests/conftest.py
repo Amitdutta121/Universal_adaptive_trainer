@@ -32,6 +32,12 @@ TEST_ENV: dict[str, str] = {
     "LLM_PROVIDER": "none",
     "LLM_API_KEY": "",
     "LLM_BASE_URL": "",
+    # Pinned for the same reason as the LLM variables above: a developer who has
+    # enabled batch re-runs in their own ``.env`` must not thereby change what
+    # the suite tests -- and must never have a test reach a real provider.
+    "JUDGE_BATCH_ENABLED": "false",
+    "JUDGE_BATCH_API_KEY": "",
+    "JUDGE_BATCH_MODEL": "",
     "CORS_ALLOW_ORIGINS": "http://localhost:5173",
 }
 

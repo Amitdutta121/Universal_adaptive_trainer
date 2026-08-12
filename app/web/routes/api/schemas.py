@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.calibration import CalibrationLabel, CalibrationPair, CalibrationReport
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
 from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
 from app.domain.enums import (
@@ -24,7 +25,9 @@ from app.domain.enums import (
     CurriculumItemStatus,
     CurriculumStatus,
     Difficulty,
+    EvaluationTrigger,
     GeneratorKind,
+    JudgeBatchStatus,
     PreferenceCategory,
     PreferenceConfirmationState,
     QuestionKind,
@@ -38,12 +41,14 @@ from app.domain.enums import (
 )
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import QuestionCheck
-from app.evaluation import PedagogicalEvaluation
+from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
 from app.persistence.models import (
     BookRow,
     CurriculumVersionRow,
+    JudgeBatchRunRow,
     PreferenceStatementRow,
     ProfessorReviewRow,
+    QuestionEvaluationRow,
     QuestionRow,
     SubtopicEvidenceRow,
     SubtopicRow,
@@ -697,6 +702,212 @@ class PreferenceRefreshResponse(BaseModel):
 
 class CorrectPreferenceRequest(BaseModel):
     rule_text: str = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------- calibration
+
+
+class CalibrationResultsResponse(BaseModel):
+    """How often the advisory judge agreed with the professor (ADR-029).
+
+    Every rate is ``null`` when its denominator is zero, so a client can tell
+    "no data yet" from "agreed with nothing". ``n`` counts questions, not
+    reviews, and ``judge_accept_count`` is published so a rate resting on two
+    questions is not read as a property of the judge.
+    """
+
+    n: int
+    judge_accept_count: int
+    agreement: float | None
+    auto_accept_precision: float | None
+    unsafe_auto_accept_rate: float | None
+
+    @classmethod
+    def from_report(cls, report: CalibrationReport) -> CalibrationResultsResponse:
+        return cls(
+            n=report.n,
+            judge_accept_count=report.judge_accept_count,
+            agreement=report.agreement,
+            auto_accept_precision=report.auto_accept_precision,
+            unsafe_auto_accept_rate=report.unsafe_auto_accept_rate,
+        )
+
+
+class CalibrationPairOut(BaseModel):
+    """One counted question: what the judge said, what the professor said.
+
+    The evidence behind the rates, kept out of ``CalibrationResultsResponse`` so
+    that response stays the fixed five-figure summary. Questions excluded from
+    the measurement do not appear here at all.
+    """
+
+    question_id: int
+    judge: CalibrationLabel
+    professor: CalibrationLabel
+    agrees: bool
+
+    @classmethod
+    def from_pair(cls, pair: CalibrationPair) -> CalibrationPairOut:
+        return cls(
+            question_id=pair.question_id,
+            judge=pair.judge,
+            professor=pair.professor,
+            agrees=pair.agrees,
+        )
+
+
+class CalibrationPairsResponse(BaseModel):
+    pairs: list[CalibrationPairOut]
+    total: int
+
+
+# ------------------------------------------------------------------ evaluation
+
+
+class EvaluationHistoryEntry(BaseModel):
+    """One retained evaluation of a question (ADR-030).
+
+    ``evaluation`` is the stored blob rather than a parsed
+    :class:`PedagogicalEvaluation`, because history includes rows written under
+    an older rubric that may no longer validate. Dropping them would be losing
+    the record this table exists to keep, so the summary columns beside it are
+    what a client should read first.
+    """
+
+    id: int
+    question_id: int
+    run_id: str
+    trigger: EvaluationTrigger
+    created_at: datetime
+    judge_model: str | None
+    rubric_version: str | None
+    eval_status: str | None
+    advisory_status: str | None
+    overall_advisory_score: float | None
+    is_current: bool
+    evaluation: dict[str, Any] | None
+
+    @classmethod
+    def from_row(cls, row: QuestionEvaluationRow, *, is_current: bool) -> EvaluationHistoryEntry:
+        payload = row.evaluation or {}
+        raw_score = payload.get("overall_advisory_score")
+        return cls(
+            id=row.id,
+            question_id=row.question_id,
+            run_id=row.run_id,
+            trigger=row.trigger,
+            created_at=row.created_at,
+            judge_model=row.judge_model,
+            rubric_version=row.rubric_version,
+            eval_status=row.eval_status,
+            advisory_status=row.advisory_status,
+            overall_advisory_score=(
+                float(raw_score) if isinstance(raw_score, (int, float)) else None
+            ),
+            is_current=is_current,
+            evaluation=row.evaluation,
+        )
+
+
+class EvaluationHistoryResponse(BaseModel):
+    """A question's judge history, newest first."""
+
+    question_id: int
+    evaluations: list[EvaluationHistoryEntry]
+    total: int
+
+
+class JudgeBatchRunOut(BaseModel):
+    """One bulk re-run, as a professor needs to see it.
+
+    ``provider_batch_ids`` is a list because a bank larger than the per-job cap
+    is split into several provider jobs that share this one run id.
+    """
+
+    run_id: str
+    status: JudgeBatchStatus
+    model: str
+    rubric_version: str
+    provider_batch_ids: list[str]
+    question_count: int
+    completed_count: int
+    failed_count: int
+    submitted_at: datetime | None
+    completed_at: datetime | None
+    error_detail: str | None
+
+    @classmethod
+    def from_row(cls, row: JudgeBatchRunRow) -> JudgeBatchRunOut:
+        return cls(
+            run_id=row.run_id,
+            status=row.status,
+            model=row.model,
+            rubric_version=row.rubric_version,
+            provider_batch_ids=list(row.provider_batch_ids or []),
+            question_count=row.question_count,
+            completed_count=row.completed_count,
+            failed_count=row.failed_count,
+            submitted_at=row.submitted_at,
+            completed_at=row.completed_at,
+            error_detail=row.error_detail,
+        )
+
+
+class SubmitBatchRunRequest(BaseModel):
+    """Optional narrowing of a re-run to named questions.
+
+    Omitted means the whole eligible bank. Ineligible ids are dropped rather
+    than rejected: the eligibility rule is ADR-024's, not the caller's to waive.
+    """
+
+    question_ids: list[int] | None = None
+
+
+class SubmitBatchRunResponse(BaseModel):
+    """What a submission did, including the one-off backfill it may have run."""
+
+    run: JudgeBatchRunOut
+    submitted: int
+    skipped: int
+    backfilled: int
+
+    @classmethod
+    def from_result(cls, result: SubmissionResult) -> SubmitBatchRunResponse:
+        return cls(
+            run=JudgeBatchRunOut.from_row(result.run),
+            submitted=result.submitted,
+            skipped=result.skipped,
+            backfilled=result.backfilled,
+        )
+
+
+class BatchRunListResponse(BaseModel):
+    runs: list[JudgeBatchRunOut]
+    total: int
+
+
+class PollBatchRunResponse(BaseModel):
+    """What one poll collected.
+
+    ``already_recorded`` is published so that re-polling a finished run reads as
+    "nothing new" rather than as a run that produced nothing.
+    """
+
+    run: JudgeBatchRunOut
+    status: JudgeBatchStatus
+    ingested: int
+    failed: int
+    already_recorded: int
+
+    @classmethod
+    def from_result(cls, result: IngestResult) -> PollBatchRunResponse:
+        return cls(
+            run=JudgeBatchRunOut.from_row(result.run),
+            status=result.status,
+            ingested=result.ingested,
+            failed=result.failed,
+            already_recorded=result.already_recorded,
+        )
 
 
 SubtopicDetail.model_rebuild()

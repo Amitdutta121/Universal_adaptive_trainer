@@ -261,3 +261,39 @@ class PreferenceConfirmationState(StrEnum):
     INFERRED = "inferred"
     CONFIRMED = "confirmed"
     CORRECTED = "corrected"
+
+
+class EvaluationTrigger(StrEnum):
+    """What caused a pedagogical evaluation to be recorded.
+
+    Every stored evaluation names its cause, so a bulk re-run's output stays
+    distinguishable from the evaluation a question received when it was first
+    generated (ADR-030).
+    """
+
+    GENERATION = "generation"
+    BATCH_RERUN = "batch_rerun"
+
+
+class JudgeBatchStatus(StrEnum):
+    """Lifecycle of one bulk judge re-run.
+
+    The provider reports a finer sequence (``validating``, ``finalizing``);
+    those map onto ``IN_PROGRESS`` because they mean the same thing to a
+    professor waiting for results. ``CANCELLED`` at the provider is recorded as
+    ``FAILED`` with the cancellation named in ``error_detail``.
+    """
+
+    SUBMITTED = "submitted"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+    def is_terminal(self) -> bool:
+        """True when no further polling can change this run."""
+        return self in (
+            JudgeBatchStatus.COMPLETED,
+            JudgeBatchStatus.FAILED,
+            JudgeBatchStatus.EXPIRED,
+        )

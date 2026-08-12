@@ -26,25 +26,41 @@ from app.persistence.repositories import CurriculumRepository
 JUDGE_MAX_ATTEMPTS = 3
 
 
+def build_judge_prompts(session: Session, question: Question) -> tuple[str, str]:
+    """Return the ``(system, user)`` prompts for reviewing one question.
+
+    Shared by the synchronous judge below and by the bulk re-run in
+    :mod:`app.evaluation.batch_service` (ADR-030). The batch path builds its own
+    request bodies, but it must not build its own rubric: two copies of these
+    prompts would be free to drift, and a re-run would then answer a different
+    question from the one the stored evaluation answered.
+
+    Raises:
+        AdaptiveTrainerError: if the question's sources or taxonomy cannot be
+            resolved. Callers turn that into an ``error`` evaluation.
+    """
+    artifact, sources, taxonomy = _load_context(session, question)
+    return (
+        build_judge_system_prompt(),
+        build_judge_user_prompt(
+            question_artifact=artifact,
+            source_sections=sources,
+            taxonomy=taxonomy,
+        ),
+    )
+
+
 class PedagogicalJudge:
     """Evaluate a generated question against its source and curriculum context."""
 
     def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
         self._session = session
         self._client = client or get_structured_client()
-        self._retrieval = SourceRetrieval(session)
-        self._curriculum = CurriculumRepository(session)
 
     def evaluate(self, question: Question) -> PedagogicalEvaluation:
         """Return completed evaluation or an advisory error after bounded retries."""
         try:
-            artifact, sources, taxonomy = self._load_context(question)
-            system = build_judge_system_prompt()
-            prompt = build_judge_user_prompt(
-                question_artifact=artifact,
-                source_sections=sources,
-                taxonomy=taxonomy,
-            )
+            system, prompt = build_judge_prompts(self._session, question)
         except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
             return error_evaluation(
                 question_id=question.id,
@@ -72,51 +88,54 @@ class PedagogicalJudge:
             judge_model=self._client.description,
         )
 
-    def _load_context(
-        self, question: Question
-    ) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
-        content = question.content or {}
-        artifact = {
-            "prompt": question.prompt,
-            "question_type": question.question_type.value if question.question_type else None,
-            "difficulty": question.difficulty.value,
-            "reference_solution": question.reference_solution,
-            "tests": question.tests,
-            "content": content,
-        }
-        sources = []
-        for section_id in _source_section_ids(question):
-            section = self._retrieval.get_section(section_id)
-            sources.append(
-                {
-                    "section_id": section_id,
-                    "citation": self._retrieval.section_source(section_id).citation(),
-                    "text": section.text,
-                }
-            )
 
-        version = self._curriculum.get_with_tree(question.curriculum_version_id)
-        topic = next((topic for topic in version.topics if topic.id == question.topic_id), None)
-        if topic is None:
-            raise NotFoundError(
-                "Question topic is not in its curriculum version.",
-                detail=f"topic_id={question.topic_id}, curriculum_version_id={version.id}",
-            )
-        subtopic = next(
-            (subtopic for subtopic in topic.subtopics if subtopic.id == question.subtopic_id),
-            None,
+def _load_context(
+    session: Session, question: Question
+) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
+    """Gather the question, its cited sections and its taxonomy names."""
+    retrieval = SourceRetrieval(session)
+    content = question.content or {}
+    artifact = {
+        "prompt": question.prompt,
+        "question_type": question.question_type.value if question.question_type else None,
+        "difficulty": question.difficulty.value,
+        "reference_solution": question.reference_solution,
+        "tests": question.tests,
+        "content": content,
+    }
+    sources = []
+    for section_id in _source_section_ids(question):
+        section = retrieval.get_section(section_id)
+        sources.append(
+            {
+                "section_id": section_id,
+                "citation": retrieval.section_source(section_id).citation(),
+                "text": section.text,
+            }
         )
-        if subtopic is None:
-            raise NotFoundError(
-                "Question subtopic is not in its topic.",
-                detail=f"subtopic_id={question.subtopic_id}, topic_id={topic.id}",
-            )
-        taxonomy = {
-            "topic_name": topic.name,
-            "subtopic_name": subtopic.name,
-            "subtopic_description": subtopic.description,
-        }
-        return artifact, sources, taxonomy
+
+    version = CurriculumRepository(session).get_with_tree(question.curriculum_version_id)
+    topic = next((topic for topic in version.topics if topic.id == question.topic_id), None)
+    if topic is None:
+        raise NotFoundError(
+            "Question topic is not in its curriculum version.",
+            detail=f"topic_id={question.topic_id}, curriculum_version_id={version.id}",
+        )
+    subtopic = next(
+        (subtopic for subtopic in topic.subtopics if subtopic.id == question.subtopic_id),
+        None,
+    )
+    if subtopic is None:
+        raise NotFoundError(
+            "Question subtopic is not in its topic.",
+            detail=f"subtopic_id={question.subtopic_id}, topic_id={topic.id}",
+        )
+    taxonomy = {
+        "topic_name": topic.name,
+        "subtopic_name": subtopic.name,
+        "subtopic_description": subtopic.description,
+    }
+    return artifact, sources, taxonomy
 
 
 def _source_section_ids(question: Question) -> list[int]:

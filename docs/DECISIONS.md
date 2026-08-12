@@ -530,6 +530,13 @@ Validation-repair retries stay off (`max_retries=0`) so bad answers surface as
 - `LLMRequestError` vs `MalformedModelOutputError` remain distinct.
 - Callers depend on `StructuredLLMClient`, never on Instructor or OpenAI types.
 
+**Amended by ADR-030** for asynchronous work only. A batch job is submitted now
+and collected up to 24 hours later, so there is no call for Instructor to wrap:
+`app/llm/batch.py` builds those request bodies by hand. The provider is
+unchanged — still OpenRouter, still one credential, still
+`provider.data_collection: deny` — and every synchronous call still goes through
+Instructor. Batch jobs live under `/api/beta/batches`, not `/api/v1`.
+
 ---
 
 ## ADR-021 — Curriculum comes from fixed taxonomy uploads
@@ -858,3 +865,151 @@ combination that makes any site able to act as a logged-in user.
 - Methods and request headers are allowed wholesale. Narrowing them buys nothing while every
   professor capability is unauthenticated; when authentication arrives, that is the point to
   revisit both this and `allow_credentials`.
+
+---
+
+## ADR-029 — Judge calibration is measured against the first professor review
+
+**Status:** accepted
+
+`GET /api/calibration/results` reports how often the advisory pedagogical judge (ADR-024) agreed
+with the professor, over questions that already carry both a stored evaluation and at least one
+review. Both verdicts are projected onto one two-valued label in `app/calibration/`: the judge's
+`strong` band means ACCEPT and `adequate` / `weak` / `uncertain` mean NEEDS_REVIEW, while the
+professor's `approve` means ACCEPT and `edit` / `reject` mean NEEDS_REVIEW. The endpoint returns
+`n`, `judge_accept_count`, `agreement`, `auto_accept_precision` and `unsafe_auto_accept_rate`.
+
+**Why:** the judge is advisory precisely because nobody has measured it. Deciding whether it could
+ever pre-screen questions needs a number drawn from data the professor already produced, not a new
+labelling exercise — so calibration reads existing rows only, and stores nothing.
+
+**Implications:**
+
+- **The *first* review of a question is the one compared, never the latest.** The judge scored the
+  question *as generated*; an edit-then-approve pair means the generated question was not usable,
+  so counting the later approval would credit the judge for an outcome the professor's own edit
+  produced. Reviews are append-only (ADR-006), which is what makes the first one recoverable.
+- **Only `strong` counts as a judge ACCEPT.** Auto-acceptance is the decision being measured, so
+  the accept bucket must hold exactly the questions that would have skipped review, not every
+  question the judge tolerated.
+- **`skipped` and `error` evaluations, and any evaluation not `COMPLETED`, are excluded** rather
+  than counted as a wrong answer: the judge made no prediction there. `uncertain` *is* a
+  prediction — the judge ran and declined to vouch — so it counts as NEEDS_REVIEW.
+- **A stored evaluation that no longer validates is skipped, with a warning logged.** Rubric and
+  schema versions change; an old blob is missing data, not evidence of inaccuracy, and failing the
+  whole endpoint over one stale row would hide the figure the professor asked for.
+- **Every rate is `null` when its denominator is zero.** A fresh database reported as `0.0` reads
+  as a judge that agrees with nobody rather than as an absent measurement.
+- No new table or column: the query joins `questions.pedagogical_eval_json` to
+  `professor_reviews`, eager-loading reviews so the report costs two queries regardless of size.
+- Deliberately out of scope for now: breakdowns (by difficulty, question type, generator, rubric
+  version), a review queue ordered by judge confidence, and any automation mode that would act on
+  these figures. Acting on a rate before it is stable is how an unvalidated judge quietly becomes
+  the approver.
+
+---
+
+## ADR-030 — Judge re-runs are bulk, asynchronous and manually collected; every evaluation is kept
+
+**Status:** accepted
+
+The pedagogical judge (ADR-024) ran in exactly one place: once per question, inside
+`GenerationService.generate_*`, writing its answer to `questions.pedagogical_eval_json`. There was
+no way to re-judge an existing question, and no way to have re-judged one without destroying what
+the judge said the first time.
+
+Two things change. **Every evaluation is now retained** in `question_evaluations`, an append-only
+history keyed by question and run. And **the whole eligible bank can be re-judged in one go**, as
+an asynchronous provider batch job recorded in `judge_batch_runs`.
+
+`questions.pedagogical_eval_json` still holds the *current* evaluation and is still what the
+question detail page, the API response and calibration read. History is added beside that column,
+not in place of it, so no existing reader changes.
+
+**Why a batch job rather than a loop of synchronous calls:** OpenRouter prices batch requests at
+roughly half the synchronous rate and this is the one operation that is inherently bulk. The
+trade-off is real and worth naming: on today's seven-question bank the saving is cents and a
+synchronous loop would finish in under a minute, so this machinery does not pay for itself yet. It
+pays at hundreds of questions per run, which is the scale a re-run exists for — re-judging after a
+rubric change, or measuring a new model against the bank.
+
+**Transport (amends ADR-020, does not overturn it).** ADR-020 says Instructor over OpenRouter owns
+structured LLM calls. That still holds for every synchronous call. It cannot hold here: a batch job
+is submitted now and collected up to 24 hours later, so there is no call for Instructor to wrap.
+`app/llm/batch.py` therefore builds request bodies and parses responses by hand.
+
+What does *not* change is the provider: this is still OpenRouter, still the same credential,
+still `provider.data_collection: deny` on every request. No direct-provider path was added and
+`LLM_PROVIDER` is still `openrouter` or `none`. The batch API simply lives at a different path —
+`/api/beta/batches`, not `/api/v1` — and takes its requests inline rather than as an uploaded
+JSONL file.
+
+The rubric is **not** forked. `build_judge_prompts` in `app/evaluation/service.py` is the one place
+both transports get their system and user prompts, and the response schema is
+`JudgeModelResponse.model_json_schema()`. Two copies of the rubric would be free to drift, and a
+re-run would then be answering a different question from the one the stored evaluation answered.
+
+**Structured output is requested as `json_object`, not as a strict `json_schema`.** The first real
+submission (`batch-1786508645`, six requests) was rejected upstream on every request with
+*"'additionalProperties' is required to be supplied and to be false"*: OpenAI's strict mode demands
+`additionalProperties: false` on every object and every property listed as required, and a Pydantic
+`model_json_schema()` provides neither. Rewriting the schema into one provider's strict dialect is
+precisely the wire-format maintenance ADR-020 deleted, so the batch path instead asks for
+`{"type": "json_object"}` and states the schema in the system message — byte for byte what
+Instructor's `Mode.JSON` does on the synchronous path, which has worked against this model since
+ADR-024. An answer that still does not fit the schema costs one question an `error` evaluation at
+ingest, not the batch.
+
+**Implications:**
+
+- **`app/llm/batch.py` knows nothing about evaluation.** `app.llm` sits below the subsystems, so it
+  takes prompts and a JSON schema as arguments rather than importing `app.evaluation`. It is a
+  transport, not a judge.
+- **Eligibility is ADR-024's rule, not a new one.** A re-run excludes any question whose
+  `validation_report` is absent or not `passed`, because the judge never ran on those. Bulk
+  re-running must not quietly extend the judge's reach past deterministic validation.
+- **The backfill runs once, before the first submission.** Evaluations recorded before this table
+  existed are real judge output; each gets a history row under trigger `generation` with its
+  *stored* `created_at` preserved, so history stays ordered by when the judge actually spoke. The
+  set is defined as "current evaluation with no history row", which is what makes a second pass a
+  no-op without a marker.
+- **Collection is manual and idempotent.** There is no scheduler in this repository and this does
+  not add one: `POST /api/evaluation/batch-runs/{run_id}/poll` is how results arrive. Re-polling a
+  finished run writes nothing and reports `already_recorded`, so the professor need not remember
+  whether they already pressed the button. The unique constraint on `(run_id, question_id)` is what
+  guarantees that rather than a convention.
+- **One malformed line costs one evaluation, not the run.** A result that cannot be parsed becomes
+  an `error` evaluation for that question and ingest continues; the transaction commits per result.
+- **A failed evaluation is retained in history but does not become the current one.** When an
+  `error` or `skipped` evaluation arrives for a question that already carries a `completed` one,
+  the history row is written and `pedagogical_eval_json` is left alone. ADR-024 already holds that
+  an `error` evaluation cannot fail a question that passed deterministic checks; the same reasoning
+  applies to the current pointer, because a re-run that never reached the model says nothing about
+  the question. Without this rule the rejected batch above blanked all six stored judgements at
+  once — recoverable from history, but every question read as unjudged until it was. The next
+  successful re-run still takes over, and a question with nothing better still shows the failure.
+- **A run may be several provider jobs.** A bank over the per-job cap is split at submission, and
+  the jobs share one run id, so the professor sees one re-run. A run is `completed` only when every
+  one of its jobs is — reporting completion while part of the bank went unjudged would be a false
+  statement about coverage. A job the provider `cancelled` is recorded as `failed` with the
+  cancellation in `error_detail`; there is no separate cancelled state to show.
+- **Re-ingesting changes past calibration figures retroactively.** ADR-029 reads
+  `questions.pedagogical_eval_json`, so a question whose current evaluation a re-run replaced is
+  measured against the *new* one. The reported agreement rate can therefore move without a single
+  professor review changing. What is untouched is the review side: reviews are append-only
+  (ADR-006) and the first-review rule of ADR-029 still selects the same review it always did. A
+  future breakdown by rubric version is the honest fix; pinning calibration to a particular run is
+  deliberately not attempted here.
+- **The denormalised columns on `question_evaluations` are plain strings.** `eval_status`,
+  `advisory_status`, `judge_model` and `rubric_version` are copies of values inside `evaluation`,
+  kept so a run can be summarised without decoding every blob. They are not mapped enums because
+  their vocabularies belong to `app.evaluation`, which persistence must not import (ADR-026).
+- **Stored blobs that no longer validate are still returned.** The history endpoint publishes the
+  raw `evaluation` object plus the summary columns rather than a parsed `PedagogicalEvaluation`,
+  because a row written under an older rubric is the record this table exists to keep — the same
+  policy ADR-029 applies when it skips such a row for measurement.
+- **Off by default.** `JUDGE_BATCH_ENABLED` is `false`: a run costs real money and completes over
+  hours, so it is opted into rather than discovered.
+- **Deliberately out of scope:** scheduling, automatic retry of failed lines, cancelling a
+  submitted run, and any use of re-run output to change a question's status. The judge stays
+  advisory (ADR-024).
