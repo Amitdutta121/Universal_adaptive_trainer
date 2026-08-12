@@ -90,10 +90,10 @@ def test_questions_page_shows_generate_form_when_ready(client, session, settings
 def test_generate_post_creates_question(client, session, settings, monkeypatch) -> None:
     book_id, _, topic_id, subtopic_id, section_id = _seed(session, settings)
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.questions as api_questions
 
     monkeypatch.setattr(
-        pages,
+        api_questions,
         "GenerationService",
         lambda request_session: GenerationService(request_session, client=FakeClient()),
     )
@@ -121,10 +121,10 @@ def test_generate_post_multiple_sections_redirects_to_bank(
     book_id, _, topic_id, subtopic_id, _ = _seed(session, settings)
     section_ids = [section.id for section in SourceRetrieval(session).sections_in_book(book_id)[:2]]
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.questions as api_questions
 
     monkeypatch.setattr(
-        pages,
+        api_questions,
         "GenerationService",
         lambda request_session: GenerationService(request_session, client=FakeClient()),
     )
@@ -158,10 +158,10 @@ def test_generate_post_all_sections_creates_one_question_per_book_section(
     book_id, _, topic_id, subtopic_id, _ = _seed(session, settings)
     section_count = len(SourceRetrieval(session).sections_in_book(book_id))
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.questions as api_questions
 
     monkeypatch.setattr(
-        pages,
+        api_questions,
         "GenerationService",
         lambda request_session: GenerationService(request_session, client=FakeClient()),
     )
@@ -197,9 +197,9 @@ def test_generate_post_renders_malformed_model_output_in_form(
                 "The model response was invalid.", detail="correct_option_index is out of range."
             )
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.questions as api_questions
 
-    monkeypatch.setattr(pages, "GenerationService", FailingGenerationService)
+    monkeypatch.setattr(api_questions, "GenerationService", FailingGenerationService)
     response = client.post(
         "/questions/generate",
         data={
@@ -220,10 +220,10 @@ def test_generate_post_renders_malformed_model_output_in_form(
 def test_detail_shows_prompt_and_source(client, session, settings, monkeypatch) -> None:
     book_id, _, topic_id, subtopic_id, section_id = _seed(session, settings)
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.questions as api_questions
 
     monkeypatch.setattr(
-        pages,
+        api_questions,
         "GenerationService",
         lambda request_session: GenerationService(request_session, client=FakeClient()),
     )

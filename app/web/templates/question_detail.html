@@ -115,17 +115,17 @@
     </section>
   {% endif %}
 
-  {% if question.reference_solution %}
+  {% if detail.reference_solution %}
     <section class="panel">
       <h2>Answer</h2>
-      <pre class="detail">{{ question.reference_solution }}</pre>
+      <pre class="detail">{{ detail.reference_solution }}</pre>
     </section>
   {% endif %}
 
-  {% if question.tests %}
+  {% if detail.tests %}
     <section class="panel">
       <h2>Tests</h2>
-      <pre class="detail">{{ question.tests }}</pre>
+      <pre class="detail">{{ detail.tests }}</pre>
     </section>
   {% endif %}
 
@@ -215,10 +215,10 @@
           <textarea name="prompt" rows="6">{{ question.prompt }}</textarea>
         </label>
         <label>Reference / answer
-          <textarea name="reference_solution" rows="4">{{ question.reference_solution or "" }}</textarea>
+          <textarea name="reference_solution" rows="4">{{ detail.reference_solution or "" }}</textarea>
         </label>
         <label>Tests
-          <textarea name="tests" rows="4">{{ question.tests or "" }}</textarea>
+          <textarea name="tests" rows="4">{{ detail.tests or "" }}</textarea>
         </label>
       </fieldset>
 

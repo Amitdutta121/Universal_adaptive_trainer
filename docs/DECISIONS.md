@@ -767,3 +767,65 @@ are append-only history that must not be deleted.
   `decode_review_ids`, `encode_warnings`/`decode_warnings`, `decode_json_list`,
   `load_content`, and the local `_decode_json`/`_decode_object` helpers in
   `app/validation/shared.py` and `app/evaluation/service.py`.
+
+---
+
+## ADR-027 — The JSON API is the single implementation; pages call it
+
+**Status:** accepted
+
+Every professor capability is exposed as JSON under `/api`, and
+`app/web/routes/pages.py` calls those same handler functions rather than
+repeating their work. A page's remaining job is to pick a template, hand it
+display objects, and turn a raised `AdaptiveTrainerError` into an inline banner
+instead of a whole error page.
+
+**Why:** before this change `/api` held one endpoint (`/api/health`) and every
+professor action lived only in an HTML form-post route. A JSON client — the
+planned React UI, a script, a test — could not upload a book, generate a
+question, or record a review at all. Adding a parallel set of API routes would
+have created two implementations of each capability that were free to drift; a
+validation rule fixed in one would silently not apply to the other.
+
+**How the delegation works**
+
+- Handlers are plain functions. FastAPI resolves `DbSession` when it serves a
+  request; the page routes pass a session in directly. There is no internal HTTP
+  call, no second transaction and no extra serialisation hop.
+- Errors are raised, not returned. The handlers in `app/errors.py` already
+  render an `AdaptiveTrainerError` as JSON for `/api` paths and as an HTML error
+  page elsewhere, so one raise serves both surfaces.
+- Writes commit inside the API handler (or inside the service it calls, for
+  preferences) and roll back before re-raising, so a rejected upload leaves no
+  partial state on either surface.
+
+**What is deliberately not shared**
+
+Read paths still pass ORM rows and domain objects to Jinja. The templates call
+`display_title()` and `citation()`, which the response models do not carry —
+mirroring those methods into the JSON contract would put presentation logic in
+the API, and rewriting twelve templates to consume response models would be a
+large change with no benefit to a JSON client. The duplication left behind is a
+single repository call per page.
+
+**Response models are a contract, not a mirror.** `app/web/routes/api/schemas.py`
+builds every response through an explicit `from_row` constructor rather than
+`from_attributes` over a mapped class, so renaming a column cannot silently
+change a shape a client depends on.
+
+**Implications:**
+
+- `app/web/routes/api/` is a package: `schemas.py` plus one module per resource
+  (`system`, `books`, `curriculum`, `questions`, `feedback`, `preferences`).
+- Tests that need to intercept generation or preference refresh must patch the
+  API module that imports the symbol (`app.web.routes.api.questions`,
+  `app.web.routes.api.preferences`), not `pages`.
+- `POST /api/questions/generate` resolves the approved curriculum id *before*
+  constructing `GenerationService`, so a missing curriculum reports that fixable
+  problem rather than the LLM-configuration error the constructor would raise
+  first.
+- `GET /api/config` publishes the enum vocabularies (difficulties, question
+  types, rejection reasons with their labels, generators) so a client never
+  hard-codes them.
+- The API mirrors current capability only. Filtering, batch generation and a
+  review queue are not part of it yet.

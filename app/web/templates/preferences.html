@@ -49,15 +49,15 @@
               <td>{{ pref.category_label }}</td>
               <td>
                 {{ pref.evidence_count }}
-                {% if pref.review_ids %}
+                {% if pref.supporting_review_ids %}
                   · reviews:
-                  {% for review_id in pref.review_ids %}
+                  {% for review_id in pref.supporting_review_ids %}
                     <a href="/feedback">#{{ review_id }}</a>{% if not loop.last %}, {% endif %}
                   {% endfor %}
                 {% endif %}
               </td>
               <td>{{ "%.2f"|format(pref.confidence) }}</td>
-              <td><span class="status">{{ pref.state }}</span>{% if not pref.active %} (removed){% endif %}</td>
+              <td><span class="status">{{ pref.confirmation_state }}</span>{% if not pref.active %} (removed){% endif %}</td>
               <td>
                 {% if pref.active %}
                   <form class="inline-form" action="/preferences/{{ pref.id }}/confirm" method="post">

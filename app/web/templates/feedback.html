@@ -55,8 +55,8 @@
               <td>{{ review.id }}</td>
               <td>{{ review.question_id }}</td>
               <td><span class="status">{{ review.decision }}</span></td>
-              <td>{{ review.reasons | join(", ") if review.reasons else "—" }}</td>
-              <td><code>{{ review.generator }}</code></td>
+              <td>{{ review.reason_labels | join(", ") if review.reason_labels else "—" }}</td>
+              <td><code>{{ review.generator_label }}</code></td>
               <td>{{ review.comment or "—" }}</td>
               <td>{{ review.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
             </tr>

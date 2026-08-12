@@ -134,7 +134,7 @@ def test_preferences_page_ok(client) -> None:
 def test_refresh_preferences_post(client, session, monkeypatch) -> None:
     _seed_reviews(session)
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.preferences as api_preferences
 
     def fake_refresh(request_session, **kwargs):
         repo = PreferenceRepository(request_session)
@@ -151,7 +151,7 @@ def test_refresh_preferences_post(client, session, monkeypatch) -> None:
             request_session.commit()
         return len(repo.list_all(active_only=True))
 
-    monkeypatch.setattr(pages, "refresh_preferences", fake_refresh)
+    monkeypatch.setattr(api_preferences, "refresh_preferences", fake_refresh)
 
     response = client.post("/preferences/refresh", follow_redirects=False)
     assert response.status_code == 303
@@ -161,7 +161,7 @@ def test_refresh_preferences_post(client, session, monkeypatch) -> None:
 def test_refresh_preferences_llm_unavailable_shows_error(client, session, monkeypatch) -> None:
     _seed_reviews(session)
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.preferences as api_preferences
 
     def fake_refresh(request_session, **kwargs):
         del request_session, kwargs
@@ -170,7 +170,7 @@ def test_refresh_preferences_llm_unavailable_shows_error(client, session, monkey
             detail="Set OPENROUTER_API_KEY in the environment.",
         )
 
-    monkeypatch.setattr(pages, "refresh_preferences", fake_refresh)
+    monkeypatch.setattr(api_preferences, "refresh_preferences", fake_refresh)
 
     response = client.post("/preferences/refresh", follow_redirects=False)
     assert response.status_code == 500
@@ -257,13 +257,13 @@ def test_questions_form_shows_generator_choice(client, session, settings) -> Non
 def test_generate_form_accepts_personalized(client, session, settings, monkeypatch) -> None:
     book_id, topic_id, subtopic_id, section_id, _ = _seed_generation_context(session, settings)
 
-    import app.web.routes.pages as pages
+    import app.web.routes.api.questions as api_questions
 
     def fake_generation_service(request_session, **kwargs):
         return GenerationService(request_session, client=FakeClient(), **kwargs)
 
-    monkeypatch.setattr(pages, "GenerationService", fake_generation_service)
-    monkeypatch.setattr(pages, "get_embedder", lambda settings=None: FakeEmbedder(dim=8))
+    monkeypatch.setattr(api_questions, "GenerationService", fake_generation_service)
+    monkeypatch.setattr(api_questions, "get_embedder", lambda settings=None: FakeEmbedder(dim=8))
 
     response = client.post(
         "/questions/generate",

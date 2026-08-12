@@ -1,15 +1,21 @@
 """Server-rendered professor pages.
 
-Each section page is a placeholder that shows real state from the database
-(counts, empty lists) plus an explicit note about what is not implemented yet.
-Showing genuine empty state rather than mock data keeps the UI honest.
+These routes render HTML; they do not implement behaviour. Every action a page
+submits is delegated to the matching handler in :mod:`app.web.routes.api`, which
+is the single implementation of that capability (ADR-027). A page's own work is
+limited to choosing a template, passing display objects to it, and turning a
+raised :class:`~app.errors.AdaptiveTrainerError` into an inline banner instead of
+a full error page.
+
+Read paths still pass ORM rows and domain objects to Jinja, because the
+templates call methods on them (``display_title()``, ``citation()``) that the
+API's JSON schemas deliberately do not carry.
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import suppress
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -17,7 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.curriculum import TaxonomyImportService, extraction_metadata, proposal_warnings
+from app.curriculum import extraction_metadata, proposal_warnings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.domain.enums import Difficulty, QuestionType, RejectionReason, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
@@ -33,36 +39,26 @@ from app.errors import (
     NotFoundError,
     UnsupportedFileError,
 )
-from app.evaluation import (
-    PedagogicalEvalStatus,
-    PedagogicalEvaluation,
-    humanize_judge_error_detail,
-)
-from app.feedback import submit_review
-from app.generation import GenerationService
-from app.ingestion import (
-    SCHEMA_VERSION,
-    SUPPORTED_EXTENSIONS,
-    BookImportService,
-    SourceRetrieval,
-)
+from app.ingestion import SCHEMA_VERSION, SUPPORTED_EXTENSIONS, SourceRetrieval
 from app.llm import describe_availability
 from app.persistence.database import get_session
 from app.persistence.repositories import (
     BookRepository,
     BookStructureRepository,
     CurriculumRepository,
-    PreferenceRepository,
-    ProfessorReviewRepository,
     QuestionRepository,
 )
-from app.personalization import (
-    confirm_preference,
-    correct_preference,
-    refresh_preferences,
-    remove_preference,
+from app.web.routes.api import books as api_books
+from app.web.routes.api import curriculum as api_curriculum
+from app.web.routes.api import feedback as api_feedback
+from app.web.routes.api import preferences as api_preferences
+from app.web.routes.api import questions as api_questions
+from app.web.routes.api import system as api_system
+from app.web.routes.api.schemas import (
+    CorrectPreferenceRequest,
+    GenerateQuestionsRequest,
+    ReviewRequest,
 )
-from app.personalization.embeddings import get_embedder
 from app.web.templating import render
 
 logger = logging.getLogger(__name__)
@@ -78,12 +74,14 @@ def dashboard(request: Request, session: DbSession) -> HTMLResponse:
     """The primary user-facing route."""
     settings = get_settings()
     llm_configured, llm_status = describe_availability(settings)
+    totals = api_system.counts(session)
     counts = {
-        "books": BookRepository(session).count(),
-        "curriculum": CurriculumRepository(session).count(),
-        "questions": QuestionRepository(session).count(),
-        "feedback": ProfessorReviewRepository(session).count(),
-        "students": 0,
+        "books": totals.books,
+        "curriculum": totals.curriculum_versions,
+        "questions": totals.questions,
+        "feedback": totals.reviews,
+        "preferences": totals.preferences,
+        "students": totals.students,
     }
     return render(
         request,
@@ -144,16 +142,10 @@ def upload_book(
     are things the professor (or their producer script) can fix and retry. Nothing
     is stored unless the document validates in full.
     """
-    # Read synchronously from the spooled temp file: this route runs in a worker
-    # thread, so reading here does not block the event loop.
-    data = file.file.read()
-    filename = file.filename or "upload"
-
     try:
-        book = BookImportService(session).import_upload(filename=filename, data=data, title=title)
+        book = api_books.import_book(session, file, title)
     except (UnsupportedFileError, FileTooLargeError, InvalidBookDocumentError) as exc:
-        session.rollback()
-        logger.info("Rejected upload %r: %s", filename, exc.message)
+        logger.info("Rejected upload %r: %s", file.filename, exc.message)
         return _books_page(
             request,
             session,
@@ -161,8 +153,6 @@ def upload_book(
             error_detail=exc.detail,
             status_code=exc.status_code,
         )
-
-    session.commit()
     return RedirectResponse(url=f"/books/{book.id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -255,13 +245,10 @@ def upload_taxonomy(
     file: Annotated[UploadFile, File()],
 ) -> Response:
     """Import an uploaded fixed taxonomy and open its approved version."""
-    data = file.file.read()
-    filename = file.filename or "taxonomy.json"
     try:
-        version = TaxonomyImportService(session).import_upload(filename=filename, data=data)
+        imported = api_curriculum.import_taxonomy(session, file)
     except (UnsupportedFileError, FileTooLargeError, InvalidTaxonomyDocumentError) as exc:
-        session.rollback()
-        logger.info("Rejected taxonomy upload %r: %s", filename, exc.message)
+        logger.info("Rejected taxonomy upload %r: %s", file.filename, exc.message)
         return _curriculum_page(
             request,
             session,
@@ -269,10 +256,8 @@ def upload_taxonomy(
             error_detail=exc.detail,
             status_code=exc.status_code,
         )
-
-    session.commit()
     return RedirectResponse(
-        url=f"/curriculum/versions/{version.id}", status_code=status.HTTP_303_SEE_OTHER
+        url=f"/curriculum/versions/{imported.version.id}", status_code=status.HTTP_303_SEE_OTHER
     )
 
 
@@ -420,36 +405,18 @@ def generate_questions(
     generator: Annotated[str, Form()] = "base",
 ) -> Response:
     """Generate one persisted question for every selected source section."""
-    selected_generator: Literal["base", "personalized"] = (
-        "personalized" if generator == "personalized" else "base"
-    )
-    service_kwargs: dict[str, object] = {}
-    if selected_generator == "personalized":
-        try:
-            service_kwargs["embedder"] = get_embedder()
-        except ConfigurationError as exc:
-            session.rollback()
-            return _questions_page(
-                request,
-                session,
-                selected_book_id=book_id,
-                error=exc.message,
-                error_detail=exc.detail,
-                status_code=exc.status_code,
-            )
     try:
-        generated = GenerationService(session, **service_kwargs).generate_for_sections(
-            curriculum_version_id=_approved_curriculum_id(session),
+        payload = GenerateQuestionsRequest(
             topic_id=topic_id,
             subtopic_id=subtopic_id,
             question_type=QuestionType(question_type),
             difficulty=Difficulty(difficulty),
-            source_section_ids=None if all_sections is not None else section_ids,
-            book_id=book_id if all_sections is not None else None,
-            generator=selected_generator,
+            book_id=book_id,
+            section_ids=section_ids,
+            all_sections_of_book=all_sections is not None,
+            generator="personalized" if generator == "personalized" else "base",
         )
-    except ValueError as exc:
-        session.rollback()
+    except (ValueError, ValidationError) as exc:
         return _questions_page(
             request,
             session,
@@ -458,13 +425,15 @@ def generate_questions(
             error_detail=str(exc),
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
+
+    try:
+        result = api_questions.generate_questions(session, payload)
     except (
         InvalidQuestionSpecError,
         ConfigurationError,
         LLMRequestError,
         MalformedModelOutputError,
     ) as exc:
-        session.rollback()
         return _questions_page(
             request,
             session,
@@ -474,87 +443,36 @@ def generate_questions(
             status_code=exc.status_code,
         )
 
-    if len(generated) == 1:
-        url = f"/questions/{generated[0].id}"
+    if result.created == 1:
+        url = f"/questions/{result.question_ids[0]}"
     else:
-        id_list = ",".join(str(row.id) for row in generated)
-        url = f"/questions?created={len(generated)}&ids={id_list}"
+        id_list = ",".join(str(question_id) for question_id in result.question_ids)
+        url = f"/questions?created={result.created}&ids={id_list}"
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-def _approved_curriculum_id(session: Session) -> int:
-    """Return the approved curriculum id or raise an actionable generation error."""
-    approved = CurriculumRepository(session).get_approved()
-    if approved is None:
-        raise InvalidQuestionSpecError(
-            "No approved curriculum is available.",
-            detail="Upload a valid taxonomy before generating questions.",
-        )
-    return approved.id
 
 
 @router.get("/questions/{question_id}", response_class=HTMLResponse, name="question_detail")
 def question_detail(request: Request, session: DbSession, question_id: int) -> HTMLResponse:
     """Show generated content and the citation(s) that ground one question."""
-    question = QuestionRepository(session).get(question_id)
-    validation_report = question.validation_report
-    pedagogical_eval = None
-    if question.pedagogical_eval is not None:
-        with suppress(ValidationError):
-            pedagogical_eval = PedagogicalEvaluation.model_validate(question.pedagogical_eval)
-    content = question.content or {}
-    sources = content.get("sources", [])
-    taxonomy = {
-        "curriculum": str(question.curriculum_version_id or "—"),
-        "topic": str(question.topic_id or "—"),
-        "subtopic": str(question.subtopic_id or "—"),
-    }
-    if question.curriculum_version_id is not None:
-        try:
-            version = CurriculumRepository(session).get_with_tree(question.curriculum_version_id)
-        except NotFoundError:
-            pass
-        else:
-            taxonomy["curriculum"] = version.label
-            topic = next((item for item in version.topics if item.id == question.topic_id), None)
-            if topic is not None:
-                taxonomy["topic"] = topic.name
-                subtopic = next(
-                    (item for item in topic.subtopics if item.id == question.subtopic_id), None
-                )
-                if subtopic is not None:
-                    taxonomy["subtopic"] = subtopic.name
-    personalization_evidence = None
-    payload = question.personalization_context
-    if question.generator_name == "personalized-context" and payload is not None:
-        preference_ids = payload.get("preference_ids", [])
-        review_ids = payload.get("retrieved_review_ids", [])
-        personalization_evidence = {
-            "preference_ids": preference_ids if isinstance(preference_ids, list) else [],
-            "review_ids": review_ids if isinstance(review_ids, list) else [],
-        }
+    detail = api_questions.get_question(session, question_id)
     return render(
         request,
         "question_detail.html",
         {
-            "page_title": f"Question {question.id}",
+            "page_title": f"Question {detail.question.id}",
             "active_section": "questions",
-            "question": question,
-            "content": content,
-            "spec": question.spec,
+            "question": detail.question,
+            "detail": detail,
+            "content": detail.content or {},
+            "spec": detail.spec,
             "rejection_reasons": list(REJECTION_REASON_LABELS.items()),
-            "sources": sources if isinstance(sources, list) else [],
-            "taxonomy": taxonomy,
-            "validation_checks": validation_report.checks if validation_report else [],
-            "validation_passed": validation_report.passed if validation_report else None,
-            "pedagogical_eval": pedagogical_eval,
-            "pedagogical_error_message": (
-                humanize_judge_error_detail(pedagogical_eval.error_detail)
-                if pedagogical_eval is not None
-                and pedagogical_eval.status is PedagogicalEvalStatus.ERROR
-                else None
-            ),
-            "personalization_evidence": personalization_evidence,
+            "sources": detail.sources,
+            "taxonomy": detail.taxonomy,
+            "validation_checks": detail.validation_checks,
+            "validation_passed": detail.validation_passed,
+            "pedagogical_eval": detail.pedagogical_eval,
+            "pedagogical_error_message": detail.pedagogical_error_message,
+            "personalization_evidence": detail.personalization,
         },
     )
 
@@ -571,47 +489,44 @@ def review_question(
     tests: Annotated[str, Form()] = "",
 ) -> RedirectResponse:
     """Record a professor verdict and return to the reviewed question."""
-    decision_enum = ReviewDecision(decision)
-    parsed_reasons = [RejectionReason(value) for value in (reasons or [])]
-    if decision_enum is ReviewDecision.EDIT:
-        submit_review(
-            session,
-            question_id=question_id,
-            decision=decision_enum,
-            reasons=parsed_reasons,
+    api_feedback.create_review(
+        session,
+        question_id,
+        ReviewRequest(
+            decision=ReviewDecision(decision),
+            reasons=[RejectionReason(value) for value in (reasons or [])],
             comment=comment or None,
             prompt=prompt,
             reference_solution=reference_solution,
             tests=tests,
-            professor_id=None,
-        )
-    else:
-        submit_review(
-            session,
-            question_id=question_id,
-            decision=decision_enum,
-            reasons=parsed_reasons,
-            comment=comment or None,
-            professor_id=None,
-        )
-    session.commit()
+        ),
+    )
     return RedirectResponse(url=f"/questions/{question_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
-def _preference_rows(session: Session) -> list[dict[str, object]]:
-    return [
+def _preferences_page(
+    request: Request,
+    session: Session,
+    *,
+    refreshed_count: int | None = None,
+    error: str | None = None,
+    error_detail: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render the Preferences index, optionally with an inline error banner."""
+    return render(
+        request,
+        "preferences.html",
         {
-            "id": pref.id,
-            "rule_text": pref.rule_text,
-            "category_label": pref.category.value.replace("_", " "),
-            "evidence_count": pref.evidence_count,
-            "confidence": pref.confidence,
-            "state": pref.confirmation_state.value,
-            "active": pref.active,
-            "review_ids": pref.supporting_review_ids,
-        }
-        for pref in PreferenceRepository(session).list_all()
-    ]
+            "page_title": "Preferences",
+            "active_section": "preferences",
+            "preferences": api_preferences.list_preferences(session).preferences,
+            "refreshed_count": refreshed_count,
+            "error": error,
+            "error_detail": error_detail,
+        },
+        status_code=status_code,
+    )
 
 
 @router.get("/preferences", response_class=HTMLResponse, name="preferences")
@@ -620,45 +535,30 @@ def preferences(
     session: DbSession,
     refreshed: int | None = None,
 ) -> HTMLResponse:
-    return render(
-        request,
-        "preferences.html",
-        {
-            "page_title": "Preferences",
-            "active_section": "preferences",
-            "preferences": _preference_rows(session),
-            "refreshed_count": refreshed,
-        },
-    )
+    return _preferences_page(request, session, refreshed_count=refreshed)
 
 
 @router.post("/preferences/refresh", name="refresh_preferences_page")
 def refresh_preferences_page(request: Request, session: DbSession) -> Response:
     try:
-        count = refresh_preferences(session)
+        result = api_preferences.refresh(session)
     except (ConfigurationError, LLMRequestError) as exc:
-        session.rollback()
-        return render(
+        return _preferences_page(
             request,
-            "preferences.html",
-            {
-                "page_title": "Preferences",
-                "active_section": "preferences",
-                "preferences": _preference_rows(session),
-                "error": exc.message,
-                "error_detail": exc.detail,
-            },
+            session,
+            error=exc.message,
+            error_detail=exc.detail,
             status_code=exc.status_code,
         )
     return RedirectResponse(
-        url=f"/preferences?refreshed={count}",
+        url=f"/preferences?refreshed={result.refreshed}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
 @router.post("/preferences/{preference_id}/confirm", name="confirm_preference_page")
 def confirm_preference_page(session: DbSession, preference_id: int) -> RedirectResponse:
-    confirm_preference(session, preference_id)
+    api_preferences.confirm(session, preference_id)
     return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -670,19 +570,23 @@ def correct_preference_page(
     rule_text: Annotated[str, Form()],
 ) -> Response:
     try:
-        correct_preference(session, preference_id, rule_text)
-    except DomainRuleError as exc:
-        session.rollback()
-        return render(
+        payload = CorrectPreferenceRequest(rule_text=rule_text)
+        api_preferences.correct(session, preference_id, payload)
+    except ValidationError as exc:
+        # An empty box fails the request model before the service sees it.
+        return _preferences_page(
             request,
-            "preferences.html",
-            {
-                "page_title": "Preferences",
-                "active_section": "preferences",
-                "preferences": _preference_rows(session),
-                "error": exc.message,
-                "error_detail": exc.detail,
-            },
+            session,
+            error="Corrected preference text must not be empty.",
+            error_detail=str(exc),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    except DomainRuleError as exc:
+        return _preferences_page(
+            request,
+            session,
+            error=exc.message,
+            error_detail=exc.detail,
             status_code=exc.status_code,
         )
     return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
@@ -690,50 +594,22 @@ def correct_preference_page(
 
 @router.post("/preferences/{preference_id}/remove", name="remove_preference_page")
 def remove_preference_page(session: DbSession, preference_id: int) -> RedirectResponse:
-    remove_preference(session, preference_id)
+    api_preferences.remove(session, preference_id)
     return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/feedback", response_class=HTMLResponse, name="feedback")
 def feedback(request: Request, session: DbSession) -> HTMLResponse:
-    repo = ProfessorReviewRepository(session)
-    by_decision = repo.count_by_decision()
-    reason_counts = repo.reason_counts()
-    review_rows = [
-        {
-            "id": review.id,
-            "question_id": review.question_id,
-            "decision": review.decision,
-            "reasons": [REJECTION_REASON_LABELS[reason] for reason in review.reasons],
-            "comment": review.comment,
-            "generator": (f"{review.reviewed_generator_name}@{review.reviewed_generator_version}"),
-            "created_at": review.created_at,
-        }
-        for review in repo.list_recent()
-    ]
+    stats = api_feedback.review_stats(session)
     return render(
         request,
         "feedback.html",
         {
             "page_title": "Professor Feedback",
             "active_section": "feedback",
-            "stats": {
-                "reviewed": repo.count(),
-                "approved": by_decision.get(ReviewDecision.APPROVE.value, 0),
-                "rejected": by_decision.get(ReviewDecision.REJECT.value, 0),
-                "edited": by_decision.get(ReviewDecision.EDIT.value, 0),
-            },
-            "reason_distribution": [
-                {
-                    "code": code,
-                    "label": REJECTION_REASON_LABELS[RejectionReason(code)],
-                    "count": count,
-                }
-                for code, count in sorted(
-                    reason_counts.items(), key=lambda item: (-item[1], item[0])
-                )
-            ],
-            "reviews": review_rows,
+            "stats": stats,
+            "reason_distribution": stats.reason_distribution,
+            "reviews": api_feedback.list_reviews(session).reviews,
         },
     )
 

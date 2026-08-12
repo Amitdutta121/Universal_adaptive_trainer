@@ -184,6 +184,8 @@ app/
   adaptive/           Student adaptive engine                   (boundary only, by instruction)
   llm/                All outbound LLM traffic                  (STRUCTURED OUTPUT IMPLEMENTED)
   web/                Routers, templates, static assets, middleware
+    routes/api/       The JSON API under /api. One module per resource. ADR-027.
+    routes/pages.py   Server-rendered pages. Delegates every action to routes/api/.
 tests/                pytest suite mirroring the modules above
 docs/DECISIONS.md     Architectural decision log
 docs/book_document_example.json     A valid book document, kept valid by a test
@@ -193,6 +195,10 @@ docs/taxonomy_document_example.json A valid taxonomy document, kept valid by a t
 Dependency direction: `web` → subsystems → `domain` / `persistence` / `config`. `domain` imports
 nothing from the application. Subsystems do not import each other except where documented in
 their module docstring.
+
+Inside `web`, `routes/pages.py` → `routes/api/` and never the reverse: the JSON API is the single
+implementation of every professor capability and the pages are one of its clients (ADR-027). A new
+capability is added to `routes/api/` first; the page then calls it.
 
 ## Coding conventions
 
