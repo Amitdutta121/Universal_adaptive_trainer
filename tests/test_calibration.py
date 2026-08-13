@@ -11,6 +11,7 @@ import logging
 
 import pytest
 from fastapi.testclient import TestClient
+from llm_fakes import metric_results
 from sqlalchemy.orm import Session
 
 from app.calibration import (
@@ -23,8 +24,14 @@ from app.calibration import (
     metrics_from_pairs,
     professor_label,
 )
-from app.domain.enums import QuestionStatus, RejectionReason, ReviewDecision
-from app.evaluation import AdvisoryStatus, PedagogicalEvalStatus, PedagogicalEvaluation
+from app.domain.enums import (
+    JudgeGate,
+    JudgeMetricId,
+    QuestionStatus,
+    RejectionReason,
+    ReviewDecision,
+)
+from app.evaluation import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.feedback import submit_review
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import QuestionRepository
@@ -34,16 +41,28 @@ NEEDS_REVIEW = CalibrationLabel.NEEDS_REVIEW
 
 
 def _evaluation(
-    advisory: AdvisoryStatus,
+    gate: JudgeGate | None = JudgeGate.APPROVED,
     *,
     status: PedagogicalEvalStatus = PedagogicalEvalStatus.COMPLETED,
+    failing: set[JudgeMetricId] | None = None,
 ) -> PedagogicalEvaluation:
+    """A stored evaluation whose gate is what the test says it is."""
+    if failing is None:
+        failing = _failing_for(gate)
     return PedagogicalEvaluation(
         status=status,
-        overall_advisory_score=4.0,
-        overall_advisory_status=advisory,
+        gate=gate,
+        metrics=metric_results(failing=failing),
         judge_model="fake/pedagogical-judge",
     )
+
+
+def _failing_for(gate: JudgeGate | None) -> set[JudgeMetricId]:
+    if gate is JudgeGate.REJECT:
+        return set(JudgeMetricId)
+    if gate is JudgeGate.NEEDS_REVIEW:
+        return {JudgeMetricId.DIFFICULTY}
+    return set()
 
 
 def _question(session: Session, *, evaluation: object | None) -> QuestionRow:
@@ -66,9 +85,17 @@ def _question(session: Session, *, evaluation: object | None) -> QuestionRow:
     return row
 
 
-def _judged(session: Session, advisory: AdvisoryStatus, decision: ReviewDecision) -> QuestionRow:
+def _judged(
+    session: Session,
+    gate: JudgeGate | None,
+    decision: ReviewDecision,
+    *,
+    failing: set[JudgeMetricId] | None = None,
+) -> QuestionRow:
     """A question with one stored evaluation and one professor review."""
-    question = _question(session, evaluation=_evaluation(advisory).model_dump(mode="json"))
+    question = _question(
+        session, evaluation=_evaluation(gate, failing=failing).model_dump(mode="json")
+    )
     submit_review(
         session,
         question_id=question.id,
@@ -93,40 +120,38 @@ def _pairs(*labels: tuple[CalibrationLabel, CalibrationLabel]) -> list[Calibrati
 
 
 @pytest.mark.parametrize(
-    ("advisory", "expected"),
+    ("gate", "expected"),
     [
-        (AdvisoryStatus.STRONG, ACCEPT),
-        (AdvisoryStatus.ADEQUATE, NEEDS_REVIEW),
-        (AdvisoryStatus.WEAK, NEEDS_REVIEW),
-        (AdvisoryStatus.UNCERTAIN, NEEDS_REVIEW),
-        (AdvisoryStatus.SKIPPED, None),
-        (AdvisoryStatus.ERROR, None),
+        (JudgeGate.APPROVED, ACCEPT),
+        (JudgeGate.NEEDS_REVIEW, NEEDS_REVIEW),
+        (JudgeGate.REJECT, NEEDS_REVIEW),
+        (None, None),
     ],
 )
-def test_every_judge_advisory_status_maps_as_documented(
-    advisory: AdvisoryStatus, expected: CalibrationLabel | None
+def test_every_judge_gate_maps_as_documented(
+    gate: JudgeGate | None, expected: CalibrationLabel | None
 ) -> None:
-    assert judge_label(_evaluation(advisory)) is expected
+    assert judge_label(_evaluation(gate)) is expected
 
 
-def test_the_mapping_covers_every_advisory_status_that_exists() -> None:
-    """A new band must not fall through to ``NEEDS_REVIEW`` unnoticed."""
-    assert {status.value for status in AdvisoryStatus} == {
-        "strong",
-        "adequate",
-        "weak",
-        "uncertain",
-        "skipped",
-        "error",
-    }
+def test_the_mapping_covers_every_gate_that_exists() -> None:
+    """A new gate must not fall through to ``NEEDS_REVIEW`` unnoticed."""
+    assert {gate.value for gate in JudgeGate} == {"approved", "needs_review", "reject"}
 
 
-@pytest.mark.parametrize("status", [PedagogicalEvalStatus.SKIPPED, PedagogicalEvalStatus.ERROR])
-def test_an_evaluation_that_never_completed_is_unusable_however_it_scored(
+@pytest.mark.parametrize(
+    "status",
+    [
+        PedagogicalEvalStatus.SKIPPED,
+        PedagogicalEvalStatus.ERROR,
+        PedagogicalEvalStatus.PARTIAL,
+    ],
+)
+def test_an_evaluation_that_never_completed_is_unusable_however_it_gated(
     status: PedagogicalEvalStatus,
 ) -> None:
-    # A `strong` band on a non-completed record is stale data, not a prediction.
-    assert judge_label(_evaluation(AdvisoryStatus.STRONG, status=status)) is None
+    """A gate on a non-completed record is stale data, not a prediction."""
+    assert judge_label(_evaluation(JudgeGate.APPROVED, status=status)) is None
 
 
 @pytest.mark.parametrize(
@@ -204,8 +229,8 @@ def test_no_judge_accepts_nulls_only_the_auto_accept_rates() -> None:
 
 
 def test_pairs_are_built_from_stored_evaluations_and_reviews(session: Session) -> None:
-    strong = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
-    weak = _judged(session, AdvisoryStatus.WEAK, ReviewDecision.REJECT)
+    strong = _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    weak = _judged(session, JudgeGate.NEEDS_REVIEW, ReviewDecision.REJECT)
 
     pairs = build_calibration_pairs(session)
 
@@ -217,7 +242,7 @@ def test_pairs_are_built_from_stored_evaluations_and_reviews(session: Session) -
 
 def test_an_edit_then_approve_counts_once_as_needs_review(session: Session) -> None:
     """The judge scored the generated question, which the professor had to fix."""
-    question = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.EDIT)
+    question = _judged(session, JudgeGate.APPROVED, ReviewDecision.EDIT)
     submit_review(session, question_id=question.id, decision=ReviewDecision.APPROVE)
     session.commit()
 
@@ -233,18 +258,19 @@ def test_an_edit_then_approve_counts_once_as_needs_review(session: Session) -> N
 
 
 @pytest.mark.parametrize(
-    ("advisory", "status"),
+    ("gate", "status"),
     [
-        (AdvisoryStatus.SKIPPED, PedagogicalEvalStatus.SKIPPED),
-        (AdvisoryStatus.ERROR, PedagogicalEvalStatus.ERROR),
-        (AdvisoryStatus.STRONG, PedagogicalEvalStatus.SKIPPED),
+        (None, PedagogicalEvalStatus.SKIPPED),
+        (None, PedagogicalEvalStatus.ERROR),
+        (JudgeGate.APPROVED, PedagogicalEvalStatus.SKIPPED),
+        (None, PedagogicalEvalStatus.PARTIAL),
     ],
 )
 def test_unusable_evaluations_are_left_out_of_the_report(
-    session: Session, advisory: AdvisoryStatus, status: PedagogicalEvalStatus
+    session: Session, gate: JudgeGate | None, status: PedagogicalEvalStatus
 ) -> None:
     question = _question(
-        session, evaluation=_evaluation(advisory, status=status).model_dump(mode="json")
+        session, evaluation=_evaluation(gate, status=status).model_dump(mode="json")
     )
     submit_review(session, question_id=question.id, decision=ReviewDecision.APPROVE)
     session.commit()
@@ -254,7 +280,7 @@ def test_unusable_evaluations_are_left_out_of_the_report(
 
 
 def test_a_question_with_no_review_is_not_a_pair(session: Session) -> None:
-    _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG).model_dump(mode="json"))
+    _question(session, evaluation=_evaluation().model_dump(mode="json"))
 
     assert build_calibration_pairs(session) == []
 
@@ -271,9 +297,9 @@ def test_a_question_with_no_evaluation_is_not_a_pair(session: Session) -> None:
     "blob",
     [
         {},
-        {"status": "completed"},
-        {"status": "completed", "overall_advisory_status": "excellent"},
-        {"status": "invented", "overall_advisory_status": "strong"},
+        {"status": "completed", "metrics": "not a list"},
+        {"status": "completed", "gate": "excellent"},
+        {"status": "invented", "gate": "approved"},
         "not an object at all",
     ],
 )
@@ -282,7 +308,7 @@ def test_a_stored_evaluation_that_no_longer_validates_is_skipped(
 ) -> None:
     stale = _question(session, evaluation=blob)
     submit_review(session, question_id=stale.id, decision=ReviewDecision.APPROVE)
-    usable = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
+    usable = _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
     session.commit()
 
     with caplog.at_level(logging.WARNING, logger="app.calibration.service"):
@@ -299,38 +325,44 @@ def test_results_on_an_empty_database_report_nulls(client: TestClient) -> None:
     response = client.get("/api/calibration/results")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "n": 0,
-        "judge_accept_count": 0,
-        "agreement": None,
-        "auto_accept_precision": None,
-        "unsafe_auto_accept_rate": None,
-    }
+    payload = response.json()
+    assert payload["n"] == 0
+    assert payload["judge_accept_count"] == 0
+    assert payload["agreement"] is None
+    assert payload["auto_accept_precision"] is None
+    assert payload["unsafe_auto_accept_rate"] is None
+    assert [row["n"] for row in payload["metrics"]] == [0, 0, 0]
+    assert payload["subtopic_confusions"] == []
+    assert payload["difficulty_confusions"] == []
 
 
 def test_results_report_the_stored_agreement(client: TestClient, session: Session) -> None:
-    _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
-    _judged(session, AdvisoryStatus.STRONG, ReviewDecision.REJECT)
-    _judged(session, AdvisoryStatus.WEAK, ReviewDecision.REJECT)
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.REJECT)
+    _judged(session, JudgeGate.NEEDS_REVIEW, ReviewDecision.REJECT)
     # Neither of these may reach the denominator.
-    _judged(session, AdvisoryStatus.SKIPPED, ReviewDecision.APPROVE)
-    _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG).model_dump(mode="json"))
+    _question(
+        session,
+        evaluation=_evaluation(None, status=PedagogicalEvalStatus.SKIPPED).model_dump(mode="json"),
+    )
+    _question(session, evaluation=_evaluation().model_dump(mode="json"))
 
     payload = client.get("/api/calibration/results").json()
 
-    assert payload == {
-        "n": 3,
-        "judge_accept_count": 2,
-        "agreement": 0.6667,
-        "auto_accept_precision": 0.5,
-        "unsafe_auto_accept_rate": 0.5,
-    }
+    assert payload["n"] == 3
+    assert payload["judge_accept_count"] == 2
+    assert payload["agreement"] == 0.6667
+    assert payload["auto_accept_precision"] == 0.5
+    assert payload["unsafe_auto_accept_rate"] == 0.5
 
 
 def test_pairs_expose_the_evidence_behind_the_figures(client: TestClient, session: Session) -> None:
-    agreeing = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
-    disagreeing = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.REJECT)
-    excluded = _judged(session, AdvisoryStatus.SKIPPED, ReviewDecision.APPROVE)
+    agreeing = _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    disagreeing = _judged(session, JudgeGate.APPROVED, ReviewDecision.REJECT)
+    excluded = _question(
+        session,
+        evaluation=_evaluation(None, status=PedagogicalEvalStatus.SKIPPED).model_dump(mode="json"),
+    )
 
     payload = client.get("/api/calibration/pairs").json()
 
@@ -358,7 +390,7 @@ def test_pairs_on_an_empty_database_are_empty(client: TestClient) -> None:
 
 def test_results_are_read_only(client: TestClient, session: Session) -> None:
     """Calibration observes history; it must not add to what it measures."""
-    _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
 
     first = client.get("/api/calibration/results").json()
     second = client.get("/api/calibration/results").json()
@@ -382,6 +414,9 @@ def test_openapi_documents_the_calibration_endpoint(client: TestClient) -> None:
         "agreement",
         "auto_accept_precision",
         "unsafe_auto_accept_rate",
+        "metrics",
+        "subtopic_confusions",
+        "difficulty_confusions",
     }
 
 
@@ -398,8 +433,8 @@ def test_the_feedback_page_states_an_honest_empty_calibration(client: TestClient
 def test_the_feedback_page_shows_the_figures_and_their_evidence(
     client: TestClient, session: Session
 ) -> None:
-    agreeing = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
-    disagreeing = _judged(session, AdvisoryStatus.STRONG, ReviewDecision.REJECT)
+    agreeing = _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    disagreeing = _judged(session, JudgeGate.APPROVED, ReviewDecision.REJECT)
 
     body = client.get("/feedback").text
 
@@ -417,7 +452,7 @@ def test_the_feedback_page_shows_the_figures_and_their_evidence(
 def test_the_feedback_page_warns_that_a_small_sample_proves_nothing(
     client: TestClient, session: Session
 ) -> None:
-    _judged(session, AdvisoryStatus.STRONG, ReviewDecision.APPROVE)
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
 
     body = client.get("/feedback").text
 
@@ -429,7 +464,7 @@ def test_a_null_rate_renders_as_a_dash_rather_than_zero(
     client: TestClient, session: Session
 ) -> None:
     """No judge accept means no precision to report -- not a precision of zero."""
-    _judged(session, AdvisoryStatus.WEAK, ReviewDecision.REJECT)
+    _judged(session, JudgeGate.NEEDS_REVIEW, ReviewDecision.REJECT)
 
     body = client.get("/feedback").text
 

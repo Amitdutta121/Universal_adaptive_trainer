@@ -48,8 +48,10 @@ class FakeClient:
         return self.draft
 
 
-def _debugging_draft() -> DebuggingDraft:
+def _debugging_draft(topic_id: int = 1, subtopic_ids: list[int] | None = None) -> DebuggingDraft:
     return DebuggingDraft(
+        topic_id=topic_id,
+        subtopic_ids=subtopic_ids or [1],
         prompt="Find the bug.",
         code="s = 'ab'\ns[0] = 'c'",
         reference_solution="Strings are immutable; build a new string.",
@@ -102,7 +104,8 @@ def _seed_with_feedback(session: Session, settings) -> tuple[object, object, obj
         session,
         curriculum_version_id=version.id,
         topic_id=topic.id,
-        subtopic_id=subtopic.id,
+        subtopic_ids=[subtopic.id],
+        spec={"source_section_ids": [section_ids[0]]},
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         prompt="Immutability debugging prompt about strings.",
@@ -140,16 +143,14 @@ def test_prompt_includes_examples_and_style_disclaimer(session: Session, setting
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_ids=[subtopic.id],
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         source_section_ids=[section_ids[0]],
     )
-    client = FakeClient(_debugging_draft())
+    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]))
     gen = PersonalizedContextGenerator(session=session, client=client, embedder=FakeEmbedder(dim=8))
 
-    gen.generate_one(spec, topic_name=topic.name, subtopic_names=[subtopic.name])
+    gen.generate_one(spec, version=version)
 
     system, user = client.calls[0]["system"], client.calls[0]["prompt"]
     combined = f"{system}\n{user}".lower()
@@ -162,16 +163,14 @@ def test_no_feedback_still_personalized_descriptor(session: Session, settings) -
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_ids=[subtopic.id],
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         source_section_ids=[section_ids[0]],
     )
-    client = FakeClient(_debugging_draft())
+    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]))
     gen = PersonalizedContextGenerator(session=session, client=client, embedder=FakeEmbedder(dim=8))
 
-    question = gen.generate_one(spec, topic_name=topic.name, subtopic_names=[subtopic.name])
+    question = gen.generate_one(spec, version=version)
 
     assert question.generator_name == "personalized-context"
     assert question.personalization_context is not None

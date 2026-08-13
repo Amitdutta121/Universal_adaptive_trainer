@@ -34,18 +34,19 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.domain.enums import EvaluationTrigger, JudgeBatchStatus
+from app.domain.enums import EvaluationTrigger, JudgeBatchStatus, JudgeMetricId
 from app.domain.questions import Question
 from app.errors import AdaptiveTrainerError, ConfigurationError, DomainRuleError
-from app.evaluation.rubric import RUBRIC_VERSION
+from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR, build_user_prompt
 from app.evaluation.schema import (
-    JudgeModelResponse,
+    RESPONSE_MODEL_FOR,
+    MetricResult,
     PedagogicalEvaluation,
-    error_evaluation,
-    evaluation_from_judge_response,
+    evaluation_from_metrics,
+    failed_metric,
     humanize_judge_error_detail,
 )
-from app.evaluation.service import build_judge_prompts
+from app.evaluation.service import build_judge_context, result_from_verdict
 from app.llm import batch as batch_transport
 from app.llm.batch import BatchRequestItem, BatchResultLine
 from app.persistence.models import JudgeBatchRunRow, QuestionEvaluationRow, QuestionRow
@@ -58,8 +59,10 @@ from app.persistence.repositories import (
 logger = logging.getLogger(__name__)
 
 #: Evaluation statuses that carry an actual judgement. Only these may become the
-#: current evaluation, so a failed re-run cannot erase a completed one.
-INFORMATIVE_STATUSES = frozenset({"completed"})
+#: current evaluation, so a failed re-run cannot erase a completed one. A
+#: ``partial`` re-run counts: some judges did answer, and their answers are a
+#: better current value than the older ones they replace.
+INFORMATIVE_STATUSES = frozenset({"completed", "partial"})
 
 #: Provider statuses that end a run, mapped onto our own vocabulary. A run the
 #: provider cancelled is recorded as failed, with the cancellation named in
@@ -116,7 +119,7 @@ def record_evaluation(
             judge_model=evaluation.judge_model,
             rubric_version=evaluation.rubric_version,
             eval_status=evaluation.status.value,
-            advisory_status=evaluation.overall_advisory_status.value,
+            gate=evaluation.gate.value if evaluation.gate is not None else None,
             run_id=run_id,
             trigger=trigger,
             created_at=evaluation.created_at,
@@ -160,7 +163,7 @@ def backfill_generation_history(session: Session) -> int:
         payload = question.pedagogical_eval
         if not isinstance(payload, dict):  # pragma: no cover - column guarantees dict | None
             continue
-        created_at, status, advisory = _describe_stored_evaluation(payload)
+        created_at, status, gate = _describe_stored_evaluation(payload)
         repository.add(
             QuestionEvaluationRow(
                 question_id=question.id,
@@ -168,7 +171,7 @@ def backfill_generation_history(session: Session) -> int:
                 judge_model=_optional_str(payload.get("judge_model")),
                 rubric_version=_optional_str(payload.get("rubric_version")),
                 eval_status=status,
-                advisory_status=advisory,
+                gate=gate,
                 run_id=run_id,
                 trigger=EvaluationTrigger.GENERATION,
                 created_at=created_at or question.created_at,
@@ -201,7 +204,7 @@ def _describe_stored_evaluation(payload: dict) -> tuple[datetime | None, str | N
     return (
         created_at,
         _optional_str(payload.get("status")),
-        _optional_str(payload.get("overall_advisory_status")),
+        _optional_str(payload.get("gate")),
     )
 
 
@@ -263,22 +266,26 @@ def submit_bank_rerun(
         )
 
     run_id = new_run_id()
-    items, skipped = _build_request_items(session, candidates, run_id=run_id)
-    if not items:
+    items_by_metric, skipped = _build_request_items(session, candidates, run_id=run_id)
+    if not any(items_by_metric.values()):
         session.rollback()
         raise DomainRuleError(
             "No eligible question could be prepared for re-judging.",
             detail=f"{skipped} question(s) could not have their source context rebuilt.",
         )
 
-    schema = JudgeModelResponse.model_json_schema()
+    # One job per metric, because a provider job carries a single response
+    # schema and the four judges answer in four different shapes.
     batch_ids: list[str] = []
-    for chunk in batch_transport.split_into_jobs(
-        items, max_per_job=settings.judge_batch_max_requests_per_job
-    ):
-        batch_ids.append(
-            batch_transport.submit_batch(chunk, response_schema=schema, settings=settings)
-        )
+    for metric, items in items_by_metric.items():
+        schema = RESPONSE_MODEL_FOR[metric].model_json_schema()
+        for chunk in batch_transport.split_into_jobs(
+            items, max_per_job=settings.judge_batch_max_requests_per_job
+        ):
+            batch_ids.append(
+                batch_transport.submit_batch(chunk, response_schema=schema, settings=settings)
+            )
+    submitted = len(items_by_metric[JudgeMetricId.ISSUES])
 
     run = JudgeBatchRunRepository(session).add(
         JudgeBatchRunRow(
@@ -288,39 +295,45 @@ def submit_bank_rerun(
             model=settings.judge_batch_route,
             rubric_version=RUBRIC_VERSION,
             submitted_at=_now(),
-            question_count=len(items),
+            question_count=submitted,
         )
     )
     session.commit()
     logger.info(
-        "Submitted judge re-run %s: %d questions across %d provider job(s)",
+        "Submitted judge re-run %s: %d questions x %d metrics across %d provider job(s)",
         run_id,
-        len(items),
+        submitted,
+        len(JudgeMetricId),
         len(batch_ids),
     )
-    return SubmissionResult(run=run, submitted=len(items), skipped=skipped, backfilled=backfilled)
+    return SubmissionResult(run=run, submitted=submitted, skipped=skipped, backfilled=backfilled)
 
 
 def _build_request_items(
     session: Session, questions: list[QuestionRow], *, run_id: str
-) -> tuple[list[BatchRequestItem], int]:
-    """Build one request per question, counting those whose context is gone."""
-    items: list[BatchRequestItem] = []
+) -> tuple[dict[JudgeMetricId, list[BatchRequestItem]], int]:
+    """Build one request per metric per question, grouped by metric.
+
+    Grouped rather than flat because each metric's requests become their own
+    provider job: they share a response schema, and a job may only carry one.
+    """
+    items: dict[JudgeMetricId, list[BatchRequestItem]] = {metric: [] for metric in JudgeMetricId}
     skipped = 0
     for row in questions:
         try:
-            system, prompt = build_judge_prompts(session, Question.model_validate(row))
+            context = build_judge_context(session, Question.model_validate(row))
         except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
             logger.warning("Skipping question %s in run %s: %s", row.id, run_id, exc)
             skipped += 1
             continue
-        items.append(
-            BatchRequestItem(
-                custom_id=batch_transport.build_custom_id(run_id, row.id),
-                system=system,
-                prompt=prompt,
+        for metric in JudgeMetricId:
+            items[metric].append(
+                BatchRequestItem(
+                    custom_id=batch_transport.build_custom_id(run_id, row.id, metric.value),
+                    system=SYSTEM_PROMPT_FOR[metric],
+                    prompt=build_user_prompt(metric, context),
+                )
             )
-        )
     return items, skipped
 
 
@@ -333,6 +346,9 @@ class IngestResult:
     ingested: int
     failed: int
     already_recorded: int
+    #: Questions whose metrics have not all arrived yet. They are left for a
+    #: later poll rather than recorded half-answered, unless the run has ended.
+    pending: int = 0
 
 
 def poll_and_ingest(
@@ -366,15 +382,44 @@ def poll_and_ingest(
         lines.extend(batch_transport.parse_results(state.raw_results))
 
     already = QuestionEvaluationRepository(session).question_ids_for_run(run_id)
+    by_question = _group_lines_by_question(run_id, lines)
+    run_status = _run_status(states)
+
     ingested = 0
     failed = 0
     already_recorded = 0
-    for line in lines:
-        outcome = _ingest_line(session, run_id, line, already=already, settings=settings)
-        if outcome is None:
+    pending = 0
+    for question_id, by_metric in sorted(by_question.items()):
+        if question_id in already:
             already_recorded += 1
             continue
-        if outcome:
+        if len(by_metric) < len(JudgeMetricId) and not run_status.is_terminal():
+            # Metrics arrive job by job. Waiting keeps a question out of history
+            # until it can be recorded whole; results are re-fetched on every
+            # poll, so nothing collected now is lost by deferring it.
+            pending += 1
+            continue
+        question = session.get(QuestionRow, question_id)
+        if question is None:
+            logger.warning(
+                "Dropping batch results for question %s, which no longer exists", question_id
+            )
+            continue
+
+        already.add(question_id)
+        evaluation = _evaluation_from_lines(
+            by_metric,
+            question=Question.model_validate(question),
+            settings=settings,
+        )
+        record_evaluation(
+            session,
+            question_id,
+            evaluation,
+            run_id=run_id,
+            trigger=EvaluationTrigger.BATCH_RERUN,
+        )
+        if evaluation.status.value in INFORMATIVE_STATUSES:
             ingested += 1
         else:
             failed += 1
@@ -382,18 +427,19 @@ def poll_and_ingest(
 
     run.completed_count += ingested
     run.failed_count += failed
-    run.status = _run_status(states)
+    run.status = run_status
     run.error_detail = _run_error_detail(states) or run.error_detail
     if run.status.is_terminal():
         run.completed_at = _now()
     session.commit()
     logger.info(
-        "Polled judge re-run %s: status=%s ingested=%d failed=%d skipped=%d",
+        "Polled judge re-run %s: status=%s ingested=%d failed=%d skipped=%d pending=%d",
         run_id,
         run.status.value,
         ingested,
         failed,
         already_recorded,
+        pending,
     )
     return IngestResult(
         run=run,
@@ -401,77 +447,69 @@ def poll_and_ingest(
         ingested=ingested,
         failed=failed,
         already_recorded=already_recorded,
+        pending=pending,
     )
 
 
-def _ingest_line(
-    session: Session,
-    run_id: str,
-    line: BatchResultLine,
+def _group_lines_by_question(
+    run_id: str, lines: list[BatchResultLine]
+) -> dict[int, dict[JudgeMetricId, BatchResultLine]]:
+    """Sort result lines into one bucket per question, keyed by metric."""
+    grouped: dict[int, dict[JudgeMetricId, BatchResultLine]] = {}
+    for line in lines:
+        try:
+            line_run_id, question_id, label = batch_transport.parse_custom_id(line.custom_id)
+        except ValueError:
+            logger.warning("Dropping batch result with unparseable custom_id %r", line.custom_id)
+            continue
+        if line_run_id != run_id:
+            logger.warning("Dropping batch result %r that belongs to another run", line.custom_id)
+            continue
+        try:
+            metric = JudgeMetricId(label)
+        except ValueError:
+            logger.warning("Dropping batch result %r naming an unknown metric", line.custom_id)
+            continue
+        grouped.setdefault(question_id, {})[metric] = line
+    return grouped
+
+
+def _evaluation_from_lines(
+    by_metric: dict[JudgeMetricId, BatchResultLine],
     *,
-    already: set[int],
+    question: Question,
     settings: Settings,
-) -> bool | None:
-    """Record one result line. ``None`` means it was already recorded.
+) -> PedagogicalEvaluation:
+    """Turn one question's result lines into an evaluation, never raising.
 
-    Returns ``True`` when a completed evaluation was stored and ``False`` when
-    an advisory error was stored in its place.
+    A metric whose line never arrived is recorded as failed, which is what makes
+    a partly-failed provider run land as a partial evaluation the professor can
+    still read rather than as nothing at all.
     """
-    try:
-        line_run_id, question_id = batch_transport.parse_custom_id(line.custom_id)
-    except ValueError:
-        logger.warning("Dropping batch result with unparseable custom_id %r", line.custom_id)
-        return None
-    if line_run_id != run_id:
-        logger.warning("Dropping batch result %r that belongs to another run", line.custom_id)
-        return None
-    if question_id in already:
-        return None
-    if session.get(QuestionRow, question_id) is None:
-        logger.warning("Dropping batch result for question %s, which no longer exists", question_id)
-        return None
-
-    already.add(question_id)
-    evaluation, ok = _evaluation_from_line(line, question_id=question_id, settings=settings)
-    record_evaluation(
-        session,
-        question_id,
-        evaluation,
-        run_id=run_id,
-        trigger=EvaluationTrigger.BATCH_RERUN,
-    )
-    return ok
-
-
-def _evaluation_from_line(
-    line: BatchResultLine, *, question_id: int, settings: Settings
-) -> tuple[PedagogicalEvaluation, bool]:
-    """Turn one result line into an evaluation, never raising."""
     judge_model = f"{settings.judge_batch_route} (batch)"
+    metrics = [
+        _metric_from_line(metric, by_metric.get(metric), question=question)
+        for metric in JudgeMetricId
+    ]
+    return evaluation_from_metrics(metrics, question_id=question.id, judge_model=judge_model)
+
+
+def _metric_from_line(
+    metric: JudgeMetricId, line: BatchResultLine | None, *, question: Question
+) -> MetricResult:
+    """Parse and score one result line, or record why it could not be."""
+    if line is None:
+        return failed_metric(metric, detail="No result was returned for this reviewer.")
     if line.content is None:
-        return (
-            error_evaluation(
-                question_id=question_id,
-                detail=humanize_judge_error_detail(line.error),
-                judge_model=judge_model,
-            ),
-            False,
-        )
+        return failed_metric(metric, detail=humanize_judge_error_detail(line.error))
     try:
-        response = JudgeModelResponse.model_validate(json.loads(line.content))
+        verdict = RESPONSE_MODEL_FOR[metric].model_validate(json.loads(line.content))
     except (ValueError, ValidationError) as exc:
-        return (
-            error_evaluation(
-                question_id=question_id,
-                detail=humanize_judge_error_detail(f"{type(exc).__name__}: {exc}"),
-                judge_model=judge_model,
-            ),
-            False,
+        return failed_metric(
+            metric,
+            detail=humanize_judge_error_detail(f"{type(exc).__name__}: {exc}"),
         )
-    return (
-        evaluation_from_judge_response(response, question_id=question_id, judge_model=judge_model),
-        True,
-    )
+    return result_from_verdict(metric, verdict, question)
 
 
 def _run_status(states: list[batch_transport.BatchJobState]) -> JudgeBatchStatus:

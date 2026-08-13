@@ -185,10 +185,9 @@ def test_question_generator_is_base_and_requires_llm_configuration(
 
 
 def test_generation_request_requires_curriculum_grounding() -> None:
-    """Generation must always name an approved curriculum version and subtopic."""
+    """Generation must always name an approved curriculum version and a source."""
     with pytest.raises(ValueError):
         GenerationRequest(  # type: ignore[call-arg]
-            subtopic_id=2,
             question_type=QuestionType.DEBUGGING,
             source_section_ids=[3],
             difficulty=Difficulty.EASY,
@@ -197,9 +196,16 @@ def test_generation_request_requires_curriculum_grounding() -> None:
         GenerationRequest(  # type: ignore[call-arg]
             curriculum_version_id=1,
             question_type=QuestionType.DEBUGGING,
-            source_section_ids=[3],
+            source_section_ids=[],
             difficulty=Difficulty.EASY,
         )
+
+
+def test_generation_request_names_no_topic_or_subtopic() -> None:
+    """The generator classifies its own question, so the request cannot pre-empt it."""
+    fields = set(GenerationRequest.model_fields)
+    assert "subtopic_id" not in fields
+    assert "topic_id" not in fields
 
 
 def test_base_and_personalized_generators_are_distinguishable() -> None:

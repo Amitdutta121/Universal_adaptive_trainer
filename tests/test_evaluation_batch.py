@@ -15,6 +15,7 @@ from typing import Any
 
 import book_documents as docs
 import pytest
+from llm_fakes import judged, verdict_for
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -23,6 +24,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     JudgeBatchStatus,
+    JudgeMetricId,
     QuestionStatus,
     QuestionType,
 )
@@ -35,14 +37,8 @@ from app.evaluation.batch_service import (
     record_evaluation,
     submit_bank_rerun,
 )
-from app.evaluation.rubric import RUBRIC_VERSION, JudgeDimensionId
-from app.evaluation.schema import (
-    AdvisoryStatus,
-    DimensionEvaluation,
-    JudgeModelResponse,
-    PedagogicalEvalStatus,
-    evaluation_from_judge_response,
-)
+from app.evaluation.prompts import RUBRIC_VERSION
+from app.evaluation.schema import RESPONSE_MODEL_FOR, PedagogicalEvalStatus
 from app.ingestion import BookImportService
 from app.llm import batch as batch_transport
 from app.llm.batch import BatchJobState, build_custom_id, parse_custom_id
@@ -165,23 +161,14 @@ def _secret(value: str) -> Any:
 # ----------------------------------------------------------------------- seeding
 
 
-def _dimensions() -> list[DimensionEvaluation]:
-    return [
-        DimensionEvaluation(
-            dimension=dimension,
-            score=4,
-            applicable=True,
-            confidence=0.9,
-            rationale="fine",
-            issues=[],
-        )
-        for dimension in JudgeDimensionId
-    ]
-
-
-def _ok_result(custom_id: str) -> dict[str, Any]:
-    """A provider result carrying a valid judge answer."""
-    content = JudgeModelResponse(dimensions=_dimensions()).model_dump_json()
+def _ok_result(
+    custom_id: str, topic_id: int = 1, subtopic_ids: list[int] | None = None
+) -> dict[str, Any]:
+    """A provider result carrying a valid answer for that request's metric."""
+    metric = JudgeMetricId(parse_custom_id(custom_id)[2])
+    content = verdict_for(
+        RESPONSE_MODEL_FOR[metric], topic_id, subtopic_ids or [1]
+    ).model_dump_json()
     return {
         "id": f"req_{custom_id}",
         "custom_id": custom_id,
@@ -195,6 +182,15 @@ def _ok_result(custom_id: str) -> dict[str, Any]:
         },
         "error": None,
     }
+
+
+def _fail_every_request(provider: FakeProvider, message: str) -> None:
+    """Make every submitted request come back as a provider error."""
+    for index, payload in enumerate(provider.submissions):
+        provider.results_by_batch[f"batch_{index}"] = [
+            {"custom_id": request["custom_id"], "error": {"message": message}}
+            for request in payload["requests"]
+        ]
 
 
 def _passing_report() -> QuestionValidationReport:
@@ -235,7 +231,7 @@ def _seed_bank(
         row = QuestionRow(
             curriculum_version_id=version.id,
             topic_id=topic.id,
-            subtopic_id=subtopic.id,
+            subtopic_ids=[subtopic.id],
             question_type=QuestionType.OUTPUT_PREDICTION,
             difficulty=Difficulty.EASY,
             status=(
@@ -254,8 +250,6 @@ def _seed_bank(
             },
             spec={
                 "curriculum_version_id": version.id,
-                "topic_id": topic.id,
-                "subtopic_ids": [subtopic.id],
                 "question_type": "output_prediction",
                 "difficulty": "easy",
                 "source_section_ids": [section.id],
@@ -272,9 +266,9 @@ def _seed_bank(
 
 
 def test_custom_id_round_trips() -> None:
-    custom_id = build_custom_id("abc123", 42)
+    custom_id = build_custom_id("abc123", 42, "difficulty")
 
-    assert parse_custom_id(custom_id) == ("abc123", 42)
+    assert parse_custom_id(custom_id) == ("abc123", 42, "difficulty")
 
 
 def test_custom_id_rejects_a_value_it_did_not_build() -> None:
@@ -296,15 +290,17 @@ def test_submission_includes_only_validation_passed_questions(
     assert result.submitted == len(ids["passing"])
     submitted_question_ids = {parse_custom_id(cid)[1] for cid in provider.custom_ids}
     assert submitted_question_ids == set(ids["passing"])
+    # One request per metric per question.
+    assert len(provider.custom_ids) == len(ids["passing"]) * len(JudgeMetricId)
     assert submitted_question_ids.isdisjoint(ids["failing"])
     assert submitted_question_ids.isdisjoint(ids["unvalidated"])
 
 
-def test_submitted_payload_carries_the_shared_rubric_and_schema(
+def test_submitted_payload_carries_the_shared_prompts_and_schema(
     session: Session, batch_settings: Settings, provider: FakeProvider
 ) -> None:
-    """The batch path must reuse the judge's prompts, not fork them."""
-    from app.evaluation.rubric import build_judge_system_prompt
+    """The batch path must reuse the judges' prompts, not fork them."""
+    from app.evaluation.prompts import SYSTEM_PROMPT_FOR
 
     _seed_bank(session, batch_settings, passing=1, failing=0, unvalidated=0)
 
@@ -318,13 +314,27 @@ def test_submitted_payload_carries_the_shared_rubric_and_schema(
 
     body = payload["requests"][0]["body"]
     system = body["messages"][0]["content"]
-    assert system.startswith(build_judge_system_prompt())
-    assert "print" in body["messages"][1]["content"]
+    metric = JudgeMetricId(parse_custom_id(payload["requests"][0]["custom_id"])[2])
+    assert system.startswith(SYSTEM_PROMPT_FOR[metric])
     # No per-request model: the provider rejects one that differs from the batch.
     assert "model" not in body
     assert body["provider"] == {"data_collection": "deny"}
     # The schema is stated in the system message, matching Instructor's Mode.JSON.
-    assert "JudgeModelResponse" in system or "dimensions" in system
+    assert RESPONSE_MODEL_FOR[metric].__name__ in system or "rationale" in system
+
+
+def test_each_metric_is_submitted_as_its_own_job(
+    session: Session, batch_settings: Settings, provider: FakeProvider
+) -> None:
+    """A provider job carries one response schema, and the four verdicts differ."""
+    _seed_bank(session, batch_settings, passing=2, failing=0, unvalidated=0)
+
+    submit_bank_rerun(session, settings=batch_settings)
+
+    assert len(provider.submissions) == len(JudgeMetricId)
+    for payload in provider.submissions:
+        metrics = {parse_custom_id(r["custom_id"])[2] for r in payload["requests"]}
+        assert len(metrics) == 1
 
 
 def test_the_request_asks_for_json_object_not_a_strict_schema(
@@ -356,8 +366,9 @@ def test_a_large_bank_is_split_into_jobs_that_share_one_run_id(
 
     result = submit_bank_rerun(session, settings=narrow)
 
-    assert len(provider.submissions) == 3  # 2 + 2 + 1
-    assert len(result.run.provider_batch_ids) == 3
+    # Five questions per metric, capped at two per job: 3 jobs x 4 metrics.
+    assert len(provider.submissions) == 3 * len(JudgeMetricId)
+    assert len(result.run.provider_batch_ids) == 3 * len(JudgeMetricId)
     run_ids = {parse_custom_id(cid)[0] for cid in provider.custom_ids}
     assert run_ids == {result.run.run_id}
     assert result.run.question_count == 5
@@ -397,11 +408,9 @@ def test_backfill_records_existing_evaluations_once(
     for question_id in ids["passing"]:
         row = session.get(QuestionRow, question_id)
         assert row is not None
-        evaluation = evaluation_from_judge_response(
-            JudgeModelResponse(dimensions=_dimensions()),
-            question_id=question_id,
-            judge_model="legacy/model",
-        ).model_copy(update={"created_at": stamped})
+        evaluation = judged(question_id=question_id, judge_model="legacy/model").model_copy(
+            update={"created_at": stamped}
+        )
         row.pedagogical_eval = evaluation.model_dump(mode="json")
     session.commit()
 
@@ -428,11 +437,9 @@ def test_submission_backfills_before_it_can_overwrite_anything(
     ids = _seed_bank(session, batch_settings, passing=1, failing=0, unvalidated=0)
     row = session.get(QuestionRow, ids["passing"][0])
     assert row is not None
-    row.pedagogical_eval = evaluation_from_judge_response(
-        JudgeModelResponse(dimensions=_dimensions()),
-        question_id=row.id,
-        judge_model="legacy/model",
-    ).model_dump(mode="json")
+    row.pedagogical_eval = judged(question_id=row.id, judge_model="legacy/model").model_dump(
+        mode="json"
+    )
     session.commit()
 
     result = submit_bank_rerun(session, settings=batch_settings)
@@ -477,11 +484,7 @@ def test_history_keeps_the_earlier_evaluation_alongside_the_new_one(
     row = session.get(QuestionRow, question_id)
     assert row is not None
     row.pedagogical_eval = (
-        evaluation_from_judge_response(
-            JudgeModelResponse(dimensions=_dimensions()),
-            question_id=question_id,
-            judge_model="legacy/model",
-        )
+        judged(question_id=question_id, judge_model="legacy/model")
         .model_copy(update={"created_at": datetime.now(UTC) - timedelta(days=1)})
         .model_dump(mode="json")
     )
@@ -502,25 +505,30 @@ def test_a_malformed_line_becomes_an_error_and_the_others_still_land(
 ) -> None:
     ids = _seed_bank(session, batch_settings, passing=2, failing=0, unvalidated=0)
     run = submit_bank_rerun(session, settings=batch_settings).run
-    good, bad = sorted(provider.custom_ids)
-    provider.set_results(
-        [
-            _ok_result(good),
-            {
-                "custom_id": bad,
+    spoiled = sorted(provider.custom_ids)[0]
+    spoiled_question_id = parse_custom_id(spoiled)[1]
+    provider.answer_everything_well()
+    for batch_id, results in provider.results_by_batch.items():
+        provider.results_by_batch[batch_id] = [
+            result
+            if result["custom_id"] != spoiled
+            else {
+                "custom_id": spoiled,
                 "response": {
                     "status_code": 200,
                     "body": {"choices": [{"message": {"content": "not json at all"}}]},
                 },
                 "error": None,
-            },
+            }
+            for result in results
         ]
-    )
 
     result = poll_and_ingest(session, run.run_id, settings=batch_settings)
 
-    assert result.ingested == 1
-    assert result.failed == 1
+    # One reviewer failed on one question: that question lands partial, the
+    # other lands whole, and neither is lost.
+    assert result.ingested == 2
+    assert result.failed == 0
     repository = QuestionEvaluationRepository(session)
     statuses = {
         question_id: repository.list_for_question(question_id)[0].eval_status
@@ -528,13 +536,11 @@ def test_a_malformed_line_becomes_an_error_and_the_others_still_land(
     }
     assert sorted(statuses.values()) == [
         PedagogicalEvalStatus.COMPLETED.value,
-        PedagogicalEvalStatus.ERROR.value,
+        PedagogicalEvalStatus.PARTIAL.value,
     ]
-    bad_question_id = parse_custom_id(bad)[1]
-    stored = repository.list_for_question(bad_question_id)[0]
-    assert stored.advisory_status == AdvisoryStatus.ERROR.value
+    stored = repository.list_for_question(spoiled_question_id)[0]
+    assert stored.gate is None
     assert stored.evaluation is not None
-    assert stored.evaluation["error_detail"]
 
 
 def test_a_provider_error_line_is_recorded_as_an_error_evaluation(
@@ -542,9 +548,7 @@ def test_a_provider_error_line_is_recorded_as_an_error_evaluation(
 ) -> None:
     ids = _seed_bank(session, batch_settings, passing=1, failing=0, unvalidated=0)
     run = submit_bank_rerun(session, settings=batch_settings).run
-    provider.set_results(
-        [{"custom_id": provider.custom_ids[0], "error": {"message": "rate limited"}}]
-    )
+    _fail_every_request(provider, "rate limited")
 
     result = poll_and_ingest(session, run.run_id, settings=batch_settings)
 
@@ -622,19 +626,36 @@ def test_a_terminal_provider_failure_is_recorded_on_the_run(
 def test_a_run_is_not_complete_while_one_of_its_jobs_is_not(
     session: Session, batch_settings: Settings, provider: FakeProvider
 ) -> None:
-    """Reporting completion with part of the bank unjudged would misstate coverage."""
+    """Reporting completion with part of the bank unjudged would misstate coverage.
+
+    Each metric is split across two jobs; the first job of each metric finishes
+    and the second does not. So two questions have all four reviewers and land,
+    and the third has none and waits -- a question is never recorded from a
+    subset of its reviewers while its run is still going.
+    """
     _seed_bank(session, batch_settings, passing=3, failing=0, unvalidated=0)
     narrow = batch_settings.model_copy(update={"judge_batch_max_requests_per_job": 2})
     run = submit_bank_rerun(session, settings=narrow).run
 
     calls: list[str] = []
+    # The full-size chunk of each metric, plus the first metric's remainder. So
+    # the third question has exactly one of its four reviewers back.
+    finished_ids = {
+        f"batch_{index}"
+        for index, payload in enumerate(provider.submissions)
+        if len(payload["requests"]) == 2
+    } | {"batch_1"}
 
     def mixed_status(batch_id: str, *, settings: Settings) -> BatchJobState:
         del settings
         calls.append(batch_id)
-        finished = batch_id == "batch_0"
+        finished = batch_id in finished_ids
+        index = int(batch_id.removeprefix("batch_"))
         results = (
-            [_ok_result(request["custom_id"]) for request in provider.submissions[0]["requests"]]
+            [
+                _ok_result(request["custom_id"])
+                for request in provider.submissions[index]["requests"]
+            ]
             if finished
             else []
         )
@@ -653,9 +674,10 @@ def test_a_run_is_not_complete_while_one_of_its_jobs_is_not(
     finally:
         batch_service.batch_transport.fetch_status = provider.fetch_status  # type: ignore[assignment]
 
-    assert sorted(calls) == ["batch_0", "batch_1"]
+    assert len(calls) == len(provider.submissions)
     assert result.status is JudgeBatchStatus.IN_PROGRESS
-    assert result.ingested == 2, "finished results are recorded even mid-run"
+    assert result.ingested == 2, "fully answered questions are recorded even mid-run"
+    assert result.pending == 1, "the part-answered question waits for its other reviewers"
 
 
 def test_record_evaluation_writes_history_and_the_current_value_together(
@@ -663,11 +685,7 @@ def test_record_evaluation_writes_history_and_the_current_value_together(
 ) -> None:
     ids = _seed_bank(session, batch_settings, passing=1, failing=0, unvalidated=0)
     question_id = ids["passing"][0]
-    evaluation = evaluation_from_judge_response(
-        JudgeModelResponse(dimensions=_dimensions()),
-        question_id=question_id,
-        judge_model="fake/model",
-    )
+    evaluation = judged(question_id=question_id, judge_model="fake/model")
 
     record_evaluation(
         session,
@@ -682,15 +700,16 @@ def test_record_evaluation_writes_history_and_the_current_value_together(
     assert row is not None
     stored = QuestionEvaluationRepository(session).list_for_question(question_id)[0]
     assert row.pedagogical_eval == stored.evaluation
-    assert stored.advisory_status == evaluation.overall_advisory_status.value
+    assert evaluation.gate is not None
+    assert stored.gate == evaluation.gate.value
 
 
 def test_result_parsing_drops_a_line_with_no_custom_id() -> None:
     lines = batch_transport.parse_results(
-        [_ok_result("run:1"), {"response": {"status_code": 200, "body": {}}}]
+        [_ok_result("run:1:issues"), {"response": {"status_code": 200, "body": {}}}]
     )
 
-    assert [line.custom_id for line in lines] == ["run:1"]
+    assert [line.custom_id for line in lines] == ["run:1:issues"]
 
 
 def test_a_failed_http_line_carries_an_error_not_content() -> None:
@@ -728,10 +747,9 @@ def test_generation_records_its_evaluation_into_history(session: Session, settin
 
     version, topic, subtopic, section_ids = _seed(session, settings)
 
-    rows = GenerationService(session, client=FakeClient(_debugging_draft())).generate_for_sections(
+    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]), topic.id, [subtopic.id])
+    rows = GenerationService(session, client=client).generate_for_sections(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_id=subtopic.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
         source_section_ids=[section_ids[0]],
@@ -753,10 +771,9 @@ def test_generated_questions_need_no_backfill(session: Session, settings: Any) -
     )
 
     version, topic, subtopic, section_ids = _seed(session, settings)
-    GenerationService(session, client=FakeClient(_debugging_draft())).generate_for_sections(
+    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]), topic.id, [subtopic.id])
+    GenerationService(session, client=client).generate_for_sections(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_id=subtopic.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
         source_section_ids=[section_ids[0]],
@@ -808,20 +825,14 @@ def test_a_failed_rerun_does_not_replace_a_completed_evaluation(
     """
     ids = _seed_bank(session, batch_settings, passing=1, failing=0, unvalidated=0)
     question_id = ids["passing"][0]
-    good = evaluation_from_judge_response(
-        JudgeModelResponse(dimensions=_dimensions()),
-        question_id=question_id,
-        judge_model="generation/model",
-    )
+    good = judged(question_id=question_id, judge_model="generation/model")
     row = session.get(QuestionRow, question_id)
     assert row is not None
     row.pedagogical_eval = good.model_dump(mode="json")
     session.commit()
 
     run = submit_bank_rerun(session, settings=batch_settings).run
-    provider.set_results(
-        [{"custom_id": provider.custom_ids[0], "error": {"message": "invalid schema"}}]
-    )
+    _fail_every_request(provider, "invalid schema")
     result = poll_and_ingest(session, run.run_id, settings=batch_settings)
 
     assert result.failed == 1
@@ -844,10 +855,8 @@ def test_a_later_successful_rerun_does_take_over(
     question_id = ids["passing"][0]
     row = session.get(QuestionRow, question_id)
     assert row is not None
-    row.pedagogical_eval = evaluation_from_judge_response(
-        JudgeModelResponse(dimensions=_dimensions()),
-        question_id=question_id,
-        judge_model="generation/model",
+    row.pedagogical_eval = judged(
+        question_id=question_id, judge_model="generation/model"
     ).model_dump(mode="json")
     session.commit()
 
@@ -869,7 +878,7 @@ def test_an_error_still_becomes_current_when_there_is_nothing_better(
     question_id = ids["passing"][0]
 
     run = submit_bank_rerun(session, settings=batch_settings).run
-    provider.set_results([{"custom_id": provider.custom_ids[0], "error": {"message": "boom"}}])
+    _fail_every_request(provider, "boom")
     poll_and_ingest(session, run.run_id, settings=batch_settings)
 
     row = session.get(QuestionRow, question_id)

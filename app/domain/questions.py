@@ -72,7 +72,7 @@ class QuestionValidationReport(BaseModel):
 
 
 class Question(BaseModel):
-    """An assessment question grounded in an approved curriculum subtopic."""
+    """An assessment question grounded in approved curriculum subtopics."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -81,7 +81,11 @@ class Question(BaseModel):
     # Grounding: which approved curriculum this question belongs to.
     curriculum_version_id: int | None = None
     topic_id: int | None = None
-    subtopic_id: int | None = None
+    #: Every subtopic the question exercises, as claimed by the generator and
+    #: checked by the subtopic judge. Plural because one question can exercise
+    #: several subtopics of its topic, and a student's score updates the
+    #: weakness of each of them.
+    subtopic_ids: list[int] = Field(default_factory=list)
 
     kind: QuestionKind = QuestionKind.TESTABLE_PROGRAM
     question_type: QuestionType | None = None

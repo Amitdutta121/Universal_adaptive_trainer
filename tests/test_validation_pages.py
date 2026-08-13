@@ -47,7 +47,7 @@ def _seed_question(
         QuestionRow(
             curriculum_version_id=version.id,
             topic_id=version.topics[0].id,
-            subtopic_id=version.topics[0].subtopics[0].id,
+            subtopic_ids=[version.topics[0].subtopics[0].id],
             kind=QuestionKind.DISCRETE,
             question_type=QuestionType.TRUE_FALSE,
             difficulty=Difficulty.EASY,

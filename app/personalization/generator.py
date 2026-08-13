@@ -10,16 +10,17 @@ from app.domain.enums import GeneratorKind
 from app.domain.questions import Question
 from app.errors import DomainRuleError
 from app.generation import GeneratorDescriptor
-from app.generation.prompts import build_prompt
+from app.generation.prompts import build_prompt, render_taxonomy
 from app.generation.schemas import (
     RESPONSE_MODEL_FOR,
     build_content,
     prompt_fields_from_draft,
     scoring_kind_for,
 )
-from app.generation.spec import QuestionSpec
+from app.generation.spec import QuestionSpec, resolve_claimed_taxonomy
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
+from app.persistence.models import CurriculumVersionRow
 from app.persistence.repositories import PreferenceRepository
 from app.personalization.context import (
     MAX_PREFS_IN_PROMPT,
@@ -61,13 +62,7 @@ class PersonalizedContextGenerator:
     def descriptor(self) -> GeneratorDescriptor:
         return DESCRIPTOR
 
-    def generate_one(
-        self,
-        spec: QuestionSpec,
-        *,
-        topic_name: str,
-        subtopic_names: list[str],
-    ) -> Question:
+    def generate_one(self, spec: QuestionSpec, *, version: CurriculumVersionRow) -> Question:
         """Generate one question with personalized prompt context."""
         if self._session is None or self._retrieval is None:
             raise DomainRuleError(
@@ -83,16 +78,14 @@ class PersonalizedContextGenerator:
             spec,
             section_text=section.text,
             citation=citation,
-            topic_name=topic_name,
-            subtopic_names=subtopic_names,
+            taxonomy=render_taxonomy(version),
         )
 
         retrieval = retrieve_examples(
             self._session,
             spec=spec,
-            topic_id=spec.topic_id,
-            topic_name=topic_name,
-            subtopic_names=subtopic_names,
+            section_id=section_id,
+            section_text=section.text,
             citation=citation,
             embedder=self._embedder,
         )
@@ -113,6 +106,9 @@ class PersonalizedContextGenerator:
             prompt=prompt,
             response_model=RESPONSE_MODEL_FOR[spec.question_type],
         )
+        claim = resolve_claimed_taxonomy(
+            version, topic_id=draft.topic_id, subtopic_ids=draft.subtopic_ids
+        )
         question_prompt, reference_solution, tests = prompt_fields_from_draft(draft)
         review_ids = [
             example.review_id for example in (*retrieval.approved_or_edited, *retrieval.rejected)
@@ -122,8 +118,8 @@ class PersonalizedContextGenerator:
         ]
         return Question(
             curriculum_version_id=spec.curriculum_version_id,
-            topic_id=spec.topic_id,
-            subtopic_id=spec.subtopic_ids[0],
+            topic_id=claim.topic_id,
+            subtopic_ids=claim.subtopic_ids,
             kind=scoring_kind_for(spec.question_type),
             question_type=spec.question_type,
             difficulty=spec.difficulty,

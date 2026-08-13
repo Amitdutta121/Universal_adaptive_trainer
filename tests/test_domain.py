@@ -88,6 +88,8 @@ class TestQuestionOriginals:
         from app.generation.schemas import TrueFalseDraft, prompt_fields_from_draft
 
         draft = TrueFalseDraft(
+            topic_id=1,
+            subtopic_ids=[1],
             prompt="Lists are mutable.",
             correct_answer=False,
             explanation="Lists support item assignment.",

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_judge_metrics.html" as judge %}
 
 {% block heading %}Review queue{% endblock %}
 
@@ -63,7 +64,7 @@
           <h2>Question {{ question.id }}</h2>
           <span class="meta">
             {{ question.difficulty }} · {{ question.question_type or question.kind }} ·
-            {{ detail.taxonomy.topic }} / {{ detail.taxonomy.subtopic }}
+            {{ detail.taxonomy.topic }} / {{ detail.taxonomy.subtopics | join(", ") }}
           </span>
         </div>
 
@@ -196,25 +197,16 @@
         </p>
         {% if detail.pedagogical_eval %}
           <p>
-            Status: {{ detail.pedagogical_eval.status }} ·
-            Advisory: {{ detail.pedagogical_eval.overall_advisory_status }}
-            {% if detail.pedagogical_eval.overall_advisory_score is not none %}
-              ({{ "%.1f"|format(detail.pedagogical_eval.overall_advisory_score) }}/5)
-            {% endif %}
+            {{ judge.gate_badge(detail.pedagogical_eval) }}
+            <span class="meta">status: {{ detail.pedagogical_eval.status }}</span>
           </p>
-          {% if detail.pedagogical_eval.status == "completed" %}
-            <ul class="checklist">
-              {% for dimension in detail.pedagogical_eval.dimensions %}
-                <li>
-                  {{ dimension.dimension }}:
-                  {% if dimension.applicable %}{{ dimension.score }}/5{% else %}n/a{% endif %}
-                  <span class="evaluation-rationale">{{ dimension.rationale }}</span>
-                </li>
-              {% endfor %}
-            </ul>
+          {% if detail.pedagogical_eval.status != "skipped" %}
+            {{ judge.metric_rows(detail.pedagogical_eval) }}
+          {% else %}
+            <p>Not reviewed: {{ detail.pedagogical_eval.skip_reason or "no reason was recorded" }}.</p>
           {% endif %}
         {% else %}
-          <p class="empty">This question has no judge evaluation.</p>
+          <p class="empty">This question has no advisory review.</p>
         {% endif %}
       </details>
     </section>

@@ -14,9 +14,13 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.calibration.schema import (
+    PROFESSOR_OBJECTIONS,
     CalibrationLabel,
     CalibrationPair,
     CalibrationReport,
+    DifficultyConfusion,
+    MetricAgreement,
+    SubtopicConfusion,
 )
 from app.calibration.schema import (
     judge_label as label_for_evaluation,
@@ -24,7 +28,8 @@ from app.calibration.schema import (
 from app.calibration.schema import (
     professor_label as label_for_decision,
 )
-from app.evaluation import PedagogicalEvaluation
+from app.domain.enums import Difficulty, JudgeMetricId
+from app.evaluation import MetricStatus, PedagogicalEvaluation
 from app.persistence.models import ProfessorReviewRow, QuestionRow
 from app.persistence.repositories import QuestionRepository
 
@@ -76,11 +81,44 @@ def _pair_for_question(row: QuestionRow) -> CalibrationPair | None:
     judge = label_for_evaluation(evaluation)
     if judge is None:
         return None
+    review = _first_review(row.reviews)
+    cited = set(review.reasons)
+    passed = {
+        result.metric: result.passed
+        for result in evaluation.metrics
+        if result.status is MetricStatus.COMPLETED and result.passed is not None
+    }
     return CalibrationPair(
         question_id=row.id,
         judge=judge,
-        professor=label_for_decision(_first_review(row.reviews).decision),
+        professor=label_for_decision(review.decision),
+        metric_passed=passed,
+        metric_objected={
+            metric: bool(cited & reasons) for metric, reasons in PROFESSOR_OBJECTIONS.items()
+        },
+        subtopic_disagreement=_subtopic_disagreement(evaluation, row),
+        difficulty_disagreement=_difficulty_disagreement(evaluation, row),
     )
+
+
+def _subtopic_disagreement(
+    evaluation: PedagogicalEvaluation, row: QuestionRow
+) -> tuple[list[int], list[int]] | None:
+    """The claimed and proposed subtopic sets, when the judge proposed others."""
+    result = evaluation.metric(JudgeMetricId.SUBTOPIC)
+    if result is None or result.passed is not False or not result.proposed_subtopic_ids:
+        return None
+    return (sorted(row.subtopic_ids), sorted(result.proposed_subtopic_ids))
+
+
+def _difficulty_disagreement(
+    evaluation: PedagogicalEvaluation, row: QuestionRow
+) -> tuple[Difficulty, Difficulty] | None:
+    """The requested and proposed difficulty, when the judge proposed another."""
+    result = evaluation.metric(JudgeMetricId.DIFFICULTY)
+    if result is None or result.passed is not False or result.proposed_difficulty is None:
+        return None
+    return (Difficulty(row.difficulty), result.proposed_difficulty)
 
 
 def build_calibration_pairs(session: Session) -> list[CalibrationPair]:
@@ -106,7 +144,66 @@ def metrics_from_pairs(pairs: list[CalibrationPair]) -> CalibrationReport:
         # labels; reported separately because it is the figure that decides
         # whether auto-acceptance is safe to turn on.
         unsafe_auto_accept_rate=_rate(len(accepted) - confirmed, len(accepted)),
+        metrics=[_metric_agreement(metric, pairs) for metric in PROFESSOR_OBJECTIONS],
+        subtopic_confusions=_subtopic_confusions(pairs),
+        difficulty_confusions=_difficulty_confusions(pairs),
     )
+
+
+def _metric_agreement(metric: JudgeMetricId, pairs: list[CalibrationPair]) -> MetricAgreement:
+    """Agreement for one metric over the pairs whose judge answered it."""
+    answered = [pair for pair in pairs if metric in pair.metric_passed]
+    matching = 0
+    missed = 0
+    false_alarms = 0
+    for pair in answered:
+        passed = pair.metric_passed[metric]
+        objected = pair.metric_objected.get(metric, False)
+        if passed is not objected:
+            matching += 1
+        elif passed:
+            missed += 1
+        else:
+            false_alarms += 1
+    return MetricAgreement(
+        metric=metric,
+        n=len(answered),
+        agreement=_rate(matching, len(answered)),
+        missed=missed,
+        false_alarms=false_alarms,
+    )
+
+
+def _subtopic_confusions(pairs: list[CalibrationPair]) -> list[SubtopicConfusion]:
+    """Every claimed/proposed subtopic mismatch, most frequent first."""
+    counts: dict[tuple[tuple[int, ...], tuple[int, ...]], int] = {}
+    for pair in pairs:
+        if pair.subtopic_disagreement is None:
+            continue
+        claimed, judged = pair.subtopic_disagreement
+        key = (tuple(claimed), tuple(judged))
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        SubtopicConfusion(
+            claimed_subtopic_ids=list(claimed),
+            judge_subtopic_ids=list(judged),
+            count=count,
+        )
+        for (claimed, judged), count in sorted(counts.items(), key=lambda item: -item[1])
+    ]
+
+
+def _difficulty_confusions(pairs: list[CalibrationPair]) -> list[DifficultyConfusion]:
+    """Every requested/judged difficulty mismatch, most frequent first."""
+    counts: dict[tuple[Difficulty, Difficulty], int] = {}
+    for pair in pairs:
+        if pair.difficulty_disagreement is None:
+            continue
+        counts[pair.difficulty_disagreement] = counts.get(pair.difficulty_disagreement, 0) + 1
+    return [
+        DifficultyConfusion(requested=requested, judged=judged, count=count)
+        for (requested, judged), count in sorted(counts.items(), key=lambda item: -item[1])
+    ]
 
 
 def _rate(numerator: int, denominator: int) -> float | None:

@@ -44,6 +44,8 @@ def test_scoring_kind_mapping(qtype: QuestionType, kind: QuestionKind) -> None:
 
 def test_multiple_choice_requires_options_and_answer() -> None:
     draft = MultipleChoiceDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="What does s[1:3] return for s='abcd'?",
         options=["ab", "bc", "cd", "abc"],
         correct_option_index=1,
@@ -55,6 +57,8 @@ def test_multiple_choice_requires_options_and_answer() -> None:
 def test_multiple_choice_rejects_correct_index_outside_options() -> None:
     with pytest.raises(ValidationError, match="correct_option_index"):
         MultipleChoiceDraft(
+            topic_id=1,
+            subtopic_ids=[1],
             prompt="What does s[1:3] return for s='abcd'?",
             options=["ab", "bc"],
             correct_option_index=2,
@@ -65,6 +69,8 @@ def test_multiple_choice_rejects_correct_index_outside_options() -> None:
 def test_output_prediction_requires_expected_output() -> None:
     with pytest.raises(ValidationError):
         OutputPredictionDraft(
+            topic_id=1,
+            subtopic_ids=[1],
             prompt="What prints?",
             code="print(1 + 2)",
             expected_output="",
@@ -74,6 +80,8 @@ def test_output_prediction_requires_expected_output() -> None:
 
 def test_parsons_supports_order_and_indent() -> None:
     draft = ParsonsDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="Arrange the function.",
         blocks=[
             ParsonsBlock(id="a", text="def f(x):", indent=0),
@@ -87,6 +95,8 @@ def test_parsons_supports_order_and_indent() -> None:
 
 def test_coding_requires_tests() -> None:
     draft = CodingDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="Write add(a, b).",
         reference_solution="def add(a, b):\n    return a + b",
         tests=[{"stdin": "", "stdout": "3\n"}],
@@ -114,6 +124,8 @@ def test_executable_test_case_accepts_assert_alias() -> None:
 def test_parsons_rejects_unknown_order_id() -> None:
     with pytest.raises(ValidationError):
         ParsonsDraft(
+            topic_id=1,
+            subtopic_ids=[1],
             prompt="x",
             blocks=[ParsonsBlock(id="a", text="pass", indent=0)],
             correct_order=["a", "missing"],
@@ -123,6 +135,8 @@ def test_parsons_rejects_unknown_order_id() -> None:
 
 def test_prompt_fields_from_true_false_draft() -> None:
     draft = TrueFalseDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="Strings are immutable.",
         correct_answer=True,
         explanation="Assignment to str items fails.",
@@ -135,6 +149,8 @@ def test_prompt_fields_from_true_false_draft() -> None:
 
 def test_prompt_fields_from_testable_draft() -> None:
     draft = DebuggingDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="Find the bug.",
         code="s = 'ab'\ns[0] = 'c'",
         reference_solution="Build a new string.",
@@ -149,6 +165,8 @@ def test_prompt_fields_from_testable_draft() -> None:
 
 def test_prompt_fields_from_parsons_draft() -> None:
     draft = ParsonsDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="Arrange the function.",
         blocks=[
             ParsonsBlock(id="a", text="def f(x):", indent=0),
@@ -167,6 +185,8 @@ def test_prompt_fields_from_parsons_draft() -> None:
 
 def test_build_content_includes_draft_and_metadata() -> None:
     draft = OutputPredictionDraft(
+        topic_id=1,
+        subtopic_ids=[1],
         prompt="What prints?",
         code="print(1 + 2)",
         expected_output="3",

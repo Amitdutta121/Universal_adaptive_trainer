@@ -14,8 +14,9 @@ A professor should eventually be able to:
 2. inspect the extracted textbook structure;
 3. upload a fixed Topic → Subtopic taxonomy JSON;
 4. inspect the approved curriculum hierarchy;
-5. generate Python assessment questions grounded in the approved books and curriculum;
-6. have those questions validated automatically;
+5. generate Python assessment questions from a chosen chunk, difficulty and format, which the
+   generator itself classifies into the approved taxonomy (ADR-031);
+6. have those questions validated automatically, then reviewed by four advisory metric judges;
 7. approve, reject or edit generated questions;
 8. have the system learn the professor's preferences from those reviews;
 9. progressively receive questions that better match those preferences;
@@ -69,6 +70,25 @@ Where this lives in code:
 The two loops are **separate**: student adaptation reacts to student scores, professor content
 optimization reacts to professor reviews. Neither may feed the other beyond the shared question
 bank.
+
+## Fixed generation and evaluation decisions
+
+**Settled. See `docs/DECISIONS.md` ADR-031 for the reasoning.**
+
+- The professor selects a **chunk, a difficulty and a question type**. The **generator** chooses the
+  topic and subtopics, from the whole approved taxonomy, and its claim is validated after the call.
+- A question claims **one topic and up to three of its subtopics**, stored in `question_subtopics`.
+  Subtopics from two different topics are refused.
+- Four advisory judges run per question, one model call each: **issues**, **subtopic**,
+  **difficulty**, **generatability**. Each returns a value plus a rationale; `passed` is derived by
+  comparing that value with what the generator claimed.
+- The **gate** is a count of passing metrics — four approve, none reject, anything between needs
+  review — and is absent unless all four judges answered. It is advisory; the professor's review is
+  the authority.
+- A judge that fails is an **absent measurement**, never a failing verdict, and never stops a
+  question reaching the review queue.
+- The judge and the professor share one issue vocabulary (`RejectionReason`), which is what makes
+  per-metric calibration a direct comparison rather than an inference.
 
 ## Fixed book-ingestion decisions
 
@@ -177,8 +197,11 @@ app/
     taxonomy_import.py  The workflow: validate and persist approved versions
     display.py          Safe display decoding for current and legacy rows
   generation/         Section-first base question generation    (IMPLEMENTED)
+    spec.py           The request, and validation of the taxonomy the model claims. ADR-031.
   validation/         Automatic question validation             (boundary only)
-  evaluation/         Advisory structured LLM pedagogical evaluation (IMPLEMENTED)
+  evaluation/         Four advisory metric judges per question  (IMPLEMENTED)
+    prompts.py        One system prompt and one payload per metric. ADR-031.
+    schema.py         Verdicts, derived pass flags, and the counted gate. ADR-031.
     batch_service.py  Bulk async re-runs + retained evaluation history. ADR-030.
   feedback/           Professor approve/reject/edit records     (recording implemented)
   calibration/        Judge vs professor agreement, read-only   (IMPLEMENTED)

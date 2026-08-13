@@ -237,6 +237,32 @@ class RejectionReason(StrEnum):
     OTHER = "other"
 
 
+class JudgeMetricId(StrEnum):
+    """The four things the advisory judge is asked, one model call each.
+
+    Separate calls rather than one rubric: a single reviewer asked for four
+    unrelated judgements at once lets a strong opinion on one bleed into the
+    others, and a malformed answer costs all four.
+    """
+
+    ISSUES = "issues"
+    SUBTOPIC = "subtopic"
+    DIFFICULTY = "difficulty"
+    GENERATABILITY = "generatability"
+
+
+class JudgeGate(StrEnum):
+    """The judge's overall suggestion, derived from how many metrics passed.
+
+    Advisory only. The professor's own :class:`ReviewDecision` is the authority;
+    this is what the professor sees beside the question while deciding.
+    """
+
+    APPROVED = "approved"
+    NEEDS_REVIEW = "needs_review"
+    REJECT = "reject"
+
+
 class GeneratorKind(StrEnum):
     """Which generator produced a question.
 

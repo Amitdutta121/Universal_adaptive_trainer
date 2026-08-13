@@ -461,8 +461,6 @@ def poll_judge_run_page(request: Request, session: DbSession, run_id: str) -> Re
 def generate_questions(
     request: Request,
     session: DbSession,
-    topic_id: Annotated[int, Form()],
-    subtopic_id: Annotated[int, Form()],
     difficulty: Annotated[str, Form()],
     question_type: Annotated[str, Form()],
     book_id: Annotated[int, Form()],
@@ -473,8 +471,6 @@ def generate_questions(
     """Generate one persisted question for every selected source section."""
     try:
         payload = GenerateQuestionsRequest(
-            topic_id=topic_id,
-            subtopic_id=subtopic_id,
             question_type=QuestionType(question_type),
             difficulty=Difficulty(difficulty),
             book_id=book_id,

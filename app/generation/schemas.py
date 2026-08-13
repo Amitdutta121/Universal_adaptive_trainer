@@ -33,7 +33,29 @@ def scoring_kind_for(question_type: QuestionType) -> QuestionKind:
             assert_never(question_type)
 
 
-class MultipleChoiceDraft(BaseModel):
+class TaxonomyClaim(BaseModel):
+    """The topic and subtopics the generator says its question exercises.
+
+    Every draft carries these because the professor no longer supplies them: the
+    generator is given the whole approved taxonomy and classifies its own output.
+    The ids are unverified here -- :func:`~app.generation.spec.resolve_claimed_taxonomy`
+    is what decides whether they name anything real.
+    """
+
+    topic_id: int = Field(
+        description="Numeric id of the single topic this question belongs to.",
+    )
+    subtopic_ids: list[int] = Field(
+        min_length=1,
+        description=(
+            "Numeric ids of the subtopics this question exercises. All must be "
+            "subtopics of the chosen topic. Name only the subtopics the question "
+            "actually assesses."
+        ),
+    )
+
+
+class MultipleChoiceDraft(TaxonomyClaim):
     """Multiple-choice question draft."""
 
     prompt: str = Field(min_length=1)
@@ -49,7 +71,7 @@ class MultipleChoiceDraft(BaseModel):
         return self
 
 
-class TrueFalseDraft(BaseModel):
+class TrueFalseDraft(TaxonomyClaim):
     """True/false question draft."""
 
     prompt: str = Field(min_length=1)
@@ -57,7 +79,7 @@ class TrueFalseDraft(BaseModel):
     explanation: str = Field(min_length=1)
 
 
-class OutputPredictionDraft(BaseModel):
+class OutputPredictionDraft(TaxonomyClaim):
     """Output-prediction question draft."""
 
     prompt: str = Field(min_length=1)
@@ -82,7 +104,7 @@ class ExecutableTestCase(BaseModel):
         return self
 
 
-class CodeCompletionDraft(BaseModel):
+class CodeCompletionDraft(TaxonomyClaim):
     """Code-completion question draft."""
 
     prompt: str = Field(min_length=1)
@@ -92,7 +114,7 @@ class CodeCompletionDraft(BaseModel):
     explanation: str = Field(min_length=1)
 
 
-class DebuggingDraft(BaseModel):
+class DebuggingDraft(TaxonomyClaim):
     """Debugging question draft."""
 
     prompt: str = Field(min_length=1)
@@ -110,7 +132,7 @@ class ParsonsBlock(BaseModel):
     indent: int = Field(ge=0)
 
 
-class ParsonsDraft(BaseModel):
+class ParsonsDraft(TaxonomyClaim):
     """Parsons (code ordering) question draft."""
 
     prompt: str = Field(min_length=1)
@@ -128,7 +150,7 @@ class ParsonsDraft(BaseModel):
         return self
 
 
-class CodingDraft(BaseModel):
+class CodingDraft(TaxonomyClaim):
     """Open coding question draft."""
 
     prompt: str = Field(min_length=1)

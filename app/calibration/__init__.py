@@ -12,10 +12,13 @@ Status
     figures are deliberately absent -- see ``docs/DECISIONS.md`` ADR-029.
 
 Key rules
-    * Only ``COMPLETED`` evaluations with a decided advisory band are scored; a
-      skipped or errored judge made no prediction to be right or wrong about.
+    * Only ``COMPLETED`` evaluations carrying a derived gate are scored; a
+      skipped, partial or errored judgement made no prediction to be right or
+      wrong about.
     * The **first** professor review of a question is the one compared, because
       that is the verdict auto-acceptance would have pre-empted.
+    * Per-metric agreement reads a professor who did not cite a metric's reason
+      as not objecting to it (ADR-031).
     * Every rate is ``None`` when its denominator is zero.
 
 Allowed dependencies
@@ -27,12 +30,15 @@ Allowed dependencies
 from __future__ import annotations
 
 from app.calibration.schema import (
-    JUDGE_ACCEPT_STATUSES,
     MIN_INFORMATIVE_SAMPLE,
-    UNUSABLE_ADVISORY_STATUSES,
+    PROFESSOR_OBJECTIONS,
+    USABLE_EVAL_STATUSES,
     CalibrationLabel,
     CalibrationPair,
     CalibrationReport,
+    DifficultyConfusion,
+    MetricAgreement,
+    SubtopicConfusion,
     judge_label,
     professor_label,
 )
@@ -43,12 +49,15 @@ from app.calibration.service import (
 )
 
 __all__ = [
-    "JUDGE_ACCEPT_STATUSES",
     "MIN_INFORMATIVE_SAMPLE",
-    "UNUSABLE_ADVISORY_STATUSES",
+    "PROFESSOR_OBJECTIONS",
+    "USABLE_EVAL_STATUSES",
     "CalibrationLabel",
     "CalibrationPair",
     "CalibrationReport",
+    "DifficultyConfusion",
+    "MetricAgreement",
+    "SubtopicConfusion",
     "build_calibration_pairs",
     "build_calibration_report",
     "judge_label",

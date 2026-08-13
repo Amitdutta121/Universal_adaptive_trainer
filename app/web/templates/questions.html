@@ -71,26 +71,11 @@
       {% if selected_book_id %}
         <form class="upload-form" action="/questions/generate" method="post">
           <input type="hidden" name="book_id" value="{{ selected_book_id }}">
-          <div class="field">
-            <label for="topic">Topic</label>
-            <select id="topic" name="topic_id" required>
-              {% for topic in approved_curriculum.topics %}
-                <option value="{{ topic.id }}">{{ topic.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="field">
-            <label for="subtopic">Subtopic</label>
-            <select id="subtopic" name="subtopic_id" required>
-              {% for topic in approved_curriculum.topics %}
-                <optgroup label="{{ topic.name }}">
-                  {% for subtopic in topic.subtopics %}
-                    <option value="{{ subtopic.id }}">{{ subtopic.name }}</option>
-                  {% endfor %}
-                </optgroup>
-              {% endfor %}
-            </select>
-          </div>
+          <p class="hint">
+            The generator reads each selected section and chooses the topic and
+            subtopics itself, from the whole approved curriculum. The subtopic
+            reviewer checks that choice.
+          </p>
           <div class="field">
             <label for="difficulty">Difficulty</label>
             <select id="difficulty" name="difficulty" required>
@@ -144,14 +129,14 @@
     {% if questions %}
       <table class="table">
         <thead>
-          <tr><th>#</th><th>Subtopic</th><th>Difficulty</th><th>Kind</th><th>Status</th>
+          <tr><th>#</th><th>Subtopics</th><th>Difficulty</th><th>Kind</th><th>Status</th>
               <th>Generator</th><th>Priority</th><th>Edited</th></tr>
         </thead>
         <tbody>
           {% for question in questions %}
             <tr>
               <td><a href="/questions/{{ question.id }}">{{ question.id }}</a></td>
-              <td>{{ question.subtopic_id if question.subtopic_id is not none else "—" }}</td>
+              <td>{{ question.subtopic_ids | join(", ") if question.subtopic_ids else "—" }}</td>
               <td>{{ question.difficulty }}</td>
               <td>{{ question.kind }}</td>
               <td><span class="status">{{ question.status }}</span></td>

@@ -43,8 +43,9 @@ class SeededReviews:
     subtopic_a_id: int
     subtopic_b_id: int
     section_id: int
-    same_subtopic_review_id: int
-    other_subtopic_review_id: int
+    other_chapter_section_id: int
+    same_section_review_id: int
+    other_section_review_id: int
     edit_review_id: int
     approve_review_id: int
     reject_review_id: int
@@ -71,7 +72,7 @@ def _question(session: Session, **overrides: object) -> QuestionRow:
 
 def _seed_reviews(session: Session, settings) -> SeededReviews:
     book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
+        filename="book.json", data=docs.to_bytes(docs.think_python())
     )
     taxonomy = (
         b'{"schema_version":"1","label":"T","topics":['
@@ -87,6 +88,7 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
     sub_a = topic.subtopics[0]
     sub_b = topic.subtopics[1]
     section_id = book.chapters[0].sections[0].id
+    other_chapter_section_id = book.chapters[1].sections[0].id
 
     base = {
         "curriculum_version_id": version.id,
@@ -98,7 +100,8 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
     q_same = _question(
         session,
         **base,
-        subtopic_id=sub_a.id,
+        subtopic_ids=[sub_a.id],
+        spec={"source_section_ids": [section_id]},
         prompt="Immutability debugging prompt about strings.",
     )
     review_same = submit_review(
@@ -111,7 +114,8 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
     q_other = _question(
         session,
         **base,
-        subtopic_id=sub_b.id,
+        subtopic_ids=[sub_b.id],
+        spec={"source_section_ids": [other_chapter_section_id]},
         prompt="Methods debugging prompt about string methods.",
     )
     review_other = submit_review(
@@ -124,7 +128,8 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
     q_edit = _question(
         session,
         **base,
-        subtopic_id=sub_a.id,
+        subtopic_ids=[sub_a.id],
+        spec={"source_section_ids": [section_id]},
         prompt="Original edit prompt.",
     )
     review_edit = submit_review(
@@ -141,7 +146,8 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
     q_approve = _question(
         session,
         **base,
-        subtopic_id=sub_a.id,
+        subtopic_ids=[sub_a.id],
+        spec={"source_section_ids": [section_id]},
         prompt="Plain approve prompt.",
     )
     review_approve = submit_review(
@@ -154,7 +160,8 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
     q_reject = _question(
         session,
         **base,
-        subtopic_id=sub_a.id,
+        subtopic_ids=[sub_a.id],
+        spec={"source_section_ids": [section_id]},
         prompt="Reject this prompt.",
     )
     review_reject = submit_review(
@@ -178,8 +185,9 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
         subtopic_a_id=sub_a.id,
         subtopic_b_id=sub_b.id,
         section_id=section_id,
-        same_subtopic_review_id=review_same.id,
-        other_subtopic_review_id=review_other.id,
+        other_chapter_section_id=other_chapter_section_id,
+        same_section_review_id=review_same.id,
+        other_section_review_id=review_other.id,
         edit_review_id=review_edit.id,
         approve_review_id=review_approve.id,
         reject_review_id=review_reject.id,
@@ -189,8 +197,6 @@ def _seed_reviews(session: Session, settings) -> SeededReviews:
 def _spec(seed: SeededReviews) -> QuestionSpec:
     return QuestionSpec(
         curriculum_version_id=seed.version_id,
-        topic_id=seed.topic_id,
-        subtopic_ids=[seed.subtopic_a_id],
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         source_section_ids=[seed.section_id],
@@ -203,26 +209,25 @@ def _retrieve(
     *,
     embedder: FakeEmbedder | None,
 ) -> object:
-    spec = _spec(seed)
     return retrieve_examples(
         session,
-        spec=spec,
-        topic_id=seed.topic_id,
-        topic_name="Strings",
-        subtopic_names=["Immutability"],
+        spec=_spec(seed),
+        section_id=seed.section_id,
+        section_text="Strings are immutable in Python.",
         citation="Book ch.1 sec.1",
         embedder=embedder,
     )
 
 
-def test_retrieval_prefers_same_subtopic(
+def test_retrieval_prefers_the_same_source_section(
     session: Session, settings, fake_embedder: FakeEmbedder
 ) -> None:
+    """The generator has not chosen a subtopic yet, so proximity is the key."""
     seed = _seed_reviews(session, settings)
     result = _retrieve(session, seed, embedder=fake_embedder)
     positive_ids = [ex.review_id for ex in result.approved_or_edited]
-    assert positive_ids.index(seed.same_subtopic_review_id) < positive_ids.index(
-        seed.other_subtopic_review_id
+    assert positive_ids.index(seed.same_section_review_id) < positive_ids.index(
+        seed.other_section_review_id
     )
 
 
@@ -264,8 +269,6 @@ def test_combined_score_uses_fake_embeddings(
     section_id = book.chapters[0].sections[0].id
     spec = QuestionSpec(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_ids=[sub.id],
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         source_section_ids=[section_id],
@@ -274,7 +277,8 @@ def test_combined_score_uses_fake_embeddings(
     base = {
         "curriculum_version_id": version.id,
         "topic_id": topic.id,
-        "subtopic_id": sub.id,
+        "subtopic_ids": [sub.id],
+        "spec": {"source_section_ids": [section_id]},
         "question_type": QuestionType.DEBUGGING,
         "difficulty": Difficulty.MEDIUM,
     }
@@ -299,9 +303,8 @@ def test_combined_score_uses_fake_embeddings(
     result = retrieve_examples(
         session,
         spec=spec,
-        topic_id=topic.id,
-        topic_name="Strings",
-        subtopic_names=["Immutability"],
+        section_id=section_id,
+        section_text="Immutability debugging prompt about strings.",
         citation="Book ch.1 sec.1",
         embedder=fake_embedder,
     )
@@ -319,8 +322,6 @@ def test_combined_score_uses_fake_embeddings(
 def test_retrieval_empty_history(session: Session, fake_embedder: FakeEmbedder) -> None:
     spec = QuestionSpec(
         curriculum_version_id=1,
-        topic_id=1,
-        subtopic_ids=[1],
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         source_section_ids=[1],
@@ -328,9 +329,8 @@ def test_retrieval_empty_history(session: Session, fake_embedder: FakeEmbedder) 
     result = retrieve_examples(
         session,
         spec=spec,
-        topic_id=1,
-        topic_name="Strings",
-        subtopic_names=["Immutability"],
+        section_id=1,
+        section_text="Strings are immutable in Python.",
         citation="Book ch.1 sec.1",
         embedder=fake_embedder,
     )
@@ -357,7 +357,8 @@ def _seed_single_approve(session: Session, settings) -> tuple[SeededReviews, Que
         session,
         curriculum_version_id=version.id,
         topic_id=topic.id,
-        subtopic_id=sub.id,
+        subtopic_ids=[sub.id],
+        spec={"source_section_ids": [section_id]},
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         prompt="Only one positive.",
@@ -370,16 +371,15 @@ def _seed_single_approve(session: Session, settings) -> tuple[SeededReviews, Que
         subtopic_a_id=sub.id,
         subtopic_b_id=sub.id,
         section_id=section_id,
-        same_subtopic_review_id=0,
-        other_subtopic_review_id=0,
+        other_chapter_section_id=section_id,
+        same_section_review_id=0,
+        other_section_review_id=0,
         edit_review_id=0,
         approve_review_id=0,
         reject_review_id=0,
     )
     spec = QuestionSpec(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_ids=[sub.id],
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         source_section_ids=[section_id],
@@ -394,9 +394,8 @@ def test_partial_history_shrinks_budget(
     result = retrieve_examples(
         session,
         spec=spec,
-        topic_id=seed.topic_id,
-        topic_name="Strings",
-        subtopic_names=["Immutability"],
+        section_id=seed.section_id,
+        section_text="Strings are immutable in Python.",
         citation="Book ch.1 sec.1",
         embedder=fake_embedder,
     )
@@ -409,7 +408,8 @@ def test_never_exceed_caps(session: Session, settings, fake_embedder: FakeEmbedd
     base = {
         "curriculum_version_id": seed.version_id,
         "topic_id": seed.topic_id,
-        "subtopic_id": seed.subtopic_a_id,
+        "subtopic_ids": [seed.subtopic_a_id],
+        "spec": {"source_section_ids": [seed.section_id]},
         "question_type": QuestionType.DEBUGGING,
         "difficulty": Difficulty.MEDIUM,
     }

@@ -29,8 +29,17 @@ def _source_section_ids(question: Question) -> set[int]:
 
 
 def _has_approved_taxonomy_ids(question: Question, session: Session | None) -> bool:
-    """Return whether the question's ids name a pair in its approved curriculum."""
+    """Return whether the question's ids name real entries in its approved curriculum.
+
+    The generator now chooses the topic and subtopics itself, so this stopped
+    being a check on what a professor typed and became a check on what a model
+    claimed. Every claimed subtopic must sit under the one claimed topic: a
+    question tagged across two topics has no single home in the taxonomy, and
+    the adaptive engine could not decide whose weakness its score updates.
+    """
     if session is None or question.curriculum_version_id is None:
+        return False
+    if not question.subtopic_ids:
         return False
     try:
         version = CurriculumRepository(session).get_with_tree(question.curriculum_version_id)
@@ -38,11 +47,11 @@ def _has_approved_taxonomy_ids(question: Question, session: Session | None) -> b
         return False
     if version.status != CurriculumStatus.APPROVED:
         return False
-    return any(
-        topic.id == question.topic_id
-        and any(subtopic.id == question.subtopic_id for subtopic in topic.subtopics)
-        for topic in version.topics
-    )
+    topic = next((row for row in version.topics if row.id == question.topic_id), None)
+    if topic is None:
+        return False
+    owned = {subtopic.id for subtopic in topic.subtopics}
+    return all(subtopic_id in owned for subtopic_id in question.subtopic_ids)
 
 
 def _has_existing_source_sections(question: Question, session: Session | None) -> bool:
@@ -72,7 +81,7 @@ def check_shared(question: Question, session: Session | None) -> list[QuestionCh
             (
                 "Approved curriculum IDs"
                 if taxonomy_ids_valid
-                else "Curriculum IDs are not an approved topic/subtopic pair."
+                else "Curriculum IDs are not a topic with its own subtopics in an approved version."
             ),
         ),
         make_check(

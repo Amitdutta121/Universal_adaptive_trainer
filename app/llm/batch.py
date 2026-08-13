@@ -44,8 +44,9 @@ from app.errors import ConfigurationError, LLMRequestError
 
 logger = logging.getLogger(__name__)
 
-#: Separates the run from the question inside a provider ``custom_id``. A run id
-#: is a UUID and a question id is an integer, so neither can contain it.
+#: Separates the parts of a provider ``custom_id``. A run id is a UUID, a
+#: question id is an integer and a label is a bare identifier, so none of the
+#: three can contain it.
 CUSTOM_ID_SEPARATOR = ":"
 
 #: The chat-completions shape, selected per batch rather than per request.
@@ -56,22 +57,29 @@ BATCH_ENDPOINT = "/v1/chat/completions"
 PENDING_PROVIDER_STATUSES = frozenset({"validating", "in_progress", "finalizing"})
 
 
-def build_custom_id(run_id: str, question_id: int) -> str:
-    """Return the id that ties one provider result back to one question."""
-    return f"{run_id}{CUSTOM_ID_SEPARATOR}{question_id}"
+def build_custom_id(run_id: str, question_id: int, label: str) -> str:
+    """Return the id that ties one provider result back to one request.
+
+    ``label`` names which of several requests about the same question this is.
+    This module attaches no meaning to it -- it is a string to carry back.
+    """
+    return f"{run_id}{CUSTOM_ID_SEPARATOR}{question_id}{CUSTOM_ID_SEPARATOR}{label}"
 
 
-def parse_custom_id(custom_id: str) -> tuple[str, int]:
-    """Split a ``custom_id`` back into its run and question.
+def parse_custom_id(custom_id: str) -> tuple[str, int, str]:
+    """Split a ``custom_id`` back into its run, question and label.
 
     Raises:
         ValueError: if the id is not one this module produced. Ingest treats
             that as a bad result line rather than guessing at a question.
     """
-    run_id, separator, raw_question_id = custom_id.rpartition(CUSTOM_ID_SEPARATOR)
-    if not separator or not run_id:
-        raise ValueError(f"custom_id {custom_id!r} is not run_id{CUSTOM_ID_SEPARATOR}question_id")
-    return run_id, int(raw_question_id)
+    parts = custom_id.split(CUSTOM_ID_SEPARATOR)
+    if len(parts) != 3 or not parts[0] or not parts[2]:
+        raise ValueError(
+            f"custom_id {custom_id!r} is not "
+            f"run_id{CUSTOM_ID_SEPARATOR}question_id{CUSTOM_ID_SEPARATOR}label"
+        )
+    return parts[0], int(parts[1]), parts[2]
 
 
 @dataclass(frozen=True)

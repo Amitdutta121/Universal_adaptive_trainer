@@ -1,8 +1,9 @@
 """Question generation boundary.
 
 Responsibility
-    Produce assessment questions for a requested subtopic and difficulty,
-    grounded in the approved curriculum and the ingested books.
+    Produce assessment questions for a requested source section, difficulty and
+    format, grounded in the approved curriculum and the ingested books, and
+    classify each one into the taxonomy.
 
 Status
     The section-first base generator and personalized-context generator are
@@ -10,9 +11,11 @@ Status
     ``generator`` flag; callers use it for persisted generation.
 
 Key rules
-    * A generation request always carries an *approved* curriculum version id
-      and a subtopic id from that version. Generation without an approved
-      curriculum is an error, not a fallback.
+    * A generation request always carries an *approved* curriculum version id.
+      Generation without an approved curriculum is an error, not a fallback.
+    * The request does **not** name a topic or subtopic. The generator receives
+      the whole approved taxonomy and classifies its own question, and the claim
+      is validated against that taxonomy before the question is stored.
     * Every generator identifies itself with a
       :class:`GeneratorDescriptor` (kind + name + version), which is stamped on
       each produced question. Base and personalized generators must therefore
@@ -54,11 +57,13 @@ class GenerationRequest(BaseModel):
 
     ``BaseQuestionGenerator.generate`` makes one question for each supplied
     source section; ``count`` is retained for generator-selection compatibility.
-    Its ``subtopic_id`` maps to the single-item ``QuestionSpec.subtopic_ids``.
+
+    Carries no subtopic: the professor chooses the source, the difficulty and
+    the format, and the generator decides which part of the taxonomy the section
+    can actually assess.
     """
 
     curriculum_version_id: int
-    subtopic_id: int
     question_type: QuestionType
     source_section_ids: list[int] = Field(min_length=1)
     difficulty: Difficulty

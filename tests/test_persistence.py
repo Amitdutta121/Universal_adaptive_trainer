@@ -203,7 +203,7 @@ def test_question_row_stores_spec_and_content(session: Session) -> None:
     row = QuestionRow(
         curriculum_version_id=None,
         topic_id=None,
-        subtopic_id=None,
+        subtopic_ids=[],
         kind=QuestionKind.DISCRETE,
         question_type=QuestionType.TRUE_FALSE,
         difficulty=Difficulty.EASY,

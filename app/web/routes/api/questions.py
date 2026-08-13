@@ -79,7 +79,7 @@ def generate_questions(
         )
     # Resolved before the service is built so that a missing curriculum reports
     # the fixable problem rather than an LLM-configuration error raised first.
-    curriculum_version_id = approved_curriculum_id(session)
+    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session)
 
     service_kwargs: dict[str, Any] = {}
     if payload.generator == "personalized":
@@ -88,8 +88,6 @@ def generate_questions(
     try:
         generated = GenerationService(session, **service_kwargs).generate_for_sections(
             curriculum_version_id=curriculum_version_id,
-            topic_id=payload.topic_id,
-            subtopic_id=payload.subtopic_id,
             question_type=payload.question_type,
             difficulty=payload.difficulty,
             source_section_ids=None if payload.all_sections_of_book else payload.section_ids,
@@ -210,10 +208,11 @@ def resolve_taxonomy(session: Session, question: QuestionRow) -> QuestionTaxonom
     A question keeps working after its curriculum version is superseded, so a
     name that can no longer be resolved degrades to an em dash rather than 404.
     """
+    subtopic_ids = list(question.subtopic_ids)
     taxonomy = QuestionTaxonomy(
         curriculum=str(question.curriculum_version_id or "—"),
         topic=str(question.topic_id or "—"),
-        subtopic=str(question.subtopic_id or "—"),
+        subtopics=[str(subtopic_id) for subtopic_id in subtopic_ids] or ["—"],
     )
     if question.curriculum_version_id is None:
         return taxonomy
@@ -227,9 +226,11 @@ def resolve_taxonomy(session: Session, question: QuestionRow) -> QuestionTaxonom
     if topic is None:
         return taxonomy
     taxonomy.topic = topic.name
-    subtopic = next((item for item in topic.subtopics if item.id == question.subtopic_id), None)
-    if subtopic is not None:
-        taxonomy.subtopic = subtopic.name
+    names = {item.id: item.name for item in topic.subtopics}
+    if subtopic_ids:
+        taxonomy.subtopics = [
+            names.get(subtopic_id, str(subtopic_id)) for subtopic_id in subtopic_ids
+        ]
     return taxonomy
 
 

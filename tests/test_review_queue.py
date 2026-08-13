@@ -9,22 +9,22 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from llm_fakes import metric_results
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QuestionStatus, RejectionReason, ReviewDecision
-from app.evaluation import AdvisoryStatus, PedagogicalEvalStatus, PedagogicalEvaluation
+from app.evaluation import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.feedback import submit_review
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import QuestionRepository
 
 
 def _evaluation(
-    advisory: AdvisoryStatus, status: PedagogicalEvalStatus = PedagogicalEvalStatus.COMPLETED
+    status: PedagogicalEvalStatus = PedagogicalEvalStatus.COMPLETED,
 ) -> dict[str, object]:
     return PedagogicalEvaluation(
         status=status,
-        overall_advisory_score=4.2,
-        overall_advisory_status=advisory,
+        metrics=metric_results() if status is PedagogicalEvalStatus.COMPLETED else [],
         judge_model="synthetic/judge",
     ).model_dump(mode="json")
 
@@ -137,8 +137,8 @@ def test_cursor_past_the_last_question_returns_none_but_still_counts_remaining(
 def test_scoreable_mode_ignores_evaluations_that_never_reached_a_verdict(
     client: TestClient, session: Session, status: PedagogicalEvalStatus
 ) -> None:
-    _question(session, evaluation=_evaluation(AdvisoryStatus.SKIPPED, status))
-    judged = _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG))
+    _question(session, evaluation=_evaluation(status))
+    judged = _question(session, evaluation=_evaluation())
 
     assert _queue(client, mode="scoreable")["question"]["question"]["id"] == judged.id
 
@@ -147,7 +147,7 @@ def test_scoreable_mode_ignores_questions_with_no_evaluation(
     client: TestClient, session: Session
 ) -> None:
     _question(session)
-    judged = _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG))
+    judged = _question(session, evaluation=_evaluation())
 
     assert _queue(client, mode="scoreable")["question"]["question"]["id"] == judged.id
 
@@ -155,8 +155,8 @@ def test_scoreable_mode_ignores_questions_with_no_evaluation(
 def test_scoreable_mode_ignores_an_evaluation_that_no_longer_validates(
     client: TestClient, session: Session
 ) -> None:
-    _question(session, evaluation={"status": "completed", "overall_advisory_status": "??"})
-    judged = _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG))
+    _question(session, evaluation={"status": "completed", "metrics": "??"})
+    judged = _question(session, evaluation=_evaluation())
 
     assert _queue(client, mode="scoreable")["question"]["question"]["id"] == judged.id
 
@@ -164,8 +164,8 @@ def test_scoreable_mode_ignores_an_evaluation_that_no_longer_validates(
 def test_scoreable_remaining_counts_the_pool_not_the_cursor(
     client: TestClient, session: Session
 ) -> None:
-    first = _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG))
-    _question(session, evaluation=_evaluation(AdvisoryStatus.WEAK))
+    first = _question(session, evaluation=_evaluation())
+    _question(session, evaluation=_evaluation())
     _question(session)
 
     # Moving the cursor past one of them must not shrink the reported pool.
@@ -213,7 +213,7 @@ def test_page_renders_a_fenced_snippet_as_code(client: TestClient, session: Sess
 
 def test_page_keeps_the_judge_verdict_closed(client: TestClient, session: Session) -> None:
     """Anchoring the professor to the judge would invalidate the agreement figures."""
-    _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG))
+    _question(session, evaluation=_evaluation())
 
     body = client.get("/review").text
 
@@ -276,7 +276,7 @@ def test_a_rejected_verdict_without_reasons_re_offers_the_same_question(
 
 
 def test_page_preserves_the_mode_across_a_submission(client: TestClient, session: Session) -> None:
-    question = _question(session, evaluation=_evaluation(AdvisoryStatus.STRONG))
+    question = _question(session, evaluation=_evaluation())
 
     response = client.post(
         f"/review/{question.id}",

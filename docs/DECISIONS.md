@@ -1013,3 +1013,75 @@ ingest, not the batch.
 - **Deliberately out of scope:** scheduling, automatic retry of failed lines, cancelling a
   submitted run, and any use of re-run output to change a question's status. The judge stays
   advisory (ADR-024).
+
+## ADR-031 — The generator classifies its own question, and four judges check it
+
+**Status:** accepted. Supersedes the scoring parts of ADR-024 and the label mapping of ADR-029.
+
+**Context.** The advisory judge produced ten rubric dimensions, each scored 1–5 with a confidence
+and a rationale, averaged into one number and bucketed into strong / adequate / weak / uncertain.
+Two problems. The scores were not actionable: a professor reading "difficulty_alignment: 3/5"
+still had to decide what to do about it, and the number could not be compared with anything the
+professor themselves recorded. And the judge and the professor spoke different languages — an
+advisory band on one side, approve / edit / reject with structured reasons on the other — so
+calibration could only compare them by projecting both onto a two-valued label.
+
+Separately, generation required the professor to pick the topic and subtopic before the model ran.
+That put the classification decision on the person with the least information about what the chunk
+could actually support, and it made the "is this tagged right?" question unanswerable, because the
+tag was the professor's own.
+
+**Decision.**
+
+- **The generator classifies its own question.** The professor selects a chunk, a difficulty and a
+  question type. The whole approved taxonomy goes into the prompt and the model returns `topic_id`
+  and `subtopic_ids` alongside the question. `QuestionSpec` no longer carries a taxonomy;
+  `resolve_claimed_taxonomy` validates the model's claim *after* the call, against the same
+  approved tree the professor's ids used to be checked against.
+- **A question claims one topic and up to `MAX_CLAIMED_SUBTOPICS` of its subtopics.** Stored in a
+  `question_subtopics` join table, replacing the single `questions.subtopic_id` column. A question
+  spread across two topics is refused: it would have no single home in the taxonomy, and the
+  adaptive engine could not decide whose weakness its score updates. An invalid claim fails the
+  generation rather than being repaired — guessing which subtopic the model meant would put an
+  invented tag on a question and hide the miss from the very judge that exists to catch it.
+- **Four judges, one model call each**, replacing the ten-dimension rubric: `issues` (which known
+  problems the question has, drawn from the professor's own `RejectionReason` vocabulary, plus a
+  free-text `custom_issue`), `subtopic` (the topic and subtopics it would assign), `difficulty`
+  (the level it would assign), and `generatability` (whether the chunk could support the request at
+  all). Separate calls because a single reviewer asked four unrelated questions at once lets a
+  strong opinion on one bleed into the others, and one malformed answer costs all four.
+- **Judges return values, not verdicts.** `passed` is derived by comparing the judge's answer with
+  what the generator claimed. Three of the four therefore give the professor something to act on —
+  the subtopic to use instead, the difficulty it really is — rather than a score to interpret.
+- **The generatability judge never sees the question.** Its subject is the source material, and
+  knowing that a question already exists is exactly the bias that would stop it saying "this chunk
+  could not support one."
+- **The gate is a count.** Four passes → `approved`, none → `reject`, anything between →
+  `needs_review`. No fifth model call: a derived gate cannot contradict its own inputs. It is
+  `None` unless all four judges answered, because a gate derived from three would read as a verdict
+  on four. It remains advisory — the professor's `ReviewDecision` is the authority.
+- **A failed judge never withholds a question.** It is recorded as an absent measurement, the
+  evaluation lands as `partial`, and the question reaches the review queue with whatever came back.
+  This extends ADR-024's rule that an advisory failure is not a verdict.
+- **Calibration compares like with like.** `judge_label` reads `gate == approved`; the auto-accept
+  figures of ADR-029 are unchanged in meaning. Added beside them: per-metric agreement, and
+  confusion tables for subtopic and difficulty. These are possible only because both sides now draw
+  from one vocabulary. A professor who did not cite a metric's reason is read as not objecting to
+  it — they had the code available and chose not to use it. `generatability` has no professor
+  counterpart and is deliberately not given a proxy one.
+- **Personalization retrieval re-keys on the chunk.** `retrieve_examples` scored candidates by
+  shared subtopic and topic; neither exists before generation now. It scores by source proximity
+  instead — same section, then same chapter — and builds its embedding query from the section text,
+  citation, type and difficulty.
+
+**Consequences.**
+
+- Evaluation costs four model calls per question instead of one, and four times the latency at
+  generation time, since the structured client is synchronous. The batch path submits one job per
+  metric (a provider job carries a single response schema) and regroups the four result lines per
+  question at ingest; a question is recorded only once all four arrive, or once the run has ended.
+- `RUBRIC_VERSION` becomes `question-metrics@1`. Existing evaluations were discarded rather than
+  migrated: they were unannotated development data, and the annotation pass that gives the
+  calibration figures meaning starts from this rubric.
+- `reject` requires all four metrics to fail, so it will be rare in practice. This is intended:
+  the professor sees everything and rejects manually; the gate is a hint, not a filter.

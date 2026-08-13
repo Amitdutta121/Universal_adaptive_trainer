@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.books import ExtractionWarning
@@ -329,9 +330,6 @@ class QuestionRow(TimestampMixin, Base):
     topic_id: Mapped[int | None] = mapped_column(
         ForeignKey("topics.id", ondelete="SET NULL"), default=None
     )
-    subtopic_id: Mapped[int | None] = mapped_column(
-        ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
-    )
 
     kind: Mapped[QuestionKind] = mapped_column(
         StrEnumType(QuestionKind, 32), default=QuestionKind.TESTABLE_PROGRAM
@@ -391,6 +389,50 @@ class QuestionRow(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="QuestionEvaluationRow.created_at.desc(), QuestionEvaluationRow.id.desc()",
     )
+    #: Eagerly loaded: every reader of a question wants its subtopics, and a
+    #: lazy load here is one query per row on the question list and the queue.
+    subtopic_links: Mapped[list[QuestionSubtopicRow]] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="QuestionSubtopicRow.id",
+        lazy="selectin",
+    )
+    #: The subtopic ids as a plain list, readable and assignable like a column,
+    #: so callers never have to build join rows by hand.
+    subtopic_ids: AssociationProxy[list[int]] = association_proxy(
+        "subtopic_links",
+        "subtopic_id",
+        creator=lambda subtopic_id: QuestionSubtopicRow(subtopic_id=subtopic_id),
+    )
+
+
+class QuestionSubtopicRow(Base):
+    """One subtopic a question was tagged with.
+
+    A question belongs to exactly one topic but may exercise several of that
+    topic's subtopics, so the tag is a row rather than a column. Weakness is
+    tracked per subtopic and a student's score updates every subtopic the
+    question touched, which a single column could not express.
+
+    Deleting a subtopic removes its tags and leaves the questions standing: a
+    question that outlives one of its tags is still a usable question, and the
+    remaining tags are still true.
+    """
+
+    __tablename__ = "question_subtopics"
+    __table_args__ = (
+        UniqueConstraint("question_id", "subtopic_id", name="uq_question_subtopics_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), index=True
+    )
+
+    question: Mapped[QuestionRow] = relationship(back_populates="subtopic_links")
 
 
 class QuestionEvaluationRow(TimestampMixin, Base):
@@ -402,8 +444,8 @@ class QuestionEvaluationRow(TimestampMixin, Base):
     evaluation ever recorded, whichever run produced it.
 
     The four denormalised columns (``judge_model``, ``rubric_version``,
-    ``eval_status``, ``advisory_status``) are plain strings rather than mapped
-    enums because their vocabularies belong to :mod:`app.evaluation`, which
+    ``eval_status``, ``gate``) are plain strings rather than mapped enums
+    because their vocabularies belong to :mod:`app.evaluation`, which
     persistence must not import (ADR-026). They are copies of values inside
     ``evaluation``, kept so a run can be summarised without decoding every blob.
     """
@@ -427,7 +469,8 @@ class QuestionEvaluationRow(TimestampMixin, Base):
     judge_model: Mapped[str | None] = mapped_column(String(200), default=None)
     rubric_version: Mapped[str | None] = mapped_column(String(50), default=None)
     eval_status: Mapped[str | None] = mapped_column(String(32), default=None)
-    advisory_status: Mapped[str | None] = mapped_column(String(32), default=None)
+    #: The derived gate, or ``None`` when too few metrics answered to derive one.
+    gate: Mapped[str | None] = mapped_column(String(32), default=None)
 
     #: Groups the evaluations produced together, whether by one generation call
     #: or by one bulk re-run. Indexed because ingest and status both read by it.

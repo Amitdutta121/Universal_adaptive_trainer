@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import book_documents as docs
+from llm_fakes import verdict_for
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -16,7 +17,6 @@ from app.domain.enums import (
     ReviewDecision,
 )
 from app.domain.preferences import confidence_from_evidence
-from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.feedback import submit_review
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
@@ -29,8 +29,12 @@ from app.personalization.embeddings import FakeEmbedder
 class FakeClient:
     """Deterministic structured client for generation service tests."""
 
-    def __init__(self, draft: BaseModel) -> None:
+    def __init__(
+        self, draft: BaseModel, topic_id: int = 1, subtopic_ids: list[int] | None = None
+    ) -> None:
         self.draft = draft
+        self.topic_id = topic_id
+        self.subtopic_ids = subtopic_ids or [1]
         self.calls: list[dict[str, Any]] = []
 
     @property
@@ -45,23 +49,15 @@ class FakeClient:
         response_model: type[BaseModel],
     ) -> BaseModel:
         self.calls.append({"system": system, "prompt": prompt, "model": response_model})
-        if response_model is JudgeModelResponse:
-            return JudgeModelResponse(
-                dimensions=[
-                    DimensionEvaluation(
-                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
-                        score=5,
-                        applicable=True,
-                        confidence=1.0,
-                        rationale="Aligned.",
-                    )
-                ]
-            )
+        if response_model is not DebuggingDraft:
+            return verdict_for(response_model, self.topic_id, self.subtopic_ids)
         return self.draft
 
 
-def _debugging_draft() -> DebuggingDraft:
+def _debugging_draft(topic_id: int = 1, subtopic_ids: list[int] | None = None) -> DebuggingDraft:
     return DebuggingDraft(
+        topic_id=topic_id,
+        subtopic_ids=subtopic_ids or [1],
         prompt="Find the bug.",
         code="s = 'ab'\ns[0] = 'c'",
         reference_solution="Strings are immutable; build a new string.",
@@ -96,7 +92,7 @@ def _seed_with_feedback(session: Session, settings) -> tuple[object, object, obj
         QuestionRow(
             curriculum_version_id=version.id,
             topic_id=topic.id,
-            subtopic_id=subtopic.id,
+            subtopic_ids=[subtopic.id],
             question_type=QuestionType.DEBUGGING,
             difficulty=Difficulty.MEDIUM,
             prompt="Immutability debugging prompt about strings.",
@@ -132,13 +128,11 @@ def _seed_with_feedback(session: Session, settings) -> tuple[object, object, obj
 
 def test_generation_service_selects_personalized(session: Session, settings) -> None:
     version, topic, subtopic, section_ids = _seed_with_feedback(session, settings)
-    client = FakeClient(_debugging_draft())
+    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]), topic.id, [subtopic.id])
     rows = GenerationService(
         session, client=client, embedder=FakeEmbedder(dim=8)
     ).generate_for_sections(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_id=subtopic.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
         source_section_ids=[section_ids[0]],
@@ -153,11 +147,9 @@ def test_generation_service_selects_personalized(session: Session, settings) -> 
 
 def test_generation_service_default_is_base(session: Session, settings) -> None:
     version, topic, subtopic, section_ids = _seed(session, settings)
-    client = FakeClient(_debugging_draft())
+    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]), topic.id, [subtopic.id])
     rows = GenerationService(session, client=client).generate_for_sections(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_id=subtopic.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
         source_section_ids=[section_ids[0]],

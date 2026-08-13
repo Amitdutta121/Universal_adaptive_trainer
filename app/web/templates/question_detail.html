@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_judge_metrics.html" as judge %}
 
 {% block heading %}Question {{ question.id }}{% endblock %}
 
@@ -21,7 +22,7 @@
       <dt>Scoring kind</dt><dd>{{ question.kind }}</dd>
       <dt>Curriculum</dt><dd>{{ taxonomy.curriculum }}</dd>
       <dt>Topic</dt><dd>{{ taxonomy.topic }}</dd>
-      <dt>Subtopic</dt><dd>{{ taxonomy.subtopic }}</dd>
+      <dt>Subtopics</dt><dd>{{ taxonomy.subtopics | join(", ") }}</dd>
       <dt>Generator</dt><dd><code>{{ question.generator_kind }}:{{ question.generator_name }}@{{ question.generator_version }}</code></dd>
     </dl>
   </section>
@@ -44,47 +45,7 @@
     {% endif %}
   </section>
 
-  <section class="panel {% if pedagogical_eval and pedagogical_eval.status == "completed" and pedagogical_eval.overall_advisory_status in ["weak", "uncertain"] %}panel-warn{% elif pedagogical_eval and pedagogical_eval.status == "completed" %}panel-success{% elif pedagogical_eval and pedagogical_eval.status == "error" %}panel-error{% elif pedagogical_eval and pedagogical_eval.status == "skipped" %}panel-warn{% endif %}">
-    <h2>LLM pedagogical evaluation</h2>
-    {% if pedagogical_eval %}
-      <p>Status: {{ pedagogical_eval.status }}</p>
-      <p class="meta">
-        Judge model: {{ pedagogical_eval.judge_model or "—" }} ·
-        Rubric: {{ pedagogical_eval.rubric_version }} ·
-        Recorded: {{ pedagogical_eval.created_at.strftime("%Y-%m-%d %H:%M UTC") }}
-      </p>
-      {% if pedagogical_eval.status == "completed" %}
-        <ul class="checklist">
-          {% for dimension in pedagogical_eval.dimensions %}
-            <li>
-              {% if not dimension.applicable %}—{% elif dimension.score is not none and dimension.score >= 4 %}✓{% elif dimension.score is not none and dimension.score >= 3 %}⚠{% else %}✗{% endif %}
-              {{ dimension.dimension }}:
-              {% if dimension.applicable %}{{ dimension.score }}/5{% else %}n/a{% endif %}
-              · Confidence: {{ dimension.confidence }}
-              <span class="evaluation-rationale">{{ dimension.rationale }}</span>
-              {% if dimension.issues %}
-                <ul class="evaluation-issues">
-                  {% for issue in dimension.issues %}
-                    <li>{{ issue }}</li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-        <p class="evaluation-summary">
-          Overall advisory mean: {% if pedagogical_eval.overall_advisory_score is not none %}{{ "%.1f"|format(pedagogical_eval.overall_advisory_score) }}{% else %}n/a{% endif %}
-          ({{ pedagogical_eval.overall_advisory_status }}) — summary only
-        </p>
-      {% elif pedagogical_eval.status == "skipped" %}
-        <p>Skipped: {{ pedagogical_eval.skip_reason or "No reason was recorded." }}</p>
-      {% else %}
-        <p>{{ pedagogical_error_message or "The pedagogical judge could not complete its review." }}</p>
-      {% endif %}
-    {% else %}
-      <p class="empty">Pedagogical evaluation has not been recorded.</p>
-    {% endif %}
-  </section>
+  {{ judge.judge_panel(pedagogical_eval, error_message=pedagogical_error_message) }}
 
   <section class="panel">
     <h2>Judge history</h2>
@@ -95,8 +56,8 @@
       </p>
       <table class="table">
         <thead>
-          <tr><th>Recorded</th><th>Trigger</th><th>Status</th><th>Advisory</th>
-              <th>Mean</th><th>Model</th><th>Rubric</th><th>Run</th></tr>
+          <tr><th>Recorded</th><th>Trigger</th><th>Status</th><th>Gate</th>
+              <th>Passed</th><th>Model</th><th>Rubric</th><th>Run</th></tr>
         </thead>
         <tbody>
           {% for entry in judge_history %}
@@ -107,10 +68,10 @@
               </td>
               <td>{{ entry.trigger }}</td>
               <td><span class="status">{{ entry.eval_status or "—" }}</span></td>
-              <td>{{ entry.advisory_status or "—" }}</td>
+              <td>{{ entry.gate or "—" }}</td>
               <td>
-                {% if entry.overall_advisory_score is not none %}
-                  {{ "%.1f"|format(entry.overall_advisory_score) }}
+                {% if entry.passed_metrics is not none %}
+                  {{ entry.passed_metrics }}/4
                 {% else %}—{% endif %}
               </td>
               <td><code>{{ entry.judge_model or "—" }}</code></td>

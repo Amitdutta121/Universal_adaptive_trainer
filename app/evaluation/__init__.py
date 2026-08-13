@@ -1,18 +1,23 @@
 """Advisory pedagogical evaluation boundary.
 
 Responsibility
-    Structured LLM rubric output, stored evaluation records, and summary helpers
-    for an advisory pedagogical judge. The judge supplements deterministic
-    validation; it never overrides a failed deterministic check.
+    Four advisory judges per question -- issues, subtopic, difficulty and
+    generatability -- their stored results, and the gate derived from them. The
+    judges supplement deterministic validation; they never override a failed
+    deterministic check.
 
 Status
-    Schema, rubric constants, summary helpers, the advisory judge service, and
-    bulk asynchronous re-runs with retained history are implemented.
+    Judge prompts, verdict schemas, the synchronous judge service, and bulk
+    asynchronous re-runs with retained history are implemented.
 
 Key rules
-    * Overall advisory score is an unweighted arithmetic mean of applicable
-      dimension scores, provided as a summary only.
-    * Individual dimension results remain the primary evaluation output.
+    * One model call per metric. A judge that fails is an absent measurement,
+      not a failing verdict, and never stops a question reaching review.
+    * ``passed`` is derived here by comparing a judge's answer with what the
+      generator claimed; no judge reports its own pass or fail.
+    * The gate is a count of passing metrics: all four approve, none reject,
+      anything between needs review. It is ``None`` unless all four answered.
+    * The gate is advisory. The professor's own review stays the authority.
     * Evaluation does not set :class:`~app.domain.enums.QuestionStatus`.
     * Every evaluation is retained; ``questions.pedagogical_eval_json`` holds
       the current one and ``question_evaluations`` holds all of them (ADR-030).
@@ -34,44 +39,55 @@ from app.evaluation.batch_service import (
     record_evaluation,
     submit_bank_rerun,
 )
-from app.evaluation.rubric import RUBRIC_VERSION, JudgeDimensionId
+from app.evaluation.prompts import JUDGE_ISSUE_CODES, RUBRIC_VERSION, JudgeContext
 from app.evaluation.schema import (
-    AdvisoryStatus,
-    DimensionEvaluation,
-    JudgeModelResponse,
+    DifficultyVerdict,
+    GeneratabilityVerdict,
+    IssuesVerdict,
+    MetricResult,
+    MetricStatus,
     PedagogicalEvalStatus,
     PedagogicalEvaluation,
-    derive_advisory_status,
-    error_evaluation,
-    evaluation_from_judge_response,
+    SubtopicVerdict,
+    derive_gate,
+    evaluation_from_metrics,
+    failed_metric,
     humanize_judge_error_detail,
-    mean_applicable_score,
     skipped_evaluation,
 )
-from app.evaluation.service import JUDGE_MAX_ATTEMPTS, PedagogicalJudge, build_judge_prompts
+from app.evaluation.service import (
+    JUDGE_MAX_ATTEMPTS,
+    PedagogicalJudge,
+    build_judge_context,
+    result_from_verdict,
+)
 
 __all__ = [
+    "JUDGE_ISSUE_CODES",
     "JUDGE_MAX_ATTEMPTS",
     "RUBRIC_VERSION",
-    "AdvisoryStatus",
-    "DimensionEvaluation",
+    "DifficultyVerdict",
+    "GeneratabilityVerdict",
     "IngestResult",
-    "JudgeDimensionId",
-    "JudgeModelResponse",
+    "IssuesVerdict",
+    "JudgeContext",
+    "MetricResult",
+    "MetricStatus",
     "PedagogicalEvalStatus",
     "PedagogicalEvaluation",
     "PedagogicalJudge",
     "SubmissionResult",
+    "SubtopicVerdict",
     "backfill_generation_history",
-    "build_judge_prompts",
-    "derive_advisory_status",
-    "error_evaluation",
-    "evaluation_from_judge_response",
+    "build_judge_context",
+    "derive_gate",
+    "evaluation_from_metrics",
+    "failed_metric",
     "humanize_judge_error_detail",
-    "mean_applicable_score",
     "new_run_id",
     "poll_and_ingest",
     "record_evaluation",
+    "result_from_verdict",
     "skipped_evaluation",
     "submit_bank_rerun",
 ]

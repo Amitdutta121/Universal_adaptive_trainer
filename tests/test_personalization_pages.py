@@ -30,6 +30,10 @@ from app.personalization.learner import PreferenceCandidate, PreferenceExtractio
 class FakeClient:
     """Return one typed draft without making a network request."""
 
+    def __init__(self, topic_id: int = 1, subtopic_ids: list[int] | None = None) -> None:
+        self.topic_id = topic_id
+        self.subtopic_ids = subtopic_ids or [1]
+
     @property
     def description(self) -> str:
         return "fake/test-model"
@@ -52,21 +56,13 @@ class FakeClient:
                     )
                 ]
             )
-        from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
+        if response_model is not DebuggingDraft:
+            from llm_fakes import verdict_for
 
-        if response_model is JudgeModelResponse:
-            return JudgeModelResponse(
-                dimensions=[
-                    DimensionEvaluation(
-                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
-                        score=5,
-                        applicable=True,
-                        confidence=1.0,
-                        rationale="Aligned.",
-                    )
-                ]
-            )
+            return verdict_for(response_model, self.topic_id, self.subtopic_ids)
         return DebuggingDraft(
+            topic_id=self.topic_id,
+            subtopic_ids=self.subtopic_ids,
             prompt="Find the bug.",
             code="s = 'ab'\ns[0] = 'c'",
             reference_solution="Strings are immutable; build a new string.",
@@ -260,7 +256,9 @@ def test_generate_form_accepts_personalized(client, session, settings, monkeypat
     import app.web.routes.api.questions as api_questions
 
     def fake_generation_service(request_session, **kwargs):
-        return GenerationService(request_session, client=FakeClient(), **kwargs)
+        return GenerationService(
+            request_session, client=FakeClient(topic_id, [subtopic_id]), **kwargs
+        )
 
     monkeypatch.setattr(api_questions, "GenerationService", fake_generation_service)
     monkeypatch.setattr(api_questions, "get_embedder", lambda settings=None: FakeEmbedder(dim=8))
@@ -268,8 +266,6 @@ def test_generate_form_accepts_personalized(client, session, settings, monkeypat
     response = client.post(
         "/questions/generate",
         data={
-            "topic_id": str(topic_id),
-            "subtopic_id": str(subtopic_id),
             "difficulty": "medium",
             "question_type": "debugging",
             "book_id": str(book_id),

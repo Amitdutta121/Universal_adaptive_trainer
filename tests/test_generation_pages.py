@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import book_documents as docs
+from llm_fakes import verdict_for
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
 from app.errors import MalformedModelOutputError
-from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
 from app.ingestion import BookImportService, SourceRetrieval
@@ -19,6 +19,10 @@ from app.persistence.repositories import QuestionRepository
 
 class FakeClient:
     """Return one typed draft without making a network request."""
+
+    def __init__(self, topic_id: int = 1, subtopic_ids: list[int] | None = None) -> None:
+        self.topic_id = topic_id
+        self.subtopic_ids = subtopic_ids or [1]
 
     @property
     def description(self) -> str:
@@ -34,19 +38,11 @@ class FakeClient:
     ) -> BaseModel:
         """Return the debugging draft used by the page tests."""
         del system, prompt
-        if response_model is JudgeModelResponse:
-            return JudgeModelResponse(
-                dimensions=[
-                    DimensionEvaluation(
-                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
-                        score=5,
-                        applicable=True,
-                        confidence=1.0,
-                        rationale="Aligned.",
-                    )
-                ]
-            )
+        if response_model is not DebuggingDraft:
+            return verdict_for(response_model, self.topic_id, self.subtopic_ids)
         return DebuggingDraft(
+            topic_id=self.topic_id,
+            subtopic_ids=self.subtopic_ids,
             prompt="Find the bug.",
             code="s = 'ab'\ns[0] = 'c'",
             reference_solution="Strings are immutable; build a new string.",
@@ -83,7 +79,10 @@ def test_questions_page_shows_generate_form_when_ready(client, session, settings
 
     assert response.status_code == 200
     assert "Generate Question" in response.text
-    assert "Immutability" in response.text
+    # No topic or subtopic control: the generator classifies its own question,
+    # so offering the professor a choice here would suggest otherwise.
+    assert 'name="subtopic_id"' not in response.text
+    assert 'name="topic_id"' not in response.text
     assert f'value="{section_id}"' in response.text
 
 
@@ -95,14 +94,14 @@ def test_generate_post_creates_question(client, session, settings, monkeypatch) 
     monkeypatch.setattr(
         api_questions,
         "GenerationService",
-        lambda request_session: GenerationService(request_session, client=FakeClient()),
+        lambda request_session: GenerationService(
+            request_session, client=FakeClient(topic_id, [subtopic_id])
+        ),
     )
 
     response = client.post(
         "/questions/generate",
         data={
-            "topic_id": str(topic_id),
-            "subtopic_id": str(subtopic_id),
             "difficulty": "medium",
             "question_type": "debugging",
             "book_id": str(book_id),
@@ -126,14 +125,14 @@ def test_generate_post_multiple_sections_redirects_to_bank(
     monkeypatch.setattr(
         api_questions,
         "GenerationService",
-        lambda request_session: GenerationService(request_session, client=FakeClient()),
+        lambda request_session: GenerationService(
+            request_session, client=FakeClient(topic_id, [subtopic_id])
+        ),
     )
 
     response = client.post(
         "/questions/generate",
         data={
-            "topic_id": str(topic_id),
-            "subtopic_id": str(subtopic_id),
             "difficulty": "medium",
             "question_type": "debugging",
             "book_id": str(book_id),
@@ -163,13 +162,13 @@ def test_generate_post_all_sections_creates_one_question_per_book_section(
     monkeypatch.setattr(
         api_questions,
         "GenerationService",
-        lambda request_session: GenerationService(request_session, client=FakeClient()),
+        lambda request_session: GenerationService(
+            request_session, client=FakeClient(topic_id, [subtopic_id])
+        ),
     )
     response = client.post(
         "/questions/generate",
         data={
-            "topic_id": str(topic_id),
-            "subtopic_id": str(subtopic_id),
             "difficulty": "medium",
             "question_type": "debugging",
             "book_id": str(book_id),
@@ -186,7 +185,7 @@ def test_generate_post_all_sections_creates_one_question_per_book_section(
 def test_generate_post_renders_malformed_model_output_in_form(
     client, session, settings, monkeypatch
 ) -> None:
-    book_id, _, topic_id, subtopic_id, section_id = _seed(session, settings)
+    book_id, _, _topic_id, _subtopic_id, section_id = _seed(session, settings)
 
     class FailingGenerationService:
         def __init__(self, request_session: Session) -> None:
@@ -203,8 +202,6 @@ def test_generate_post_renders_malformed_model_output_in_form(
     response = client.post(
         "/questions/generate",
         data={
-            "topic_id": str(topic_id),
-            "subtopic_id": str(subtopic_id),
             "difficulty": "medium",
             "question_type": "debugging",
             "book_id": str(book_id),
@@ -225,13 +222,13 @@ def test_detail_shows_prompt_and_source(client, session, settings, monkeypatch) 
     monkeypatch.setattr(
         api_questions,
         "GenerationService",
-        lambda request_session: GenerationService(request_session, client=FakeClient()),
+        lambda request_session: GenerationService(
+            request_session, client=FakeClient(topic_id, [subtopic_id])
+        ),
     )
     response = client.post(
         "/questions/generate",
         data={
-            "topic_id": str(topic_id),
-            "subtopic_id": str(subtopic_id),
             "difficulty": "medium",
             "question_type": "debugging",
             "book_id": str(book_id),

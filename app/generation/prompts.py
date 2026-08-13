@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from app.domain.enums import QuestionType
 from app.generation.principles import COMMON_SYSTEM
-from app.generation.spec import QuestionSpec
+from app.generation.spec import MAX_CLAIMED_SUBTOPICS, QuestionSpec
+from app.persistence.models import CurriculumVersionRow
 
 _TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
     QuestionType.MULTIPLE_CHOICE: (
@@ -36,21 +37,42 @@ _TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
     ),
 }
 
+CLASSIFICATION_INSTRUCTION = f"""Classify your own question.
+Choose the one topic it belongs to and set topic_id to that topic's numeric id.
+Then set subtopic_ids to the ids of the subtopics your question actually
+assesses -- at least one, at most {MAX_CLAIMED_SUBTOPICS}, all of them under the
+topic you chose. Use only ids from the taxonomy below.
+
+Write the question the section supports, then classify what you wrote. Do not
+bend the question toward a subtopic that reads as a neater fit."""
+
+
+def render_taxonomy(version: CurriculumVersionRow) -> str:
+    """Render the whole approved taxonomy as the id list the model chooses from.
+
+    The entire tree goes into the prompt, not a pre-selected branch: the point of
+    letting the generator classify is that nothing upstream has decided where the
+    section belongs.
+    """
+    lines: list[str] = []
+    for topic in version.topics:
+        lines.append(f"[topic {topic.id}] {topic.name}")
+        for subtopic in topic.subtopics:
+            description = f" -- {subtopic.description}" if subtopic.description else ""
+            lines.append(f"  [subtopic {subtopic.id}] {subtopic.name}{description}")
+    return "\n".join(lines)
+
 
 def build_prompt(
     spec: QuestionSpec,
     *,
     section_text: str,
     citation: str,
-    topic_name: str,
-    subtopic_names: list[str],
+    taxonomy: str,
 ) -> tuple[str, str]:
     """Build the shared system instruction and one format-specific user prompt."""
-    subtopics = ", ".join(subtopic_names)
     user = f"""Create a {spec.difficulty.value} {spec.question_type.value} question.
 
-Topic: {topic_name}
-Subtopic(s): {subtopics}
 Source citation: {citation}
 
 Type-specific requirements:
@@ -59,5 +81,11 @@ Type-specific requirements:
 Use this section text as the grounding source:
 --- section text ---
 {section_text}
---- end section text ---"""
+--- end section text ---
+
+{CLASSIFICATION_INSTRUCTION}
+
+--- taxonomy ---
+{taxonomy}
+--- end taxonomy ---"""
     return COMMON_SYSTEM, user

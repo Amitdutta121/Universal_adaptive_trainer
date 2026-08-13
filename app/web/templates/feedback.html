@@ -54,7 +54,7 @@
         <dt>Auto-accept precision</dt>
         <dd>
           {{ rate(calibration.auto_accept_precision) }}
-          <span class="note">— you approved this share of what the judge called strong</span>
+          <span class="note">— you approved this share of what the judge gated as approved</span>
         </dd>
         <dt>Unsafe auto-accept rate</dt>
         <dd>
@@ -63,6 +63,57 @@
           have shipped those unreviewed</span>
         </dd>
       </dl>
+
+      {% if calibration.metrics %}
+        <h3>Per reviewer</h3>
+        <p class="note">
+          The four reviewers each answer one thing, and your rejection reasons say the same
+          things in the same words, so these compare directly. A review that did not cite a
+          reviewer's reason counts as not objecting to it.
+        </p>
+        <table class="table">
+          <thead>
+            <tr><th>Reviewer</th><th>Measured</th><th>Agreement</th>
+                <th>Missed</th><th>False alarms</th></tr>
+          </thead>
+          <tbody>
+            {% for metric in calibration.metrics %}
+              <tr>
+                <td>{{ metric.metric | replace("_", " ") | capitalize }}</td>
+                <td>{{ metric.n }}</td>
+                <td>{{ rate(metric.agreement) }}</td>
+                <td>{{ metric.missed }}</td>
+                <td>{{ metric.false_alarms }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="note">
+          <em>Missed</em>: the reviewer passed it and you objected. <em>False alarms</em>: the
+          reviewer flagged it and you did not.
+        </p>
+      {% endif %}
+
+      {% if calibration.difficulty_confusions %}
+        <h3>Difficulty disagreements</h3>
+        <ul class="checklist">
+          {% for row in calibration.difficulty_confusions %}
+            <li>Asked for {{ row.requested }}, reviewer called it {{ row.judged }} — {{ row.count }}×</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% if calibration.subtopic_confusions %}
+        <h3>Subtopic disagreements</h3>
+        <ul class="checklist">
+          {% for row in calibration.subtopic_confusions %}
+            <li>
+              Generator claimed {{ row.claimed_subtopic_ids | join(", ") }},
+              reviewer proposed {{ row.judge_subtopic_ids | join(", ") }} — {{ row.count }}×
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
 
       {% if calibration.n < min_informative_sample %}
         <p class="note" role="status">

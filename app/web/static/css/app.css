@@ -134,6 +134,21 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .evaluation-rationale { display: block; margin-top: 2px; }
 .evaluation-issues { margin: 4px 0 0; padding-left: 20px; }
 .evaluation-summary { margin: 10px 0 0; font-weight: 600; }
+.evaluation-proposal { margin: 4px 0 0; font-size: 13px; color: var(--ink-soft); }
+
+.gate {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gate-approved { background: #e6f5e4; color: #2f6a2a; }
+.gate-needs_review { background: #fdf1dc; color: #8a5a10; }
+.gate-reject { background: #fdeaea; color: #9c2b2b; }
+.gate-undecided { background: #eceff3; color: var(--ink-soft); }
 
 .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
 .kv dt { color: var(--ink-soft); }

@@ -8,13 +8,23 @@ from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, RejectionReason, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
+from app.errors import NotFoundError
 from app.generation.spec import QuestionSpec
 from app.persistence.models import ProfessorReviewRow, QuestionRow, ReviewEmbeddingRow
-from app.persistence.repositories import ProfessorReviewRepository, ReviewEmbeddingRepository
+from app.persistence.repositories import (
+    BookStructureRepository,
+    ProfessorReviewRepository,
+    ReviewEmbeddingRepository,
+)
 from app.personalization.embeddings import Embedder, cosine_similarity, example_content_hash
 
-SUBTOPIC = 5.0
-TOPIC = 2.0
+#: Examples are keyed on where a question came from, not on what it was tagged
+#: with: the generator now assigns the topic and subtopics itself, so neither is
+#: known at the moment retrieval has to run. Source proximity is the strongest
+#: signal still available before the model has said anything -- two questions
+#: written from the same section are about the same material by construction.
+SAME_SECTION = 5.0
+SAME_CHAPTER = 2.0
 TYPE = 2.0
 DIFFICULTY_EXACT = 1.0
 DIFFICULTY_ADJACENT = 0.5
@@ -105,17 +115,50 @@ def _build_example_text(review: ProfessorReviewRow, question: QuestionRow) -> st
     return "\n".join(part for part in parts if part)
 
 
-def _build_query_text(
-    *,
-    topic_name: str,
-    subtopic_names: list[str],
-    spec: QuestionSpec,
-    citation: str,
-) -> str:
+#: How much of the section is carried into the embedding query. The query stands
+#: in for a question that does not exist yet, so it needs enough of the material
+#: to be comparable with real question text without becoming a wall of prose.
+QUERY_SECTION_CHARS = 1200
+
+
+def _build_query_text(*, spec: QuestionSpec, section_text: str, citation: str) -> str:
     return (
-        f"{topic_name}\n{', '.join(subtopic_names)}\n"
-        f"{spec.question_type.value}\n{spec.difficulty.value}\n{citation}"
+        f"{spec.question_type.value}\n{spec.difficulty.value}\n{citation}\n"
+        f"{section_text[:QUERY_SECTION_CHARS]}"
     )
+
+
+def question_section_ids(question: QuestionRow) -> set[int]:
+    """Section ids a stored question was generated from, frozen request first."""
+    section_ids: set[int] = set()
+    spec = question.spec or {}
+    values = spec.get("source_section_ids")
+    if isinstance(values, list):
+        section_ids.update(value for value in values if type(value) is int)
+    sources = (question.content or {}).get("sources")
+    if isinstance(sources, list):
+        for source in sources:
+            if isinstance(source, dict) and type(source.get("section_id")) is int:
+                section_ids.add(source["section_id"])
+    return section_ids
+
+
+def _sibling_section_ids(session: Session, section_id: int) -> set[int]:
+    """Every section printed in the same chapter, including this one.
+
+    An unchaptered section has no siblings rather than every section in the
+    book: without a chapter there is nothing saying the neighbouring sections
+    are related, and treating them as related would inflate the score of
+    examples that merely landed nearby in the file.
+    """
+    repository = BookStructureRepository(session)
+    try:
+        section = repository.get_section(section_id)
+    except NotFoundError:
+        return set()
+    if section.chapter_id is None:
+        return {section_id}
+    return {row.id for row in repository.sections_in_chapter(section.chapter_id)}
 
 
 def _meta_raw_score(
@@ -123,15 +166,17 @@ def _meta_raw_score(
     review: ProfessorReviewRow,
     question: QuestionRow,
     spec: QuestionSpec,
-    topic_id: int,
+    section_id: int,
+    sibling_section_ids: set[int],
     recency_rank: int,
     total_candidates: int,
 ) -> float:
     score = _decision_score(review.decision) + _recency_score(recency_rank, total_candidates)
-    if question.subtopic_id is not None and question.subtopic_id in spec.subtopic_ids:
-        score += SUBTOPIC
-    elif question.topic_id == topic_id:
-        score += TOPIC
+    sources = question_section_ids(question)
+    if section_id in sources:
+        score += SAME_SECTION
+    elif sources & sibling_section_ids:
+        score += SAME_CHAPTER
     if question.question_type == spec.question_type:
         score += TYPE
     score += _difficulty_score(question.difficulty, spec.difficulty)
@@ -200,9 +245,8 @@ def retrieve_examples(
     session: Session,
     *,
     spec: QuestionSpec,
-    topic_id: int,
-    topic_name: str,
-    subtopic_names: list[str],
+    section_id: int,
+    section_text: str,
     citation: str,
     embedder: Embedder | None = None,
 ) -> RetrievalResult:
@@ -214,14 +258,14 @@ def retrieve_examples(
     review_vectors: dict[int, list[float]] = {}
     if embedder is not None:
         query_text = _build_query_text(
-            topic_name=topic_name,
-            subtopic_names=subtopic_names,
             spec=spec,
+            section_text=section_text,
             citation=citation,
         )
         query_vector = embedder.embed([query_text])[0]
         review_vectors = _ensure_embeddings(session, reviews=reviews, embedder=embedder)
 
+    siblings = _sibling_section_ids(session, section_id)
     total = len(reviews)
     meta_raws: list[float] = []
     candidates: list[_ScoredCandidate] = []
@@ -233,7 +277,8 @@ def retrieve_examples(
             review=review,
             question=question,
             spec=spec,
-            topic_id=topic_id,
+            section_id=section_id,
+            sibling_section_ids=siblings,
             recency_rank=rank,
             total_candidates=total,
         )

@@ -1,91 +1,35 @@
-"""PedagogicalJudge retries and completed/error outcomes."""
+"""The four metric judges: pass derivation, retries, and partial failure."""
 
 from __future__ import annotations
 
 from typing import Any
 
 import book_documents as docs
-from pydantic import BaseModel
+from llm_fakes import FlakyJudgeClient, MetricJudgeClient, RaisingJudgeClient
 from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
-from app.domain.enums import Difficulty, QuestionType
+from app.domain.enums import (
+    Difficulty,
+    JudgeGate,
+    JudgeMetricId,
+    QuestionType,
+    RejectionReason,
+)
 from app.domain.questions import Question
 from app.errors import LLMRequestError, MalformedModelOutputError
-from app.evaluation.rubric import JudgeDimensionId
-from app.evaluation.schema import (
-    DimensionEvaluation,
-    JudgeModelResponse,
-    PedagogicalEvalStatus,
-)
-from app.evaluation.service import JUDGE_MAX_ATTEMPTS, PedagogicalJudge
+from app.evaluation.prompts import build_user_prompt
+from app.evaluation.schema import MetricStatus, PedagogicalEvalStatus
+from app.evaluation.service import JUDGE_MAX_ATTEMPTS, PedagogicalJudge, build_judge_context
 from app.ingestion import BookImportService
 
-
-def _all_dims() -> list[DimensionEvaluation]:
-    return [
-        DimensionEvaluation(
-            dimension=dim,
-            score=4 if dim is not JudgeDimensionId.DISTRACTOR_QUALITY else None,
-            applicable=dim is not JudgeDimensionId.DISTRACTOR_QUALITY,
-            confidence=0.8,
-            rationale="fine",
-            issues=[],
-        )
-        for dim in JudgeDimensionId
-    ]
-
-
-class GoodJudgeClient:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    @property
-    def description(self) -> str:
-        return "fake/judge-model"
-
-    def complete_structured(
-        self, *, system: str, prompt: str, response_model: type[BaseModel]
-    ) -> BaseModel:
-        self.calls += 1
-        assert response_model is JudgeModelResponse
-        assert "print" in prompt.lower() or "prompt" in prompt.lower()
-        return JudgeModelResponse(dimensions=_all_dims())
-
-
-class FlakyJudgeClient:
-    def __init__(self, failures_before_success: int) -> None:
-        self.failures_before_success = failures_before_success
-        self.calls = 0
-
-    @property
-    def description(self) -> str:
-        return "fake/flaky-judge"
-
-    def complete_structured(
-        self, *, system: str, prompt: str, response_model: type[BaseModel]
-    ) -> BaseModel:
-        del system, prompt, response_model
-        self.calls += 1
-        if self.calls <= self.failures_before_success:
-            raise MalformedModelOutputError("bad json", detail="nope")
-        return JudgeModelResponse(dimensions=_all_dims())
-
-
-class AlwaysBrokenJudgeClient:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    @property
-    def description(self) -> str:
-        return "fake/broken-judge"
-
-    def complete_structured(
-        self, *, system: str, prompt: str, response_model: type[BaseModel]
-    ) -> BaseModel:
-        del system, prompt, response_model
-        self.calls += 1
-        raise LLMRequestError("down", detail="503")
+TAXONOMY = (
+    b'{"schema_version":"1","label":"Python","topics":['
+    b'{"name":"Output","subtopics":['
+    b'{"name":"Printing","description":"print()"},'
+    b'{"name":"Formatting","description":"f-strings"}]},'
+    b'{"name":"Loops","subtopics":[{"name":"For loops","description":"for"}]}]}'
+)
 
 
 def _seed_question(session: Session, settings: Any) -> Question:
@@ -93,19 +37,16 @@ def _seed_question(session: Session, settings: Any) -> Question:
         filename="book.json", data=docs.to_bytes(docs.minimal())
     )
     version = TaxonomyImportService(session, settings).import_upload(
-        filename="taxonomy.json",
-        data=(
-            b'{"schema_version":"1","label":"Python","topics":['
-            b'{"name":"Output","subtopics":[{"name":"Printing","description":"print()"}]}]}'
-        ),
+        filename="taxonomy.json", data=TAXONOMY
     )
     session.commit()
     section = book.chapters[0].sections[0]
+    topic = version.topics[0]
     return Question(
         id=1,
         curriculum_version_id=version.id,
-        topic_id=version.topics[0].id,
-        subtopic_id=version.topics[0].subtopics[0].id,
+        topic_id=topic.id,
+        subtopic_ids=[topic.subtopics[0].id],
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
         prompt="What is printed?",
@@ -118,8 +59,6 @@ def _seed_question(session: Session, settings: Any) -> Question:
         },
         spec={
             "curriculum_version_id": version.id,
-            "topic_id": version.topics[0].id,
-            "subtopic_ids": [version.topics[0].subtopics[0].id],
             "question_type": "output_prediction",
             "difficulty": "easy",
             "source_section_ids": [section.id],
@@ -127,37 +66,148 @@ def _seed_question(session: Session, settings: Any) -> Question:
     )
 
 
-def test_judge_returns_completed(session: Session, settings: Any) -> None:
-    client = GoodJudgeClient()
+def _agreeing_client(question: Question) -> MetricJudgeClient:
+    return MetricJudgeClient(
+        topic_id=question.topic_id or 0,
+        subtopic_ids=list(question.subtopic_ids),
+        difficulty=question.difficulty,
+    )
+
+
+def test_all_metrics_agreeing_approves(session: Session, settings: Any) -> None:
     question = _seed_question(session, settings)
+    client = _agreeing_client(question)
+
     result = PedagogicalJudge(session, client=client).evaluate(question)
+
     assert result.status is PedagogicalEvalStatus.COMPLETED
-    assert client.calls == 1
+    assert result.gate is JudgeGate.APPROVED
+    assert client.calls == len(JudgeMetricId)
     assert result.judge_model == "fake/judge-model"
-    assert result.overall_advisory_score is not None
+    assert all(metric.passed for metric in result.metrics)
+    assert all(metric.rationale for metric in result.metrics)
 
 
-def test_judge_retries_then_succeeds(session: Session, settings: Any) -> None:
-    client = FlakyJudgeClient(failures_before_success=2)
-    result = PedagogicalJudge(session, client=client).evaluate(_seed_question(session, settings))
+def test_one_failing_metric_needs_review(session: Session, settings: Any) -> None:
+    question = _seed_question(session, settings)
+    client = _agreeing_client(question)
+    client.difficulty = Difficulty.HARD
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
+    assert result.gate is JudgeGate.NEEDS_REVIEW
+    difficulty = result.metric(JudgeMetricId.DIFFICULTY)
+    assert difficulty is not None
+    assert difficulty.passed is False
+    assert difficulty.proposed_difficulty is Difficulty.HARD
+
+
+def test_every_metric_failing_rejects(session: Session, settings: Any) -> None:
+    question = _seed_question(session, settings)
+    client = MetricJudgeClient(
+        topic_id=(question.topic_id or 0) + 100,
+        subtopic_ids=[999],
+        difficulty=Difficulty.HARD,
+        issue_codes=[RejectionReason.AMBIGUOUS],
+        should_have_generated=False,
+    )
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
+    assert result.gate is JudgeGate.REJECT
+    assert not any(metric.passed for metric in result.metrics)
+
+
+def test_subtopic_metric_ignores_order(session: Session, settings: Any) -> None:
+    question = _seed_question(session, settings)
+    question = question.model_copy(update={"subtopic_ids": [2, 1]})
+    client = MetricJudgeClient(
+        topic_id=question.topic_id or 0,
+        subtopic_ids=[1, 2],
+        difficulty=question.difficulty,
+    )
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
+    subtopic = result.metric(JudgeMetricId.SUBTOPIC)
+    assert subtopic is not None
+    assert subtopic.passed is True
+
+
+def test_issue_codes_are_reported_with_the_failure(session: Session, settings: Any) -> None:
+    question = _seed_question(session, settings)
+    client = _agreeing_client(question)
+    client.issue_codes = [RejectionReason.POOR_WORDING]
+    client.custom_issue = "  the stem repeats itself  "
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
+    issues = result.metric(JudgeMetricId.ISSUES)
+    assert issues is not None
+    assert issues.passed is False
+    assert issues.issue_codes == [RejectionReason.POOR_WORDING]
+    assert issues.custom_issue == "the stem repeats itself"
+
+
+def test_each_judge_retries_then_succeeds(session: Session, settings: Any) -> None:
+    question = _seed_question(session, settings)
+    client = FlakyJudgeClient(
+        failures_per_metric=2,
+        error=MalformedModelOutputError("bad json", detail="nope"),
+        topic_id=question.topic_id or 0,
+        subtopic_ids=list(question.subtopic_ids),
+        difficulty=question.difficulty,
+    )
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
     assert result.status is PedagogicalEvalStatus.COMPLETED
-    assert client.calls == 3
+    assert result.gate is JudgeGate.APPROVED
 
 
-def test_judge_returns_error_after_max_attempts(session: Session, settings: Any) -> None:
-    client = AlwaysBrokenJudgeClient()
-    result = PedagogicalJudge(session, client=client).evaluate(_seed_question(session, settings))
+def test_all_judges_failing_gives_no_gate(session: Session, settings: Any) -> None:
+    client = RaisingJudgeClient(LLMRequestError("down", detail="503"))
+    question = _seed_question(session, settings)
+
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+
     assert result.status is PedagogicalEvalStatus.ERROR
-    assert client.calls == JUDGE_MAX_ATTEMPTS
-    assert result.error_detail
+    assert result.gate is None
+    assert client.calls == JUDGE_MAX_ATTEMPTS * len(JudgeMetricId)
+    assert len(result.error_details) == len(JudgeMetricId)
 
 
-def test_judge_returns_error_when_context_cannot_be_loaded(session: Session, settings: Any) -> None:
-    client = GoodJudgeClient()
+def test_unloadable_context_fails_every_metric_without_calling(
+    session: Session, settings: Any
+) -> None:
+    client = MetricJudgeClient()
     question = _seed_question(session, settings).model_copy(update={"topic_id": 999})
 
     result = PedagogicalJudge(session, client=client).evaluate(question)
 
     assert result.status is PedagogicalEvalStatus.ERROR
-    assert result.error_detail
+    assert result.gate is None
     assert client.calls == 0
+    assert all(metric.status is MetricStatus.ERROR for metric in result.metrics)
+
+
+def test_generatability_judge_is_never_shown_the_question(session: Session, settings: Any) -> None:
+    """Its subject is the source material, so seeing the question would bias it."""
+    question = _seed_question(session, settings)
+    context = build_judge_context(session, question)
+
+    payload = build_user_prompt(JudgeMetricId.GENERATABILITY, context)
+
+    assert "What is printed?" not in payload
+    assert "requested_difficulty" in payload
+    assert "source_sections" in payload
+
+
+def test_subtopic_judge_sees_the_whole_taxonomy(session: Session, settings: Any) -> None:
+    question = _seed_question(session, settings)
+    context = build_judge_context(session, question)
+
+    payload = build_user_prompt(JudgeMetricId.SUBTOPIC, context)
+
+    assert "For loops" in payload
+    assert "claimed_taxonomy" in payload

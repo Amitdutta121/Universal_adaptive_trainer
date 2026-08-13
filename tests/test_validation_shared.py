@@ -38,14 +38,14 @@ def _seed(session: Session, settings: Any) -> tuple[int, int, int, int]:
 def _question(
     curriculum_version_id: int,
     topic_id: int,
-    subtopic_id: int,
+    subtopic_ids: list[int],
     section_id: int,
 ) -> Question:
     return Question(
         prompt="Explain why strings are immutable.",
         curriculum_version_id=curriculum_version_id,
         topic_id=topic_id,
-        subtopic_id=subtopic_id,
+        subtopic_ids=subtopic_ids,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
         spec={"source_section_ids": [section_id]},
@@ -56,7 +56,7 @@ def _question(
 def test_shared_checks_pass_for_seeded_ids(session: Session, settings: Any) -> None:
     version_id, topic_id, subtopic_id, section_id = _seed(session, settings)
 
-    checks = check_shared(_question(version_id, topic_id, subtopic_id, section_id), session)
+    checks = check_shared(_question(version_id, topic_id, [subtopic_id], section_id), session)
 
     assert [check.name for check in checks] == [
         "approved_taxonomy_ids",
@@ -75,7 +75,7 @@ def test_shared_checks_pass_for_seeded_ids(session: Session, settings: Any) -> N
 
 def test_shared_checks_reject_unknown_section(session: Session, settings: Any) -> None:
     version_id, topic_id, subtopic_id, section_id = _seed(session, settings)
-    question = _question(version_id, topic_id, subtopic_id, section_id)
+    question = _question(version_id, topic_id, [subtopic_id], section_id)
     question.content = {"sources": [{"section_id": 999999}]}
 
     checks = {check.name: check for check in check_shared(question, session)}
@@ -93,7 +93,7 @@ def test_shared_checks_reject_null_type(session: Session, settings: Any) -> None
 
 def test_shared_checks_rejects_non_approved_curriculum(session: Session, settings: Any) -> None:
     version_id, topic_id, subtopic_id, section_id = _seed(session, settings)
-    question = _question(version_id, topic_id, subtopic_id, section_id)
+    question = _question(version_id, topic_id, [subtopic_id], section_id)
     version = CurriculumRepository(session).get_with_tree(version_id)
     version.status = CurriculumStatus.PROPOSED
 
@@ -102,5 +102,5 @@ def test_shared_checks_rejects_non_approved_curriculum(session: Session, setting
     assert checks["approved_taxonomy_ids"].passed is False
     assert (
         checks["approved_taxonomy_ids"].detail
-        == "Curriculum IDs are not an approved topic/subtopic pair."
+        == "Curriculum IDs are not a topic with its own subtopics in an approved version."
     )

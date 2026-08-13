@@ -16,7 +16,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.calibration import CalibrationLabel, CalibrationPair, CalibrationReport
+from app.calibration import (
+    CalibrationLabel,
+    CalibrationPair,
+    CalibrationReport,
+    DifficultyConfusion,
+    MetricAgreement,
+    SubtopicConfusion,
+)
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
 from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
 from app.domain.enums import (
@@ -470,7 +477,7 @@ class QuestionSummary(BaseModel):
     status: QuestionStatus
     curriculum_version_id: int | None
     topic_id: int | None
-    subtopic_id: int | None
+    subtopic_ids: list[int]
     generator_kind: GeneratorKind
     generator_name: str
     generator_version: str
@@ -494,7 +501,7 @@ class QuestionSummary(BaseModel):
             status=row.status,
             curriculum_version_id=row.curriculum_version_id,
             topic_id=row.topic_id,
-            subtopic_id=row.subtopic_id,
+            subtopic_ids=list(row.subtopic_ids),
             generator_kind=row.generator_kind,
             generator_name=row.generator_name,
             generator_version=row.generator_version,
@@ -513,7 +520,9 @@ class QuestionTaxonomy(BaseModel):
 
     curriculum: str
     topic: str
-    subtopic: str
+    #: One entry per claimed subtopic, resolved to a name where possible. A
+    #: question can claim several, so this is a list even when it holds one.
+    subtopics: list[str]
 
 
 class PersonalizationEvidence(BaseModel):
@@ -578,10 +587,12 @@ class GenerateQuestionsRequest(BaseModel):
 
     Exactly one source selection is required: either ``section_ids`` or
     ``all_sections_of_book``. One question is generated per resolved section.
+
+    No topic or subtopic: the generator reads the section and classifies its own
+    question against the approved taxonomy (ADR-031).
     """
 
-    topic_id: int
-    subtopic_id: int
+    curriculum_version_id: int | None = None
     question_type: QuestionType
     difficulty: Difficulty
     book_id: int | None = None
@@ -743,6 +754,12 @@ class CalibrationResultsResponse(BaseModel):
     agreement: float | None
     auto_accept_precision: float | None
     unsafe_auto_accept_rate: float | None
+    #: Agreement per metric, and the two confusion tables. Present because the
+    #: judge and the professor now share one vocabulary, so "how often did the
+    #: subtopic reviewer agree" is answerable rather than inferred (ADR-031).
+    metrics: list[MetricAgreement]
+    subtopic_confusions: list[SubtopicConfusion]
+    difficulty_confusions: list[DifficultyConfusion]
 
     @classmethod
     def from_report(cls, report: CalibrationReport) -> CalibrationResultsResponse:
@@ -752,6 +769,9 @@ class CalibrationResultsResponse(BaseModel):
             agreement=report.agreement,
             auto_accept_precision=report.auto_accept_precision,
             unsafe_auto_accept_rate=report.unsafe_auto_accept_rate,
+            metrics=report.metrics,
+            subtopic_confusions=report.subtopic_confusions,
+            difficulty_confusions=report.difficulty_confusions,
         )
 
 
@@ -804,15 +824,21 @@ class EvaluationHistoryEntry(BaseModel):
     judge_model: str | None
     rubric_version: str | None
     eval_status: str | None
-    advisory_status: str | None
-    overall_advisory_score: float | None
+    gate: str | None
+    #: How many of the four metrics passed, when the blob is readable. ``None``
+    #: for a skipped judgement or one written under a superseded rubric.
+    passed_metrics: int | None
     is_current: bool
     evaluation: dict[str, Any] | None
 
     @classmethod
     def from_row(cls, row: QuestionEvaluationRow, *, is_current: bool) -> EvaluationHistoryEntry:
-        payload = row.evaluation or {}
-        raw_score = payload.get("overall_advisory_score")
+        metrics = (row.evaluation or {}).get("metrics")
+        passed = None
+        if isinstance(metrics, list):
+            passed = sum(
+                1 for metric in metrics if isinstance(metric, dict) and metric.get("passed") is True
+            )
         return cls(
             id=row.id,
             question_id=row.question_id,
@@ -822,10 +848,8 @@ class EvaluationHistoryEntry(BaseModel):
             judge_model=row.judge_model,
             rubric_version=row.rubric_version,
             eval_status=row.eval_status,
-            advisory_status=row.advisory_status,
-            overall_advisory_score=(
-                float(raw_score) if isinstance(raw_score, (int, float)) else None
-            ),
+            gate=row.gate,
+            passed_metrics=passed,
             is_current=is_current,
             evaluation=row.evaluation,
         )

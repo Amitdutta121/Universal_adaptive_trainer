@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import book_documents as docs
+from llm_fakes import verdict_for as _verdict
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, QuestionStatus, QuestionType
 from app.domain.questions import Question
-from app.evaluation import DimensionEvaluation, JudgeDimensionId, JudgeModelResponse
 from app.generation.schemas import OutputPredictionDraft
 from app.generation.service import GenerationService
 from app.ingestion import BookImportService
@@ -20,7 +20,11 @@ from app.validation import DeterministicQuestionValidator
 
 
 class FakeClient:
-    """Return one passing output-prediction draft."""
+    """Return one passing output-prediction draft, and agreeing verdicts."""
+
+    def __init__(self, topic_id: int = 1, subtopic_ids: list[int] | None = None) -> None:
+        self.topic_id = topic_id
+        self.subtopic_ids = subtopic_ids or [1]
 
     @property
     def description(self) -> str:
@@ -34,19 +38,11 @@ class FakeClient:
         response_model: type[BaseModel],
     ) -> BaseModel:
         del system, prompt
-        if response_model is JudgeModelResponse:
-            return JudgeModelResponse(
-                dimensions=[
-                    DimensionEvaluation(
-                        dimension=JudgeDimensionId.SUBTOPIC_ALIGNMENT,
-                        score=5,
-                        applicable=True,
-                        confidence=1.0,
-                        rationale="Aligned.",
-                    )
-                ]
-            )
+        if response_model is not OutputPredictionDraft:
+            return _verdict(response_model, self.topic_id, self.subtopic_ids)
         return OutputPredictionDraft(
+            topic_id=self.topic_id,
+            subtopic_ids=self.subtopic_ids,
             prompt="What is printed?",
             code="print(3)",
             expected_output="3",
@@ -56,6 +52,10 @@ class FakeClient:
 
 class FailingFakeClient:
     """Return one output-prediction draft that fails deterministic validation."""
+
+    def __init__(self, topic_id: int = 1, subtopic_ids: list[int] | None = None) -> None:
+        self.topic_id = topic_id
+        self.subtopic_ids = subtopic_ids or [1]
 
     @property
     def description(self) -> str:
@@ -68,8 +68,12 @@ class FailingFakeClient:
         prompt: str,
         response_model: type[BaseModel],
     ) -> BaseModel:
-        del system, prompt, response_model
+        del system, prompt
+        if response_model is not OutputPredictionDraft:
+            return _verdict(response_model, self.topic_id, self.subtopic_ids)
         return OutputPredictionDraft(
+            topic_id=self.topic_id,
+            subtopic_ids=self.subtopic_ids,
             prompt="What is printed?",
             code="print(4)",
             expected_output="3",
@@ -111,10 +115,10 @@ def test_validator_reports_unreadable_content_without_type_checks() -> None:
 def test_generation_persists_passing_validation_report(session: Session, settings: Any) -> None:
     version, topic, subtopic, section_id = _seed(session, settings)
 
-    rows = GenerationService(session, client=FakeClient()).generate_for_sections(
+    rows = GenerationService(
+        session, client=FakeClient(topic.id, [subtopic.id])
+    ).generate_for_sections(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_id=subtopic.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
         source_section_ids=[section_id],
@@ -128,10 +132,10 @@ def test_generation_persists_passing_validation_report(session: Session, setting
 def test_generation_persists_failing_validation_report(session: Session, settings: Any) -> None:
     version, topic, subtopic, section_id = _seed(session, settings)
 
-    rows = GenerationService(session, client=FailingFakeClient()).generate_for_sections(
+    rows = GenerationService(
+        session, client=FailingFakeClient(topic.id, [subtopic.id])
+    ).generate_for_sections(
         curriculum_version_id=version.id,
-        topic_id=topic.id,
-        subtopic_id=subtopic.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
         source_section_ids=[section_id],
