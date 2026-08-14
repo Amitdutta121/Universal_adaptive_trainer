@@ -196,6 +196,21 @@ class QuestionType(StrEnum):
     CODING = "coding"
 
 
+class ClaimViolation(StrEnum):
+    """Why a generator's taxonomy claim was refused (ADR-032).
+
+    Named rather than free text because the retry prompt, the deterministic
+    check and any later "how does this generator fail?" count all read the same
+    value. A claim can break more than one rule at once, so these accumulate.
+    """
+
+    UNKNOWN_TOPIC = "unknown_topic"
+    UNKNOWN_SUBTOPICS = "unknown_subtopics"
+    NO_SUBTOPIC = "no_subtopic"
+    TOO_MANY_SUBTOPICS = "too_many_subtopics"
+    FOREIGN_SUBTOPICS = "foreign_subtopics"
+
+
 class QuestionStatus(StrEnum):
     """Lifecycle of a generated question through validation and review."""
 
@@ -263,6 +278,37 @@ class JudgeGate(StrEnum):
     REJECT = "reject"
 
 
+class CalibrationLabel(StrEnum):
+    """The shared vocabulary the judge gate and the professor verdict project onto.
+
+    Lives here rather than in :mod:`app.calibration` because a review outcome is
+    now *stored* at review time (ADR-037), and persistence may not import a
+    subsystem.
+    """
+
+    ACCEPT = "accept"
+    NEEDS_REVIEW = "needs_review"
+
+
+class QuadrantCell(StrEnum):
+    """Which of the four judge/professor outcomes a reviewed question fell into.
+
+    The two agreeing cells are not interchangeable and neither are the two
+    disagreeing ones (ADR-034). Only :attr:`MISSED` makes auto-acceptance unsafe:
+    it is the sole cell where the judge vouched for a question the professor
+    would not have kept.
+    """
+
+    #: Judge accepted, professor approved. The evidence auto-acceptance rests on.
+    CONFIRMED_GOOD = "confirmed_good"
+    #: Judge accepted, professor rejected or edited. The dangerous cell.
+    MISSED = "missed"
+    #: Judge did not accept, professor approved. Safe, but slow.
+    FALSE_ALARM = "false_alarm"
+    #: Neither accepted. The judge was right; the question was not good enough.
+    CONFIRMED_BAD = "confirmed_bad"
+
+
 class GeneratorKind(StrEnum):
     """Which generator produced a question.
 
@@ -272,21 +318,6 @@ class GeneratorKind(StrEnum):
 
     BASE = "base"
     PERSONALIZED = "personalized"
-
-
-class PreferenceCategory(StrEnum):
-    WORDING = "wording"
-    SCENARIO_STYLE = "scenario_style"
-    EMPHASIS = "emphasis"
-    DISLIKE = "dislike"
-    EXAMPLE_PATTERN = "example_pattern"
-    OTHER = "other"
-
-
-class PreferenceConfirmationState(StrEnum):
-    INFERRED = "inferred"
-    CONFIRMED = "confirmed"
-    CORRECTED = "corrected"
 
 
 class EvaluationTrigger(StrEnum):

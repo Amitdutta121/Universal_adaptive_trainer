@@ -15,19 +15,29 @@ from llm_fakes import metric_results
 from sqlalchemy.orm import Session
 
 from app.calibration import (
+    HELD_OUT_DIVISOR,
     MIN_INFORMATIVE_SAMPLE,
+    PROFESSOR_OBJECTIONS,
     CalibrationLabel,
     CalibrationPair,
+    QuadrantCell,
     build_calibration_pairs,
     build_calibration_report,
+    build_type_calibrations,
+    for_repair,
+    held_out,
+    is_held_out,
     judge_label,
     metrics_from_pairs,
     professor_label,
+    quadrant_cell,
+    reports_by_type,
 )
 from app.domain.enums import (
     JudgeGate,
     JudgeMetricId,
     QuestionStatus,
+    QuestionType,
     RejectionReason,
     ReviewDecision,
 )
@@ -65,7 +75,12 @@ def _failing_for(gate: JudgeGate | None) -> set[JudgeMetricId]:
     return set()
 
 
-def _question(session: Session, *, evaluation: object | None) -> QuestionRow:
+def _question(
+    session: Session,
+    *,
+    evaluation: object | None,
+    question_type: QuestionType | None = None,
+) -> QuestionRow:
     """A reviewable question carrying whatever blob the test wants stored."""
     row = QuestionRepository(session).add(
         QuestionRow(
@@ -77,6 +92,7 @@ def _question(session: Session, *, evaluation: object | None) -> QuestionRow:
             original_tests="assert True",
             generator_name="base-gen",
             generator_version="1",
+            question_type=question_type,
             status=QuestionStatus.VALIDATION_PASSED,
             pedagogical_eval=evaluation,
         )
@@ -91,10 +107,13 @@ def _judged(
     decision: ReviewDecision,
     *,
     failing: set[JudgeMetricId] | None = None,
+    question_type: QuestionType | None = None,
 ) -> QuestionRow:
     """A question with one stored evaluation and one professor review."""
     question = _question(
-        session, evaluation=_evaluation(gate, failing=failing).model_dump(mode="json")
+        session,
+        evaluation=_evaluation(gate, failing=failing).model_dump(mode="json"),
+        question_type=question_type,
     )
     submit_review(
         session,
@@ -318,6 +337,324 @@ def test_a_stored_evaluation_that_no_longer_validates_is_skipped(
     assert f"Skipping question {stale.id}" in caplog.text
 
 
+# -------------------------------------------------------------------- quadrant
+
+
+@pytest.mark.parametrize(
+    ("judge", "professor", "expected"),
+    [
+        (ACCEPT, ACCEPT, QuadrantCell.CONFIRMED_GOOD),
+        (ACCEPT, NEEDS_REVIEW, QuadrantCell.MISSED),
+        (NEEDS_REVIEW, ACCEPT, QuadrantCell.FALSE_ALARM),
+        (NEEDS_REVIEW, NEEDS_REVIEW, QuadrantCell.CONFIRMED_BAD),
+    ],
+)
+def test_every_label_combination_maps_to_its_cell(
+    judge: CalibrationLabel, professor: CalibrationLabel, expected: QuadrantCell
+) -> None:
+    assert quadrant_cell(judge, professor) is expected
+    assert _pairs((judge, professor))[0].cell is expected
+
+
+def test_the_quadrant_counts_every_pair_exactly_once() -> None:
+    report = metrics_from_pairs(
+        _pairs(
+            (ACCEPT, ACCEPT),
+            (ACCEPT, ACCEPT),
+            (ACCEPT, NEEDS_REVIEW),
+            (NEEDS_REVIEW, ACCEPT),
+            (NEEDS_REVIEW, NEEDS_REVIEW),
+        )
+    )
+    quadrant = report.quadrant
+
+    assert (quadrant.confirmed_good, quadrant.missed) == (2, 1)
+    assert (quadrant.false_alarm, quadrant.confirmed_bad) == (1, 1)
+    counted = quadrant.confirmed_good + quadrant.missed
+    assert counted + quadrant.false_alarm + quadrant.confirmed_bad == report.n
+
+
+def test_only_the_two_judge_accept_cells_feed_auto_accept_precision() -> None:
+    """The cells where the judge did not accept must not move the safety figure.
+
+    This is the whole reason the quadrant is published beside the rate: a
+    professor cannot see from ``auto_accept_precision`` alone that half their
+    measured questions were never in its denominator.
+    """
+    accepted_only = metrics_from_pairs(_pairs((ACCEPT, ACCEPT), (ACCEPT, NEEDS_REVIEW)))
+    plus_rejected = metrics_from_pairs(
+        _pairs(
+            (ACCEPT, ACCEPT),
+            (ACCEPT, NEEDS_REVIEW),
+            (NEEDS_REVIEW, ACCEPT),
+            (NEEDS_REVIEW, NEEDS_REVIEW),
+        )
+    )
+
+    assert accepted_only.auto_accept_precision == plus_rejected.auto_accept_precision == 0.5
+    assert accepted_only.judge_accept_count == plus_rejected.judge_accept_count == 2
+    assert plus_rejected.n == 4
+
+
+def test_a_missed_pair_names_the_reviewer_that_passed_it(session: Session) -> None:
+    """A rejection for TOO_EASY contradicts the difficulty reviewer, and no other."""
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.REJECT)
+
+    pair = build_calibration_pairs(session)[0]
+
+    assert pair.cell is QuadrantCell.MISSED
+    assert pair.missed_metrics == [JudgeMetricId.DIFFICULTY]
+    assert pair.false_alarm_metrics == []
+
+
+def test_a_false_alarm_names_the_reviewer_that_flagged_it(session: Session) -> None:
+    _judged(
+        session,
+        JudgeGate.NEEDS_REVIEW,
+        ReviewDecision.APPROVE,
+        failing={JudgeMetricId.DIFFICULTY},
+    )
+
+    pair = build_calibration_pairs(session)[0]
+
+    assert pair.cell is QuadrantCell.FALSE_ALARM
+    assert pair.false_alarm_metrics == [JudgeMetricId.DIFFICULTY]
+    assert pair.missed_metrics == []
+
+
+def test_generatability_is_never_blamed_for_anything(session: Session) -> None:
+    """The professor has no reason that contradicts it, so it has no verdict to lose.
+
+    Attributing a miss to the nearest judge would send the professor to repair a
+    prompt that was not at fault.
+    """
+    assert JudgeMetricId.GENERATABILITY not in PROFESSOR_OBJECTIONS
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.REJECT)
+    _judged(
+        session,
+        JudgeGate.NEEDS_REVIEW,
+        ReviewDecision.APPROVE,
+        failing={JudgeMetricId.GENERATABILITY},
+    )
+
+    for pair in build_calibration_pairs(session):
+        assert JudgeMetricId.GENERATABILITY not in pair.missed_metrics
+        assert JudgeMetricId.GENERATABILITY not in pair.false_alarm_metrics
+
+
+def test_an_unattributable_miss_reports_no_reviewer_rather_than_a_wrong_one(
+    session: Session,
+) -> None:
+    """A rejection reason outside every metric's vocabulary blames nobody."""
+    question = _question(
+        session, evaluation=_evaluation(JudgeGate.APPROVED).model_dump(mode="json")
+    )
+    submit_review(
+        session,
+        question_id=question.id,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.TOO_SIMILAR_REPETITIVE],
+    )
+    session.commit()
+
+    pair = build_calibration_pairs(session)[0]
+
+    assert pair.cell is QuadrantCell.MISSED
+    assert pair.missed_metrics == []
+
+
+def test_pairs_are_grouped_by_question_type(session: Session) -> None:
+    mcq = _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+    debugging = _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.REJECT,
+        question_type=QuestionType.DEBUGGING,
+    )
+
+    slices = build_type_calibrations(session)
+
+    assert [slice_.question_type for slice_ in slices] == [
+        QuestionType.MULTIPLE_CHOICE,
+        QuestionType.DEBUGGING,
+    ]
+    assert [pair.question_id for pair in slices[0].pairs] == [mcq.id]
+    assert slices[0].report.auto_accept_precision == 1.0
+    assert [pair.question_id for pair in slices[1].pairs] == [debugging.id]
+    assert slices[1].report.auto_accept_precision == 0.0
+
+
+def test_a_type_nobody_reviewed_is_absent_rather_than_a_row_of_zeroes(session: Session) -> None:
+    _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+
+    slices = build_type_calibrations(session)
+
+    assert len(slices) == 1
+    assert QuestionType.CODING not in [slice_.question_type for slice_ in slices]
+
+
+def test_a_question_with_no_type_groups_under_none_and_comes_last(session: Session) -> None:
+    """A question generated before the field existed declared no type to fold in."""
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.PARSONS,
+    )
+
+    slices = build_type_calibrations(session)
+
+    assert [slice_.question_type for slice_ in slices] == [QuestionType.PARSONS, None]
+
+
+def test_the_type_slices_partition_the_pairs(session: Session) -> None:
+    """Every measured question appears in exactly one slice."""
+    for question_type in (QuestionType.CODING, QuestionType.TRUE_FALSE, None):
+        _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE, question_type=question_type)
+    pairs = build_calibration_pairs(session)
+
+    slices = reports_by_type(pairs)
+
+    assert sum(slice_.report.n for slice_ in slices) == len(pairs) == 3
+    seen = [pair.question_id for slice_ in slices for pair in slice_.pairs]
+    assert sorted(seen) == sorted(pair.question_id for pair in pairs)
+
+
+def test_in_cell_selects_only_that_cell(session: Session) -> None:
+    good = _judged(
+        session, JudgeGate.APPROVED, ReviewDecision.APPROVE, question_type=QuestionType.CODING
+    )
+    missed = _judged(
+        session, JudgeGate.APPROVED, ReviewDecision.REJECT, question_type=QuestionType.CODING
+    )
+
+    slice_ = build_type_calibrations(session)[0]
+
+    assert [pair.question_id for pair in slice_.in_cell(QuadrantCell.CONFIRMED_GOOD)] == [good.id]
+    assert [pair.question_id for pair in slice_.in_cell(QuadrantCell.MISSED)] == [missed.id]
+    assert slice_.in_cell(QuadrantCell.FALSE_ALARM) == []
+
+
+# ---------------------------------------------------------- held-out check set
+
+
+def test_the_split_is_keyed_on_the_question_id_and_never_moves() -> None:
+    """A question must be in the same half before and after any repair."""
+    assert HELD_OUT_DIVISOR == 3
+    assert [is_held_out(question_id) for question_id in (1, 2, 3, 4, 5, 6)] == [
+        False,
+        False,
+        True,
+        False,
+        False,
+        True,
+    ]
+    assert all(is_held_out(9) for _ in range(5))
+
+
+def test_repair_lists_exclude_the_held_out_pairs(session: Session) -> None:
+    for _ in range(6):
+        _judged(
+            session,
+            JudgeGate.APPROVED,
+            ReviewDecision.REJECT,
+            question_type=QuestionType.CODING,
+        )
+
+    slice_ = build_type_calibrations(session)[0]
+    repairable = slice_.to_repair(QuadrantCell.MISSED)
+
+    assert [pair.question_id for pair in slice_.in_cell(QuadrantCell.MISSED)] == [1, 2, 3, 4, 5, 6]
+    assert [pair.question_id for pair in repairable] == [1, 2, 4, 5]
+    assert all(not pair.held_out for pair in repairable)
+
+
+def test_the_check_report_scores_the_held_out_pairs_only(session: Session) -> None:
+    """Ids 1 and 2 are repairable; id 3 is the only one that scores the repair."""
+    for decision in (ReviewDecision.REJECT, ReviewDecision.REJECT, ReviewDecision.APPROVE):
+        _judged(session, JudgeGate.APPROVED, decision, question_type=QuestionType.CODING)
+
+    slice_ = build_type_calibrations(session)[0]
+
+    # Over everything the judge looks poor: one approval in three.
+    assert slice_.report.n == 3
+    assert slice_.report.auto_accept_precision == 0.3333
+    # The held-out third is question 3 alone, which the professor approved.
+    assert slice_.check_report.n == 1
+    assert slice_.check_report.auto_accept_precision == 1.0
+
+
+def test_the_two_halves_partition_the_pairs(session: Session) -> None:
+    for _ in range(7):
+        _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    pairs = build_calibration_pairs(session)
+
+    reserved = held_out(pairs)
+    repairable = for_repair(pairs)
+
+    assert len(reserved) + len(repairable) == len(pairs) == 7
+    assert not {pair.question_id for pair in reserved} & {pair.question_id for pair in repairable}
+
+
+def test_the_split_does_not_change_the_overall_report(session: Session) -> None:
+    """The figure the professor already reads must not be silently narrowed."""
+    for _ in range(6):
+        _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+
+    slice_ = build_type_calibrations(session)[0]
+
+    assert slice_.report.n == 6
+    assert slice_.report.n == build_calibration_report(session).n
+
+
+# -------------------------------------------------------- judge rubric versions
+
+
+def test_a_report_names_every_judge_version_behind_it(session: Session) -> None:
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    stale = _evaluation(JudgeGate.APPROVED)
+    stale.rubric_version = "ancient-1"
+    question = _question(session, evaluation=stale.model_dump(mode="json"))
+    submit_review(session, question_id=question.id, decision=ReviewDecision.APPROVE)
+    session.commit()
+
+    report = build_calibration_report(session)
+
+    assert len(report.rubric_versions) == 2
+    assert "ancient-1" in report.rubric_versions
+    assert report.rubric_versions == sorted(report.rubric_versions)
+
+
+def test_filtering_by_rubric_version_measures_one_judge_only(session: Session) -> None:
+    current = _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    stale = _evaluation(JudgeGate.APPROVED)
+    stale.rubric_version = "ancient-1"
+    old = _question(session, evaluation=stale.model_dump(mode="json"))
+    submit_review(
+        session,
+        question_id=old.id,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.TOO_EASY],
+    )
+    session.commit()
+
+    assert len(build_calibration_pairs(session)) == 2
+    filtered = build_calibration_pairs(session, rubric_version="ancient-1")
+    assert [pair.question_id for pair in filtered] == [old.id]
+    assert current.id not in [pair.question_id for pair in filtered]
+
+
 # -------------------------------------------------------------------- endpoint
 
 
@@ -367,18 +704,23 @@ def test_pairs_expose_the_evidence_behind_the_figures(client: TestClient, sessio
     payload = client.get("/api/calibration/pairs").json()
 
     assert payload["total"] == 2
-    assert payload["pairs"] == [
+    assert [
+        {key: pair[key] for key in ("question_id", "judge", "professor", "agrees", "cell")}
+        for pair in payload["pairs"]
+    ] == [
         {
             "question_id": agreeing.id,
             "judge": "accept",
             "professor": "accept",
             "agrees": True,
+            "cell": "confirmed_good",
         },
         {
             "question_id": disagreeing.id,
             "judge": "accept",
             "professor": "needs_review",
             "agrees": False,
+            "cell": "missed",
         },
     ]
     assert excluded.id not in [pair["question_id"] for pair in payload["pairs"]]
@@ -386,6 +728,79 @@ def test_pairs_expose_the_evidence_behind_the_figures(client: TestClient, sessio
 
 def test_pairs_on_an_empty_database_are_empty(client: TestClient) -> None:
     assert client.get("/api/calibration/pairs").json() == {"pairs": [], "total": 0}
+
+
+def test_the_quadrant_endpoint_reports_per_type_cells(client: TestClient, session: Session) -> None:
+    _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+    missed = _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.REJECT,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+
+    payload = client.get("/api/calibration/quadrant").json()
+
+    assert payload["overall"]["quadrant"] == {
+        "confirmed_good": 1,
+        "missed": 1,
+        "false_alarm": 0,
+        "confirmed_bad": 0,
+    }
+    assert len(payload["types"]) == 1
+    slice_ = payload["types"][0]
+    assert slice_["question_type"] == "multiple_choice"
+    assert slice_["report"]["auto_accept_precision"] == 0.5
+    flagged = [pair for pair in slice_["pairs"] if pair["cell"] == "missed"]
+    assert [pair["question_id"] for pair in flagged] == [missed.id]
+    assert flagged[0]["missed_metrics"] == ["difficulty"]
+
+
+def test_the_quadrant_endpoint_states_which_reviewer_cannot_be_blamed(
+    client: TestClient,
+) -> None:
+    payload = client.get("/api/calibration/quadrant").json()
+
+    assert payload["unattributable_metrics"] == ["generatability"]
+    assert payload["overall"]["n"] == 0
+    assert payload["types"] == []
+
+
+def test_the_quadrant_endpoint_publishes_the_split_rule(
+    client: TestClient, session: Session
+) -> None:
+    for _ in range(3):
+        _judged(
+            session,
+            JudgeGate.APPROVED,
+            ReviewDecision.APPROVE,
+            question_type=QuestionType.CODING,
+        )
+
+    payload = client.get("/api/calibration/quadrant").json()
+    slice_ = payload["types"][0]
+
+    assert payload["held_out_divisor"] == HELD_OUT_DIVISOR
+    assert slice_["report"]["n"] == 3
+    assert slice_["check_report"]["n"] == 1
+    assert [pair["question_id"] for pair in slice_["pairs"] if pair["held_out"]] == [3]
+
+
+def test_the_quadrant_endpoint_filters_by_rubric_version(
+    client: TestClient, session: Session
+) -> None:
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+
+    matched = client.get("/api/calibration/quadrant", params={"rubric_version": "ancient-1"}).json()
+    unmatched = client.get("/api/calibration/quadrant").json()
+
+    assert matched["overall"]["n"] == 0
+    assert unmatched["overall"]["n"] == 1
 
 
 def test_results_are_read_only(client: TestClient, session: Session) -> None:
@@ -405,7 +820,8 @@ def test_openapi_documents_the_calibration_endpoint(client: TestClient) -> None:
 
     assert "/api/calibration/results" in schema["paths"]
     assert "/api/calibration/pairs" in schema["paths"]
-    for path in ("/api/calibration/results", "/api/calibration/pairs"):
+    assert "/api/calibration/quadrant" in schema["paths"]
+    for path in ("/api/calibration/results", "/api/calibration/pairs", "/api/calibration/quadrant"):
         assert set(schema["paths"][path]) == {"get"}, f"{path} must stay read-only"
     properties = schema["components"]["schemas"]["CalibrationResultsResponse"]["properties"]
     assert set(properties) == {
@@ -414,9 +830,18 @@ def test_openapi_documents_the_calibration_endpoint(client: TestClient) -> None:
         "agreement",
         "auto_accept_precision",
         "unsafe_auto_accept_rate",
+        "quadrant",
+        "rubric_versions",
         "metrics",
         "subtopic_confusions",
         "difficulty_confusions",
+    }
+    quadrant = schema["components"]["schemas"]["CalibrationQuadrantResponse"]["properties"]
+    assert set(quadrant) == {
+        "overall",
+        "types",
+        "unattributable_metrics",
+        "held_out_divisor",
     }
 
 
@@ -458,6 +883,162 @@ def test_the_feedback_page_warns_that_a_small_sample_proves_nothing(
 
     assert "small sample" in body
     assert str(MIN_INFORMATIVE_SAMPLE) in body
+
+
+def test_the_page_shows_the_four_cells_and_puts_the_missed_list_first(
+    client: TestClient, session: Session
+) -> None:
+    good = _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+    missed = _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.REJECT,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+    # Id 3 is held out (ADR-035), so it is spent on a question this test does
+    # not assert about; the false alarm has to land on an id the lists show.
+    _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+    strict = _judged(
+        session,
+        JudgeGate.NEEDS_REVIEW,
+        ReviewDecision.APPROVE,
+        failing={JudgeMetricId.DIFFICULTY},
+        question_type=QuestionType.MULTIPLE_CHOICE,
+    )
+    assert not is_held_out(strict.id)
+
+    # Scoped to the new panel: the older calibration table has its own
+    # "False alarms" column, which would satisfy a whole-page search.
+    panel = client.get("/feedback").text.split('id="quadrant"', 1)[1]
+
+    assert "What to repair" in panel
+    assert "Multiple choice" in panel
+    # The dangerous list is named, attributed, and comes before the safe one.
+    assert "Missed — two lessons each" in panel
+    assert panel.index("Missed — two lessons") < panel.index(
+        "False alarms — the judge is too strict"
+    )
+    assert f'href="/questions/{missed.id}"' in panel
+    assert f'href="/questions/{strict.id}"' in panel
+    # The confirmed-good questions are counted, not listed as work.
+    assert "Both accepted: 2" in panel
+    assert f'href="/questions/{good.id}"' not in panel
+
+
+def test_the_page_keeps_held_out_questions_out_of_the_repair_lists(
+    client: TestClient, session: Session
+) -> None:
+    """Question 3 is held back, so it must not appear as work to do."""
+    questions = [
+        _judged(
+            session,
+            JudgeGate.APPROVED,
+            ReviewDecision.REJECT,
+            question_type=QuestionType.CODING,
+        )
+        for _ in range(3)
+    ]
+    reserved = questions[2]
+    assert is_held_out(reserved.id)
+
+    panel = client.get("/feedback").text.split('id="quadrant"', 1)[1]
+
+    assert f'href="/questions/{questions[0].id}"' in panel
+    assert f'href="/questions/{questions[1].id}"' in panel
+    assert f'href="/questions/{reserved.id}"' not in panel
+    assert "Held back:" in panel
+
+
+def test_the_page_offers_to_relearn_the_instruction_for_a_failing_type(
+    client: TestClient, session: Session
+) -> None:
+    """The both-rejected list is the generator's problem, so it links to the learner."""
+    _judged(
+        session,
+        JudgeGate.NEEDS_REVIEW,
+        ReviewDecision.REJECT,
+        question_type=QuestionType.DEBUGGING,
+    )
+
+    panel = client.get("/feedback").text.split('id="quadrant"', 1)[1]
+
+    assert 'action="/instructions/debugging/refresh"' in panel
+    assert "Relearn the debugging instruction" in panel
+
+
+def test_the_page_does_not_offer_relearning_when_nothing_was_both_rejected(
+    client: TestClient, session: Session
+) -> None:
+    _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.DEBUGGING,
+    )
+
+    panel = client.get("/feedback").text.split('id="quadrant"', 1)[1]
+
+    assert 'action="/instructions/debugging/refresh"' not in panel
+
+
+def test_the_page_says_when_the_check_set_is_too_small_to_score(
+    client: TestClient, session: Session
+) -> None:
+    _judged(
+        session,
+        JudgeGate.APPROVED,
+        ReviewDecision.APPROVE,
+        question_type=QuestionType.CODING,
+    )
+
+    panel = client.get("/feedback").text.split('id="quadrant"', 1)[1]
+
+    assert "too small to score" in panel
+    assert "Splitting does not create evidence" in panel
+
+
+def test_the_page_says_which_reviewer_can_never_be_blamed(
+    client: TestClient, session: Session
+) -> None:
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+
+    body = client.get("/feedback").text
+
+    assert "No fault is ever attributed to" in body
+    assert "generatability" in body
+
+
+def test_the_page_warns_when_the_figures_span_two_judge_versions(
+    client: TestClient, session: Session
+) -> None:
+    _judged(session, JudgeGate.APPROVED, ReviewDecision.APPROVE)
+    stale = _evaluation(JudgeGate.APPROVED)
+    stale.rubric_version = "ancient-1"
+    old = _question(session, evaluation=stale.model_dump(mode="json"))
+    submit_review(session, question_id=old.id, decision=ReviewDecision.APPROVE)
+    session.commit()
+
+    body = client.get("/feedback").text
+
+    assert "mixed judge versions" in body
+    assert "ancient-1" in body
+
+
+def test_the_page_states_an_honest_empty_quadrant(client: TestClient) -> None:
+    body = client.get("/feedback").text
+
+    assert "What to repair" in body
+    assert "Nothing is measured yet, so there is nothing to repair" in body
 
 
 def test_a_null_rate_renders_as_a_dash_rather_than_zero(

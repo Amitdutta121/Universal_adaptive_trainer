@@ -76,12 +76,24 @@ def submit_review(
         if not changed_fields:
             raise DomainRuleError("Edit requires at least one changed field.")
 
+        before_edit = Question.model_validate(question)
         edited_question = apply_professor_edit(
-            Question.model_validate(question),
+            before_edit,
             prompt=edited_prompt,
             reference_solution=edited_reference_solution,
             tests=edited_tests,
         )
+        # Persist the generated text before overwriting it. ``Question`` seeds
+        # ``original_*`` on construction, but only on the domain copy; a row that
+        # reached the database without them would otherwise lose the generated
+        # version here, and "generated vs. accepted" (ADR-002) is exactly what a
+        # judge repair and a generator refresh both read.
+        if question.original_prompt is None:
+            question.original_prompt = before_edit.original_prompt
+        if question.original_reference_solution is None:
+            question.original_reference_solution = before_edit.original_reference_solution
+        if question.original_tests is None:
+            question.original_tests = before_edit.original_tests
         question.prompt = edited_question.prompt
         question.reference_solution = edited_question.reference_solution
         question.tests = edited_question.tests

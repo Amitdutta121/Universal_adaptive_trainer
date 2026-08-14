@@ -11,13 +11,22 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.books import ExtractionWarning
 from app.domain.enums import (
     BookStatus,
+    CalibrationLabel,
     ConceptConfidence,
     CurriculumItemStatus,
     CurriculumStatus,
@@ -25,8 +34,8 @@ from app.domain.enums import (
     EvaluationTrigger,
     GeneratorKind,
     JudgeBatchStatus,
-    PreferenceCategory,
-    PreferenceConfirmationState,
+    JudgeMetricId,
+    QuadrantCell,
     QuestionKind,
     QuestionStatus,
     QuestionType,
@@ -36,7 +45,7 @@ from app.domain.enums import (
     StructureConfidence,
     StructureSource,
 )
-from app.domain.questions import DEFAULT_PRIORITY, QuestionValidationReport
+from app.domain.questions import DEFAULT_PRIORITY, GenerationAttempt, QuestionValidationReport
 from app.persistence.database import Base
 from app.persistence.types import (
     EnumList,
@@ -355,6 +364,12 @@ class QuestionRow(TimestampMixin, Base):
     validation_report: Mapped[QuestionValidationReport | None] = mapped_column(
         "validation_report_json", PydanticObject(QuestionValidationReport), default=None
     )
+    #: Every model call that tried to produce this question (ADR-032). Empty for
+    #: rows written before that decision, and for anything the generator got
+    #: right first time it holds the single accepted attempt.
+    generation_attempts: Mapped[list[GenerationAttempt]] = mapped_column(
+        "generation_attempts_json", PydanticList(GenerationAttempt), default=list, nullable=True
+    )
     #: Advisory judge output. A plain object because its shape belongs to
     #: :mod:`app.evaluation`, which persistence must not import.
     pedagogical_eval: Mapped[dict | None] = mapped_column(
@@ -542,32 +557,204 @@ class ProfessorReviewRow(TimestampMixin, Base):
     question: Mapped[QuestionRow] = relationship(back_populates="reviews")
 
 
-class PreferenceStatementRow(TimestampMixin, Base):
-    __tablename__ = "preference_statements"
+class QuestionSetVersionRow(TimestampMixin, Base):
+    """A frozen list of approved questions, named and dated (ADR-036).
+
+    An adaptive training run must be reproducible: two students following the
+    same link have to be answering the same bank, and afterwards it must be
+    possible to say what a cohort was actually asked. The question bank itself
+    grows continuously, so the unit that a training run points at is a snapshot
+    of it, not the bank.
+
+    Nothing here is ever updated. There is no edit path and no repository method
+    that writes to an existing row -- a set that could change is not a snapshot,
+    and a link into a changing set answers no question about what was served.
+    Correcting a set means creating the next one.
+    """
+
+    __tablename__ = "question_set_versions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    rule_text: Mapped[str] = mapped_column(Text)
-    category: Mapped[PreferenceCategory] = mapped_column(StrEnumType(PreferenceCategory, 32))
-    evidence_count: Mapped[int] = mapped_column(Integer, default=0)
-    confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    supporting_review_ids: Mapped[list[int]] = mapped_column(
-        "supporting_review_ids_json", JsonList, default=list
+    label: Mapped[str] = mapped_column(String(200))
+    #: The taxonomy the members were tagged against. Coverage is meaningless
+    #: without it: a count per subtopic needs to know whose subtopics.
+    curriculum_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("curriculum_versions.id", ondelete="SET NULL"), default=None
     )
-    active: Mapped[bool] = mapped_column(default=True)
-    confirmation_state: Mapped[PreferenceConfirmationState] = mapped_column(
-        StrEnumType(PreferenceConfirmationState, 16), default=PreferenceConfirmationState.INFERRED
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    #: How many questions were members at creation, frozen. Compared against the
+    #: live member count so a set that lost a row to a deleted question reads as
+    #: damaged rather than as a smaller set that was always this size.
+    question_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    members: Mapped[list[QuestionSetMemberRow]] = relationship(
+        back_populates="set_version",
+        cascade="all, delete-orphan",
+        order_by="QuestionSetMemberRow.question_id",
     )
-    profile_version: Mapped[str] = mapped_column(String(50), default="1")
+
+
+class QuestionSetMemberRow(Base):
+    """One question's membership of one frozen set.
+
+    Deleting the set deletes its memberships. Deleting a *question* also removes
+    its membership, which is why :attr:`QuestionSetVersionRow.question_count`
+    records the original size: the loss stays visible instead of rewriting
+    history silently.
+    """
+
+    __tablename__ = "question_set_members"
+    __table_args__ = (
+        UniqueConstraint("set_version_id", "question_id", name="uq_question_set_members_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    set_version_id: Mapped[int] = mapped_column(
+        ForeignKey("question_set_versions.id", ondelete="CASCADE"), index=True
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+
+    set_version: Mapped[QuestionSetVersionRow] = relationship(back_populates="members")
+
+
+class TypeInstructionRow(TimestampMixin, Base):
+    """The generation instruction for one question type, learned from reviews.
+
+    Personalization lives here rather than in a block appended to the prompt
+    (ADR-033). One row per :class:`~app.domain.enums.QuestionType`, holding the
+    text that occupies the type-specific slot the shipped one-liner used to fill.
+
+    ``rules`` is the accumulated list the rewriter edits; ``instruction`` is the
+    rendered text actually sent. Keeping both is what lets a rule earned in one
+    round survive the next: rewriting the whole instruction from scratch each
+    time silently dropped earlier lessons.
+    """
+
+    __tablename__ = "type_instructions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_type: Mapped[QuestionType] = mapped_column(
+        StrEnumType(QuestionType, 32), unique=True, index=True
+    )
+    instruction: Mapped[str] = mapped_column(Text)
+    #: One entry per learned rule: ``{"rule": str, "review_ids": [int]}``.
+    rules: Mapped[list[dict]] = mapped_column("rules_json", JsonList, default=list, nullable=True)
+    #: How many reviews the current text was derived from, so a stale instruction
+    #: is visible without re-reading every review.
+    review_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
-class ReviewEmbeddingRow(TimestampMixin, Base):
-    __tablename__ = "review_embeddings"
+class ReviewOutcomeRow(TimestampMixin, Base):
+    """What the judge and the professor said, recorded when the review lands.
+
+    The dataset (ADR-037). One row per review, written at submit time and never
+    updated.
+
+    This is deliberately *not* derivable from the live tables. A bulk re-judge
+    overwrites ``questions.pedagogical_eval`` (ADR-030), so recomputing the cell
+    afterwards would pair yesterday's review with today's judge and silently
+    restate history. The row freezes both sides as they stood, together with the
+    ``rubric_version`` that produced the gate, which is what makes it usable as
+    training or check evidence for a judge repair.
+
+    ``attributed_metrics`` names the individual judges at fault: those that
+    passed the question while the professor objected (a ``MISSED`` cell), or
+    those that failed it while the professor did not (``FALSE_ALARM``). It is
+    empty when no single judge accounts for the disagreement -- an unattributable
+    miss is recorded as unattributed rather than blamed on the nearest judge.
+    """
+
+    __tablename__ = "review_outcomes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    #: Unique: an append-only review gets exactly one outcome. A second row for
+    #: the same review would double-count that question in any dataset built here.
     review_id: Mapped[int] = mapped_column(
-        ForeignKey("professor_reviews.id", ondelete="CASCADE"), unique=True
+        ForeignKey("professor_reviews.id", ondelete="CASCADE"), unique=True, index=True
     )
-    model_id: Mapped[str] = mapped_column(String(200))
-    vector: Mapped[list[float]] = mapped_column("vector_json", JsonList)
-    content_hash: Mapped[str] = mapped_column(String(64))
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    question_type: Mapped[QuestionType | None] = mapped_column(
+        StrEnumType(QuestionType, 32), default=None, index=True
+    )
+
+    cell: Mapped[QuadrantCell] = mapped_column(StrEnumType(QuadrantCell, 32), index=True)
+    judge: Mapped[CalibrationLabel] = mapped_column(StrEnumType(CalibrationLabel, 16))
+    professor: Mapped[CalibrationLabel] = mapped_column(StrEnumType(CalibrationLabel, 16))
+
+    #: The judge version that produced the gate, frozen. Two rows with different
+    #: values describe two different judges and must not be pooled into one rate.
+    rubric_version: Mapped[str | None] = mapped_column(String(50), default=None)
+    judge_model: Mapped[str | None] = mapped_column(String(200), default=None)
+
+    attributed_metrics: Mapped[list[JudgeMetricId]] = mapped_column(
+        "attributed_metrics_json", EnumList(JudgeMetricId), default=list, nullable=True
+    )
+    #: Copied from :func:`app.calibration.is_held_out` at write time so a reader
+    #: filtering the dataset states the rule rather than re-deriving it.
+    held_out: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    #: What each attributed judge said while getting this question wrong, keyed
+    #: by metric. Snapshotted here because it is the evidence a judge repair
+    #: reads (ADR-039), and the live evaluation it came from can be overwritten
+    #: by a bulk re-judge before anyone gets round to the repair.
+    judge_rationales: Mapped[dict] = mapped_column(
+        "judge_rationales_json", JsonObject, default=dict, nullable=True
+    )
+
+    #: Whether the confirmed-bad cell triggered a type-instruction refresh, and
+    #: what happened. A failed refresh is recorded, never silent: the review is
+    #: kept either way, so without this the professor could not tell that the
+    #: lesson from this review has not reached the generator yet.
+    instruction_refreshed: Mapped[bool] = mapped_column(Boolean, default=False)
+    refresh_error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The judges relearned because this review disagreed with them (ADR-039).
+    judges_refreshed: Mapped[list[JudgeMetricId]] = mapped_column(
+        "judges_refreshed_json", EnumList(JudgeMetricId), default=list, nullable=True
+    )
+
+    review: Mapped[ProfessorReviewRow] = relationship()
+    question: Mapped[QuestionRow] = relationship()
+
+
+class JudgePromptRow(TimestampMixin, Base):
+    """A professor-edited system prompt for one metric judge (ADR-038).
+
+    Absent means the shipped prompt in :mod:`app.evaluation.prompts` is in force.
+    A row overrides it.
+
+    ``revision`` counts how often *this* judge was edited. It does not identify
+    the judge: the rubric version is a fingerprint of the prompts in force
+    (:func:`app.evaluation.judge_prompts.effective_rubric_version`), because a
+    counter cannot tell two different prompt sets apart when both have been
+    edited the same number of times -- and a reverted judge must not inherit the
+    version of the edit it undid.
+    """
+
+    __tablename__ = "judge_prompts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metric: Mapped[JudgeMetricId] = mapped_column(
+        StrEnumType(JudgeMetricId, 32), unique=True, index=True
+    )
+    system_prompt: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    #: Why the professor changed it. Not required, but it is the only record of
+    #: the reasoning behind a judge that now behaves differently.
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+
+    #: Rules learned from disagreements and rendered onto the shipped prompt
+    #: (ADR-039), one entry per rule: ``{"rule": str, "question_ids": [int]}``.
+    #: Empty for a prompt the professor typed by hand.
+    rules: Mapped[list[dict]] = mapped_column("rules_json", JsonList, default=list, nullable=True)
+    #: How many disagreements the current rules were learned from, so a stale
+    #: judge is visible without re-counting the dataset.
+    evidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: True when a model wrote this text, false when the professor typed it.
+    learned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

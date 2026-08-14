@@ -20,7 +20,10 @@ from app.calibration.schema import (
     CalibrationReport,
     DifficultyConfusion,
     MetricAgreement,
+    QuadrantCell,
+    QuadrantCounts,
     SubtopicConfusion,
+    TypeCalibration,
 )
 from app.calibration.schema import (
     judge_label as label_for_evaluation,
@@ -28,7 +31,7 @@ from app.calibration.schema import (
 from app.calibration.schema import (
     professor_label as label_for_decision,
 )
-from app.domain.enums import Difficulty, JudgeMetricId
+from app.domain.enums import Difficulty, JudgeMetricId, QuestionType
 from app.evaluation import MetricStatus, PedagogicalEvaluation
 from app.persistence.models import ProfessorReviewRow, QuestionRow
 from app.persistence.repositories import QuestionRepository
@@ -92,6 +95,8 @@ def _pair_for_question(row: QuestionRow) -> CalibrationPair | None:
         question_id=row.id,
         judge=judge,
         professor=label_for_decision(review.decision),
+        question_type=row.question_type,
+        rubric_version=evaluation.rubric_version,
         metric_passed=passed,
         metric_objected={
             metric: bool(cited & reasons) for metric, reasons in PROFESSOR_OBJECTIONS.items()
@@ -121,11 +126,22 @@ def _difficulty_disagreement(
     return (Difficulty(row.difficulty), result.proposed_difficulty)
 
 
-def build_calibration_pairs(session: Session) -> list[CalibrationPair]:
-    """Every reviewed question the judge actually rendered a verdict on."""
+def build_calibration_pairs(
+    session: Session, *, rubric_version: str | None = None
+) -> list[CalibrationPair]:
+    """Every reviewed question the judge actually rendered a verdict on.
+
+    ``rubric_version`` restricts the pairs to one judge. Unfiltered by default:
+    narrowing silently would change a figure the professor has already read,
+    and the honest alternative -- naming every version present in the report --
+    is what :attr:`CalibrationReport.rubric_versions` does.
+    """
     rows = QuestionRepository(session).list_reviewed_with_evaluation()
     pairs = [_pair_for_question(row) for row in rows]
-    return [pair for pair in pairs if pair is not None]
+    found = [pair for pair in pairs if pair is not None]
+    if rubric_version is None:
+        return found
+    return [pair for pair in found if pair.rubric_version == rubric_version]
 
 
 def metrics_from_pairs(pairs: list[CalibrationPair]) -> CalibrationReport:
@@ -144,10 +160,67 @@ def metrics_from_pairs(pairs: list[CalibrationPair]) -> CalibrationReport:
         # labels; reported separately because it is the figure that decides
         # whether auto-acceptance is safe to turn on.
         unsafe_auto_accept_rate=_rate(len(accepted) - confirmed, len(accepted)),
+        quadrant=_quadrant_counts(pairs),
+        rubric_versions=sorted({pair.rubric_version for pair in pairs if pair.rubric_version}),
         metrics=[_metric_agreement(metric, pairs) for metric in PROFESSOR_OBJECTIONS],
         subtopic_confusions=_subtopic_confusions(pairs),
         difficulty_confusions=_difficulty_confusions(pairs),
     )
+
+
+def _quadrant_counts(pairs: list[CalibrationPair]) -> QuadrantCounts:
+    """Split the pairs four ways rather than two."""
+    counts = dict.fromkeys(QuadrantCell, 0)
+    for pair in pairs:
+        counts[pair.cell] += 1
+    return QuadrantCounts(
+        confirmed_good=counts[QuadrantCell.CONFIRMED_GOOD],
+        missed=counts[QuadrantCell.MISSED],
+        false_alarm=counts[QuadrantCell.FALSE_ALARM],
+        confirmed_bad=counts[QuadrantCell.CONFIRMED_BAD],
+    )
+
+
+def reports_by_type(pairs: list[CalibrationPair]) -> list[TypeCalibration]:
+    """One report per question type, in the order the enum declares.
+
+    A type with no measured pair is left out entirely rather than reported as a
+    row of zeroes: the professor is deciding which type to trust, and seven
+    empty rows would bury the two that carry evidence. Pairs whose question
+    predates ``question_type`` are grouped under ``None``, last.
+    """
+    grouped: dict[QuestionType | None, list[CalibrationPair]] = {}
+    for pair in pairs:
+        grouped.setdefault(pair.question_type, []).append(pair)
+
+    order = [*QuestionType, None]
+    return [
+        TypeCalibration(
+            question_type=question_type,
+            report=metrics_from_pairs(grouped[question_type]),
+            check_report=metrics_from_pairs(held_out(grouped[question_type])),
+            pairs=grouped[question_type],
+        )
+        for question_type in order
+        if question_type in grouped
+    ]
+
+
+def held_out(pairs: list[CalibrationPair]) -> list[CalibrationPair]:
+    """The pairs reserved for scoring a repaired judge (ADR-035)."""
+    return [pair for pair in pairs if pair.held_out]
+
+
+def for_repair(pairs: list[CalibrationPair]) -> list[CalibrationPair]:
+    """The pairs a judge repair may read. The complement of :func:`held_out`."""
+    return [pair for pair in pairs if not pair.held_out]
+
+
+def build_type_calibrations(
+    session: Session, *, rubric_version: str | None = None
+) -> list[TypeCalibration]:
+    """The per-type reports over every reviewed, evaluated question."""
+    return reports_by_type(build_calibration_pairs(session, rubric_version=rubric_version))
 
 
 def _metric_agreement(metric: JudgeMetricId, pairs: list[CalibrationPair]) -> MetricAgreement:

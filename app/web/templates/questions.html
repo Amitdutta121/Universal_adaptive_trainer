@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_placeholder.html" import deferred %}
+{% from "_macros.html" import confidence_badge %}
 
 {% block subheading %}
   <p class="lede">Generate questions from selected textbook sections against the approved curriculum.</p>
@@ -65,11 +66,32 @@
           </select>
           <p class="hint">Choose a book to load its instructional sections.</p>
         </div>
+        {% if plan and plan.chapters | length > 1 %}
+          <div class="field">
+            <label for="chapter-filter">Show</label>
+            <select id="chapter-filter" name="chapter_id">
+              <option value="">Every chapter ({{ plan.totals.sections_available }} sections)</option>
+              {% for chapter in plan.chapters %}
+                <option value="{{ chapter.id }}" {% if chapter.id == chapter_id %}selected{% endif %}>
+                  {{ chapter.label }} ({{ chapter.sections | length }} sections)
+                </option>
+              {% endfor %}
+            </select>
+            <p class="hint">
+              Narrowing only changes what is listed. Sections already selected in other
+              chapters stay selected, and still count towards the run below.
+            </p>
+          </div>
+        {% endif %}
+        {# Carries the current choices through the picker's round-trip, so
+           loading a book does not silently reset them. #}
+        {% if selected_difficulty %}<input type="hidden" name="difficulty" value="{{ selected_difficulty }}">{% endif %}
+        {% if selected_question_type %}<input type="hidden" name="question_type" value="{{ selected_question_type }}">{% endif %}
         <button class="button" type="submit">Load sections</button>
       </form>
 
-      {% if selected_book_id %}
-        <form class="upload-form" action="/questions/generate" method="post">
+      {% if plan %}
+        <form class="upload-form" action="/questions/generate" method="post" id="generate-form">
           <input type="hidden" name="book_id" value="{{ selected_book_id }}">
           <p class="hint">
             The generator reads each selected section and chooses the topic and
@@ -80,7 +102,9 @@
             <label for="difficulty">Difficulty</label>
             <select id="difficulty" name="difficulty" required>
               {% for option in difficulty_options %}
-                <option value="{{ option.value }}">{{ option.value | capitalize }}</option>
+                <option value="{{ option.value }}" {% if option.value == selected_difficulty %}selected{% endif %}>
+                  {{ option.value | capitalize }}
+                </option>
               {% endfor %}
             </select>
           </div>
@@ -88,30 +112,126 @@
             <label for="question-type">Question type</label>
             <select id="question-type" name="question_type" required>
               {% for option in question_type_options %}
-                <option value="{{ option.value }}">{{ option.value | replace("_", " ") | capitalize }}</option>
+                <option value="{{ option.value }}" {% if option.value == selected_question_type %}selected{% endif %}>
+                  {{ option.value | replace("_", " ") | capitalize }}
+                </option>
               {% endfor %}
             </select>
           </div>
-          <fieldset class="field">
-            <legend>Generator</legend>
-            <label><input type="radio" name="generator" value="base" checked> Base</label>
-            <label><input type="radio" name="generator" value="personalized"> Personalized</label>
-            <p class="hint">Personalized uses learned preferences and retrieved review examples.</p>
-          </fieldset>
-          <div class="field">
-            <label for="section-ids">Sections</label>
-            <select id="section-ids" name="section_ids" multiple size="8">
-              {% for section in selected_sections %}
-                <option value="{{ section.id }}">{{ section.display_title() }}</option>
+          <div class="chunk-plan">
+            <div class="chunk-plan-head">
+              <h3>Chunk plan</h3>
+              <p class="hint">
+                One question is generated per selected section, from the exact text shown below.
+                Open a section to read what the generator will receive.
+              </p>
+            </div>
+
+            {% for chapter in visible_chapters %}
+              <div class="chunk-chapter">
+                <p class="chunk-chapter-head">
+                  <label class="chunk-select-all">
+                    <input type="checkbox" data-select-all="chapter"> <strong>{{ chapter.label }}</strong>
+                  </label>
+                  {% if chapter.location_label %}<span class="pages">{{ chapter.location_label }}</span>{% endif %}
+                </p>
+                <ul class="chunk-rows">
+                  {% for item in chapter.sections %}
+                    <li class="chunk-row">
+                      <label class="chunk-pick">
+                        <input type="checkbox" name="section_ids" value="{{ item.section.id }}"
+                               data-chars="{{ item.section.char_count }}"
+                               {% if item.selected %}checked{% endif %}
+                               {% if not item.selectable %}disabled{% endif %}>
+                        <span class="chunk-label">{{ item.section.display_title }}</span>
+                      </label>
+                      <span class="chunk-meta">
+                        {% if item.section.location_label %}
+                          <span class="pages">{{ item.section.location_label }}</span>
+                        {% endif %}
+                        <span class="chars">{{ item.section.char_count }} chars</span>
+                        {% if item.existing_question_count %}
+                          <span class="status status-busy"
+                                title="Generating again is allowed; this is here so it is a choice">
+                            {{ item.existing_question_count }} question{{ "" if item.existing_question_count == 1 else "s" }} already
+                          </span>
+                        {% endif %}
+                        {% if item.section.structure_confidence | string != "high" %}
+                          {{ confidence_badge(item.section.structure_confidence) }}
+                        {% endif %}
+                        {% if item.section.is_unlabelled %}
+                          <span class="status status-bad" title="No heading was found; this unit is labelled by location">no heading found</span>
+                        {% endif %}
+                        {% if item.section.is_empty %}
+                          <span class="status status-bad">no text — cannot generate</span>
+                        {% endif %}
+                      </span>
+                      {% if not item.section.is_empty %}
+                        <details class="chunk-text">
+                          <summary>Show source text</summary>
+                          <pre class="section-text">{{ section_texts.get(item.section.id, "") }}</pre>
+                          <p class="hint">
+                            <a href="/books/{{ selected_book_id }}/sections/{{ item.section.id }}">
+                              Open this section with its citation →
+                            </a>
+                          </p>
+                        </details>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% else %}
+              <p class="empty">This book has no sections to generate from.</p>
+            {% endfor %}
+
+            {# A section selected in a chapter the filter is hiding still belongs to
+               the run, so it travels as a hidden input rather than being dropped
+               silently by a change to what is merely *displayed*. #}
+            {% set visible_ids = visible_chapters | map(attribute="id") | list %}
+            {% set offscreen = namespace(count=0, chars=0) %}
+            {% for chapter in plan.chapters if chapter.id not in visible_ids %}
+              {% for item in chapter.sections if item.selected %}
+                {% set offscreen.count = offscreen.count + 1 %}
+                {% set offscreen.chars = offscreen.chars + item.section.char_count %}
+                <input type="hidden" name="section_ids" value="{{ item.section.id }}">
               {% endfor %}
-            </select>
-            <p class="hint">Select one or more sections, or generate from every section in this book.</p>
+            {% endfor %}
+
+            <p class="chunk-summary" id="chunk-summary"
+               data-metrics="{{ (plan.totals.judge_calls // plan.totals.sections_selected) if plan.totals.sections_selected else 4 }}"
+               data-offscreen-count="{{ offscreen.count }}"
+               data-offscreen-chars="{{ offscreen.chars }}"
+               data-available="{{ plan.totals.sections_available }}">
+              <strong>{{ plan.totals.sections_selected }}</strong> of
+              {{ plan.totals.sections_available }} sections selected →
+              {{ plan.totals.questions_to_create }} question{{ "" if plan.totals.questions_to_create == 1 else "s" }} ·
+              {{ plan.totals.generation_calls }} generation + {{ plan.totals.judge_calls }} judge calls ·
+              {{ "{:,}".format(plan.totals.source_chars) }} chars of source text
+            </p>
+            {% if offscreen.count %}
+              <p class="hint">
+                {{ offscreen.count }} of those {{ "is" if offscreen.count == 1 else "are" }} in a
+                chapter this filter is hiding.
+              </p>
+            {% endif %}
+            {% if plan.blockers %}
+              <ul class="chunk-blockers">
+                {% for blocker in plan.blockers %}<li>{{ blocker }}</li>{% endfor %}
+              </ul>
+            {% endif %}
           </div>
+
           <label>
-            <input type="checkbox" name="all_sections" value="true">
+            <input type="checkbox" name="all_sections" value="true" {% if all_sections %}checked{% endif %}>
             Generate one question for every section in this book
+            ({{ plan.totals.sections_available }} questions)
           </label>
           <button class="button" type="submit">Generate Question</button>
+          <p class="hint">
+            More than {{ confirm_threshold }} sections, or the whole book, shows a
+            confirmation page first. Nothing is generated until you confirm it.
+          </p>
         </form>
       {% else %}
         <p class="empty">Choose a book above to select sections.</p>
@@ -130,17 +250,30 @@
       <table class="table">
         <thead>
           <tr><th>#</th><th>Subtopics</th><th>Difficulty</th><th>Kind</th><th>Status</th>
-              <th>Generator</th><th>Priority</th><th>Edited</th></tr>
+              <th>Instruction</th><th>Priority</th><th>Edited</th></tr>
         </thead>
         <tbody>
           {% for question in questions %}
+            {# There is one generator (ADR-033), so its name distinguishes
+               nothing. What differs between two questions is the instruction it
+               followed, named by fingerprint (ADR-040). #}
+            {% set stamp = (question.personalization_context or {}).get("type_instruction") %}
             <tr>
               <td><a href="/questions/{{ question.id }}">{{ question.id }}</a></td>
               <td>{{ question.subtopic_ids | join(", ") if question.subtopic_ids else "—" }}</td>
               <td>{{ question.difficulty }}</td>
               <td>{{ question.kind }}</td>
               <td><span class="status">{{ question.status }}</span></td>
-              <td><code>{{ question.generator_kind }}:{{ question.generator_name }}@{{ question.generator_version }}</code></td>
+              <td>
+                {% if stamp %}
+                  <code>{{ stamp.source }}:{{ stamp.fingerprint }}</code>
+                  {% if stamp.rule_count %}
+                    <span class="muted">{{ stamp.rule_count }} rule{{ "" if stamp.rule_count == 1 else "s" }}</span>
+                  {% endif %}
+                {% else %}
+                  <span class="muted">not recorded</span>
+                {% endif %}
+              </td>
               <td>{{ question.priority }}</td>
               <td>{{ "yes" if question.prompt != question.original_prompt else "no" }}</td>
             </tr>
@@ -153,7 +286,26 @@
         </p>
       {% endif %}
     {% else %}
-      <p class="empty">No questions have been generated yet.</p>
+      <p class="empty">
+        {% if failed_count and not show_failed %}
+          No usable questions yet. {{ failed_count }} failed validation and {{ "is" if failed_count == 1 else "are" }} hidden.
+        {% else %}
+          No questions have been generated yet.
+        {% endif %}
+      </p>
+    {% endif %}
+    {% if failed_count %}
+      <p class="note">
+        {% if show_failed %}
+          Showing questions that failed validation.
+          <a href="/questions">Hide them</a>.
+        {% else %}
+          {{ failed_count }} question{{ "" if failed_count == 1 else "s" }} failed validation and
+          {{ "is" if failed_count == 1 else "are" }} hidden. They are never offered for review —
+          the failing check already names the fault.
+          <a href="/questions?show_failed=true">Show them</a>.
+        {% endif %}
+      </p>
     {% endif %}
   </section>
 
@@ -221,4 +373,69 @@
   {{ deferred("Planned for this section", [
     "Approve, reject or edit each question; the generated original is always retained.",
   ]) }}
+
+  <script>
+    // Progressive enhancement only: every checkbox below works without this, and
+    // the summary it updates is already rendered correctly by the server for the
+    // selection the page loaded with. This keeps that summary honest while the
+    // professor is still choosing, so the cost of a run is never a surprise.
+    (function () {
+      var form = document.getElementById("generate-form");
+      var summary = document.getElementById("chunk-summary");
+      if (!form || !summary) { return; }
+
+      function number(name, fallback) {
+        var value = parseInt(summary.getAttribute(name), 10);
+        return isNaN(value) ? fallback : value;
+      }
+
+      var metrics = number("data-metrics", 4);
+      // Sections selected in a chapter the filter is hiding: they are part of the
+      // run and are already in the form as hidden inputs, so they must be part of
+      // the count too.
+      var offscreenCount = number("data-offscreen-count", 0);
+      var offscreenChars = number("data-offscreen-chars", 0);
+      var available = number(
+        "data-available",
+        form.querySelectorAll('input[type="checkbox"][name="section_ids"]').length
+      );
+
+      function boxesIn(scope) {
+        return scope.querySelectorAll(
+          'input[type="checkbox"][name="section_ids"]:not([disabled])'
+        );
+      }
+
+      function refresh() {
+        var picked = form.querySelectorAll(
+          'input[type="checkbox"][name="section_ids"]:checked'
+        );
+        var chars = offscreenChars;
+        picked.forEach(function (box) {
+          chars += parseInt(box.getAttribute("data-chars"), 10) || 0;
+        });
+        var n = picked.length + offscreenCount;
+        summary.innerHTML =
+          "<strong>" + n + "</strong> of " + available + " sections selected → " +
+          n + (n === 1 ? " question" : " questions") + " · " +
+          n + " generation + " + (n * metrics) + " judge calls · " +
+          chars.toLocaleString() + " chars of source text";
+      }
+
+      form.querySelectorAll('[data-select-all="chapter"]').forEach(function (toggle) {
+        toggle.addEventListener("change", function () {
+          boxesIn(toggle.closest(".chunk-chapter")).forEach(function (box) {
+            box.checked = toggle.checked;
+          });
+          refresh();
+        });
+      });
+
+      form.addEventListener("change", function (event) {
+        if (event.target.name === "section_ids") { refresh(); }
+      });
+
+      refresh();
+    })();
+  </script>
 {% endblock %}

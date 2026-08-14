@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.domain.enums import CurriculumStatus, ReviewDecision
+from app.domain.enums import CurriculumStatus, JudgeMetricId, QuestionType, ReviewDecision
 from app.persistence.repositories import BookRepository, CurriculumRepository
 
 VALID_TAXONOMY = (
@@ -66,7 +66,6 @@ def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient
         "parsons",
         "coding",
     }
-    assert {option["value"] for option in payload["generators"]} == {"base", "personalized"}
     # Rejection reasons carry the professor-facing label, not the raw code.
     labels = {option["value"]: option["label"] for option in payload["rejection_reasons"]}
     assert labels["too_easy"] != "too_easy"
@@ -79,7 +78,7 @@ def test_counts_start_at_zero(client: TestClient) -> None:
         "curriculum_versions": 0,
         "questions": 0,
         "reviews": 0,
-        "preferences": 0,
+        "learned_instructions": 0,
         "students": 0,
     }
 
@@ -237,6 +236,7 @@ def test_question_list_is_empty_before_any_generation(client: TestClient) -> Non
         "questions": [],
         "status_counts": {},
         "total": 0,
+        "status": None,
     }
 
 
@@ -295,6 +295,75 @@ def test_generation_rejects_an_unknown_question_type(client: TestClient) -> None
 
 def test_unknown_question_is_a_json_404(client: TestClient) -> None:
     response = client.get("/api/questions/4242")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_generation_plan_prices_a_selection_without_running_it(client: TestClient) -> None:
+    book_id = _import_book(client)["id"]
+    sections = client.get(f"/api/books/{book_id}/sections").json()["sections"]
+    chosen = [sections[0]["id"], sections[1]["id"]]
+
+    response = client.get(
+        "/api/questions/generation-plan",
+        params={"book_id": book_id, "section_ids": chosen},
+    )
+
+    assert response.status_code == 200
+    plan = response.json()
+    totals = plan["totals"]
+    assert totals["sections_available"] == len(sections)
+    assert totals["sections_selected"] == 2
+    assert totals["questions_to_create"] == 2
+    assert totals["generation_calls"] == 2
+    # One judge call per advisory metric per question (ADR-031).
+    assert totals["judge_calls"] == 2 * len(JudgeMetricId)
+    assert totals["source_chars"] == sections[0]["char_count"] + sections[1]["char_count"]
+    assert plan["blockers"] == []
+    # Pricing a run must not create one.
+    assert client.get("/api/questions").json()["total"] == 0
+
+
+def test_generation_plan_groups_sections_by_chapter_and_marks_the_selection(
+    client: TestClient,
+) -> None:
+    book_id = _import_book(client)["id"]
+    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
+
+    plan = client.get(
+        "/api/questions/generation-plan",
+        params={"book_id": book_id, "section_ids": [section_id]},
+    ).json()
+
+    assert [chapter["label"] for chapter in plan["chapters"]] == [
+        "1 The Way of the Program",
+        "2 Variables, Expressions and Statements",
+    ]
+    entries = {
+        item["section"]["id"]: item for chapter in plan["chapters"] for item in chapter["sections"]
+    }
+    assert entries[section_id]["selected"] is True
+    assert entries[section_id]["selectable"] is True
+    assert entries[section_id]["existing_question_count"] == 0
+    assert sum(1 for item in entries.values() if item["selected"]) == 1
+
+
+def test_generation_plan_for_a_whole_book_selects_every_section(client: TestClient) -> None:
+    book_id = _import_book(client)["id"]
+    section_count = len(client.get(f"/api/books/{book_id}/sections").json()["sections"])
+
+    plan = client.get(
+        "/api/questions/generation-plan",
+        params={"book_id": book_id, "all_sections": True},
+    ).json()
+
+    assert plan["totals"]["sections_selected"] == section_count
+    assert plan["totals"]["judge_calls"] == section_count * len(JudgeMetricId)
+
+
+def test_generation_plan_for_an_unknown_book_is_a_json_404(client: TestClient) -> None:
+    response = client.get("/api/questions/generation-plan", params={"book_id": 4242})
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
@@ -411,34 +480,35 @@ def test_review_rejects_an_unknown_decision(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "invalid_request"
 
 
-# -------------------------------------------------------------------- preferences
+# ------------------------------------------------------------- type instructions
 
 
-def test_preferences_start_empty(client: TestClient) -> None:
-    assert client.get("/api/preferences").json() == {
-        "preferences": [],
-        "total": 0,
-        "active_count": 0,
-    }
+def test_every_type_is_listed_with_its_shipped_instruction(client: TestClient) -> None:
+    """A type nobody has reviewed still has an instruction -- the shipped one."""
+    payload = client.get("/api/instructions").json()
+
+    entries = {entry["question_type"]: entry for entry in payload["instructions"]}
+    assert set(entries) == {question_type.value for question_type in QuestionType}
+    multiple_choice = entries["multiple_choice"]
+    assert multiple_choice["learned"] is False
+    assert multiple_choice["rules"] == []
+    assert multiple_choice["available_reviews"] == 0
+    assert multiple_choice["instruction"]
 
 
-def test_refresh_without_an_llm_reports_configuration_as_json(client: TestClient) -> None:
-    # Test settings disable the LLM; refresh with no reviews short-circuits to 0.
-    response = client.post("/api/preferences/refresh")
+def test_refreshing_a_type_with_no_reviews_changes_nothing(client: TestClient) -> None:
+    """Nothing to learn from is not an error, and must not invent rules."""
+    response = client.post("/api/instructions/multiple_choice/refresh")
 
     assert response.status_code == 200
-    assert response.json() == {"refreshed": 0, "preferences": []}
+    payload = response.json()
+    assert payload["learned"] is False
+    assert payload["rule_count"] == 0
+    assert payload["review_count"] == 0
 
 
-def test_correcting_an_unknown_preference_is_a_json_404(client: TestClient) -> None:
-    response = client.post("/api/preferences/999/correct", json={"rule_text": "Be concise."})
-
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "not_found"
-
-
-def test_correcting_with_empty_text_is_refused_by_the_request_model(client: TestClient) -> None:
-    response = client.post("/api/preferences/1/correct", json={"rule_text": ""})
+def test_refreshing_an_unknown_type_is_a_json_422(client: TestClient) -> None:
+    response = client.post("/api/instructions/not_a_type/refresh")
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
@@ -458,7 +528,7 @@ def test_correcting_with_empty_text_is_refused_by_the_request_model(client: Test
         "/api/questions",
         "/api/reviews",
         "/api/reviews/stats",
-        "/api/preferences",
+        "/api/instructions",
         "/api/calibration/results",
         "/api/calibration/pairs",
         "/api/evaluation/batch-runs",
@@ -494,11 +564,8 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/questions/{question_id}/review",
         "/api/reviews",
         "/api/reviews/stats",
-        "/api/preferences",
-        "/api/preferences/refresh",
-        "/api/preferences/{preference_id}/confirm",
-        "/api/preferences/{preference_id}/correct",
-        "/api/preferences/{preference_id}/remove",
+        "/api/instructions",
+        "/api/instructions/{question_type}/refresh",
         "/api/calibration/results",
         "/api/calibration/pairs",
         "/api/evaluation/batch-runs",

@@ -18,16 +18,24 @@ import logging
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.calibration import MIN_INFORMATIVE_SAMPLE
+from app.calibration import HELD_OUT_DIVISOR, MIN_INFORMATIVE_SAMPLE
 from app.config import get_settings
 from app.curriculum import extraction_metadata, proposal_warnings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
-from app.domain.enums import Difficulty, QuestionType, RejectionReason, ReviewDecision
+from app.domain.enums import (
+    Difficulty,
+    JudgeMetricId,
+    QuadrantCell,
+    QuestionStatus,
+    QuestionType,
+    RejectionReason,
+    ReviewDecision,
+)
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.errors import (
     ConfigurationError,
@@ -52,15 +60,19 @@ from app.persistence.repositories import (
 )
 from app.web.routes.api import books as api_books
 from app.web.routes.api import calibration as api_calibration
+from app.web.routes.api import coverage as api_coverage
 from app.web.routes.api import curriculum as api_curriculum
 from app.web.routes.api import evaluation as api_evaluation
 from app.web.routes.api import feedback as api_feedback
-from app.web.routes.api import preferences as api_preferences
+from app.web.routes.api import instructions as api_instructions
+from app.web.routes.api import judge_prompts as api_judge_prompts
 from app.web.routes.api import questions as api_questions
 from app.web.routes.api import system as api_system
 from app.web.routes.api.schemas import (
-    CorrectPreferenceRequest,
+    CreateQuestionSetRequest,
     GenerateQuestionsRequest,
+    JudgePromptRequest,
+    ReviewOutcomeOut,
     ReviewQueueMode,
     ReviewRequest,
 )
@@ -85,7 +97,7 @@ def dashboard(request: Request, session: DbSession) -> HTMLResponse:
         "curriculum": totals.curriculum_versions,
         "questions": totals.questions,
         "feedback": totals.reviews,
-        "preferences": totals.preferences,
+        "instructions": totals.learned_instructions,
         "students": totals.students,
     }
     return render(
@@ -333,41 +345,97 @@ def curriculum_subtopic(request: Request, session: DbSession, subtopic_id: int) 
     )
 
 
+#: Above this many sections, generation asks for confirmation first. A run is a
+#: sequence of model calls that cannot be recalled once spent, so a large one is
+#: worth one deliberate click; a small one is not worth the friction.
+GENERATION_CONFIRM_THRESHOLD = 5
+
+
 def _questions_page(
     request: Request,
     session: Session,
     *,
     selected_book_id: int | None = None,
+    selected_section_ids: list[int] | None = None,
+    all_sections: bool = False,
+    chapter_id: int | None = None,
+    difficulty: str | None = None,
+    question_type: str | None = None,
     created_count: int | None = None,
     created_ids: list[int] | None = None,
     judge_notice: str | None = None,
+    show_failed: bool = False,
     error: str | None = None,
     error_detail: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    """Render the question bank and its section-first generation form."""
+    """Render the question bank, the chunk plan and the generation form.
+
+    Every choice the professor has made is passed back into the template, so an
+    error banner re-renders the form they were looking at rather than resetting
+    it.
+    """
     curriculum = CurriculumRepository(session)
     approved = curriculum.get_approved()
-    selected_sections = (
-        SourceRetrieval(session).sections_in_book(selected_book_id)
-        if selected_book_id is not None
-        else []
-    )
     repo = QuestionRepository(session)
+    # Questions that failed deterministic validation are hidden by default: they
+    # are kept as evidence of how the generator fails (ADR-032), not as candidates,
+    # and unfiltered they would crowd out the bank. The status counts below always
+    # describe the whole bank, so the omission is stated rather than silent.
+    bank_statuses = (
+        None
+        if show_failed
+        else [status for status in QuestionStatus if status is not QuestionStatus.VALIDATION_FAILED]
+    )
+    status_counts = repo.count_by_status()
+
+    plan = None
+    section_texts: dict[int, str] = {}
+    if selected_book_id is not None:
+        try:
+            plan = api_questions.generation_plan(
+                session,
+                book_id=selected_book_id,
+                section_ids=selected_section_ids,
+                all_sections=all_sections,
+            )
+            # The plan deliberately carries no text: the page reads it from the
+            # domain objects instead, the way book_detail.html does.
+            section_texts = {
+                section.id: section.text
+                for section in SourceRetrieval(session).sections_in_book(selected_book_id)
+                if section.id is not None
+            }
+        except NotFoundError:
+            plan = None
+
+    visible_chapters = plan.chapters if plan else []
+    if plan and chapter_id is not None:
+        visible_chapters = [chapter for chapter in plan.chapters if chapter.id == chapter_id]
+
     return render(
         request,
         "questions.html",
         {
             "page_title": "Questions",
             "active_section": "questions",
-            "questions": repo.list_recent(),
-            "status_counts": repo.count_by_status(),
+            "questions": repo.list_recent(statuses=bank_statuses),
+            "status_counts": status_counts,
+            "show_failed": show_failed,
+            "failed_count": status_counts.get(QuestionStatus.VALIDATION_FAILED.value, 0),
             "approved_curriculum": curriculum.get_with_tree(approved.id) if approved else None,
             "books": BookRepository(session).list_usable(),
             "selected_book_id": selected_book_id,
-            "selected_sections": selected_sections,
+            "plan": plan,
+            "visible_chapters": visible_chapters,
+            "section_texts": section_texts,
+            "chapter_id": chapter_id,
+            "all_sections": all_sections,
             "difficulty_options": list(Difficulty),
             "question_type_options": list(QuestionType),
+            "selected_difficulty": difficulty,
+            "selected_question_type": question_type,
+            "confirm_threshold": GENERATION_CONFIRM_THRESHOLD,
             "created_count": created_count,
             "created_ids": created_ids,
             "judge_runs": api_evaluation.list_batch_runs(session).runs,
@@ -386,9 +454,14 @@ def questions(
     request: Request,
     session: DbSession,
     book_id: int | None = None,
+    section_ids: Annotated[list[int] | None, Query()] = None,
+    chapter_id: int | None = None,
+    difficulty: str | None = None,
+    question_type: str | None = None,
     created: int | None = None,
     ids: str | None = None,
     judge_notice: str | None = None,
+    show_failed: bool = False,
 ) -> HTMLResponse:
     created_ids: list[int] | None = None
     if ids:
@@ -397,9 +470,14 @@ def questions(
         request,
         session,
         selected_book_id=book_id,
+        selected_section_ids=section_ids,
+        chapter_id=chapter_id,
+        difficulty=difficulty,
+        question_type=question_type,
         created_count=created,
         created_ids=created_ids,
         judge_notice=judge_notice,
+        show_failed=show_failed,
     )
 
 
@@ -466,9 +544,15 @@ def generate_questions(
     book_id: Annotated[int, Form()],
     section_ids: Annotated[list[int] | None, Form()] = None,
     all_sections: Annotated[str | None, Form()] = None,
-    generator: Annotated[str, Form()] = "base",
+    confirmed: Annotated[str | None, Form()] = None,
 ) -> Response:
-    """Generate one persisted question for every selected source section."""
+    """Generate one persisted question for every selected source section.
+
+    A large run renders a confirmation page instead of generating, and only
+    proceeds once it comes back with ``confirmed`` set. The check lives in this
+    handler rather than in a separate confirm route so there is one entry point
+    to generation, and no second URL that quietly skips the step.
+    """
     try:
         payload = GenerateQuestionsRequest(
             question_type=QuestionType(question_type),
@@ -476,17 +560,21 @@ def generate_questions(
             book_id=book_id,
             section_ids=section_ids,
             all_sections_of_book=all_sections is not None,
-            generator="personalized" if generator == "personalized" else "base",
         )
     except (ValueError, ValidationError) as exc:
         return _questions_page(
             request,
             session,
             selected_book_id=book_id,
+            selected_section_ids=section_ids,
+            all_sections=all_sections is not None,
             error="Choose a supported difficulty and question type.",
             error_detail=str(exc),
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
+
+    if confirmed is None and _needs_confirmation(payload):
+        return _confirmation_page(request, session, payload, book_id)
 
     try:
         result = api_questions.generate_questions(session, payload)
@@ -500,6 +588,10 @@ def generate_questions(
             request,
             session,
             selected_book_id=book_id,
+            selected_section_ids=section_ids,
+            all_sections=all_sections is not None,
+            difficulty=difficulty,
+            question_type=question_type,
             error=exc.message,
             error_detail=exc.detail,
             status_code=exc.status_code,
@@ -511,6 +603,45 @@ def generate_questions(
         id_list = ",".join(str(question_id) for question_id in result.question_ids)
         url = f"/questions?created={result.created}&ids={id_list}"
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _needs_confirmation(payload: GenerateQuestionsRequest) -> bool:
+    """Whether this run is large enough to be worth confirming first.
+
+    A whole-book run always is: its size is whatever the book happens to hold,
+    which is exactly the number the professor cannot see when they tick the box.
+    """
+    if payload.all_sections_of_book:
+        return True
+    return len(payload.section_ids or []) > GENERATION_CONFIRM_THRESHOLD
+
+
+def _confirmation_page(
+    request: Request, session: Session, payload: GenerateQuestionsRequest, book_id: int
+) -> HTMLResponse:
+    """Show what a run will do, and carry the selection forward unchanged."""
+    plan = api_questions.generation_plan(
+        session,
+        book_id=book_id,
+        section_ids=payload.section_ids,
+        all_sections=payload.all_sections_of_book,
+    )
+    return render(
+        request,
+        "questions_confirm.html",
+        {
+            "page_title": "Confirm generation",
+            "active_section": "questions",
+            "plan": plan,
+            "payload": payload,
+            "section_ids": [
+                item.section.id
+                for chapter in plan.chapters
+                for item in chapter.sections
+                if item.selected
+            ],
+        },
+    )
 
 
 @router.get("/questions/{question_id}", response_class=HTMLResponse, name="question_detail")
@@ -532,6 +663,7 @@ def question_detail(request: Request, session: DbSession, question_id: int) -> H
             "taxonomy": detail.taxonomy,
             "validation_checks": detail.validation_checks,
             "validation_passed": detail.validation_passed,
+            "generation_attempts": detail.generation_attempts,
             "pedagogical_eval": detail.pedagogical_eval,
             "pedagogical_error_message": detail.pedagogical_error_message,
             "personalization_evidence": detail.personalization,
@@ -575,6 +707,7 @@ def _review_queue_page(
     mode: str,
     error: str | None = None,
     error_detail: str | None = None,
+    outcome: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
     """Render the review queue at its current cursor.
@@ -600,6 +733,7 @@ def _review_queue_page(
             "rejection_reasons": list(REJECTION_REASON_LABELS.items()),
             "error": error,
             "error_detail": error_detail,
+            "outcome": outcome,
         },
         status_code=status_code,
     )
@@ -611,9 +745,15 @@ def review_queue_page(
     session: DbSession,
     after: int | None = None,
     mode: str = "all",
+    outcome: str | None = None,
 ) -> HTMLResponse:
-    """Review one question at a time, in one screen, without leaving the queue."""
-    return _review_queue_page(request, session, after=after, mode=mode)
+    """Review one question at a time, in one screen, without leaving the queue.
+
+    ``outcome`` carries what the previous submit did (ADR-037) across the
+    redirect, so the professor reads it on the next question instead of having
+    to open the calibration page to find out.
+    """
+    return _review_queue_page(request, session, after=after, mode=mode, outcome=outcome)
 
 
 @router.post("/review/{question_id}", name="submit_queue_review")
@@ -636,7 +776,7 @@ def submit_queue_review(
     verdict and makes a hundred-question pass far slower than it needs to be.
     """
     try:
-        api_feedback.create_review(
+        result = api_feedback.create_review(
             session,
             question_id,
             ReviewRequest(
@@ -660,29 +800,64 @@ def submit_queue_review(
             error_detail=exc.detail,
             status_code=exc.status_code,
         )
+    notice = quote(_outcome_notice(question_id, result.outcome))
     return RedirectResponse(
-        url=f"/review?after={question_id}&mode={mode}", status_code=status.HTTP_303_SEE_OTHER
+        url=f"/review?after={question_id}&mode={mode}&outcome={notice}",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-def _preferences_page(
+def _outcome_notice(question_id: int, outcome: ReviewOutcomeOut | None) -> str:
+    """One line saying where the review landed and what was done about it.
+
+    Says "not measured" rather than nothing when the question carried no judge
+    verdict. Silence would read as agreement, and the professor would have no
+    way to tell a question the judge got right from one it never answered.
+    """
+    if outcome is None:
+        return f"#{question_id}: recorded. No judge verdict to compare, so nothing was measured."
+
+    line = f"#{question_id}: {outcome.cell.value.replace('_', ' ')}."
+    if outcome.attributed_labels:
+        line += f" Reviewer(s) at fault: {', '.join(outcome.attributed_labels)}."
+    elif outcome.cell in (QuadrantCell.MISSED, QuadrantCell.FALSE_ALARM):
+        line += " No single reviewer accounts for it."
+    learned = []
+    if outcome.instruction_refreshed:
+        learned.append(f"the {outcome.refresh_rule_count}-rule type instruction")
+    if outcome.judges_refreshed:
+        learned.append(
+            "the "
+            + ", ".join(m.value.replace("_", " ") for m in outcome.judges_refreshed)
+            + " reviewer"
+        )
+    if learned:
+        line += f" Relearned: {' and '.join(learned)}."
+    elif outcome.cell is QuadrantCell.CONFIRMED_BAD and not outcome.refresh_error:
+        line += " No review of this type to learn from yet."
+    if outcome.refresh_error:
+        line += f" Relearning failed: {outcome.refresh_error}"
+    return line
+
+
+def _instructions_page(
     request: Request,
     session: Session,
     *,
-    refreshed_count: int | None = None,
+    refreshed: str | None = None,
     error: str | None = None,
     error_detail: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    """Render the Preferences index, optionally with an inline error banner."""
+    """Render the learned per-type instructions (ADR-033)."""
     return render(
         request,
-        "preferences.html",
+        "instructions.html",
         {
-            "page_title": "Preferences",
-            "active_section": "preferences",
-            "preferences": api_preferences.list_preferences(session).preferences,
-            "refreshed_count": refreshed_count,
+            "page_title": "Instructions",
+            "active_section": "instructions",
+            "instructions": api_instructions.list_instructions(session).instructions,
+            "refreshed": refreshed,
             "error": error,
             "error_detail": error_detail,
         },
@@ -690,73 +865,130 @@ def _preferences_page(
     )
 
 
-@router.get("/preferences", response_class=HTMLResponse, name="preferences")
-def preferences(
+@router.get("/instructions", response_class=HTMLResponse, name="instructions")
+def instructions(
     request: Request,
     session: DbSession,
-    refreshed: int | None = None,
+    refreshed: str | None = None,
 ) -> HTMLResponse:
-    return _preferences_page(request, session, refreshed_count=refreshed)
+    return _instructions_page(request, session, refreshed=refreshed)
 
 
-@router.post("/preferences/refresh", name="refresh_preferences_page")
-def refresh_preferences_page(request: Request, session: DbSession) -> Response:
+@router.post("/instructions/{question_type}/refresh", name="refresh_instruction_page")
+def refresh_instruction_page(
+    request: Request, session: DbSession, question_type: QuestionType
+) -> Response:
     try:
-        result = api_preferences.refresh(session)
-    except (ConfigurationError, LLMRequestError) as exc:
-        return _preferences_page(
+        result = api_instructions.refresh(session, question_type)
+    except (ConfigurationError, LLMRequestError, MalformedModelOutputError) as exc:
+        return _instructions_page(
             request,
             session,
             error=exc.message,
             error_detail=exc.detail,
             status_code=exc.status_code,
         )
+    notice = (
+        f"{result.question_type.value}: {result.rule_count} rule(s) from "
+        f"{result.review_count} review(s)."
+        if result.learned
+        else f"{result.question_type.value}: no reviews yet, instruction unchanged."
+    )
     return RedirectResponse(
-        url=f"/preferences?refreshed={result.refreshed}",
+        url=f"/instructions?refreshed={quote(notice)}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-@router.post("/preferences/{preference_id}/confirm", name="confirm_preference_page")
-def confirm_preference_page(session: DbSession, preference_id: int) -> RedirectResponse:
-    api_preferences.confirm(session, preference_id)
-    return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
+def _judges_page(
+    request: Request,
+    session: Session,
+    *,
+    saved: str | None = None,
+    error: str | None = None,
+    error_detail: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render the four judge prompts, editable (ADR-038)."""
+    listing = api_judge_prompts.list_judge_prompts(session)
+    return render(
+        request,
+        "judges.html",
+        {
+            "page_title": "Judges",
+            "active_section": "judges",
+            "prompts": listing.prompts,
+            "rubric_version": listing.rubric_version,
+            "shipped_rubric_version": listing.shipped_rubric_version,
+            "saved": saved,
+            "error": error,
+            "error_detail": error_detail,
+        },
+        status_code=status_code,
+    )
 
 
-@router.post("/preferences/{preference_id}/correct", name="correct_preference_page")
-def correct_preference_page(
+@router.get("/judges", response_class=HTMLResponse, name="judges")
+def judges(request: Request, session: DbSession, saved: str | None = None) -> HTMLResponse:
+    return _judges_page(request, session, saved=saved)
+
+
+@router.post("/judges/{metric}", name="save_judge_prompt_page")
+def save_judge_prompt_page(
     request: Request,
     session: DbSession,
-    preference_id: int,
-    rule_text: Annotated[str, Form()],
+    metric: JudgeMetricId,
+    system_prompt: Annotated[str, Form()] = "",
+    note: Annotated[str, Form()] = "",
+    revert: Annotated[str | None, Form()] = None,
 ) -> Response:
+    """Save or revert one judge prompt, then report the version it now answers under."""
     try:
-        payload = CorrectPreferenceRequest(rule_text=rule_text)
-        api_preferences.correct(session, preference_id, payload)
-    except ValidationError as exc:
-        # An empty box fails the request model before the service sees it.
-        return _preferences_page(
+        if revert is not None:
+            result = api_judge_prompts.revert_judge_prompt(session, metric)
+            notice = f"{metric.value}: reverted to the shipped prompt."
+        else:
+            result = api_judge_prompts.save_judge_prompt(
+                session, metric, JudgePromptRequest(system_prompt=system_prompt, note=note or None)
+            )
+            notice = f"{metric.value}: saved (edit {result.prompt.revision})."
+    except (DomainRuleError, NotFoundError, ValidationError) as exc:
+        message = getattr(exc, "message", "The judge prompt must not be empty.")
+        return _judges_page(
             request,
             session,
-            error="Corrected preference text must not be empty.",
-            error_detail=str(exc),
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            error=message,
+            error_detail=getattr(exc, "detail", None),
+            status_code=getattr(exc, "status_code", 400),
         )
-    except DomainRuleError as exc:
-        return _preferences_page(
+    notice += f" Judges now answer as {result.rubric_version}."
+    return RedirectResponse(
+        url=f"/judges?saved={quote(notice)}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/judges/{metric}/refresh", name="refresh_judge_page")
+def refresh_judge_page(request: Request, session: DbSession, metric: JudgeMetricId) -> Response:
+    """Relearn one judge's prompt from the cases it got wrong (ADR-039)."""
+    try:
+        result = api_judge_prompts.refresh(session, metric)
+    except (ConfigurationError, LLMRequestError, MalformedModelOutputError) as exc:
+        return _judges_page(
             request,
             session,
             error=exc.message,
             error_detail=exc.detail,
             status_code=exc.status_code,
         )
-    return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
-
-
-@router.post("/preferences/{preference_id}/remove", name="remove_preference_page")
-def remove_preference_page(session: DbSession, preference_id: int) -> RedirectResponse:
-    api_preferences.remove(session, preference_id)
-    return RedirectResponse(url="/preferences", status_code=status.HTTP_303_SEE_OTHER)
+    notice = (
+        f"{metric.value}: {result.rule_count} rule(s) from {result.evidence_count} "
+        f"disagreement(s). Judges now answer as {result.rubric_version}."
+        if result.learned
+        else f"{metric.value}: nothing has contradicted it yet, so the prompt is unchanged."
+    )
+    return RedirectResponse(
+        url=f"/judges?saved={quote(notice)}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.get("/feedback", response_class=HTMLResponse, name="feedback")
@@ -775,8 +1007,68 @@ def feedback(request: Request, session: DbSession) -> HTMLResponse:
             # so it belongs here rather than behind a section of its own.
             "calibration": api_calibration.calibration_results(session),
             "calibration_pairs": api_calibration.calibration_pairs(session).pairs,
+            # The same pairs split four ways and per question type, because the
+            # type is the unit a professor would ever authorise (ADR-034).
+            "quadrant": api_calibration.calibration_quadrant(session),
             "min_informative_sample": MIN_INFORMATIVE_SAMPLE,
+            "held_out_divisor": HELD_OUT_DIVISOR,
         },
+    )
+
+
+def _coverage_page(
+    request: Request,
+    session: Session,
+    *,
+    set_version_id: int | None = None,
+    created: str | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render the coverage grid for the live bank or one frozen set (ADR-036)."""
+    return render(
+        request,
+        "coverage.html",
+        {
+            "page_title": "Coverage",
+            "active_section": "coverage",
+            "coverage": api_coverage.coverage(session, set_version_id=set_version_id),
+            "question_sets": api_coverage.list_question_sets(session).sets,
+            "selected_set_id": set_version_id,
+            "created": created,
+            "error": error,
+        },
+        status_code=status_code,
+    )
+
+
+@router.get("/coverage", response_class=HTMLResponse, name="coverage")
+def coverage(
+    request: Request,
+    session: DbSession,
+    set_version_id: int | None = None,
+    created: str | None = None,
+) -> HTMLResponse:
+    return _coverage_page(request, session, set_version_id=set_version_id, created=created)
+
+
+@router.post("/coverage/sets", name="create_question_set_page")
+def create_question_set_page(
+    request: Request,
+    session: DbSession,
+    label: Annotated[str, Form()],
+    notes: Annotated[str | None, Form()] = None,
+) -> Response:
+    try:
+        result = api_coverage.create_set(
+            session, CreateQuestionSetRequest(label=label, notes=notes or None)
+        )
+    except DomainRuleError as exc:
+        return _coverage_page(request, session, error=exc.message, status_code=exc.status_code)
+    notice = f"{result.label}: {result.question_count} question(s) frozen as set #{result.id}."
+    return RedirectResponse(
+        url=f"/coverage?created={quote(notice)}",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 

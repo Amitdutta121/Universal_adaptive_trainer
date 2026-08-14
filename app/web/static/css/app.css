@@ -250,6 +250,45 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .citation { font-size: 13px; }
 .checksum { font-size: 11px; word-break: break-all; }
 
+/* ---------- questions: the chunk plan ---------- */
+.chunk-plan { width: 100%; }
+.chunk-plan-head h3 { margin: 0 0 4px; font-size: 14px; }
+
+.chunk-chapter { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.chunk-chapter:last-of-type { border-bottom: 0; }
+.chunk-chapter-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
+.chunk-select-all { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+
+.chunk-rows { list-style: none; margin: 6px 0 0; padding: 0 0 0 18px; }
+.chunk-row {
+  padding: 5px 0 5px 12px;
+  border-left: 2px solid var(--line);
+}
+.chunk-pick { display: inline-flex; align-items: baseline; gap: 7px; font-weight: 400; }
+.chunk-label { font-weight: 500; }
+.chunk-meta { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: 8px; }
+.chunk-pick input:disabled + .chunk-label { color: var(--ink-soft); }
+
+.chunk-text { margin: 6px 0 0 25px; }
+.chunk-text summary { cursor: pointer; font-size: 12px; color: var(--accent); }
+.chunk-text .section-text { margin-top: 6px; max-height: 20em; }
+
+.chunk-summary {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f7f8fa;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.chunk-blockers {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #9c2b2b;
+}
+
 /* ---------- books: schema help ---------- */
 .schema-details { margin-top: 12px; }
 .schema-details summary {

@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% from "_placeholder.html" import deferred %}
+
+{% block subheading %}
+  <p class="lede">
+    Every question can be good and the set still unusable. The adaptive engine picks a
+    <strong>subtopic</strong> first and a <strong>difficulty</strong> second, so a subtopic with no
+    hard question is a request it cannot answer.
+  </p>
+{% endblock %}
+
+{% block content %}
+  {% if created %}
+    <section class="panel panel-success" role="status">
+      <h2>Question set frozen</h2>
+      <p>{{ created }}</p>
+    </section>
+  {% endif %}
+
+  {% if error %}
+    <section class="panel panel-error" role="alert">
+      <h2>Could not freeze the set</h2>
+      <p class="error-message">{{ error }}</p>
+    </section>
+  {% endif %}
+
+  <section class="panel" id="verdict">
+    <h2>Readiness</h2>
+    {% if coverage.curriculum_version_id is none %}
+      <p class="empty">
+        No curriculum is approved, so there is no taxonomy to cover. Upload and approve a
+        Topic → Subtopic taxonomy first.
+      </p>
+    {% elif coverage.total_cells == 0 %}
+      <p class="empty">
+        The approved curriculum <strong>{{ coverage.curriculum_label }}</strong> has no subtopics,
+        so there is nothing to cover.
+      </p>
+    {% else %}
+      <p class="note">
+        Taxonomy: <strong>{{ coverage.curriculum_label }}</strong>.
+        {% if coverage.set_version_id %}
+          Measuring frozen set <strong>#{{ coverage.set_version_id }}</strong>.
+        {% else %}
+          Measuring the live approved bank.
+        {% endif %}
+        A cell needs {{ coverage.minimum_per_cell }} questions: a served question drops to the
+        lowest priority, so a cell holding one repeats it immediately.
+      </p>
+
+      <dl class="kv">
+        <dt>Approved questions</dt>
+        <dd>{{ coverage.question_count }}</dd>
+        <dt>Cells</dt>
+        <dd>{{ coverage.total_cells }} ({{ coverage.subtopics | length }} subtopics × 3)</dd>
+        <dt>Empty</dt>
+        <dd>{{ coverage.empty_cells }}</dd>
+        <dt>Thin</dt>
+        <dd>{{ coverage.thin_cells }}</dd>
+      </dl>
+
+      {% if coverage.is_ready %}
+        <p role="status">
+          <span class="status status-ok">ready</span>
+          Every subtopic has at least {{ coverage.minimum_per_cell }} questions at every difficulty.
+        </p>
+      {% elif coverage.is_servable %}
+        <p role="status">
+          <span class="status status-warn">servable, but thin</span>
+          No cell is empty, so the engine can always find a question.
+          {{ coverage.thin_cells }} cell{{ "" if coverage.thin_cells == 1 else "s" }} hold fewer than
+          {{ coverage.minimum_per_cell }}, so a student meets the same question again quickly.
+        </p>
+      {% else %}
+        <p role="status">
+          <span class="status status-bad">not ready</span>
+          {{ coverage.empty_cells }} cell{{ "" if coverage.empty_cells == 1 else "s" }} have no
+          question at all. The engine can select those and find nothing.
+        </p>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  {% if coverage.empty_cells %}
+    <section class="panel" id="gaps">
+      <h2>Gaps to fill</h2>
+      <p class="note">
+        In taxonomy order. Note that the generator chooses its own topic and subtopics (ADR-031):
+        you select a chunk, a difficulty and a question type, and the generator classifies what it
+        wrote. So a gap is filled by generating from a chunk that teaches that subtopic, then
+        checking what the generator claimed — not by requesting the subtopic directly.
+      </p>
+      <table class="table">
+        <thead>
+          <tr><th>Topic</th><th>Subtopic</th><th>Difficulty</th></tr>
+        </thead>
+        <tbody>
+          {% for row in coverage.subtopics %}
+            {% for cell in row.cells %}
+              {% if cell.state == "empty" %}
+                <tr>
+                  <td>{{ row.topic_name }}</td>
+                  <td>{{ row.subtopic_name }}</td>
+                  <td><span class="status status-bad">{{ cell.difficulty }}</span></td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+
+  {% if coverage.subtopics %}
+    <section class="panel" id="grid">
+      <h2>The grid</h2>
+      <table class="table">
+        <thead>
+          <tr><th>Topic</th><th>Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th></tr>
+        </thead>
+        <tbody>
+          {% for row in coverage.subtopics %}
+            <tr>
+              <td>{{ row.topic_name }}</td>
+              <td>{{ row.subtopic_name }}</td>
+              {% for cell in row.cells %}
+                <td>
+                  {% if cell.state == "empty" %}
+                    <span class="status status-bad">0</span>
+                  {% elif cell.state == "thin" %}
+                    <span class="status status-warn">{{ cell.count }}</span>
+                  {% else %}
+                    <span class="status status-ok">{{ cell.count }}</span>
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="note">
+        A question may claim up to three subtopics, so one question can fill a cell in three rows.
+        That is correct: the engine would find it under each of them.
+      </p>
+    </section>
+  {% endif %}
+
+  <section class="panel" id="sets">
+    <h2>Frozen question sets</h2>
+    <p class="note">
+      A training run must be reproducible, and the bank keeps growing. A set is a snapshot of the
+      approved questions at one moment. It is never edited — correcting a set means freezing the
+      next one.
+    </p>
+
+    {% if question_sets %}
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>Label</th><th>Frozen</th><th>Now</th><th>Taxonomy</th>
+              <th>When</th><th>Coverage</th></tr>
+        </thead>
+        <tbody>
+          {% for entry in question_sets %}
+            <tr>
+              <td>{{ entry.id }}</td>
+              <td>{{ entry.label }}</td>
+              <td>{{ entry.question_count }}</td>
+              <td>
+                {% if entry.member_count != entry.question_count %}
+                  <span class="status status-bad">{{ entry.member_count }}</span>
+                {% else %}
+                  {{ entry.member_count }}
+                {% endif %}
+              </td>
+              <td>{{ entry.curriculum_version_id or "—" }}</td>
+              <td>{{ entry.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+              <td><a href="/coverage?set_version_id={{ entry.id }}">Measure this set</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if selected_set_id %}
+        <p class="note"><a href="/coverage">← Back to the live bank</a></p>
+      {% endif %}
+    {% else %}
+      <p class="empty">No question set has been frozen yet.</p>
+    {% endif %}
+
+    <form class="upload-form" action="/coverage/sets" method="post">
+      <label for="set-label">Label</label>
+      <input id="set-label" name="label" type="text" required maxlength="200"
+             placeholder="e.g. Autumn 2026 cohort">
+      <label for="set-notes">Notes</label>
+      <input id="set-notes" name="notes" type="text" maxlength="500">
+      <button class="button" type="submit">Freeze the approved questions</button>
+      <p class="hint">
+        Takes every currently approved question of the approved curriculum. Freezing a set that is
+        not ready is allowed — the grid above says what it would be missing.
+      </p>
+    </form>
+  </section>
+
+  {{ deferred("Planned for this section", [
+    "Create an adaptive training link from a frozen question set.",
+    "Serve questions to students by weakness-weighted subtopic selection, then difficulty, then priority.",
+    "Report per-set item statistics once students have answered.",
+  ]) }}
+{% endblock %}

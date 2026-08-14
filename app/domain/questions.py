@@ -16,7 +16,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.enums import Difficulty, GeneratorKind, QuestionKind, QuestionStatus, QuestionType
+from app.domain.enums import (
+    ClaimViolation,
+    Difficulty,
+    GeneratorKind,
+    QuestionKind,
+    QuestionStatus,
+    QuestionType,
+)
 
 #: Priority given to a question that has just been served. Lower is served later;
 #: the adaptive engine picks the highest-priority candidate for a subtopic and
@@ -71,6 +78,47 @@ class QuestionValidationReport(BaseModel):
         return QuestionStatus.VALIDATION_PASSED if self.passed else QuestionStatus.VALIDATION_FAILED
 
 
+class GenerationAttempt(BaseModel):
+    """One model call that tried to produce this question (ADR-032).
+
+    A question that took three attempts is one question with three attempts, not
+    three questions: separate rows would fill the bank with drafts that every
+    later query would have to learn to exclude, and the adaptive engine has no
+    use for a draft that was never valid.
+
+    The claim is recorded as the model made it, duplicates and non-existent ids
+    included, because it is the evidence for how this generator fails. What
+    actually reached the columns is narrower -- see
+    :class:`~app.generation.spec.TaxonomyClaimOutcome`.
+    """
+
+    number: int = Field(ge=1)
+    #: ``None`` when the reply could not be read as a question at all, so there
+    #: was no claim to record. See :attr:`malformed`.
+    claimed_topic_id: int | None = None
+    claimed_subtopic_ids: list[int] = Field(default_factory=list)
+    violations: list[ClaimViolation] = Field(default_factory=list)
+    #: The refusal in one sentence, as it was put back to the model on retry.
+    detail: str | None = None
+    #: Deterministic checks this attempt failed. A retry is triggered by either a
+    #: refused claim or a failed check, so without these an attempts table would
+    #: show three accepted claims and no reason the first two were rejected.
+    failed_checks: list[QuestionCheck] = Field(default_factory=list)
+    #: The model answered with something that was not a question -- most often the
+    #: schema of the draft rather than an instance of it. Recorded rather than
+    #: swallowed: ADR-020 objects to bad answers being *silently* re-prompted, not
+    #: to them being retried.
+    malformed: bool = False
+    accepted: bool
+    #: Provenance of the call, so a claim can be read against the model that made it.
+    model: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        """Whether this attempt was good enough to stop retrying."""
+        return self.accepted and not self.failed_checks and not self.malformed
+
+
 class Question(BaseModel):
     """An assessment question grounded in approved curriculum subtopics."""
 
@@ -104,6 +152,10 @@ class Question(BaseModel):
     content: dict[str, Any] | None = None
     #: Deterministic validation outcome, for display and review.
     validation_report: QuestionValidationReport | None = None
+    #: Every model call that tried to produce this question, oldest first. Empty
+    #: for questions generated before ADR-032, which is what
+    #: :mod:`app.validation` reads to leave those reports unchanged.
+    generation_attempts: list[GenerationAttempt] = Field(default_factory=list)
     #: LLM pedagogical evaluation. Left as a plain object because its shape is
     #: owned by :mod:`app.evaluation`, which the domain must not import.
     pedagogical_eval: dict[str, Any] | None = None

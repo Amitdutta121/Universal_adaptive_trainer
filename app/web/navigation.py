@@ -46,10 +46,22 @@ NAV_SECTIONS: tuple[NavSection, ...] = (
         summary="The approve / reject / edit history that teaches the generator your preferences.",
     ),
     NavSection(
-        key="preferences",
-        label="Preferences",
-        path="/preferences",
-        summary="Learned professor preferences from review history (manual refresh).",
+        key="instructions",
+        label="Instructions",
+        path="/instructions",
+        summary="What the generator is told for each question type, learned from your reviews.",
+    ),
+    NavSection(
+        key="judges",
+        label="Judges",
+        path="/judges",
+        summary="The four advisory reviewers, and the prompt each one follows.",
+    ),
+    NavSection(
+        key="coverage",
+        label="Coverage",
+        path="/coverage",
+        summary="Whether the approved questions cover every subtopic at every difficulty.",
     ),
     NavSection(
         key="students",

@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.calibration import (
     CalibrationLabel,
@@ -22,8 +22,12 @@ from app.calibration import (
     CalibrationReport,
     DifficultyConfusion,
     MetricAgreement,
+    QuadrantCell,
+    QuadrantCounts,
     SubtopicConfusion,
+    TypeCalibration,
 )
+from app.coverage import CoverageReport, SubtopicCoverage
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
 from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
 from app.domain.enums import (
@@ -35,8 +39,7 @@ from app.domain.enums import (
     EvaluationTrigger,
     GeneratorKind,
     JudgeBatchStatus,
-    PreferenceCategory,
-    PreferenceConfirmationState,
+    JudgeMetricId,
     QuestionKind,
     QuestionStatus,
     QuestionType,
@@ -47,23 +50,21 @@ from app.domain.enums import (
     StructureSource,
 )
 from app.domain.feedback import REJECTION_REASON_LABELS
-from app.domain.questions import QuestionCheck
+from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
 from app.persistence.models import (
     BookRow,
     CurriculumVersionRow,
     JudgeBatchRunRow,
-    PreferenceStatementRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
+    QuestionSetVersionRow,
+    ReviewOutcomeRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
 )
-
-#: Which generator a generation request should use.
-GeneratorChoice = Literal["base", "personalized"]
 
 
 class EnumOption(BaseModel):
@@ -116,7 +117,6 @@ class ConfigResponse(BaseModel):
     question_statuses: list[EnumOption]
     review_decisions: list[EnumOption]
     rejection_reasons: list[EnumOption]
-    generators: list[EnumOption]
 
     @classmethod
     def build(
@@ -151,10 +151,6 @@ class ConfigResponse(BaseModel):
             question_statuses=_options(QuestionStatus),
             review_decisions=_options(ReviewDecision),
             rejection_reasons=_options(RejectionReason, REJECTION_REASON_LABELS),
-            generators=[
-                EnumOption(value="base", label="Base"),
-                EnumOption(value="personalized", label="Personalized"),
-            ],
         )
 
 
@@ -165,7 +161,8 @@ class CountsResponse(BaseModel):
     curriculum_versions: int
     questions: int
     reviews: int
-    preferences: int
+    #: Question types with an instruction learned from reviews (ADR-033).
+    learned_instructions: int
     students: int
 
 
@@ -466,6 +463,40 @@ class SubtopicParent(BaseModel):
 # ------------------------------------------------------------------------ questions
 
 
+class InstructionStamp(BaseModel):
+    """Which type instruction produced a question (ADR-040).
+
+    ``generator_label`` names the code path and is always ``base@1``; this names
+    the text. Two questions with the same label and different fingerprints were
+    written from different instructions.
+    """
+
+    source: Literal["learned", "shipped"]
+    fingerprint: str
+    rule_count: int
+    review_count: int
+
+    @classmethod
+    def from_context(cls, payload: dict[str, Any] | None) -> InstructionStamp | None:
+        """Read the stamp, or ``None`` for a question generated before ADR-040.
+
+        Absent is not "shipped": a question written before the stamp existed
+        could have used either, and claiming one would be an invention.
+        """
+        entry = (payload or {}).get("type_instruction")
+        if not isinstance(entry, dict):
+            return None
+        source = entry.get("source")
+        if source not in ("learned", "shipped"):
+            return None
+        return cls(
+            source=source,
+            fingerprint=str(entry.get("fingerprint", "")),
+            rule_count=int(entry.get("rule_count", 0)),
+            review_count=int(entry.get("review_count", 0)),
+        )
+
+
 class QuestionSummary(BaseModel):
     """One generated question, without its solution, tests or reports."""
 
@@ -482,6 +513,9 @@ class QuestionSummary(BaseModel):
     generator_name: str
     generator_version: str
     generator_label: str
+    #: Which instruction wrote it (ADR-040). ``None`` for a question generated
+    #: before the stamp existed.
+    instruction: InstructionStamp | None
     validation_passed: bool | None
     priority: int
     times_used: int
@@ -506,10 +540,14 @@ class QuestionSummary(BaseModel):
             generator_name=row.generator_name,
             generator_version=row.generator_version,
             generator_label=f"{row.generator_name}@{row.generator_version}",
+            instruction=InstructionStamp.from_context(row.personalization_context),
             validation_passed=report.passed if report is not None else None,
             priority=row.priority,
             times_used=row.times_used,
-            is_edited=row.original_prompt is not None,
+            # Whether the professor changed the text, not whether an original was
+            # recorded: ``original_prompt`` is seeded on every generated question,
+            # so testing it for None reported every question as edited.
+            is_edited=row.prompt != row.original_prompt,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -545,6 +583,10 @@ class QuestionDetail(BaseModel):
     taxonomy: QuestionTaxonomy
     validation_passed: bool | None
     validation_checks: list[QuestionCheck]
+    #: Every model call that tried to produce this question, oldest first
+    #: (ADR-032). More than one means a classification was refused and retried;
+    #: a last entry with ``accepted`` false is why the question failed validation.
+    generation_attempts: list[GenerationAttempt]
     pedagogical_eval: PedagogicalEvaluation | None
     pedagogical_error_message: str | None
     personalization: PersonalizationEvidence | None
@@ -556,8 +598,12 @@ class QuestionDetail(BaseModel):
 
 class QuestionListResponse(BaseModel):
     questions: list[QuestionSummary]
+    #: Always the whole bank, so a filtered listing still reports what it omitted.
     status_counts: dict[str, int]
     total: int
+    #: The status filter that produced ``questions``, echoed back so a client can
+    #: tell a narrowed listing from a bank that happens to hold only these rows.
+    status: QuestionStatus | None = None
 
 
 #: Which unreviewed questions the review queue offers. ``scoreable`` restricts
@@ -598,7 +644,6 @@ class GenerateQuestionsRequest(BaseModel):
     book_id: int | None = None
     section_ids: list[int] | None = None
     all_sections_of_book: bool = False
-    generator: GeneratorChoice = "base"
     seed: str | None = None
 
 
@@ -606,6 +651,52 @@ class GenerateQuestionsResponse(BaseModel):
     created: int
     question_ids: list[int]
     questions: list[QuestionSummary]
+
+
+class GenerationPlanSection(BaseModel):
+    """One candidate source section, and what generating from it would mean."""
+
+    section: SectionSummary
+    #: How many questions this section has already produced. Re-generating is
+    #: allowed; the count is here so it is a decision rather than an accident.
+    existing_question_count: int
+    selected: bool
+    #: False for a section with no text: the generator would receive nothing, so
+    #: the UI disables it rather than letting the run fail one call in.
+    selectable: bool
+
+
+class GenerationPlanChapter(BaseModel):
+    """One chapter, and the candidate sections beneath it."""
+
+    id: int
+    label: str
+    location_label: str | None
+    sections: list[GenerationPlanSection]
+
+
+class GenerationPlanTotals(BaseModel):
+    """What the selected run costs, before any model call is made."""
+
+    sections_available: int
+    sections_selected: int
+    questions_to_create: int
+    generation_calls: int
+    #: ``sections_selected`` times the number of advisory metrics, because the
+    #: judge makes one call per metric per question (ADR-031).
+    judge_calls: int
+    source_chars: int
+
+
+class GenerationPlanResponse(BaseModel):
+    """The chunk plan: every candidate section, and the cost of the selection."""
+
+    book: BookSummary
+    chapters: list[GenerationPlanChapter]
+    totals: GenerationPlanTotals
+    #: Selected sections that cannot be generated from, named so the professor
+    #: can deselect them rather than discovering the problem mid-run.
+    blockers: list[str]
 
 
 # ------------------------------------------------------------------------- feedback
@@ -627,6 +718,66 @@ class ReviewRequest(BaseModel):
     professor_id: int | None = None
 
 
+class ReviewOutcomeOut(BaseModel):
+    """What the system did with one review the moment it landed (ADR-037)."""
+
+    cell: QuadrantCell
+    judge: CalibrationLabel
+    professor: CalibrationLabel
+    #: The judges at fault. Empty means no single judge accounts for it.
+    attributed_metrics: list[JudgeMetricId]
+    attributed_labels: list[str]
+    held_out: bool
+    #: What the cell calls for, stated rather than left for the client to map.
+    action: str
+    #: Only the confirmed-bad cell relearns the generator, and only if the model
+    #: answered.
+    instruction_refreshed: bool = False
+    refresh_error: str | None = None
+    refresh_rule_count: int | None = None
+    #: The judges relearned from this disagreement (ADR-039). Only the two
+    #: disagreeing cells ever fill this.
+    judges_refreshed: list[JudgeMetricId] = Field(default_factory=list)
+
+    @classmethod
+    def from_row(cls, row: ReviewOutcomeRow) -> ReviewOutcomeOut:
+        metrics = list(row.attributed_metrics or [])
+        return cls(
+            cell=row.cell,
+            judge=row.judge,
+            professor=row.professor,
+            attributed_metrics=metrics,
+            attributed_labels=[metric.value.replace("_", " ") for metric in metrics],
+            held_out=row.held_out,
+            action=CELL_ACTIONS[row.cell],
+            instruction_refreshed=row.instruction_refreshed,
+            refresh_error=row.refresh_error,
+            judges_refreshed=list(row.judges_refreshed or []),
+        )
+
+
+#: What each cell calls for, in the professor's terms. One sentence per cell,
+#: published in the API so a client states the rule instead of reinventing it.
+CELL_ACTIONS: dict[QuadrantCell, str] = {
+    QuadrantCell.CONFIRMED_GOOD: (
+        "Both accepted. Kept as evidence that would earn auto-acceptance for this type."
+    ),
+    QuadrantCell.MISSED: (
+        "Two things went wrong: the generator wrote a question you would not keep, and the "
+        "judge passed it. So this type's instruction relearns and the named judge relearns. "
+        "The only cell that makes auto-acceptance unsafe."
+    ),
+    QuadrantCell.FALSE_ALARM: (
+        "The judge flagged a question you approved, so the named judge relearns. This costs "
+        "review time, never a student."
+    ),
+    QuadrantCell.CONFIRMED_BAD: (
+        "The judge was right and the question was not good enough. The generator is what "
+        "to fix, so this type's instruction is relearned from your reviews."
+    ),
+}
+
+
 class ReviewOut(BaseModel):
     """One immutable review record."""
 
@@ -642,6 +793,9 @@ class ReviewOut(BaseModel):
     reviewed_generator_version: str | None
     generator_label: str
     created_at: datetime
+    #: Absent when the question carried no completed judge evaluation, so there
+    #: was no judge verdict for this review to agree or disagree with.
+    outcome: ReviewOutcomeOut | None = None
 
     @classmethod
     def from_row(cls, row: ProfessorReviewRow) -> ReviewOut:
@@ -685,56 +839,119 @@ class ReviewListResponse(BaseModel):
     total: int
 
 
-# ---------------------------------------------------------------------- preferences
+# ----------------------------------------------------------------- judge prompts
 
 
-class PreferenceOut(BaseModel):
-    """One inferred preference statement and the evidence behind it."""
+class JudgePromptOut(BaseModel):
+    """One metric judge's system prompt, shipped or professor-edited (ADR-038)."""
 
-    id: int
-    rule_text: str
-    category: PreferenceCategory
-    category_label: str
+    metric: JudgeMetricId
+    label: str
+    #: The text this judge runs now.
+    system_prompt: str
+    #: The text it would run with no override, so the page can offer a revert
+    #: and show what was changed away from.
+    shipped_prompt: str
+    edited: bool
+    #: True when a model wrote the text, false when the professor typed it.
+    learned: bool
+    #: The rules learned from disagreements and rendered onto the shipped prompt.
+    rules: list[str]
+    #: How many disagreements the current rules came from.
     evidence_count: int
-    confidence: float
-    supporting_review_ids: list[int]
-    active: bool
-    confirmation_state: PreferenceConfirmationState
-    profile_version: str
-    created_at: datetime
+    #: Disagreements available to learn from now, which is how a stale judge is
+    #: visible without re-reading the dataset.
+    available_disagreements: int
+    #: How often this judge has been rewritten. Informational: the rubric
+    #: version, not this counter, is what identifies the panel.
+    revision: int
+    note: str | None
     updated_at: datetime | None
 
+
+class JudgePromptListResponse(BaseModel):
+    prompts: list[JudgePromptOut]
+    #: The name the panel currently answers under. Every evaluation written from
+    #: now on carries it, which is what lets calibration separate a repaired
+    #: judge from the one it replaced.
+    rubric_version: str
+    shipped_rubric_version: str
+
+
+class JudgePromptRequest(BaseModel):
+    """A professor's replacement text for one judge."""
+
+    system_prompt: str = Field(min_length=1)
+    note: str | None = None
+
+    @field_validator("system_prompt")
     @classmethod
-    def from_row(cls, row: PreferenceStatementRow) -> PreferenceOut:
-        return cls(
-            id=row.id,
-            rule_text=row.rule_text,
-            category=row.category,
-            category_label=row.category.value.replace("_", " "),
-            evidence_count=row.evidence_count,
-            confidence=row.confidence,
-            supporting_review_ids=list(row.supporting_review_ids or []),
-            active=row.active,
-            confirmation_state=row.confirmation_state,
-            profile_version=row.profile_version,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+    def _must_say_something(cls, value: str) -> str:
+        """Refuse whitespace. A blank prompt would silently disable a judge.
+
+        ``min_length`` alone accepts "   ", which the route then strips to
+        nothing -- and a judge asked to answer with no instruction returns
+        whatever it likes while still reporting a verdict.
+        """
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("A judge prompt must not be blank.")
+        return stripped
 
 
-class PreferenceListResponse(BaseModel):
-    preferences: list[PreferenceOut]
-    total: int
-    active_count: int
+class JudgePromptSaveResponse(BaseModel):
+    prompt: JudgePromptOut
+    rubric_version: str
+    #: True when the save changed the panel's identity, which is the normal case.
+    #: False means the submitted text equals what was already in force.
+    rubric_version_changed: bool
 
 
-class PreferenceRefreshResponse(BaseModel):
-    refreshed: int
-    preferences: list[PreferenceOut]
+class JudgePromptRefreshResponse(BaseModel):
+    """What one learned judge repair did (ADR-039)."""
+
+    prompt: JudgePromptOut
+    rubric_version: str
+    rubric_version_changed: bool
+    #: False when no attributable disagreement exists yet, so nothing was learned
+    #: and the prompt is unchanged.
+    learned: bool
+    rule_count: int
+    evidence_count: int
 
 
-class CorrectPreferenceRequest(BaseModel):
-    rule_text: str = Field(min_length=1)
+# ------------------------------------------------------------- type instructions
+
+
+class TypeInstructionOut(BaseModel):
+    """What the generator is told for one question type (ADR-033).
+
+    ``learned`` distinguishes an instruction built from reviews from the shipped
+    default, so a professor can see at a glance which types their feedback has
+    actually reached. ``available_reviews`` is how many reviews a refresh would
+    draw on now, which is what makes a stale instruction visible.
+    """
+
+    question_type: QuestionType
+    instruction: str
+    rules: list[str]
+    learned: bool
+    review_count: int
+    available_reviews: int
+    updated_at: datetime | None
+
+
+class TypeInstructionListResponse(BaseModel):
+    instructions: list[TypeInstructionOut]
+
+
+class TypeInstructionRefreshResponse(BaseModel):
+    question_type: QuestionType
+    #: False when the type has no reviews yet, leaving the shipped text in place.
+    learned: bool
+    rule_count: int
+    review_count: int
+    instruction: str
 
 
 # ---------------------------------------------------------------------- calibration
@@ -754,6 +971,13 @@ class CalibrationResultsResponse(BaseModel):
     agreement: float | None
     auto_accept_precision: float | None
     unsafe_auto_accept_rate: float | None
+    #: The same pairs split four ways. ``missed`` is the only cell that makes
+    #: auto-acceptance unsafe, so it is published beside the rate that hides
+    #: it inside a denominator (ADR-034).
+    quadrant: QuadrantCounts
+    #: Every judge version behind these figures. More than one entry means the
+    #: report describes two judges and cannot be read as a property of either.
+    rubric_versions: list[str]
     #: Agreement per metric, and the two confusion tables. Present because the
     #: judge and the professor now share one vocabulary, so "how often did the
     #: subtopic reviewer agree" is answerable rather than inferred (ADR-031).
@@ -769,6 +993,8 @@ class CalibrationResultsResponse(BaseModel):
             agreement=report.agreement,
             auto_accept_precision=report.auto_accept_precision,
             unsafe_auto_accept_rate=report.unsafe_auto_accept_rate,
+            quadrant=report.quadrant,
+            rubric_versions=report.rubric_versions,
             metrics=report.metrics,
             subtopic_confusions=report.subtopic_confusions,
             difficulty_confusions=report.difficulty_confusions,
@@ -787,6 +1013,19 @@ class CalibrationPairOut(BaseModel):
     judge: CalibrationLabel
     professor: CalibrationLabel
     agrees: bool
+    #: Which of the four outcomes this pair is (ADR-034).
+    cell: QuadrantCell
+    question_type: QuestionType | None
+    rubric_version: str | None
+    #: Reserved for scoring a repaired judge, so absent from the repair lists
+    #: (ADR-035).
+    held_out: bool
+    #: The judges that passed this question while the professor objected, and
+    #: those that failed it while the professor did not. Empty when no single
+    #: judge can be held responsible -- which is the honest answer, not a
+    #: reason to name the nearest one.
+    missed_metrics: list[JudgeMetricId]
+    false_alarm_metrics: list[JudgeMetricId]
 
     @classmethod
     def from_pair(cls, pair: CalibrationPair) -> CalibrationPairOut:
@@ -795,12 +1034,57 @@ class CalibrationPairOut(BaseModel):
             judge=pair.judge,
             professor=pair.professor,
             agrees=pair.agrees,
+            cell=pair.cell,
+            question_type=pair.question_type,
+            rubric_version=pair.rubric_version,
+            held_out=pair.held_out,
+            missed_metrics=pair.missed_metrics,
+            false_alarm_metrics=pair.false_alarm_metrics,
         )
 
 
 class CalibrationPairsResponse(BaseModel):
     pairs: list[CalibrationPairOut]
     total: int
+
+
+class TypeCalibrationOut(BaseModel):
+    """One question type's four-cell report (ADR-034).
+
+    The type is the unit a professor would authorise, because the instruction
+    the generator follows is per type (ADR-033). A pooled figure describes a
+    mixture of generators and authorises none of them.
+    """
+
+    question_type: QuestionType | None
+    report: CalibrationResultsResponse
+    #: The same arithmetic over held-out pairs only (ADR-035): what a repaired
+    #: judge is scored on, as opposed to what a repair is allowed to read.
+    check_report: CalibrationResultsResponse
+    pairs: list[CalibrationPairOut]
+
+    @classmethod
+    def from_type_calibration(cls, calibration: TypeCalibration) -> TypeCalibrationOut:
+        return cls(
+            question_type=calibration.question_type,
+            report=CalibrationResultsResponse.from_report(calibration.report),
+            check_report=CalibrationResultsResponse.from_report(calibration.check_report),
+            pairs=[CalibrationPairOut.from_pair(pair) for pair in calibration.pairs],
+        )
+
+
+class CalibrationQuadrantResponse(BaseModel):
+    """The four-cell breakdown, whole-corpus and per question type."""
+
+    overall: CalibrationResultsResponse
+    types: list[TypeCalibrationOut]
+    #: Judges whose fault can never be attributed, because the professor's
+    #: vocabulary has no reason that contradicts them. Stated rather than
+    #: silently omitted.
+    unattributable_metrics: list[JudgeMetricId]
+    #: One question in this many is held out. Published so a client can state
+    #: the rule rather than infer it from which ids happen to be flagged.
+    held_out_divisor: int
 
 
 # ------------------------------------------------------------------ evaluation
@@ -954,6 +1238,91 @@ class PollBatchRunResponse(BaseModel):
             failed=result.failed,
             already_recorded=result.already_recorded,
         )
+
+
+# -------------------------------------------------------------------- coverage
+
+
+class CoverageReportResponse(BaseModel):
+    """The subtopic x difficulty grid, and what it means (ADR-036).
+
+    ``empty_cells`` and ``thin_cells`` stay separate: an empty cell is a request
+    the adaptive engine cannot satisfy, a thin one is satisfied repetitively.
+    ``is_servable`` is the blocking condition; ``is_ready`` is the comfortable
+    one.
+    """
+
+    curriculum_version_id: int | None
+    curriculum_label: str | None
+    set_version_id: int | None
+    minimum_per_cell: int
+    question_count: int
+    total_cells: int
+    empty_cells: int
+    thin_cells: int
+    is_servable: bool
+    is_ready: bool
+    subtopics: list[SubtopicCoverage]
+
+    @classmethod
+    def from_report(cls, report: CoverageReport) -> CoverageReportResponse:
+        return cls(
+            curriculum_version_id=report.curriculum_version_id,
+            curriculum_label=report.curriculum_label,
+            set_version_id=report.set_version_id,
+            minimum_per_cell=report.minimum_per_cell,
+            question_count=report.question_count,
+            total_cells=report.total_cells,
+            empty_cells=report.empty_cells,
+            thin_cells=report.thin_cells,
+            is_servable=report.is_servable,
+            is_ready=report.is_ready,
+            subtopics=report.subtopics,
+        )
+
+
+class QuestionSetOut(BaseModel):
+    """One frozen set of approved questions.
+
+    ``question_count`` is what was frozen; ``member_count`` is what is still
+    there. They differ only if a member question was deleted, and publishing
+    both is what makes that visible rather than silently rewriting the set's
+    size.
+    """
+
+    id: int
+    label: str
+    notes: str | None
+    curriculum_version_id: int | None
+    question_count: int
+    member_count: int
+    created_at: datetime
+    question_ids: list[int]
+
+    @classmethod
+    def from_row(cls, row: QuestionSetVersionRow) -> QuestionSetOut:
+        return cls(
+            id=row.id,
+            label=row.label,
+            notes=row.notes,
+            curriculum_version_id=row.curriculum_version_id,
+            question_count=row.question_count,
+            member_count=len(row.members),
+            created_at=row.created_at,
+            question_ids=[member.question_id for member in row.members],
+        )
+
+
+class QuestionSetListResponse(BaseModel):
+    sets: list[QuestionSetOut]
+    total: int
+
+
+class CreateQuestionSetRequest(BaseModel):
+    """Freeze the currently approved questions under a name."""
+
+    label: str = Field(min_length=1, max_length=200)
+    notes: str | None = None
 
 
 SubtopicDetail.model_rebuild()

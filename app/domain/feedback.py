@@ -31,6 +31,44 @@ REJECTION_REASON_LABELS: dict[RejectionReason, str] = {
 }
 
 
+#: Characters of an edited field quoted as evidence to a rewriter.
+EDIT_SNIPPET_CHARS = 240
+
+
+def professor_edits(
+    *,
+    changed_fields: list[str],
+    edited_prompt: str | None,
+    edited_reference_solution: str | None,
+    edited_tests: str | None,
+    limit: int = EDIT_SNIPPET_CHARS,
+) -> dict[str, str]:
+    """The fields the professor actually rewrote, and what they became.
+
+    Keyed on ``changed_fields``, which :func:`app.feedback.submit_review` derives
+    by comparing the submission with the stored question. An edit form submits
+    all three fields whether or not they changed, so quoting ``edited_prompt``
+    unconditionally shows a rewriter text identical to the original and hides the
+    field that really moved: a professor who fixed only the tests would appear to
+    have rewritten the prompt into itself, and the tests would never be
+    mentioned.
+
+    Pure, and shared by both rewriters (the generator's and the judges'), because
+    the two must read one professor edit the same way.
+    """
+    values = {
+        "prompt": edited_prompt,
+        "reference_solution": edited_reference_solution,
+        "tests": edited_tests,
+    }
+    edits = {}
+    for field in changed_fields:
+        value = (values.get(field) or "").strip()
+        if value:
+            edits[field] = value[:limit]
+    return edits
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 

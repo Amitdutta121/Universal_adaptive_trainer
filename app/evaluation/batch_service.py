@@ -37,7 +37,8 @@ from app.config import Settings, get_settings
 from app.domain.enums import EvaluationTrigger, JudgeBatchStatus, JudgeMetricId
 from app.domain.questions import Question
 from app.errors import AdaptiveTrainerError, ConfigurationError, DomainRuleError
-from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR, build_user_prompt
+from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
+from app.evaluation.prompts import RUBRIC_VERSION, build_user_prompt
 from app.evaluation.schema import (
     RESPONSE_MODEL_FOR,
     MetricResult,
@@ -293,7 +294,7 @@ def submit_bank_rerun(
             provider_batch_ids=batch_ids,
             status=JudgeBatchStatus.SUBMITTED,
             model=settings.judge_batch_route,
-            rubric_version=RUBRIC_VERSION,
+            rubric_version=effective_rubric_version(session),
             submitted_at=_now(),
             question_count=submitted,
         )
@@ -318,6 +319,7 @@ def _build_request_items(
     provider job: they share a response schema, and a job may only carry one.
     """
     items: dict[JudgeMetricId, list[BatchRequestItem]] = {metric: [] for metric in JudgeMetricId}
+    prompts = resolve_system_prompts(session)
     skipped = 0
     for row in questions:
         try:
@@ -330,7 +332,7 @@ def _build_request_items(
             items[metric].append(
                 BatchRequestItem(
                     custom_id=batch_transport.build_custom_id(run_id, row.id, metric.value),
-                    system=SYSTEM_PROMPT_FOR[metric],
+                    system=prompts[metric],
                     prompt=build_user_prompt(metric, context),
                 )
             )
@@ -411,6 +413,10 @@ def poll_and_ingest(
             by_metric,
             question=Question.model_validate(question),
             settings=settings,
+            # The panel this run was *submitted* with, not the one in force now:
+            # a professor may have edited a judge while the batch was in flight,
+            # and these answers came from the older prompts (ADR-038).
+            rubric_version=run.rubric_version or RUBRIC_VERSION,
         )
         record_evaluation(
             session,
@@ -479,6 +485,7 @@ def _evaluation_from_lines(
     *,
     question: Question,
     settings: Settings,
+    rubric_version: str = RUBRIC_VERSION,
 ) -> PedagogicalEvaluation:
     """Turn one question's result lines into an evaluation, never raising.
 
@@ -491,7 +498,12 @@ def _evaluation_from_lines(
         _metric_from_line(metric, by_metric.get(metric), question=question)
         for metric in JudgeMetricId
     ]
-    return evaluation_from_metrics(metrics, question_id=question.id, judge_model=judge_model)
+    return evaluation_from_metrics(
+        metrics,
+        question_id=question.id,
+        judge_model=judge_model,
+        rubric_version=rubric_version,
+    )
 
 
 def _metric_from_line(

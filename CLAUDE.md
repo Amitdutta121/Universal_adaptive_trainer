@@ -18,8 +18,8 @@ A professor should eventually be able to:
    generator itself classifies into the approved taxonomy (ADR-031);
 6. have those questions validated automatically, then reviewed by four advisory metric judges;
 7. approve, reject or edit generated questions;
-8. have the system learn the professor's preferences from those reviews;
-9. progressively receive questions that better match those preferences;
+8. have the system learn, per question type, the instruction the generator follows (ADR-033);
+9. progressively receive questions that better match those requirements;
 10. later optimize the generator using accumulated feedback.
 
 ### B. Student adaptive-training system
@@ -73,12 +73,23 @@ bank.
 
 ## Fixed generation and evaluation decisions
 
-**Settled. See `docs/DECISIONS.md` ADR-031 for the reasoning.**
+**Settled. See `docs/DECISIONS.md` ADR-031 and ADR-032 for generation and judging, and ADR-037 to
+ADR-039 for what a submitted review then does.**
 
 - The professor selects a **chunk, a difficulty and a question type**. The **generator** chooses the
   topic and subtopics, from the whole approved taxonomy, and its claim is validated after the call.
 - A question claims **one topic and up to three of its subtopics**, stored in `question_subtopics`.
   Subtopics from two different topics are refused.
+- A defective question is **retried with the defect stated**, at most three generation calls per
+  section. Both a refused taxonomy claim and a failed deterministic check trigger it, so validation
+  runs *inside* the generation loop. The correction carries every defect raised so far, or the model
+  fixes the latest and reintroduces the previous one.
+- **Every generated question is kept** — the defective one included, marked `validation_failed` with
+  each attempt recorded on its row. The application never repairs the model's answer; it says what
+  was wrong and asks for a fresh one.
+- The **review queue offers only questions that passed deterministic validation.** A refused claim
+  has no verdict left for a professor to add, so it stays in the bank behind a status filter instead
+  of consuming review time.
 - Four advisory judges run per question, one model call each: **issues**, **subtopic**,
   **difficulty**, **generatability**. Each returns a value plus a rationale; `passed` is derived by
   comparing that value with what the generator claimed.
@@ -89,6 +100,33 @@ bank.
   question reaching the review queue.
 - The judge and the professor share one issue vocabulary (`RejectionReason`), which is what makes
   per-metric calibration a direct comparison rather than an inference.
+- Each submitted review is **routed to its quadrant cell as it lands** (ADR-037), not only when the
+  calibration page is opened. The cell is written to `review_outcomes` as a frozen record, and the
+  judges at fault are named on it.
+- **Two lessons can come from one review, and both are taken.** Whenever the professor did not
+  accept the question (`confirmed_bad` *and* `missed`), that type's instruction relearns. Whenever
+  the two sides disagreed (`missed` and `false_alarm`), the named judges relearn. A `missed` review
+  therefore teaches the generator and the judge at once — they are independent faults.
+- A review whose question carries no completed judge evaluation is **not placed**. There is no
+  verdict to disagree with, and the review page says "nothing was measured" rather than staying
+  silent.
+- **Judge prompts are editable** (ADR-038). The panel is named by a fingerprint of the four prompts
+  in force, so two different panels can never share a `rubric_version`. Saving never re-judges the
+  bank and never rewrites a stored verdict.
+- **A judge learns its own prompt** from the questions it got wrong (ADR-039), the exact mirror of
+  the generator's learned type instruction: a `missed` or `false_alarm` review relearns each judge it
+  names, rules accumulate, and they render *onto* the shipped prompt so the issue vocabulary and
+  difficulty bands cannot be lost. The held-out third (ADR-035) is excluded from that evidence. A
+  prompt the professor typed by hand is marked `learned=False` and is never overwritten.
+- **There is one generator, and every question is personalized.** `base@1` names the code path, not
+  the prompt. Which *instruction* wrote a question is recorded on it (ADR-040) as a fingerprint of
+  the text actually sent, so two questions written either side of a refresh stay distinguishable.
+  Absent means "generated before the stamp existed", never "shipped".
+- **Both learners read a professor edit the same way**, through `domain.feedback.professor_edits`:
+  the question quoted is `original_prompt` (what the model produced, never the correction), and only
+  the fields `changed_fields` says actually moved are quoted back as the correction. The edit form
+  submits all three fields regardless, so quoting them blindly shows a prompt rewritten into itself
+  and hides a professor who fixed only the tests.
 
 ## Fixed book-ingestion decisions
 
@@ -198,14 +236,20 @@ app/
     display.py          Safe display decoding for current and legacy rows
   generation/         Section-first base question generation    (IMPLEMENTED)
     spec.py           The request, and validation of the taxonomy the model claims. ADR-031.
-  validation/         Automatic question validation             (boundary only)
+  validation/         Automatic question validation             (IMPLEMENTED)
+    runner.py         The isolated subprocess test runner. ADR-023.
+    type_checks.py    The deterministic per-type checks.
   evaluation/         Four advisory metric judges per question  (IMPLEMENTED)
-    prompts.py        One system prompt and one payload per metric. ADR-031.
+    prompts.py        The shipped system prompt and payload per metric. ADR-031.
+    judge_prompts.py  Which prompt each judge runs, and the panel's name. ADR-038.
+    judge_learning.py A judge's prompt, learned from its own mistakes. ADR-039.
     schema.py         Verdicts, derived pass flags, and the counted gate. ADR-031.
     batch_service.py  Bulk async re-runs + retained evaluation history. ADR-030.
   feedback/           Professor approve/reject/edit records     (recording implemented)
+    outcomes.py       Placing a landed review in its quadrant cell. ADR-037.
   calibration/        Judge vs professor agreement, read-only   (IMPLEMENTED)
-  personalization/    Professor preference learning             (boundary only)
+  personalization/    Per-type instructions learned from reviews (IMPLEMENTED)
+    instructions.py   Rules accumulated per question type, rendered into the type slot. ADR-033.
   adaptive/           Student adaptive engine                   (boundary only, by instruction)
   llm/                All outbound LLM traffic                  (STRUCTURED OUTPUT IMPLEMENTED)
     client.py         Synchronous structured output via Instructor. ADR-020.

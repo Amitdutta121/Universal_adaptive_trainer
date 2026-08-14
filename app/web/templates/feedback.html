@@ -9,6 +9,32 @@
   {%- endif -%}
 {%- endmacro %}
 
+{% macro cell_list(slice, cell, heading, action, blame) %}
+  {# Held-out pairs are absent by design: reading them while rewriting a judge
+     prompt turns the check set into a second tuning set (ADR-035). #}
+  {% set rows = slice.pairs | selectattr("cell", "equalto", cell)
+                | rejectattr("held_out") | list %}
+  {% if rows %}
+    <h4>{{ heading }} <span class="muted">({{ rows | length }})</span></h4>
+    <p class="note">{{ action }}</p>
+    <ul class="checklist">
+      {% for pair in rows %}
+        <li>
+          <a href="/questions/{{ pair.question_id }}">#{{ pair.question_id }}</a>
+          {% if blame %}
+            {% set judges = pair.missed_metrics if blame == "missed" else pair.false_alarm_metrics %}
+            {% if judges %}
+              — {{ judges | map("replace", "_", " ") | join(", ") }}
+            {% else %}
+              — <span class="muted">no single reviewer accounts for this one</span>
+            {% endif %}
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endmacro %}
+
 {% block subheading %}
   <p class="lede">Professor reviews are the authority for professor preference. They are append-only.</p>
   <p><a class="button" href="/review">Start reviewing →</a></p>
@@ -149,6 +175,136 @@
         Excluded from the table and from every figure above: questions whose judge was skipped or
         errored, questions with no review yet, and any stored evaluation too old to still validate.
       </p>
+    {% endif %}
+  </section>
+
+  <section class="panel" id="quadrant">
+    <h2>What to repair</h2>
+    <p class="note">
+      The same measured questions, split four ways instead of two, and once per question type —
+      because the instruction the generator follows is per type, so a pooled figure describes seven
+      generators at once. Only <strong>missed</strong> makes auto-acceptance unsafe: it is the one
+      cell where the judge vouched for a question you would not have kept. A false alarm costs you
+      time, never a student. Raw JSON:
+      <a href="/api/calibration/quadrant"><code>/api/calibration/quadrant</code></a>.
+    </p>
+    <p class="note">
+      One question in {{ held_out_divisor }} is <strong>held back</strong> and does not appear in
+      any list below. Repair a reviewer by reading the lists, then score the repair on the held-back
+      questions. If you repair against every question you have, agreement rises because the prompt
+      has been fitted to them — which is not the same as the judge getting better.
+    </p>
+    <p class="note">
+      Each cell below was decided when you submitted the review and recorded then, so a later
+      re-judge cannot restate it. Rewrite a reviewer's prompt on the <a href="/judges">Judges</a>
+      page; that re-names the panel, so the figures after a repair stay separable from the ones
+      before it.
+    </p>
+
+    {% if quadrant.overall.n == 0 %}
+      <p class="empty">
+        Nothing is measured yet, so there is nothing to repair. Review some judged questions first.
+      </p>
+    {% else %}
+      {% if quadrant.overall.rubric_versions | length > 1 %}
+        <p class="note" role="status">
+          <span class="status status-warn">mixed judge versions</span>
+          These questions were judged by {{ quadrant.overall.rubric_versions | length }} different
+          rubric versions ({{ quadrant.overall.rubric_versions | join(", ") }}). The figures below
+          therefore describe more than one judge. Filter with
+          <code>?rubric_version=</code> to read one of them.
+        </p>
+      {% endif %}
+
+      {% for slice in quadrant.types %}
+        <h3>
+          {{ (slice.question_type | replace("_", " ") | capitalize) if slice.question_type
+             else "Type not recorded" }}
+          <span class="muted">— {{ slice.report.n }} measured</span>
+        </h3>
+
+        <table class="table">
+          <thead>
+            <tr><th></th><th>Judge accepted</th><th>Judge did not accept</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">You approved</th>
+              <td><span class="status status-ok">good</span> {{ slice.report.quadrant.confirmed_good }}</td>
+              <td><span class="status">false alarm</span> {{ slice.report.quadrant.false_alarm }}</td>
+            </tr>
+            <tr>
+              <th scope="row">You rejected or edited</th>
+              <td><span class="status status-bad">missed</span> {{ slice.report.quadrant.missed }}</td>
+              <td><span class="status status-ok">caught</span> {{ slice.report.quadrant.confirmed_bad }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="note">
+          Auto-accept precision for this type: {{ rate(slice.report.auto_accept_precision) }}
+          of {{ slice.report.judge_accept_count }} accepted.
+          {% if slice.report.n < min_informative_sample %}
+            <span class="status status-warn">small sample</span>
+            {{ slice.report.n }} of the {{ min_informative_sample }} these rates would need.
+          {% endif %}
+        </p>
+
+        <p class="note">
+          <strong>Held back:</strong> {{ slice.check_report.n }} of {{ slice.report.n }}. These are
+          not in the lists below. Repair a reviewer using the lists, then read this figure to see
+          whether the repair worked:
+          <strong>{{ rate(slice.check_report.auto_accept_precision) }}</strong>
+          of {{ slice.check_report.judge_accept_count }} accepted.
+          {% if slice.check_report.n < min_informative_sample %}
+            <span class="status status-warn">too small to score</span>
+            Splitting does not create evidence, it divides it. Below about
+            {{ min_informative_sample * held_out_divisor }} measured questions of one type there is
+            not enough for both a repair list and an honest score.
+          {% endif %}
+        </p>
+
+        {{ cell_list(slice, "missed", "Missed — two lessons each", "The judge passed these and you
+           did not. Both sides learned as you submitted: this type's instruction, because the
+           generator wrote a question you would not keep, and the named reviewer, because it passed
+           one. This is what auto-acceptance would have released unreviewed.",
+           "missed") }}
+        {{ cell_list(slice, "false_alarm", "False alarms — the judge is too strict", "The judge
+           flagged these and you approved them. Safe, but it makes auto-acceptance rare.",
+           "false_alarm") }}
+        {{ cell_list(slice, "confirmed_bad", "Both rejected — the generator is what to fix", "The
+           judge was right. Each of these already relearned this type's instruction as you
+           submitted it; the button below re-runs that by hand.",
+           none) }}
+
+        {% if slice.question_type and slice.report.quadrant.confirmed_bad %}
+          <form class="upload-form" action="/instructions/{{ slice.question_type }}/refresh"
+                method="post">
+            <button class="button" type="submit">
+              Relearn the {{ slice.question_type | replace("_", " ") }} instruction
+            </button>
+            <p class="hint">
+              Reads every review of this type, not only the {{ slice.report.quadrant.confirmed_bad }}
+              above. Costs one model call. Only needed if a relearn failed while you were reviewing.
+            </p>
+          </form>
+        {% endif %}
+
+        <p class="note">
+          Both accepted: {{ slice.report.quadrant.confirmed_good }}. Nothing to repair — this count
+          is the evidence that would earn auto-acceptance for this type, and every one of them is
+          kept in the dataset.
+        </p>
+      {% endfor %}
+
+      {% if quadrant.unattributable_metrics %}
+        <p class="note">
+          No fault is ever attributed to
+          {{ quadrant.unattributable_metrics | map("replace", "_", " ") | join(", ") }}:
+          your rejection reasons contain nothing that contradicts it, so there is no comparison to
+          make. A miss it caused shows as “no single reviewer accounts for this one”.
+        </p>
+      {% endif %}
     {% endif %}
   </section>
 

@@ -24,7 +24,27 @@
       <dt>Topic</dt><dd>{{ taxonomy.topic }}</dd>
       <dt>Subtopics</dt><dd>{{ taxonomy.subtopics | join(", ") }}</dd>
       <dt>Generator</dt><dd><code>{{ question.generator_kind }}:{{ question.generator_name }}@{{ question.generator_version }}</code></dd>
+      {% set stamp = (question.personalization_context or {}).get("type_instruction") %}
+      <dt>Instruction</dt>
+      <dd>
+        {% if stamp %}
+          <code>{{ stamp.source }}:{{ stamp.fingerprint }}</code>
+          {% if stamp.source == "learned" %}
+            — {{ stamp.rule_count }} learned rule{{ "" if stamp.rule_count == 1 else "s" }}
+            from {{ stamp.review_count }} review{{ "" if stamp.review_count == 1 else "s" }}
+          {% else %}
+            — the shipped text, nothing learned for this type yet
+          {% endif %}
+        {% else %}
+          <span class="muted">not recorded</span>
+        {% endif %}
+      </dd>
     </dl>
+    <p class="note">
+      There is one generator, so <code>base@1</code> names the code and not the prompt. Every
+      question is personalized: the instruction above is what it followed, named by a fingerprint of
+      its text so two questions written from different instructions stay distinguishable.
+    </p>
   </section>
 
   <section class="panel {% if validation_passed is none %}{% elif validation_passed %}panel-success{% else %}panel-error{% endif %}">
@@ -44,6 +64,43 @@
       <p class="empty">Deterministic checks have not been recorded.</p>
     {% endif %}
   </section>
+
+  {% if generation_attempts | length > 1 or (generation_attempts and not generation_attempts[-1].usable) %}
+    <section class="panel {% if generation_attempts[-1].usable %}{% else %}panel-error{% endif %}">
+      <h2>Generation attempts</h2>
+      <p class="note">
+        A question that fails a check, claims the wrong taxonomy, or comes back unreadable is put
+        back to the generator with the problem stated. Every attempt is kept, so what went wrong
+        stays readable.
+      </p>
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>Claimed topic</th><th>Claimed subtopics</th><th>Outcome</th><th>Model</th></tr>
+        </thead>
+        <tbody>
+          {% for attempt in generation_attempts %}
+            <tr>
+              <td>{{ attempt.number }}</td>
+              <td>{{ attempt.claimed_topic_id if attempt.claimed_topic_id is not none else "—" }}</td>
+              <td>{{ attempt.claimed_subtopic_ids | join(", ") if attempt.claimed_subtopic_ids else "—" }}</td>
+              <td>
+                {% if attempt.malformed %}
+                  ✗ not a readable question
+                  {% if attempt.detail %}<br><span class="note">{{ attempt.detail }}</span>{% endif %}
+                {% elif attempt.usable %}
+                  ✓ accepted
+                {% else %}
+                  ✗ {{ (attempt.violations + (attempt.failed_checks | map(attribute="name") | list)) | join(", ") }}
+                  {% if attempt.detail %}<br><span class="note">{{ attempt.detail }}</span>{% endif %}
+                {% endif %}
+              </td>
+              <td><code>{{ attempt.model or "—" }}</code></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
 
   {{ judge.judge_panel(pedagogical_eval, error_message=pedagogical_error_message) }}
 

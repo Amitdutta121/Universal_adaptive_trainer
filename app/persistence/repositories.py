@@ -8,11 +8,21 @@ here rather than in routes or services.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Collection
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.domain.enums import BookStatus, CurriculumStatus
+from app.domain.enums import (
+    BookStatus,
+    CurriculumStatus,
+    Difficulty,
+    JudgeMetricId,
+    QuadrantCell,
+    QuestionStatus,
+    QuestionType,
+)
 from app.errors import NotFoundError
 from app.persistence.models import (
     BookChapterRow,
@@ -20,14 +30,18 @@ from app.persistence.models import (
     BookSectionRow,
     CurriculumVersionRow,
     JudgeBatchRunRow,
-    PreferenceStatementRow,
+    JudgePromptRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
-    ReviewEmbeddingRow,
+    QuestionSetMemberRow,
+    QuestionSetVersionRow,
+    QuestionSubtopicRow,
+    ReviewOutcomeRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
+    TypeInstructionRow,
 )
 
 
@@ -268,6 +282,14 @@ class CurriculumRepository:
         return version
 
 
+#: Statuses the review queue never offers (ADR-032). A question that failed
+#: deterministic validation has already been ruled on by a check that names the
+#: fault exactly, so there is no verdict left for a professor to add -- and
+#: professor attention is the scarcest resource in this system. Such questions
+#: stay in the bank, where the generator's failure modes are meant to be read.
+NOT_REVIEWABLE_STATUSES = (QuestionStatus.VALIDATION_FAILED,)
+
+
 class QuestionRepository:
     """Generated questions."""
 
@@ -281,13 +303,34 @@ class QuestionRepository:
         stmt = select(QuestionRow.status, func.count()).group_by(QuestionRow.status)
         return {str(status): count for status, count in self._session.execute(stmt)}
 
-    def list_recent(self, limit: int = 50) -> list[QuestionRow]:
+    def count_reviewable(self) -> int:
+        """Questions a professor could be asked to rule on.
+
+        Excludes the same statuses :meth:`list_unreviewed` excludes, so the review
+        queue's "reviewed of total" can actually reach completion. Counting the
+        whole bank there would leave a permanent remainder of questions the queue
+        will never offer.
+        """
         stmt = (
-            select(QuestionRow)
-            .order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
-            .limit(limit)
+            select(func.count())
+            .select_from(QuestionRow)
+            .where(QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES))
         )
-        return list(self._session.scalars(stmt))
+        return self._session.scalar(stmt) or 0
+
+    def list_recent(
+        self, limit: int = 50, *, statuses: Collection[QuestionStatus] | None = None
+    ) -> list[QuestionRow]:
+        """The newest questions, optionally narrowed to particular statuses.
+
+        ``statuses`` is a filter, never a default: both callers decide for
+        themselves what to show, and an empty collection means "nothing matches"
+        rather than "no filter".
+        """
+        stmt = select(QuestionRow).order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
+        if statuses is not None:
+            stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
+        return list(self._session.scalars(stmt.limit(limit)))
 
     def get(self, question_id: int) -> QuestionRow:
         row = self._session.get(QuestionRow, question_id)
@@ -313,8 +356,21 @@ class QuestionRepository:
         return list(self._session.scalars(stmt))
 
     def count_reviewed(self) -> int:
-        """How many questions carry at least one professor verdict."""
-        stmt = select(func.count()).select_from(QuestionRow).where(QuestionRow.reviews.any())
+        """How many reviewable questions carry at least one professor verdict.
+
+        Restricted to the same set as :meth:`count_reviewable` so the two can be
+        subtracted. A question that was reviewed before ADR-032 excluded its
+        status would otherwise be counted as progress against a total it is no
+        longer part of, and the remainder could go negative.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(QuestionRow)
+            .where(
+                QuestionRow.reviews.any(),
+                QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES),
+            )
+        )
         return self._session.scalar(stmt) or 0
 
     def list_unreviewed(
@@ -331,8 +387,19 @@ class QuestionRepository:
         evaluation. Whether that evaluation actually *completed* lives inside the
         JSON column and is the caller's to decide: that vocabulary belongs to
         :mod:`app.evaluation`, which persistence must not import (ADR-026).
+
+        :data:`NOT_REVIEWABLE_STATUSES` is excluded unconditionally, in every
+        mode: a question that failed deterministic validation is not awaiting a
+        verdict, it already has one.
         """
-        stmt = select(QuestionRow).where(~QuestionRow.reviews.any()).order_by(QuestionRow.id)
+        stmt = (
+            select(QuestionRow)
+            .where(
+                ~QuestionRow.reviews.any(),
+                QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES),
+            )
+            .order_by(QuestionRow.id)
+        )
         if after_id is not None:
             stmt = stmt.where(QuestionRow.id > after_id)
         if require_evaluation:
@@ -377,10 +444,41 @@ class QuestionRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def count_by_source_section(self) -> dict[int, int]:
+        """How many questions each source section has already produced.
+
+        Read in Python rather than in SQL because the section ids live inside a
+        JSON column, and SQLite's JSON support is not worth depending on for a
+        count this small. The frozen spec is authoritative; ``content`` is the
+        fallback for a row stored before a spec was persisted, so an early
+        question still reports against the section it actually came from.
+        """
+        counts: dict[int, int] = {}
+        for row in self._session.scalars(select(QuestionRow)):
+            for section_id in _source_section_ids(row):
+                counts[section_id] = counts.get(section_id, 0) + 1
+        return counts
+
     def add(self, question: QuestionRow) -> QuestionRow:
         self._session.add(question)
         self._session.flush()
         return question
+
+
+def _source_section_ids(row: QuestionRow) -> list[int]:
+    """The section ids one question was generated from, or an empty list."""
+    spec = row.spec or {}
+    ids = spec.get("source_section_ids")
+    if isinstance(ids, list):
+        return [section_id for section_id in ids if isinstance(section_id, int)]
+    sources = (row.content or {}).get("sources")
+    if not isinstance(sources, list):
+        return []
+    return [
+        source["section_id"]
+        for source in sources
+        if isinstance(source, dict) and isinstance(source.get("section_id"), int)
+    ]
 
 
 class QuestionEvaluationRepository:
@@ -507,65 +605,300 @@ class ProfessorReviewRepository:
         return list(self._session.scalars(stmt).unique())
 
 
-class PreferenceRepository:
-    """Professor preference statements inferred from review history."""
+class ReviewOutcomeRepository:
+    """The dataset written when a review lands (ADR-037).
+
+    Append-only, like the reviews it describes. There is no update method: an
+    outcome states what the judge and the professor said at one moment, and a
+    row that could be rewritten would not answer that.
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, row: PreferenceStatementRow) -> PreferenceStatementRow:
+    def add(self, outcome: ReviewOutcomeRow) -> ReviewOutcomeRow:
+        self._session.add(outcome)
+        self._session.flush()
+        return outcome
+
+    def get_for_review(self, review_id: int) -> ReviewOutcomeRow | None:
+        stmt = select(ReviewOutcomeRow).where(ReviewOutcomeRow.review_id == review_id)
+        return self._session.scalars(stmt).first()
+
+    def list_recent(self, limit: int = 50) -> list[ReviewOutcomeRow]:
+        stmt = (
+            select(ReviewOutcomeRow)
+            .order_by(ReviewOutcomeRow.created_at.desc(), ReviewOutcomeRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt))
+
+    def list_in_cells(
+        self,
+        cells: Collection[QuadrantCell],
+        *,
+        question_type: QuestionType | None = None,
+        include_held_out: bool = True,
+        limit: int = 500,
+    ) -> list[ReviewOutcomeRow]:
+        """The dataset rows in the given cells, newest first.
+
+        ``include_held_out`` is false when the caller is about to *repair* a
+        judge: reading the held-back third while rewriting a prompt turns the
+        check set into a second tuning set (ADR-035).
+        """
+        stmt = select(ReviewOutcomeRow).where(ReviewOutcomeRow.cell.in_(list(cells)))
+        if question_type is not None:
+            stmt = stmt.where(ReviewOutcomeRow.question_type == question_type)
+        if not include_held_out:
+            stmt = stmt.where(ReviewOutcomeRow.held_out.is_(False))
+        stmt = stmt.order_by(ReviewOutcomeRow.created_at.desc(), ReviewOutcomeRow.id.desc())
+        return list(self._session.scalars(stmt.limit(limit)))
+
+    def list_disagreements_for(
+        self, metric: JudgeMetricId, *, include_held_out: bool = False, limit: int = 60
+    ) -> list[ReviewOutcomeRow]:
+        """Rows where this judge was the one at fault, newest first (ADR-039).
+
+        Held-out rows are excluded by default because the caller is normally
+        about to repair the judge, and reading the reserved third while
+        rewriting its prompt turns the check set into a second tuning set
+        (ADR-035). This is the one query where that default matters most, so it
+        is the default rather than a flag the caller must remember.
+
+        The review and the question travel with each row: a rewriter needs the
+        question that was misjudged and the professor's reasons, and loading
+        them lazily would mean two queries per disagreement.
+        """
+        stmt = (
+            select(ReviewOutcomeRow)
+            .options(
+                joinedload(ReviewOutcomeRow.review),
+                joinedload(ReviewOutcomeRow.question),
+            )
+            .where(
+                ReviewOutcomeRow.cell.in_([QuadrantCell.MISSED, QuadrantCell.FALSE_ALARM]),
+            )
+        )
+        if not include_held_out:
+            stmt = stmt.where(ReviewOutcomeRow.held_out.is_(False))
+        stmt = stmt.order_by(ReviewOutcomeRow.created_at.desc(), ReviewOutcomeRow.id.desc())
+        rows = list(self._session.scalars(stmt).unique())
+        # Filtered in Python: ``attributed_metrics`` is a JSON list, and matching
+        # inside it in SQL would be dialect-specific for no gain at this size.
+        named = [row for row in rows if metric in (row.attributed_metrics or [])]
+        return named[:limit]
+
+    def count_by_cell(self) -> dict[QuadrantCell, int]:
+        stmt = select(ReviewOutcomeRow.cell, func.count()).group_by(ReviewOutcomeRow.cell)
+        return dict(self._session.execute(stmt).all())
+
+
+class JudgePromptRepository:
+    """Professor-edited judge prompts, and the version they imply (ADR-038)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, metric: JudgeMetricId) -> JudgePromptRow | None:
+        stmt = select(JudgePromptRow).where(JudgePromptRow.metric == metric)
+        return self._session.scalars(stmt).first()
+
+    def list_all(self) -> list[JudgePromptRow]:
+        stmt = select(JudgePromptRow).order_by(JudgePromptRow.metric)
+        return list(self._session.scalars(stmt))
+
+    def save(
+        self,
+        metric: JudgeMetricId,
+        *,
+        system_prompt: str,
+        note: str | None,
+        rules: list[dict] | None = None,
+        evidence_count: int | None = None,
+        learned: bool = False,
+    ) -> JudgePromptRow:
+        """Store one prompt, counting how often this judge has been rewritten.
+
+        ``revision`` is per metric and informational. It is deliberately *not*
+        what identifies the judge: the rubric version is a fingerprint of the
+        prompts actually in force (see
+        :func:`app.evaluation.judge_prompts.effective_rubric_version`), because a
+        counter cannot distinguish two different prompt sets that happen to have
+        been edited the same number of times.
+
+        ``learned`` separates a model-written prompt from one the professor
+        typed. A hand edit clears the rules: the professor has replaced the text
+        the rules were rendered into, so continuing to claim those rules produced
+        it would be false.
+        """
+        row = self.get(metric)
+        if row is None:
+            row = JudgePromptRow(metric=metric, revision=1)
+            self._session.add(row)
+        else:
+            row.revision += 1
+            row.updated_at = datetime.now(UTC)
+        row.system_prompt = system_prompt
+        row.note = note
+        row.learned = learned
+        row.rules = rules if rules is not None else []
+        if evidence_count is not None:
+            row.evidence_count = evidence_count
+        elif not learned:
+            row.evidence_count = 0
+        self._session.flush()
+        return row
+
+    def delete(self, metric: JudgeMetricId) -> bool:
+        """Drop one override, returning that judge to its shipped prompt."""
+        row = self.get(metric)
+        if row is None:
+            return False
+        self._session.delete(row)
+        self._session.flush()
+        return True
+
+
+class TypeInstructionRepository:
+    """The learned generation instruction for each question type (ADR-033)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, question_type: QuestionType) -> TypeInstructionRow | None:
+        """The stored instruction for this type, or ``None`` if none was learned.
+
+        ``None`` is a normal answer, not an error: a type nobody has reviewed
+        keeps the shipped instruction, and the caller decides that fallback.
+        """
+        stmt = select(TypeInstructionRow).where(TypeInstructionRow.question_type == question_type)
+        return self._session.scalars(stmt).first()
+
+    def list_all(self) -> list[TypeInstructionRow]:
+        stmt = select(TypeInstructionRow).order_by(TypeInstructionRow.question_type)
+        return list(self._session.scalars(stmt))
+
+    def upsert(
+        self,
+        question_type: QuestionType,
+        *,
+        instruction: str,
+        rules: list[dict],
+        review_count: int,
+    ) -> TypeInstructionRow:
+        row = self.get(question_type)
+        if row is None:
+            row = TypeInstructionRow(question_type=question_type)
+            self._session.add(row)
+        else:
+            row.updated_at = datetime.now(UTC)
+        row.instruction = instruction
+        row.rules = rules
+        row.review_count = review_count
+        self._session.flush()
+        return row
+
+
+class QuestionSetRepository:
+    """Frozen snapshots of the approved bank, and the coverage query (ADR-036).
+
+    There is deliberately no update method. A set is created whole and read
+    thereafter; a snapshot that could be edited would not answer the question it
+    exists to answer, which is what a given cohort was actually served.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def approved_question_ids(self, *, curriculum_version_id: int | None = None) -> list[int]:
+        """Every approved question, optionally restricted to one curriculum.
+
+        Approved means the professor approved it. A question that merely passed
+        deterministic validation carries no verdict and must never reach a
+        student.
+        """
+        stmt = select(QuestionRow.id).where(QuestionRow.status == QuestionStatus.APPROVED)
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        return list(self._session.scalars(stmt.order_by(QuestionRow.id)))
+
+    def create(
+        self,
+        *,
+        label: str,
+        question_ids: Collection[int],
+        curriculum_version_id: int | None,
+        notes: str | None = None,
+    ) -> QuestionSetVersionRow:
+        """Freeze these question ids as a new set. Never call twice for one set."""
+        ids = sorted(set(question_ids))
+        row = QuestionSetVersionRow(
+            label=label,
+            curriculum_version_id=curriculum_version_id,
+            notes=notes,
+            question_count=len(ids),
+        )
+        row.members = [QuestionSetMemberRow(question_id=question_id) for question_id in ids]
         self._session.add(row)
         self._session.flush()
         return row
 
-    def get(self, preference_id: int) -> PreferenceStatementRow:
-        row = self._session.get(PreferenceStatementRow, preference_id)
+    def list_versions(self, limit: int = 50) -> list[QuestionSetVersionRow]:
+        stmt = (
+            select(QuestionSetVersionRow)
+            .options(selectinload(QuestionSetVersionRow.members))
+            .order_by(QuestionSetVersionRow.created_at.desc(), QuestionSetVersionRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt))
+
+    def get(self, set_version_id: int) -> QuestionSetVersionRow:
+        """One set with its members.
+
+        Raises:
+            NotFoundError: if no such set exists.
+        """
+        stmt = (
+            select(QuestionSetVersionRow)
+            .options(selectinload(QuestionSetVersionRow.members))
+            .where(QuestionSetVersionRow.id == set_version_id)
+        )
+        row = self._session.scalars(stmt).first()
         if row is None:
-            raise NotFoundError(f"Preference {preference_id} does not exist.")
+            raise NotFoundError(f"Question set {set_version_id} was not found.")
         return row
 
-    def list_all(self, *, active_only: bool = False) -> list[PreferenceStatementRow]:
-        stmt = select(PreferenceStatementRow).order_by(
-            PreferenceStatementRow.confidence.desc(),
-            PreferenceStatementRow.id.desc(),
-        )
-        if active_only:
-            stmt = stmt.where(PreferenceStatementRow.active.is_(True))
-        return list(self._session.scalars(stmt))
+    def coverage_counts(
+        self, *, question_ids: Collection[int] | None = None
+    ) -> dict[tuple[int, Difficulty], int]:
+        """How many questions cover each (subtopic, difficulty) pair.
 
-    def list_for_generation(self, *, soft_floor: float) -> list[PreferenceStatementRow]:
+        Counts distinct questions: a question tagged with three subtopics is one
+        question in each of three rows, which is what the adaptive engine would
+        find when it selects on that subtopic.
+
+        Returns only pairs that have at least one question. The empty pairs --
+        the ones the professor needs -- are produced by walking the taxonomy
+        against this mapping, so a subtopic with no questions at all cannot fall
+        out of a join and be read as covered.
+        """
         stmt = (
-            select(PreferenceStatementRow)
-            .where(
-                PreferenceStatementRow.active.is_(True),
-                PreferenceStatementRow.confidence >= soft_floor,
+            select(
+                QuestionSubtopicRow.subtopic_id,
+                QuestionRow.difficulty,
+                func.count(func.distinct(QuestionRow.id)),
             )
-            .order_by(
-                PreferenceStatementRow.confidence.desc(),
-                PreferenceStatementRow.id.desc(),
-            )
+            .join(QuestionRow, QuestionRow.id == QuestionSubtopicRow.question_id)
+            .where(QuestionRow.status == QuestionStatus.APPROVED)
+            .group_by(QuestionSubtopicRow.subtopic_id, QuestionRow.difficulty)
         )
-        return list(self._session.scalars(stmt))
-
-
-class ReviewEmbeddingRepository:
-    """Cached embedding vectors for professor reviews."""
-
-    def __init__(self, session: Session) -> None:
-        self._session = session
-
-    def get_for_review(self, review_id: int) -> ReviewEmbeddingRow | None:
-        stmt = select(ReviewEmbeddingRow).where(ReviewEmbeddingRow.review_id == review_id)
-        return self._session.scalars(stmt).first()
-
-    def upsert(self, row: ReviewEmbeddingRow) -> ReviewEmbeddingRow:
-        existing = self.get_for_review(row.review_id)
-        if existing is None:
-            self._session.add(row)
-            self._session.flush()
-            return row
-        existing.model_id = row.model_id
-        existing.vector = row.vector
-        existing.content_hash = row.content_hash
-        self._session.flush()
-        return existing
+        if question_ids is not None:
+            ids = list(question_ids)
+            if not ids:
+                return {}
+            stmt = stmt.where(QuestionRow.id.in_(ids))
+        return {
+            (subtopic_id, Difficulty(difficulty)): count
+            for subtopic_id, difficulty, count in self._session.execute(stmt)
+        }

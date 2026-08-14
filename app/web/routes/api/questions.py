@@ -4,18 +4,24 @@ Generation always names an approved curriculum version; there is no path that
 lets a caller invent taxonomy ids (ADR-001). Which generator ran is explicit and
 recorded on the question, so ``base`` and ``personalized-context`` stay
 distinguishable rather than being silently swapped (ADR-005).
+
+``generation-plan`` prices a selection without running it. Generation is a
+sequence of model calls that cannot be undone once spent, so what a run will
+cost is answerable before it starts rather than only afterwards.
 """
 
 from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from typing import Any
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.domain.books import BookSection
+from app.domain.enums import JudgeMetricId, QuestionStatus
 from app.errors import InvalidQuestionSpecError, NotFoundError
 from app.evaluation import (
     PedagogicalEvalStatus,
@@ -23,13 +29,22 @@ from app.evaluation import (
     humanize_judge_error_detail,
 )
 from app.generation import GenerationService
+from app.ingestion import SourceRetrieval
 from app.persistence.models import QuestionRow
-from app.persistence.repositories import CurriculumRepository, QuestionRepository
-from app.personalization.embeddings import get_embedder
+from app.persistence.repositories import (
+    BookRepository,
+    CurriculumRepository,
+    QuestionRepository,
+)
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
+    BookSummary,
     GenerateQuestionsRequest,
     GenerateQuestionsResponse,
+    GenerationPlanChapter,
+    GenerationPlanResponse,
+    GenerationPlanSection,
+    GenerationPlanTotals,
     PersonalizationEvidence,
     QuestionDetail,
     QuestionListResponse,
@@ -38,6 +53,7 @@ from app.web.routes.api.schemas import (
     ReviewOut,
     ReviewQueueMode,
     ReviewQueueResponse,
+    SectionSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,13 +62,24 @@ router = APIRouter(prefix="/questions", tags=["questions"])
 
 
 @router.get("", response_model=QuestionListResponse)
-def list_questions(session: DbSession, limit: int = 50) -> QuestionListResponse:
-    """The question bank, newest first, with counts by lifecycle status."""
+def list_questions(
+    session: DbSession, limit: int = 50, status: QuestionStatus | None = None
+) -> QuestionListResponse:
+    """The question bank, newest first, with counts by lifecycle status.
+
+    ``status`` narrows the listing; without it nothing is hidden. The API does not
+    filter by default even though the page does, because a caller reading the bank
+    over JSON has no way to discover rows an unrequested default removed.
+    ``status_counts`` and ``total`` always describe the whole bank, so a filtered
+    listing still says how much it is showing of what.
+    """
     repo = QuestionRepository(session)
+    rows = repo.list_recent(limit=limit, statuses=None if status is None else [status])
     return QuestionListResponse(
-        questions=[QuestionSummary.from_row(row) for row in repo.list_recent(limit=limit)],
+        questions=[QuestionSummary.from_row(row) for row in rows],
         status_counts=repo.count_by_status(),
         total=repo.count(),
+        status=status,
     )
 
 
@@ -81,19 +108,14 @@ def generate_questions(
     # the fixable problem rather than an LLM-configuration error raised first.
     curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session)
 
-    service_kwargs: dict[str, Any] = {}
-    if payload.generator == "personalized":
-        service_kwargs["embedder"] = get_embedder()
-
     try:
-        generated = GenerationService(session, **service_kwargs).generate_for_sections(
+        generated = GenerationService(session).generate_for_sections(
             curriculum_version_id=curriculum_version_id,
             question_type=payload.question_type,
             difficulty=payload.difficulty,
             source_section_ids=None if payload.all_sections_of_book else payload.section_ids,
             book_id=payload.book_id if payload.all_sections_of_book else None,
             seed=payload.seed,
-            generator=payload.generator,
         )
     except Exception:
         session.rollback()
@@ -119,6 +141,69 @@ def approved_curriculum_id(session: Session) -> int:
 
 # Declared before "/{question_id}": FastAPI matches in registration order, so a
 # literal path added after it would be parsed as a question id and 422.
+@router.get("/generation-plan", response_model=GenerationPlanResponse)
+def generation_plan(
+    session: DbSession,
+    book_id: int,
+    section_ids: Annotated[list[int] | None, Query()] = None,
+    all_sections: bool = False,
+) -> GenerationPlanResponse:
+    """What generating from this selection would produce, before it runs.
+
+    Read-only and free: it makes no model call, so a professor can price a run
+    and revise it as often as they like. The arithmetic lives here rather than in
+    the template because the page is only one client of it (ADR-027).
+    """
+    book = BookRepository(session).get(book_id)
+    chapters = SourceRetrieval(session).chapters_in_book(book_id)
+    already_generated = QuestionRepository(session).count_by_source_section()
+    chosen = set(section_ids or [])
+
+    plan_chapters: list[GenerationPlanChapter] = []
+    selected_sections: list[BookSection] = []
+    for chapter in chapters:
+        entries = []
+        for section in chapter.sections:
+            selected = all_sections or (section.id in chosen)
+            if selected:
+                selected_sections.append(section)
+            entries.append(
+                GenerationPlanSection(
+                    section=SectionSummary.from_section(section),
+                    existing_question_count=already_generated.get(section.id or 0, 0),
+                    selected=selected,
+                    selectable=not section.is_empty,
+                )
+            )
+        plan_chapters.append(
+            GenerationPlanChapter(
+                id=chapter.id or 0,
+                label=chapter.display_title(),
+                location_label=chapter.location_label,
+                sections=entries,
+            )
+        )
+
+    count = len(selected_sections)
+    return GenerationPlanResponse(
+        book=BookSummary.from_row(book),
+        chapters=plan_chapters,
+        totals=GenerationPlanTotals(
+            sections_available=sum(len(chapter.sections) for chapter in chapters),
+            sections_selected=count,
+            questions_to_create=count,
+            generation_calls=count,
+            judge_calls=count * len(JudgeMetricId),
+            source_chars=sum(section.char_count for section in selected_sections),
+        ),
+        blockers=[
+            f"{section.display_title()} has no text to generate from."
+            for section in selected_sections
+            if section.is_empty
+        ],
+    )
+
+
 @router.get("/review-queue", response_model=ReviewQueueResponse)
 def review_queue(
     session: DbSession, after: int | None = None, mode: ReviewQueueMode = "all"
@@ -128,6 +213,10 @@ def review_queue(
     The queue holds no state. ``after`` is a plain cursor over question ids,
     which is what lets a professor skip a question -- and lets a submitted
     review advance to the next one -- without a stored position per professor.
+
+    Questions that failed deterministic validation are never offered (ADR-032),
+    and ``total`` counts only reviewable ones, so a completed pass reads as
+    ``remaining == 0`` rather than stalling on questions the queue excludes.
     """
     repo = QuestionRepository(session)
     scoreable = [row for row in repo.list_unreviewed(require_evaluation=True) if _is_scoreable(row)]
@@ -136,7 +225,7 @@ def review_queue(
     if mode == "scoreable":
         candidates = [row for row in candidates if _is_scoreable(row)]
 
-    total = repo.count()
+    total = repo.count_reviewable()
     reviewed = repo.count_reviewed()
     return ReviewQueueResponse(
         mode=mode,
@@ -188,6 +277,7 @@ def get_question(session: DbSession, question_id: int) -> QuestionDetail:
         taxonomy=resolve_taxonomy(session, question),
         validation_passed=report.passed if report is not None else None,
         validation_checks=report.checks if report is not None else [],
+        generation_attempts=list(question.generation_attempts),
         pedagogical_eval=evaluation,
         pedagogical_error_message=(
             humanize_judge_error_detail(evaluation.error_detail)
@@ -235,7 +325,13 @@ def resolve_taxonomy(session: Session, question: QuestionRow) -> QuestionTaxonom
 
 
 def personalization_evidence(question: QuestionRow) -> PersonalizationEvidence | None:
-    """The preferences and reviews recorded against a personalized question."""
+    """Historical only: what shaped a question generated before ADR-033.
+
+    Personalization is now the per-type instruction, which leaves no per-question
+    payload. Nothing generated from here on sets ``personalization_context``, but
+    the questions that already carry it keep showing what produced them rather
+    than losing that evidence to a refactor.
+    """
     payload = question.personalization_context
     if question.generator_name != "personalized-context" or payload is None:
         return None

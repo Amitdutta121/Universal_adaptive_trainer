@@ -668,7 +668,7 @@ pedagogical evaluation in separate panels.
 
 ## ADR-025 — Retrieval-first personalization with dual stores and soft activation
 
-**Status:** accepted
+**Status:** superseded by ADR-033
 
 Professor personalization is **retrieval-first**: at generation time the personalized generator
 (`personalized-context@1`) augments the same section-first base prompt with (a) ranked
@@ -1044,6 +1044,8 @@ tag was the professor's own.
   adaptive engine could not decide whose weakness its score updates. An invalid claim fails the
   generation rather than being repaired — guessing which subtopic the model meant would put an
   invented tag on a question and hide the miss from the very judge that exists to catch it.
+  *Superseded by ADR-032: the claim is still never silently repaired, but it is now retried with the
+  violation stated, and the question is kept either way rather than the run being discarded.*
 - **Four judges, one model call each**, replacing the ten-dimension rubric: `issues` (which known
   problems the question has, drawn from the professor's own `RejectionReason` vocabulary, plus a
   free-text `custom_issue`), `subtopic` (the topic and subtopics it would assign), `difficulty`
@@ -1085,3 +1087,306 @@ tag was the professor's own.
   calibration figures meaning starts from this rubric.
 - `reject` requires all four metrics to fail, so it will be rare in practice. This is intended:
   the professor sees everything and rejects manually; the gate is a hint, not a filter.
+
+---
+
+## ADR-032 — A rejected taxonomy claim is retried and kept, never discarded
+
+**Status:** accepted. Supersedes the invalid-claim bullet of ADR-031.
+
+**Context.** ADR-031 made an invalid taxonomy claim fail the generation. In practice that decision
+destroyed work that had already been paid for. `resolve_claimed_taxonomy` raised, the exception
+propagated through `GenerationService` to the API route, and the route's `session.rollback()`
+discarded the **whole batch** — so one misclassified question threw away every question generated
+before it in the same run. Measured on a three-section run: three model calls spent, zero questions
+kept.
+
+It also made the generator's accuracy unobservable. The defective question was never stored, so
+nothing recorded how often the model tags across two topics, which subtopic pairs it confuses, or
+whether a restatement would have fixed it. The one artefact that could answer those questions was
+the one artefact being thrown away.
+
+**Decision.**
+
+- **Every generated question is stored, valid claim or not.** A question whose claim was rejected is
+  persisted, marked `validation_failed`, and carries the violation and the claim verbatim.
+- **A defective question is retried with the defect stated**, up to `MAX_GENERATION_ATTEMPTS` = 3
+  generation calls per section: the first attempt plus two corrections. There is a cap because a
+  model that has failed the same check twice is not converging, and an uncapped loop would spend a
+  professor's budget on one section.
+- **Three kinds of defect trigger the retry, and they are treated alike**: a refused taxonomy claim,
+  a failed deterministic check from `app.validation`, and a reply that could not be read as a
+  question at all. They cost the same thing — a call spent for a question that cannot be used — so
+  they earn the same response. Validation therefore runs *inside* the generation loop; the validator
+  is injected into the generator rather than imported, so `app.generation` still does not depend on
+  `app.validation`.
+- **A malformed reply is retried, and recorded.** Observed in production: the provider returned the
+  JSON *schema* of the draft instead of an instance, and because `max_retries=0` (ADR-020) that one
+  reply ended the whole generation. ADR-020's objection is to bad answers being **silently**
+  re-prompted, so the attempt is written onto the question with `malformed` set and no claim, where
+  it can be counted. If every attempt is malformed there is no question to store and the provider's
+  own error is raised.
+- **The correction carries every defect raised so far**, not only the latest attempt's. Showing one
+  attempt at a time let the model fix the current fault and reintroduce the previous one: observed
+  as verbose options → unbalanced options → verbose options again, three calls ending where they
+  started.
+- **This is not repair.** ADR-031's reasoning stands: the application never guesses which subtopic
+  the model meant. It states what was wrong and asks the model to classify again. The distinction
+  matters — a repaired claim would be an invented tag, whereas a retried claim is still the
+  generator's own.
+- **Attempts are history on one row, not rows of their own.** `questions.generation_attempts_json`
+  records each attempt's claim, violations, failed checks and outcome. Separate rows per attempt
+  would fill the bank with drafts that every later query — selection, calibration, counts — would
+  have to learn to exclude, and the adaptive engine has no use for a question that was never valid.
+  `failed_checks` reuses `QuestionCheck` and rides in the existing column, so widening the retry
+  needed no migration.
+- **An unresolvable id is stored as `NULL` with the claim as evidence.** `questions.topic_id` and
+  `question_subtopics.subtopic_id` are foreign keys, so a claim naming an id that does not exist
+  cannot be stored as-is. What is storable is decided by existence, not by correctness: a cross-topic
+  claim stores verbatim (both rows exist; only the relationship is wrong), an over-long list stores
+  verbatim, and a non-existent id is dropped with the raw claim readable in `content_json`.
+- **The review queue offers only questions that passed deterministic validation.** A rejected claim
+  is not a matter of opinion — the check names the fault exactly — so there is no verdict for a
+  professor to add, and professor attention is the scarcest resource in this system. The failed
+  questions remain in the bank behind a status filter, which is where the generator's failure modes
+  are meant to be read.
+- **The judge still never sees them**, by ADR-024's existing rule rather than a new one: a report
+  that did not pass yields `skipped_evaluation()`, so a claim-failed question spends no judge calls.
+- **Sections commit individually.** An LLM transport error partway through a batch now keeps the
+  questions generated before it, for the same reason the claim failure does.
+
+**Consequences.**
+
+- A pathological section can cost three generation calls instead of one. `generation-plan` prices the
+  optimistic case; it is not a ceiling, and it does not claim to be.
+- Widening the retry to deterministic checks was measured before it was adopted. Of six questions
+  that had failed validation in the bank, five failed a deterministic check and had used a single
+  generation call, because validation ran after the loop had returned; only the one claim failure
+  had been retried. Feeding the failures back took hard `debugging` questions from 2/6 to 6/6
+  passing, with the mechanism visible in the drafts: declared `stdout` cases fell from 14 to 1.
+- `questions` gains `generation_attempts_json`, so an existing local database must be deleted and
+  recreated — ADR-014's `verify_schema()` names the column and the remedy at startup.
+- The `validation_failed` count becomes a real signal rather than always zero, and the question bank
+  needs a status filter to stay readable. The count stays visible so the filter hides nothing
+  silently.
+- `claimed_taxonomy_accepted` is a new deterministic check, derived from the stored attempts. It is
+  emitted only for questions that have recorded attempts, so every question stored before this
+  decision validates exactly as it did. It exists because the pre-existing `approved_taxonomy_ids`
+  check structurally cannot see two of the violations: a claim of too many subtopics, and a dropped
+  non-existent subtopic id that leaves a valid-looking remainder.
+
+---
+
+## ADR-033 — Personalization is the per-type instruction, not a block appended to the prompt
+
+**Status:** accepted. Supersedes ADR-025.
+
+**Context.** ADR-025 personalized generation by *adding* to the prompt: the shipped one-line type
+instruction stayed, and after it came a block of inferred preference statements plus five or six
+retrieved review examples. Measured against alternatives, that design never won.
+
+- Its preference rules were not actionable. Of eight learned from 31 reviews, four could not change
+  any output — "Avoid poor wording in prompts", "Poor wording is frequently associated with
+  incorrect difficulty assessments". The extractor's `MIN_SUPPORTING_REVIEWS = 2` forced every rule
+  to generalise across two reviews, and the only thing nine different wording complaints share is
+  that wording was bad.
+- Duplicates accumulated. `merge_candidates` matched on exact text while the extractor reworded the
+  same rule each refresh, so 17 stored preferences were really 8 distinct ones. Three pairs cited
+  *identical* evidence. The five injected rules covered two concepts; deduplicated they covered five.
+- A fixed, published item-writing checklist in the type slot beat the whole appended block on every
+  objective measure, across 10 runs of 4 arms: correct-option-is-longest 0.37 → 0.17, mean option
+  length 61 → 48. The learned preferences did not separate from the shipped instruction.
+- Retrieved examples were not the problem either, but they were not the solution: an arm with them
+  and an arm without were indistinguishable at n=8, and both lost to the checklist.
+
+What did work was replacing the type instruction with one rewritten from the reviews *of that type*.
+It captured requirements no generic source could know — "not book-specific", "not trivial recall" —
+both traceable to specific review comments, and it produced the best-reviewed arm in a blind hand
+review (3 approvals, 0 rejections of 6).
+
+**Decision.**
+
+- **The learned instruction occupies the type-specific slot.** `build_prompt` takes a
+  `type_instruction` override; personalization replaces the shipped one-liner rather than arriving
+  after the prompt. One row per `QuestionType` on `type_instructions`.
+- **The shipped text is kept and the rules are appended to it.** It carries the format contract —
+  which fields to fill, how the test harness runs — which is a fact about this application, not a
+  preference anyone reviewed.
+- **Rules accumulate and are edited; the instruction is never rewritten from scratch.** Measured over
+  six rounds of a closed loop: a wholesale rewrite each round drifted from "test a single concept,
+  not a collection of unrelated facts" to "avoid broad, unrelated content", and dropped specific
+  rules about annotating defects and verifying a single correct option entirely. The rewriter is
+  shown the rules it already has and returns them edited.
+- **A type with no reviews learns nothing** and keeps the shipped instruction. Rules invented from
+  no evidence are not personalization.
+- **There is one generator.** With personalization in the type slot, `base` and
+  `personalized-context` differ in nothing, so the split, the `generator` request field and the UI
+  selector are removed. `GeneratorKind.PERSONALIZED` stays for rows already stamped with it.
+- **Retrieval and preference statements are removed**, with them `app.personalization.retrieval`,
+  `context`, `embeddings`, `learner`, `service`, `app.domain.preferences`, `preference_statements`,
+  `review_embeddings`, and the preferences page and API.
+
+**Consequences.**
+
+- The whole `MAX_PREFS_IN_PROMPT` / `SOFT_PREF_FLOOR` / `merge_candidates` apparatus disappears: with
+  one instruction per type there is nothing to rank, threshold or deduplicate.
+- Personalization now needs feedback *per type*. Reviews spread across seven types learn more slowly
+  than one global profile did — but a global profile that could not change an output was not
+  learning at all.
+- What the generator is told is now readable in one place, per type, on `/instructions`. The previous
+  design could only be reconstructed by tracing which preferences cleared a confidence floor and
+  which examples retrieval happened to return.
+- Questions generated before this decision keep their `personalization_context`, and the question
+  detail page still renders it. Deleting the display would drop evidence attached to real questions.
+
+---
+
+## ADR-034 — Calibration is reported as four cells per question type, and never blames an unaskable judge
+
+**Status:** accepted
+
+ADR-029 put breakdowns "by difficulty, question type, generator, rubric version" out of scope. That
+was right while the question was *"can this judge be measured at all?"*. The question is now *"which
+judge, for which question type, could be trusted to approve without me?"*, and a pooled two-valued
+agreement figure cannot answer it. This decision reverses the question-type and rubric-version half
+of that exclusion. Difficulty and generator breakdowns stay out of scope.
+
+Three things are added to `app/calibration/`, all read-only and all derived from pairs that already
+existed:
+
+- **`QuadrantCell`** — the judge label crossed with the professor label, as four named values rather
+  than `agrees: bool`.
+- **`TypeCalibration`** — one `CalibrationReport` per `QuestionType`, over the same arithmetic.
+- **`CalibrationPair.missed_metrics` / `.false_alarm_metrics`** — the same comparison
+  `MetricAgreement` aggregates, kept per question so the output is a work list and not a rate.
+
+**Why four cells rather than agreement:** the two agreeing cells are not interchangeable and neither
+are the two disagreeing ones. `auto_accept_precision` is `confirmed_good / (confirmed_good +
+missed)` — the two cells where the judge did not accept are *absent from it entirely*, because
+auto-acceptance would never have released those questions. A professor reading one agreement figure
+cannot see that, and so cannot tell a judge that is dangerous from one that is merely strict.
+
+**Why per question type:** ADR-033 made the generation instruction per type. There are therefore
+seven generators, and a figure pooled across them describes a mixture and authorises none of it.
+The type is the unit a professor would ever switch on.
+
+**Implications:**
+
+- **`MISSED` is the only cell that blocks auto-acceptance.** `FALSE_ALARM` costs coverage and
+  nothing else — the gate is advisory (ADR-031), so a strict judge delays no question today and
+  loses none. The page says so, because a professor who treats the two as equally bad will spend
+  their effort on the harmless one.
+- **A fault is attributed to a named judge only where the professor's vocabulary can contradict it.**
+  `GENERATABILITY` has no entry in `PROFESSOR_OBJECTIONS`, so it never appears in either list, and
+  the response publishes `unattributable_metrics` rather than staying silent. A miss no judge can be
+  blamed for is reported as unattributed; blaming the nearest judge would send the professor to
+  repair a prompt that was not at fault.
+- **A type with no measured pair is omitted, not reported as zeroes.** Seven empty rows would bury
+  the one or two carrying evidence. Questions predating `question_type` group under `null`, last.
+- **Pairs carry `rubric_version`, and a report names every version it drew on.** Repairing a judge
+  prompt raises `RUBRIC_VERSION`, after which older pairs measure a judge that no longer runs.
+  `build_calibration_pairs(rubric_version=...)` narrows to one; the default stays unfiltered so a
+  figure the professor has already read does not silently change, and the mixture is disclosed
+  instead.
+- **Still no new table, no new column, and no write.** The four cells are a projection of pairs the
+  previous report already built. Calibration remains an observation about history (ADR-029).
+- **Still no automation.** This decision reports where to work. It does not approve a question, does
+  not change a status, and does not turn anything on. Auto-acceptance, audit sampling and any
+  revocation mechanism remain undecided and unbuilt.
+
+---
+
+## ADR-035 — One question in three is held back from judge repair
+
+**Status:** accepted
+
+ADR-034 turned calibration into work lists: the questions a named judge got wrong, so its prompt can
+be rewritten. That creates a failure mode the report did not have while it was only a rate. If the
+professor rewrites a judge prompt against *every* pair, re-runs the judges and reads the agreement
+figure, the figure rises whether or not the judge improved — the prompt has been fitted to the
+questions it is then scored on.
+
+`app/calibration/` therefore splits the pairs. `is_held_out(question_id)` is
+`question_id % HELD_OUT_DIVISOR == 0`, with `HELD_OUT_DIVISOR = 3`. Held-out pairs are excluded from
+every repair list on the page and from `TypeCalibration.to_repair()`. They are the only pairs behind
+`TypeCalibration.check_report`, which is what a repaired judge is scored on.
+
+**Why keyed on the question id:** the split must not move. A random draw would re-draw itself on
+every request, and a recency split would migrate: a judge repaired against one draw would be scored
+on a set that had since absorbed the very questions it was tuned on. The id is assigned once and
+never changes, so a question is in the same half before and after any repair.
+
+**Why one in three rather than one in two:** the repair list is what the professor reads to find a
+pattern, and a pattern is what justifies a prompt change. Halving that list costs more than the
+check set gains.
+
+**Implications:**
+
+- **The split governs judge repair only.** `refresh_type_instruction` (ADR-033) is untouched: it
+  learns the *generator's* instruction from reviews, and the generator is measured by the
+  professor's approval rate, not by the judge. Applying one split to both would hold questions back
+  from a learner that has no leakage problem.
+- **`report` still covers every pair and is unchanged.** The check figure is published beside it,
+  not instead of it. Narrowing the number the professor has already been reading would be a silent
+  restatement of the thing they use to decide.
+- **The split divides evidence, it does not create it.** Below roughly
+  `MIN_INFORMATIVE_SAMPLE * HELD_OUT_DIVISOR` measured questions of one type, there is not enough
+  for both a repair list and an honest score, and the page says so rather than printing a rate over
+  four questions. This is a real limitation of doing this at current bank sizes, not a detail.
+- **The rule is published, not implied.** `held_out_divisor` is in the API response and each pair
+  carries `held_out`, so a client states the rule rather than inferring it from which ids happen to
+  be flagged.
+- **Nothing enforces the discipline.** A professor can open a held-out question from any other page.
+  The split removes it from the list they work from and names why; it is not access control, and
+  claiming otherwise would overstate what a read-only report can do.
+
+---
+
+## ADR-036 — A training run points at a frozen question set, and coverage is a property of the set
+
+**Status:** accepted
+
+Two things are added, both read-only except for one deliberate write.
+
+**Coverage** (`app/coverage/`) reports a grid of **subtopic × difficulty** over approved questions,
+with three states per cell: `EMPTY` (no question), `THIN` (fewer than `MIN_QUESTIONS_PER_CELL`) and
+`READY`. **Question sets** (`question_set_versions`, `question_set_members`) freeze the approved
+bank under a name, and are never edited afterwards.
+
+**Why coverage is not derivable from the questions:** the adaptive engine selects a **subtopic**
+first and a **difficulty** second (`CLAUDE.md`, fixed decisions). A bank in which every question is
+excellent is still unusable if one subtopic has no hard question, because that is a request the
+engine can make and cannot satisfy. Quality is a property of a question; coverage is a property of
+a set, and nothing in the review pipeline measures it.
+
+**Why the grid is walked from the taxonomy:** grouping questions by subtopic produces a report in
+which a subtopic nobody has written for simply does not appear — the one row the professor most
+needs. So the report iterates the approved curriculum and looks each cell up, defaulting to zero.
+
+**Why a cell needs three questions rather than one:** a served question drops to
+`LOWEST_PRIORITY`, so the engine prefers a different question next time. With one question in a
+cell there is no different question to prefer and the student meets it again immediately. Three is
+the smallest number that avoids that; the professor may demand more.
+
+**Implications:**
+
+- **`EMPTY` and `THIN` are never merged.** `is_servable` is false only while a cell is empty —
+  that is the blocking condition. `is_ready` additionally requires no thin cell. Collapsing them
+  would make a bank needing one more question look like a bank needing a hundred.
+- **Only `APPROVED` questions count.** A question that passed deterministic validation carries no
+  professor verdict and must not reach a student.
+- **A set is immutable.** There is no update method on `QuestionSetRepository` and no edit route.
+  A snapshot that could change answers nothing about what a cohort was served. `question_count` is
+  frozen at creation and published beside the live `member_count`, so a set that lost a row to a
+  deleted question reads as damaged rather than as a set that was always smaller.
+- **An empty set is refused.** Creating one would leave a named, dated, permanently useless row
+  that later reads as a real snapshot of an empty moment.
+- **The grid cannot be turned into a work queue automatically.** ADR-031 gives the *generator* the
+  choice of topic and subtopics; the professor selects a chunk, a difficulty and a type. So a gap
+  is filled by generating from a chunk that teaches that subtopic and then checking what the
+  generator claimed. The page says this rather than offering a button that cannot exist. Adding a
+  requested-subtopic field to the generation request would change ADR-031 and needs its own
+  decision — deferred until the gap counts show it is worth it.
+- **No training link is built.** `app/adaptive/` is still a boundary with no engine, so there is
+  nothing to link to. The page lists that as deferred rather than rendering a link that would not
+  work.

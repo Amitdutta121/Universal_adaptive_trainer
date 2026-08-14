@@ -159,7 +159,10 @@ class CodingDraft(TaxonomyClaim):
     explanation: str = Field(min_length=1)
 
 
-RESPONSE_MODEL_FOR: dict[QuestionType, type[BaseModel]] = {
+#: Typed as ``TaxonomyClaim`` rather than ``BaseModel`` because every draft below
+#: inherits it, and the retry loop reads ``topic_id`` / ``subtopic_ids`` off the
+#: result without a ``getattr`` escape hatch.
+RESPONSE_MODEL_FOR: dict[QuestionType, type[TaxonomyClaim]] = {
     QuestionType.MULTIPLE_CHOICE: MultipleChoiceDraft,
     QuestionType.TRUE_FALSE: TrueFalseDraft,
     QuestionType.OUTPUT_PREDICTION: OutputPredictionDraft,

@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.domain.enums import Difficulty, JudgeMetricId, RejectionReason
+from app.errors import MalformedModelOutputError
 from app.evaluation.schema import (
     DifficultyVerdict,
     GeneratabilityVerdict,
@@ -21,6 +22,7 @@ from app.evaluation.schema import (
     evaluation_from_metrics,
     failed_metric,
 )
+from app.generation.schemas import TaxonomyClaim
 
 
 def metric_results(
@@ -150,6 +152,73 @@ class MetricJudgeClient:
                 rationale="generatability rationale",
             )
         raise AssertionError(f"Unexpected response model: {response_model!r}")
+
+
+class SequencedDraftClient(MetricJudgeClient):
+    """Returns a different generation draft per call, judging normally in between.
+
+    For the claim-retry path (ADR-032): a run that misclassifies and then corrects
+    itself needs the second call to answer differently from the first, which a
+    single fixed ``draft`` cannot express. The last draft repeats once the sequence
+    is exhausted, so a test can say "wrong twice, then right" without counting the
+    judge's calls too.
+    """
+
+    def __init__(self, *, drafts: list[TaxonomyClaim], **kwargs: Any) -> None:
+        if not drafts:
+            raise AssertionError("SequencedDraftClient needs at least one draft.")
+        super().__init__(draft=drafts[0], **kwargs)
+        self.drafts = drafts
+        self.draft_calls = 0
+
+    def complete_structured(
+        self, *, system: str, prompt: str, response_model: type[BaseModel], **kwargs: Any
+    ) -> BaseModel:
+        if isinstance(self.drafts[0], response_model):
+            index = min(self.draft_calls, len(self.drafts) - 1)
+            self.draft_calls += 1
+            self.draft = self.drafts[index]
+            # Keep the subtopic judge agreeing with whatever was last claimed, so a
+            # retry test is not also a calibration test.
+            self.topic_id = self.draft.topic_id
+            self.subtopic_ids = list(self.draft.subtopic_ids)
+        return super().complete_structured(
+            system=system, prompt=prompt, response_model=response_model, **kwargs
+        )
+
+
+class MalformedThenGoodClient(MetricJudgeClient):
+    """Fails to return a readable draft N times, then answers normally.
+
+    Reproduces the observed failure: the provider replies with the JSON *schema*
+    of the draft instead of an instance, which Instructor surfaces as
+    :class:`~app.errors.MalformedModelOutputError`.
+    """
+
+    def __init__(self, *, malformed_replies: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.malformed_replies = malformed_replies
+        self.malformed_seen = 0
+
+    def complete_structured(
+        self, *, system: str, prompt: str, response_model: type[BaseModel], **kwargs: Any
+    ) -> BaseModel:
+        generating = self.draft is not None and isinstance(self.draft, response_model)
+        if generating and self.malformed_seen < self.malformed_replies:
+            self.malformed_seen += 1
+            self.calls += 1
+            self.prompts.append(prompt)
+            raise MalformedModelOutputError(
+                "The model did not return a usable structured answer.",
+                detail=(
+                    f"ValidationError: 6 validation errors for {response_model.__name__} "
+                    "topic_id Field required [type=missing, input_value="
+                    "{'description': '...', 'type': 'object'}]"
+                ),
+            )
+        return super().complete_structured(
+            system=system, prompt=prompt, response_model=response_model, **kwargs
+        )
 
 
 class RaisingJudgeClient:

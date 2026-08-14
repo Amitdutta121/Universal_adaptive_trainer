@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 from app.domain.books import ExtractionWarning
 from app.domain.enums import (
     ExtractionWarningCode,
-    PreferenceCategory,
     QuestionStatus,
+    QuestionType,
     RejectionReason,
     ReviewDecision,
     WarningSeverity,
@@ -23,9 +23,9 @@ from app.domain.enums import (
 from app.domain.questions import QuestionCheck, QuestionValidationReport
 from app.persistence.models import (
     BookRow,
-    PreferenceStatementRow,
     ProfessorReviewRow,
     QuestionRow,
+    TypeInstructionRow,
 )
 
 
@@ -195,18 +195,19 @@ class TestEnumColumns:
         Callers guarded ``.value`` access with ``hasattr`` because a constructed
         row held the member while a loaded row held its value.
         """
-        row = PreferenceStatementRow(
-            rule_text="Prefer concrete code.",
-            category=PreferenceCategory.WORDING,
-            supporting_review_ids=[1, 2],
+        row = TypeInstructionRow(
+            question_type=QuestionType.MULTIPLE_CHOICE,
+            instruction="Prefer concrete code.",
+            rules=[{"rule": "Keep options short.", "review_ids": [1, 2]}],
         )
         session.add(row)
         session.commit()
         session.expire_all()
 
-        loaded = session.get(PreferenceStatementRow, row.id)
-        assert loaded.category is PreferenceCategory.WORDING
-        assert loaded.category.value == PreferenceCategory.WORDING.value
+        loaded = session.get(TypeInstructionRow, row.id)
+        assert loaded.question_type is QuestionType.MULTIPLE_CHOICE
+        assert loaded.question_type.value == QuestionType.MULTIPLE_CHOICE.value
+        assert loaded.rules[0]["rule"] == "Keep options short."
 
     def test_unknown_scalar_enum_value_is_reported(self, engine: Engine, session: Session) -> None:
         """Unlike display data, a schema/code mismatch here is named, not hidden."""

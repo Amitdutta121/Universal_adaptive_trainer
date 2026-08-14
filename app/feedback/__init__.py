@@ -15,7 +15,9 @@ Key rules
       "what was generated vs. what was accepted" stays recoverable.
 
 Allowed dependencies
-    ``app.domain``, ``app.errors``, ``app.persistence``.
+    ``app.domain``, ``app.errors``, ``app.persistence``, and the pure label
+    functions of ``app.calibration`` (used by :mod:`app.feedback.outcomes` to
+    place a landed review in its quadrant cell).
     Must not import ``app.generation`` (that direction would create a cycle:
     generation reads preference, preference reads feedback).
 """
@@ -26,8 +28,11 @@ from sqlalchemy.orm import Session
 
 from app.domain.enums import ReviewDecision
 from app.errors import DomainRuleError
+from app.feedback.outcomes import ReviewOutcome, route_review_outcome
 from app.feedback.service import submit_review
 from app.persistence.models import ProfessorReviewRow
+
+__all__ = ["ReviewOutcome", "record_review", "route_review_outcome", "submit_review"]
 
 
 def record_review(

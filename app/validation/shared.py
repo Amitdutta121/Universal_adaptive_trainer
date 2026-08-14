@@ -68,13 +68,48 @@ def _has_existing_source_sections(question: Question, session: Session | None) -
     return True
 
 
+def _claim_check(question: Question) -> QuestionCheck | None:
+    """Report whether the generator's own classification was accepted (ADR-032).
+
+    ``None`` when the question records no attempts, so every question stored
+    before that decision validates exactly as it did -- adding a check to an
+    older row would fail it retroactively over a measurement never taken.
+
+    This is not a duplicate of ``approved_taxonomy_ids``. That check reads the
+    ids that reached the columns, which cannot show what was dropped to get them
+    there: a claim of too many subtopics stores a valid-looking prefix, and a
+    non-existent subtopic id is simply absent. Only the recorded claim shows the
+    miss.
+    """
+    if not question.generation_attempts:
+        return None
+    last = question.generation_attempts[-1]
+    return make_check(
+        "claimed_taxonomy_accepted",
+        last.accepted,
+        (
+            "Generator's classification accepted"
+            if last.accepted
+            else last.detail or "The generator's classification was refused."
+        ),
+        evidence=(
+            None
+            if last.accepted
+            else (
+                f"Attempt {last.number} of {len(question.generation_attempts)} claimed "
+                f"topic {last.claimed_topic_id}, subtopics {last.claimed_subtopic_ids}."
+            )
+        ),
+    )
+
+
 def check_shared(question: Question, session: Session | None) -> list[QuestionCheck]:
     """Check required curriculum, source, type, and difficulty grounding."""
     taxonomy_ids_valid = _has_approved_taxonomy_ids(question, session)
     source_sections_valid = _has_existing_source_sections(question, session)
     question_type_valid = question.question_type is not None
 
-    return [
+    checks = [
         make_check(
             "approved_taxonomy_ids",
             taxonomy_ids_valid,
@@ -100,3 +135,7 @@ def check_shared(question: Question, session: Session | None) -> list[QuestionCh
         ),
         make_check("allowed_difficulty", True, "Allowed difficulty"),
     ]
+    claim = _claim_check(question)
+    if claim is not None:
+        checks.append(claim)
+    return checks

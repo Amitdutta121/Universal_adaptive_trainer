@@ -21,7 +21,6 @@ from app.domain.questions import QuestionValidationReport
 from app.errors import ConfigurationError, FeatureNotAvailableError
 from app.generation import GenerationRequest, GeneratorDescriptor, get_question_generator
 from app.llm import describe_availability, require_llm
-from app.personalization import get_preference_learner
 from app.validation import get_question_validator
 
 BOUNDARY_MODULES = [
@@ -208,13 +207,16 @@ def test_generation_request_names_no_topic_or_subtopic() -> None:
     assert "topic_id" not in fields
 
 
-def test_base_and_personalized_generators_are_distinguishable() -> None:
+def test_generator_provenance_is_still_labelled() -> None:
+    """One generator now (ADR-033), but questions still record which made them.
+
+    ``GeneratorKind.PERSONALIZED`` is kept because rows written before ADR-033
+    carry it; nothing new is stamped with it.
+    """
     base = GeneratorDescriptor(kind=GeneratorKind.BASE, name="grounded", version="1")
-    personalized = GeneratorDescriptor(
-        kind=GeneratorKind.PERSONALIZED, name="grounded", version="1"
-    )
-    assert base.label() != personalized.label()
     assert base.label() == "base:grounded@1"
+    historical = GeneratorDescriptor(kind=GeneratorKind.PERSONALIZED, name="grounded", version="1")
+    assert base.label() != historical.label()
 
 
 def test_question_validation_returns_a_report() -> None:
@@ -226,10 +228,27 @@ def test_question_validation_returns_a_report() -> None:
     assert report.passed is False
 
 
-def test_preference_learning_builds_profile(session) -> None:
-    profile = get_preference_learner().build_profile(1)
-    assert profile.profile_version == "1"
-    assert profile.review_count >= 0
+def test_personalization_is_the_type_instruction(session) -> None:
+    """ADR-033: nothing is appended to the prompt; the type slot is replaced.
+
+    The deleted modules stay deleted. A retrieval or preference module coming
+    back would mean the appended-block design had returned with it.
+    """
+    for module in (
+        "app.personalization.retrieval",
+        "app.personalization.context",
+        "app.personalization.embeddings",
+        "app.personalization.learner",
+        "app.personalization.service",
+        "app.personalization.generator",
+        "app.domain.preferences",
+    ):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
+
+    from app.personalization import refresh_type_instruction
+
+    assert callable(refresh_type_instruction)
 
 
 def test_adaptive_engine_fails_loudly() -> None:

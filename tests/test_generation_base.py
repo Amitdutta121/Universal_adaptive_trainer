@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import book_documents as docs
-import pytest
-from llm_fakes import MetricJudgeClient
+from llm_fakes import MetricJudgeClient, SequencedDraftClient
 from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
-from app.domain.enums import Difficulty, QuestionKind, QuestionType
-from app.errors import InvalidQuestionSpecError
+from app.domain.enums import ClaimViolation, Difficulty, QuestionKind, QuestionType
+from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.base import DESCRIPTOR, BaseQuestionGenerator
 from app.generation.schemas import RESPONSE_MODEL_FOR, DebuggingDraft
 from app.generation.service import GenerationService
@@ -41,13 +40,19 @@ def _seed(session: Session, settings) -> tuple[object, object, object, list[int]
 
 
 def _debugging_draft(topic_id: int, subtopic_ids: list[int]) -> DebuggingDraft:
+    """A draft that passes deterministic validation.
+
+    The reference solution has to be runnable Python that satisfies its own
+    tests: since ADR-032 a failed check triggers a retry, so a fixture with a
+    prose 'solution' would make every test spend three generation calls.
+    """
     return DebuggingDraft(
         topic_id=topic_id,
         subtopic_ids=subtopic_ids,
         prompt="Find the bug.",
         code="s = 'ab'\ns[0] = 'c'",
-        reference_solution="Strings are immutable; build a new string.",
-        tests=[{"assert": "assert True"}],
+        reference_solution="def fixed(s):\n    return 'c' + s[1:]",
+        tests=[{"assert": "assert fixed('ab') == 'cb'"}],
         explanation="Item assignment on str fails.",
     )
 
@@ -78,7 +83,7 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
     assert question.generator_version == "1"
     assert question.content is not None
     assert question.content["sources"][0]["section_id"] == section_ids[0]
-    assert question.tests and '"assert": "assert True"' in question.tests
+    assert question.tests and "assert fixed('ab') == 'cb'" in question.tests
     call = client.generation_calls[0]
     assert call["model"] is RESPONSE_MODEL_FOR[QuestionType.DEBUGGING]
     assert "section text" in call["prompt"].lower()
@@ -126,7 +131,13 @@ def test_generator_claim_becomes_the_questions_taxonomy(session, settings) -> No
     assert question.subtopic_ids == both
 
 
-def test_a_subtopic_outside_the_claimed_topic_is_refused(session, settings) -> None:
+def test_a_subtopic_outside_the_claimed_topic_is_retried_then_kept(session, settings) -> None:
+    """A cross-topic claim costs the retries and still yields a question (ADR-032).
+
+    It used to raise, which discarded the whole batch. Now the violation is put
+    back to the model, and after the cap the question is returned with its refused
+    claim recorded -- the run continues and the miss stays visible.
+    """
     version, topic, subtopic, section_ids = _seed(session, settings)
     other_topic_subtopic = version.topics[1].subtopics[0].id
     spec = build_question_spec(
@@ -140,10 +151,78 @@ def test_a_subtopic_outside_the_claimed_topic_is_refused(session, settings) -> N
         draft=_debugging_draft(topic.id, [subtopic.id, other_topic_subtopic])
     )
 
-    with pytest.raises(InvalidQuestionSpecError):
-        BaseQuestionGenerator(client=client, retrieval=SourceRetrieval(session)).generate_one(
-            spec, version=version
-        )
+    question = BaseQuestionGenerator(
+        client=client, retrieval=SourceRetrieval(session)
+    ).generate_one(spec, version=version)
+
+    assert len(question.generation_attempts) == MAX_GENERATION_ATTEMPTS
+    assert not any(attempt.accepted for attempt in question.generation_attempts)
+    assert question.generation_attempts[-1].violations == [ClaimViolation.FOREIGN_SUBTOPICS]
+    # Both ids exist, so both were stored; the deterministic checks refuse the
+    # pairing rather than the row being unrepresentable.
+    assert question.topic_id == topic.id
+    assert question.subtopic_ids == [subtopic.id, other_topic_subtopic]
+
+
+def test_the_second_attempt_is_told_which_id_to_change(session, settings) -> None:
+    """Naming the fault is not enough; the retry must name the id and the fix.
+
+    A live model, told only that "subtopic 106 is not under topic 11", returned
+    the same id three times. So the correction says which id to remove -- and
+    offers the other resolution, since a model that keeps naming a subtopic may
+    be right about it and wrong about the topic.
+    """
+    version, topic, subtopic, section_ids = _seed(session, settings)
+    other_topic_subtopic = version.topics[1].subtopics[0].id
+    spec = build_question_spec(
+        session,
+        curriculum_version_id=version.id,
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        source_section_ids=[section_ids[0]],
+    )
+    client = MetricJudgeClient(
+        draft=_debugging_draft(topic.id, [subtopic.id, other_topic_subtopic])
+    )
+
+    BaseQuestionGenerator(client=client, retrieval=SourceRetrieval(session)).generate_one(
+        spec, version=version
+    )
+
+    first, second = client.generation_calls[0]["prompt"], client.generation_calls[1]["prompt"]
+    assert "correction" not in first
+    # The offending id, an instruction to remove it, and the topic that owns it.
+    assert f"Either remove {other_topic_subtopic} from subtopic_ids" in second
+    assert f"Subtopic {other_topic_subtopic}" in second
+    assert f"set topic_id to {version.topics[1].id}" in second
+    assert version.topics[1].name in second
+
+
+def test_a_refused_claim_is_accepted_once_corrected(session, settings) -> None:
+    """The retry is what makes a recoverable miss cost one extra call, not a run."""
+    version, topic, subtopic, section_ids = _seed(session, settings)
+    other_topic_subtopic = version.topics[1].subtopics[0].id
+    spec = build_question_spec(
+        session,
+        curriculum_version_id=version.id,
+        question_type=QuestionType.DEBUGGING,
+        difficulty=Difficulty.MEDIUM,
+        source_section_ids=[section_ids[0]],
+    )
+    client = SequencedDraftClient(
+        drafts=[
+            _debugging_draft(topic.id, [subtopic.id, other_topic_subtopic]),
+            _debugging_draft(topic.id, [subtopic.id]),
+        ]
+    )
+
+    question = BaseQuestionGenerator(
+        client=client, retrieval=SourceRetrieval(session)
+    ).generate_one(spec, version=version)
+
+    assert len(question.generation_attempts) == 2
+    assert [attempt.accepted for attempt in question.generation_attempts] == [False, True]
+    assert question.subtopic_ids == [subtopic.id]
 
 
 def test_base_generator_generates_one_unpersisted_question_per_section(

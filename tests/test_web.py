@@ -1,4 +1,4 @@
-"""HTTP surface: the five sections, the dashboard, health and error handling."""
+"""HTTP surface: every section, the dashboard, health and error handling."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ REQUIRED_LABELS = (
     "Curriculum",
     "Questions",
     "Professor Feedback",
-    "Preferences",
+    "Instructions",
+    "Coverage",
     "Students",
 )
 
 
-def test_navigation_declares_exactly_the_six_required_sections() -> None:
+def test_navigation_declares_exactly_the_required_sections() -> None:
     assert tuple(section.label for section in NAV_SECTIONS) == REQUIRED_LABELS
 
 
@@ -52,7 +53,9 @@ def test_section_pages_report_honest_empty_state(client: TestClient) -> None:
     assert "No curriculum version has been approved yet." in client.get("/curriculum").text
     assert "No questions have been generated yet." in client.get("/questions").text
     assert "No professor reviews have been recorded yet." in client.get("/feedback").text
-    assert "No preference rules have been inferred yet." in client.get("/preferences").text
+    # Every type is listed even with nothing learned, so the honest empty state is
+    # "shipped instruction", not an empty page.
+    assert "Shipped instruction" in client.get("/instructions").text
 
 
 def test_students_page_states_the_fixed_adaptive_mechanism(client: TestClient) -> None:

@@ -1,99 +1,48 @@
 """Personalization boundary (professor preference learning).
 
 Responsibility
-    Turn accumulated professor feedback into a preference profile, then into a
-    *personalized* generator that produces questions closer to what this
-    professor approves. Later, use the accumulated feedback to optimize the
-    generator itself.
+    Turn accumulated professor feedback into the generation instruction for each
+    question type, so that questions move toward what this professor approves.
 
 Status
-    Preference extraction, merge, refresh, professor confirm/correct/remove
-    actions, and personalized-context generation are implemented.
-    :class:`~app.personalization.generator.PersonalizedContextGenerator` is
-    wired through :class:`~app.generation.GenerationService` when
-    ``generator="personalized"``.
+    Implemented as **per-type learned instructions** (ADR-033):
+    :func:`~app.personalization.instructions.refresh_type_instruction` turns the
+    reviews of one question type into a rule list, renders it into the
+    type-specific slot of the generation prompt, and stores it on
+    ``type_instructions``. There is no separate personalized generator: every
+    question is generated with whatever has been learned for its type.
+
+    The previous design -- a preference profile plus retrieved review examples,
+    appended as a block after the prompt -- was removed. ADR-033 records why.
 
 Key rules
     * Input is professor feedback only. Student performance belongs to the
       separate student-adaptation loop and must not leak in here.
-    * A personalized generator is always versioned and always distinguishable
-      from the base generator (see :mod:`app.generation`), so the two can be
-      compared rather than silently swapped.
+    * A type nobody has reviewed keeps the shipped instruction. Personalization
+      that invents rules from no evidence is not personalization.
+    * Rules accumulate and are edited; the instruction is never rewritten from
+      scratch, because that loses rules earned in earlier rounds.
 
 Allowed dependencies
     ``app.config``, ``app.domain``, ``app.errors``, ``app.feedback``,
-    ``app.generation`` (for :class:`~app.generation.GeneratorDescriptor`),
-    ``app.llm``, ``app.persistence``.
+    ``app.generation`` (for the shipped type instruction), ``app.llm``,
+    ``app.persistence``.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
-
-from pydantic import BaseModel, Field
-
-from app.domain.preferences import PROFILE_VERSION
-from app.persistence.database import session_scope
-from app.persistence.repositories import ProfessorReviewRepository
-from app.personalization.service import (
-    confirm_preference,
-    correct_preference,
-    list_active_preferences,
-    refresh_preferences,
-    remove_preference,
+from app.personalization.instructions import (
+    LearnedRule,
+    LearnedRules,
+    refresh_type_instruction,
+    render_instruction,
+    reviews_for_type,
 )
 
-
-class ProfessorPreferenceProfile(BaseModel):
-    """A professor's learned preferences.
-
-    The shape is intentionally thin: it will be defined by what the review data
-    actually supports, not guessed in advance.
-    """
-
-    professor_id: int
-    #: How many reviews the profile was derived from. Zero means "no signal yet".
-    review_count: int = Field(default=0, ge=0)
-    #: Version of the profile-building procedure, so profiles stay comparable.
-    profile_version: str = "0"
-
-    @property
-    def has_signal(self) -> bool:
-        return self.review_count > 0
-
-
-class PreferenceLearner(Protocol):
-    """Builds a preference profile from stored professor feedback."""
-
-    def build_profile(self, professor_id: int) -> ProfessorPreferenceProfile: ...
-
-
-class ReviewPreferenceLearner:
-    """Build a thin profile summary from stored review history."""
-
-    def build_profile(self, professor_id: int) -> ProfessorPreferenceProfile:
-        with session_scope() as session:
-            count = ProfessorReviewRepository(session).count()
-        return ProfessorPreferenceProfile(
-            professor_id=professor_id,
-            review_count=count,
-            profile_version=PROFILE_VERSION,
-        )
-
-
-def get_preference_learner() -> PreferenceLearner:
-    """Return the configured learner."""
-    return ReviewPreferenceLearner()
-
-
 __all__ = [
-    "PreferenceLearner",
-    "ProfessorPreferenceProfile",
-    "ReviewPreferenceLearner",
-    "confirm_preference",
-    "correct_preference",
-    "get_preference_learner",
-    "list_active_preferences",
-    "refresh_preferences",
-    "remove_preference",
+    "LearnedRule",
+    "LearnedRules",
+    "refresh_type_instruction",
+    "render_instruction",
+    "reviews_for_type",
 ]

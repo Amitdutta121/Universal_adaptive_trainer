@@ -29,7 +29,12 @@ def _evaluation(
     ).model_dump(mode="json")
 
 
-def _question(session: Session, *, evaluation: object | None = None) -> QuestionRow:
+def _question(
+    session: Session,
+    *,
+    evaluation: object | None = None,
+    status: QuestionStatus = QuestionStatus.VALIDATION_PASSED,
+) -> QuestionRow:
     row = QuestionRepository(session).add(
         QuestionRow(
             prompt="Write a loop.",
@@ -40,7 +45,7 @@ def _question(session: Session, *, evaluation: object | None = None) -> Question
             original_tests="assert True",
             generator_name="base-gen",
             generator_version="1",
-            status=QuestionStatus.VALIDATION_PASSED,
+            status=status,
             pedagogical_eval=evaluation,
         )
     )
@@ -98,6 +103,33 @@ def test_queue_reports_progress_counts(client: TestClient, session: Session) -> 
     payload = _queue(client)
 
     assert (payload["total"], payload["reviewed"], payload["remaining"]) == (3, 1, 2)
+
+
+def test_queue_never_offers_a_question_that_failed_validation(
+    client: TestClient, session: Session
+) -> None:
+    """A deterministic fault has no verdict left to solicit (ADR-032)."""
+    _question(session, status=QuestionStatus.VALIDATION_FAILED)
+    usable = _question(session)
+
+    payload = _queue(client)
+
+    assert payload["question"]["question"]["id"] == usable.id
+    # And it is excluded from the total too, so a finished pass reads as finished
+    # rather than stalling on a question the queue will never offer.
+    assert (payload["total"], payload["remaining"]) == (1, 1)
+
+
+def test_a_finished_pass_reaches_zero_despite_failed_questions(
+    client: TestClient, session: Session
+) -> None:
+    _question(session, status=QuestionStatus.VALIDATION_FAILED)
+    _review(session, _question(session))
+
+    payload = _queue(client)
+
+    assert payload["question"] is None
+    assert (payload["total"], payload["reviewed"], payload["remaining"]) == (1, 1, 0)
 
 
 def test_review_queue_path_is_not_parsed_as_a_question_id(client: TestClient) -> None:

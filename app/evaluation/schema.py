@@ -224,8 +224,14 @@ def evaluation_from_metrics(
     *,
     question_id: int | None,
     judge_model: str,
+    rubric_version: str = RUBRIC_VERSION,
 ) -> PedagogicalEvaluation:
-    """Assemble the stored evaluation from whatever the four judges returned."""
+    """Assemble the stored evaluation from whatever the four judges returned.
+
+    ``rubric_version`` is passed in rather than read from the module constant:
+    once a professor may edit a judge prompt (ADR-038), the panel that produced
+    these metrics is a fact about the call, not about the code.
+    """
     answered = [row for row in metrics if row.status is MetricStatus.COMPLETED]
     if not answered:
         status = PedagogicalEvalStatus.ERROR
@@ -239,7 +245,7 @@ def evaluation_from_metrics(
         gate=derive_gate(metrics),
         metrics=metrics,
         judge_model=judge_model,
-        rubric_version=RUBRIC_VERSION,
+        rubric_version=rubric_version,
     )
 
 

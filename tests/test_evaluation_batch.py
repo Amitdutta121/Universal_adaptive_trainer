@@ -738,16 +738,14 @@ def test_submitted_bodies_are_json_serialisable_in_key_order(
 
 def test_generation_records_its_evaluation_into_history(session: Session, settings: Any) -> None:
     """Generation must go through the same recorder, or history starts incomplete."""
+    from llm_fakes import MetricJudgeClient
+
     from app.generation.service import GenerationService
-    from tests.test_generation_service_personalization import (
-        FakeClient,
-        _debugging_draft,
-        _seed,
-    )
+    from tests.test_generation_base import _debugging_draft, _seed
 
     version, topic, subtopic, section_ids = _seed(session, settings)
 
-    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]), topic.id, [subtopic.id])
+    client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
     rows = GenerationService(session, client=client).generate_for_sections(
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
@@ -763,15 +761,13 @@ def test_generation_records_its_evaluation_into_history(session: Session, settin
 
 def test_generated_questions_need_no_backfill(session: Session, settings: Any) -> None:
     """The backfill exists for pre-existing rows, not for ones just written."""
+    from llm_fakes import MetricJudgeClient
+
     from app.generation.service import GenerationService
-    from tests.test_generation_service_personalization import (
-        FakeClient,
-        _debugging_draft,
-        _seed,
-    )
+    from tests.test_generation_base import _debugging_draft, _seed
 
     version, topic, subtopic, section_ids = _seed(session, settings)
-    client = FakeClient(_debugging_draft(topic.id, [subtopic.id]), topic.id, [subtopic.id])
+    client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
     GenerationService(session, client=client).generate_for_sections(
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,

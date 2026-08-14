@@ -16,9 +16,9 @@ from app.llm import describe_availability
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
-    PreferenceRepository,
     ProfessorReviewRepository,
     QuestionRepository,
+    TypeInstructionRepository,
 )
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import ConfigResponse, CountsResponse, HealthResponse
@@ -79,6 +79,6 @@ def counts(session: DbSession) -> CountsResponse:
         curriculum_versions=CurriculumRepository(session).count(),
         questions=QuestionRepository(session).count(),
         reviews=ProfessorReviewRepository(session).count(),
-        preferences=len(PreferenceRepository(session).list_all()),
+        learned_instructions=len(TypeInstructionRepository(session).list_all()),
         students=0,
     )

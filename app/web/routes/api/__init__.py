@@ -16,10 +16,12 @@ from fastapi import APIRouter
 from app.web.routes.api import (
     books,
     calibration,
+    coverage,
     curriculum,
     evaluation,
     feedback,
-    preferences,
+    instructions,
+    judge_prompts,
     questions,
     system,
 )
@@ -30,8 +32,10 @@ router.include_router(books.router)
 router.include_router(curriculum.router)
 router.include_router(questions.router)
 router.include_router(feedback.router)
-router.include_router(preferences.router)
+router.include_router(instructions.router)
+router.include_router(judge_prompts.router)
 router.include_router(calibration.router)
+router.include_router(coverage.router)
 # After ``questions``: this router also serves /questions/{id}/evaluations, and
 # including it first would let that path shadow /questions/{question_id}.
 router.include_router(evaluation.router)
@@ -39,10 +43,12 @@ router.include_router(evaluation.router)
 __all__ = [
     "books",
     "calibration",
+    "coverage",
     "curriculum",
     "evaluation",
     "feedback",
-    "preferences",
+    "instructions",
+    "judge_prompts",
     "questions",
     "router",
     "system",

@@ -17,6 +17,16 @@
     </div>
   {% endif %}
 
+  {# What the previous submit did, carried across the redirect (ADR-037). #}
+  {% if outcome %}
+    <div class="banner" role="status">
+      <p>{{ outcome }}</p>
+      <p class="meta">
+        Recorded as dataset evidence. <a href="/feedback#quadrant">See every cell</a>.
+      </p>
+    </div>
+  {% endif %}
+
   <section class="panel review-progress">
     <div class="review-progress-head">
       <div>
