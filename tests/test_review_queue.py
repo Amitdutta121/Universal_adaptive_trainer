@@ -264,7 +264,9 @@ def test_submitting_a_verdict_advances_to_the_next_question(
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"/review?after={first.id}&mode=all"
+    # The outcome of the verdict rides along as a notice (ADR-037); the cursor
+    # and the mode are what this test is about.
+    assert response.headers["location"].startswith(f"/review?after={first.id}&mode=all")
     assert f'action="/review/{second.id}"' in client.get(response.headers["location"]).text
 
 
@@ -316,7 +318,7 @@ def test_page_preserves_the_mode_across_a_submission(client: TestClient, session
         follow_redirects=False,
     )
 
-    assert response.headers["location"].endswith("mode=scoreable")
+    assert "mode=scoreable" in response.headers["location"]
 
 
 def test_page_falls_back_to_all_for_an_unknown_mode(client: TestClient, session: Session) -> None:

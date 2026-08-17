@@ -6,6 +6,7 @@ but are not a multi-tenant sandbox: generated code can still use the filesystem.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -13,6 +14,8 @@ import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from app.config import get_settings
 from app.generation.schemas import ExecutableTestCase
@@ -24,6 +27,31 @@ def normalize_output(text: str) -> str:
     """Normalize line endings and remove at most one trailing newline."""
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     return normalized.removesuffix("\n")
+
+
+def parse_test_cases(raw: object) -> list[ExecutableTestCase] | None:
+    """Read stored test cases, from a decoded list or the JSON text of one.
+
+    ``None`` means "these are not usable test cases" -- absent, empty, or not
+    shaped like a case. Callers decide what that means: for validation it is a
+    failing check, for scoring a student it is a question that cannot be marked.
+
+    Lives here rather than in :mod:`app.validation.type_checks` so that reading a
+    question's tests and running them are one import. It is what lets
+    :mod:`app.adaptive` execute a student's answer without depending on
+    :mod:`app.generation`.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        return [ExecutableTestCase.model_validate(case) for case in raw]
+    except (ValidationError, TypeError):
+        return None
 
 
 @dataclass(frozen=True)

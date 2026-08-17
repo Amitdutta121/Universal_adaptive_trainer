@@ -11,12 +11,15 @@ Enum-valued fields serialise as their string value because every enum in
 
 from __future__ import annotations
 
+import random
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.calibration import (
+    MIN_PANEL_SAMPLE,
+    AgreementTrend,
     CalibrationLabel,
     CalibrationPair,
     CalibrationReport,
@@ -40,6 +43,7 @@ from app.domain.enums import (
     GeneratorKind,
     JudgeBatchStatus,
     JudgeMetricId,
+    MasteryBand,
     QuestionKind,
     QuestionStatus,
     QuestionType,
@@ -61,9 +65,12 @@ from app.persistence.models import (
     QuestionRow,
     QuestionSetVersionRow,
     ReviewOutcomeRow,
+    StudentAttemptRow,
+    StudentRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
+    TrainingSessionRow,
 )
 
 
@@ -842,6 +849,84 @@ class ReviewListResponse(BaseModel):
 # ----------------------------------------------------------------- judge prompts
 
 
+class MetricFaultsOut(BaseModel):
+    """How often one judge was at fault within one panel (ADR-041)."""
+
+    metric: JudgeMetricId
+    label: str
+    missed: int
+    false_alarms: int
+    faults: int
+    #: Faults per outcome, so panels of different sizes are comparable.
+    fault_rate: float | None
+
+
+class TrendPointOut(BaseModel):
+    """One judge panel's agreement record."""
+
+    rubric_version: str | None
+    n: int
+    first_seen: datetime | None
+    last_seen: datetime | None
+    confirmed_good: int
+    missed: int
+    false_alarm: int
+    confirmed_bad: int
+    agreement: float | None
+    auto_accept_precision: float | None
+    #: True while ``n`` is too small for the rates to describe the panel rather
+    #: than whichever questions happened to be reviewed under it.
+    small_sample: bool
+    metrics: list[MetricFaultsOut]
+
+
+class AgreementTrendResponse(BaseModel):
+    """Agreement panel by panel, oldest first (ADR-041)."""
+
+    points: list[TrendPointOut]
+    total: int
+    #: Whether the newest panel agrees more often than the oldest. A direction,
+    #: never a significance claim: ``None`` until two panels have been measured.
+    improved: bool | None
+    min_panel_sample: int
+
+    @classmethod
+    def from_trend(cls, trend: AgreementTrend) -> AgreementTrendResponse:
+        rates = {point.rubric_version: point.fault_rates for point in trend.points}
+        return cls(
+            points=[
+                TrendPointOut(
+                    rubric_version=point.rubric_version,
+                    n=point.n,
+                    first_seen=point.first_seen,
+                    last_seen=point.last_seen,
+                    confirmed_good=point.confirmed_good,
+                    missed=point.missed,
+                    false_alarm=point.false_alarm,
+                    confirmed_bad=point.confirmed_bad,
+                    agreement=point.agreement,
+                    auto_accept_precision=point.auto_accept_precision,
+                    small_sample=point.small_sample,
+                    metrics=[
+                        MetricFaultsOut(
+                            metric=row.metric,
+                            label=row.metric.value.replace("_", " "),
+                            missed=row.missed,
+                            false_alarms=row.false_alarms,
+                            faults=row.faults,
+                            fault_rate=rates[point.rubric_version][row.metric],
+                        )
+                        for row in point.metrics
+                    ],
+                )
+                for point in trend.points
+            ],
+            total=trend.total,
+            improved=trend.improved,
+            min_panel_sample=MIN_PANEL_SAMPLE,
+        )
+
+
 class JudgePromptOut(BaseModel):
     """One metric judge's system prompt, shipped or professor-edited (ADR-038)."""
 
@@ -1323,6 +1408,297 @@ class CreateQuestionSetRequest(BaseModel):
 
     label: str = Field(min_length=1, max_length=200)
     notes: str | None = None
+
+
+# -------------------------------------------------------------------- students
+
+
+class StudentOut(BaseModel):
+    """One learner. No credentials: there is no authentication (ADR-041)."""
+
+    id: int
+    display_name: str
+    created_at: datetime
+    answered_count: int = 0
+
+    @classmethod
+    def from_row(cls, row: StudentRow, *, answered_count: int = 0) -> StudentOut:
+        return cls(
+            id=row.id,
+            display_name=row.display_name,
+            created_at=row.created_at,
+            answered_count=answered_count,
+        )
+
+
+class StudentListResponse(BaseModel):
+    students: list[StudentOut]
+    total: int
+
+
+class CreateStudentRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=200)
+
+
+class TrainingSessionOut(BaseModel):
+    """One run against one frozen question set (ADR-036)."""
+
+    id: int
+    student_id: int
+    student_name: str | None
+    set_version_id: int | None
+    set_label: str | None
+    rng_seed: int
+    created_at: datetime
+    ended_at: datetime | None
+    served_count: int
+    answered_count: int
+
+    @classmethod
+    def from_row(
+        cls,
+        row: TrainingSessionRow,
+        *,
+        student_name: str | None = None,
+        set_label: str | None = None,
+    ) -> TrainingSessionOut:
+        attempts = list(row.attempts)
+        return cls(
+            id=row.id,
+            student_id=row.student_id,
+            student_name=student_name,
+            set_version_id=row.set_version_id,
+            set_label=set_label,
+            rng_seed=row.rng_seed,
+            created_at=row.created_at,
+            ended_at=row.ended_at,
+            served_count=len(attempts),
+            answered_count=sum(1 for attempt in attempts if attempt.score is not None),
+        )
+
+
+class TrainingSessionListResponse(BaseModel):
+    sessions: list[TrainingSessionOut]
+    total: int
+
+
+class StartTrainingSessionRequest(BaseModel):
+    student_id: int
+    set_version_id: int
+
+
+class ParsonsBlockOut(BaseModel):
+    """One draggable block. Its stored ``indent`` is deliberately not published."""
+
+    id: str
+    text: str
+
+
+class ServedQuestionOut(BaseModel):
+    """One question as the student sees it.
+
+    Every presentable field is listed explicitly. The stored ``content`` is never
+    published as-is, because it holds the answer -- ``correct_option_index``,
+    ``correct_answer``, ``expected_output``, ``correct_order`` and
+    ``reference_solution`` all live there. A whitelist per type is the only shape
+    where adding a question format cannot leak its answer by default.
+    """
+
+    training_session_id: int
+    attempt_id: int
+    ordinal: int
+    #: True when this was already outstanding rather than freshly drawn.
+    resumed: bool
+    #: True when the requested difficulty was unavailable (ADR-041).
+    fallback_used: bool
+    requested_difficulty: Difficulty
+    served_difficulty: Difficulty
+    subtopic_id: int | None
+    subtopic_name: str | None
+    question_id: int
+    question_type: QuestionType | None
+    prompt: str
+    #: Multiple choice only.
+    options: list[str] | None = None
+    #: Output prediction, code completion and debugging: the code to reason about.
+    code: str | None = None
+    #: Parsons only, in a shuffled order the student has to fix.
+    blocks: list[ParsonsBlockOut] | None = None
+
+    @classmethod
+    def from_served(cls, served: Any, *, subtopic_name: str | None = None) -> ServedQuestionOut:
+        attempt = served.attempt
+        question = served.question
+        content = question.content or {}
+        return cls(
+            training_session_id=attempt.session_id,
+            attempt_id=attempt.id,
+            ordinal=attempt.ordinal,
+            resumed=served.resumed,
+            fallback_used=served.fallback_used,
+            requested_difficulty=attempt.requested_difficulty,
+            served_difficulty=attempt.served_difficulty,
+            subtopic_id=attempt.subtopic_id,
+            subtopic_name=subtopic_name,
+            question_id=question.id,
+            question_type=question.question_type,
+            prompt=question.prompt,
+            options=_presentable_options(question.question_type, content),
+            code=_presentable_code(question.question_type, content),
+            blocks=_presentable_blocks(question.question_type, content, seed=attempt.id),
+        )
+
+
+def _presentable_options(question_type: QuestionType | None, content: dict) -> list[str] | None:
+    if question_type is not QuestionType.MULTIPLE_CHOICE:
+        return None
+    options = content.get("options")
+    if not isinstance(options, list):
+        return None
+    return [str(option) for option in options]
+
+
+def _presentable_code(question_type: QuestionType | None, content: dict) -> str | None:
+    """The code a student reads or edits -- never the reference solution."""
+    if question_type not in {
+        QuestionType.OUTPUT_PREDICTION,
+        QuestionType.CODE_COMPLETION,
+        QuestionType.DEBUGGING,
+    }:
+        return None
+    code = content.get("code")
+    return code if isinstance(code, str) else None
+
+
+def _presentable_blocks(
+    question_type: QuestionType | None, content: dict, *, seed: int
+) -> list[ParsonsBlockOut] | None:
+    """Parsons blocks, shuffled.
+
+    Stored order is the correct order, so publishing it unshuffled would answer
+    the puzzle. The shuffle is seeded on the attempt id so a reload shows the
+    same arrangement rather than silently re-posing the question.
+    """
+    if question_type is not QuestionType.PARSONS:
+        return None
+    blocks = content.get("blocks")
+    if not isinstance(blocks, list):
+        return None
+    presentable = [
+        ParsonsBlockOut(id=str(block.get("id")), text=str(block.get("text")))
+        for block in blocks
+        if isinstance(block, dict) and block.get("id") is not None
+    ]
+    random.Random(seed).shuffle(presentable)
+    return presentable
+
+
+class AnswerRequest(BaseModel):
+    answer: str = ""
+
+
+class AnsweredOut(BaseModel):
+    """What one submitted answer was worth, and what it moved."""
+
+    training_session_id: int
+    attempt_id: int
+    question_id: int
+    score: float
+    passed_tests: int | None
+    total_tests: int | None
+    #: Failing-test evidence, or the author's explanation for a discrete question.
+    detail: str | None
+    mastery_before: float | None
+    mastery_after: float | None
+
+    @classmethod
+    def from_result(cls, result: Any) -> AnsweredOut:
+        attempt = result.attempt
+        return cls(
+            training_session_id=attempt.session_id,
+            attempt_id=attempt.id,
+            question_id=attempt.question_id,
+            score=result.scored.score,
+            passed_tests=result.scored.passed_tests,
+            total_tests=result.scored.total_tests,
+            detail=result.scored.detail,
+            mastery_before=result.mastery_before,
+            mastery_after=result.mastery_after,
+        )
+
+
+class TopicMasteryOut(BaseModel):
+    """One topic's BKT state, and the difficulty it currently implies."""
+
+    topic_id: int
+    topic_name: str
+    p_known: float
+    band: MasteryBand
+    next_difficulty: Difficulty
+    observations: int
+
+
+class SubtopicWeaknessOut(BaseModel):
+    """One subtopic's weakness -- its weight in the roulette."""
+
+    subtopic_id: int
+    subtopic_name: str
+    topic_name: str
+    weakness: float
+    observations: int
+
+
+class AttemptOut(BaseModel):
+    """One question served to a student, answered or not."""
+
+    id: int
+    session_id: int
+    ordinal: int
+    question_id: int
+    question_type: QuestionType | None
+    subtopic_id: int | None
+    requested_difficulty: Difficulty
+    served_difficulty: Difficulty
+    score: float | None
+    passed_tests: int | None
+    total_tests: int | None
+    created_at: datetime
+    answered_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: StudentAttemptRow) -> AttemptOut:
+        return cls(
+            id=row.id,
+            session_id=row.session_id,
+            ordinal=row.ordinal,
+            question_id=row.question_id,
+            question_type=row.question.question_type if row.question else None,
+            subtopic_id=row.subtopic_id,
+            requested_difficulty=row.requested_difficulty,
+            served_difficulty=row.served_difficulty,
+            score=row.score,
+            passed_tests=row.passed_tests,
+            total_tests=row.total_tests,
+            created_at=row.created_at,
+            answered_at=row.answered_at,
+        )
+
+
+class StudentProgressOut(BaseModel):
+    """Everything measured about one learner.
+
+    ``topics`` and ``subtopics`` list only what has actually been scored. State
+    rows are created on first touch (ADR-041), so an untouched subtopic has no
+    row and appears here as nothing rather than as a fabricated starting value.
+    """
+
+    student: StudentOut
+    answered: int
+    average_score: float | None
+    topics: list[TopicMasteryOut]
+    subtopics: list[SubtopicWeaknessOut]
+    recent_attempts: list[AttemptOut]
+    sessions: list[TrainingSessionOut]
 
 
 SubtopicDetail.model_rebuild()

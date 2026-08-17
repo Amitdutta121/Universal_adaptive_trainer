@@ -1389,4 +1389,140 @@ the smallest number that avoids that; the professor may demand more.
   decision — deferred until the gap counts show it is worth it.
 - **No training link is built.** `app/adaptive/` is still a boundary with no engine, so there is
   nothing to link to. The page lists that as deferred rather than rendering a link that would not
-  work.
+  work. *Superseded in fact by ADR-041:* the engine exists, and the set list now links to
+  `/students#start`, where a run is begun against a chosen set. Nothing else in this entry changes.
+
+---
+
+## ADR-041 — The adaptive engine: partial-credit BKT, a floored weakness, and a per-student reuse filter
+
+**Status:** accepted
+
+`CLAUDE.md` fixes the adaptive mechanism — BKT per topic, weakness per subtopic, weakness-weighted
+roulette, mastery-banded difficulty, priority-ordered selection, 0-100 scores. It leaves four rules
+undefined that no engine can run without. This entry decides them. Nothing here redesigns the fixed
+mechanism; each item fills a hole inside it.
+
+**1. A partial score is a partial observation.**
+
+BKT updates on a binary observation, but a testable question scores `passed_tests / total_tests`.
+The engine computes both posteriors — the one for a correct answer and the one for a wrong one —
+blends them by `score / 100`, then applies the single learning transition:
+
+```
+posterior = f·P(L|correct) + (1 − f)·P(L|wrong)      where f = score / 100
+p_known'  = posterior + (1 − posterior)·p_learn
+```
+
+**Why not binarize at a threshold:** 10/10 and 6/10 are different evidence about whether a student
+knows a skill, and a threshold discards the difference. It also puts a cliff at the pass mark,
+where one test case flips the update to its opposite. The blend is continuous, reduces exactly to
+standard BKT at 0 and at 100, and needs no threshold constant that nobody can justify.
+
+**Why blend before the transition:** the transition is affine in the posterior, so blending on
+either side of it yields the same number. Before it reads as what it is — one blended observation,
+followed by one opportunity to learn.
+
+**2. Weakness moves by a fixed rate and never reaches zero.**
+
+`weakness' = weakness + α·((1 − score/100) − weakness)`, with `α = 0.3`, clamped to
+`[MIN_SUBTOPIC_WEAKNESS, INITIAL_SUBTOPIC_WEAKNESS]` = `[0.05, 1.0]`.
+
+**Why a floor:** weakness *is* the roulette weight. A subtopic that reached zero would have zero
+draw probability and could never be asked again — the exploration half of "exploitation of weak
+areas while retaining exploration" would be gone precisely where mastery was demonstrated once and
+may have decayed since. At 0.05 against nine untouched subtopics that cell is still drawn about one
+time in 180: rare, not impossible.
+
+**Why a moving average rather than a running counter:** it needs one stored float per
+(student, subtopic) and weights recent evidence more heavily, which is what "current weakness"
+should mean.
+
+**3. A student is not re-served a question they have already answered while an unseen one remains.**
+
+The fixed rule is kept exactly: a served question's priority drops to `LOWEST_PRIORITY`, and
+`priority` and `times_used` remain properties of the question, global to the bank. The engine adds
+one ordering key *above* them — within a cell, questions this student has not answered sort before
+questions they have.
+
+**Why:** the fixed rule was written for one learner. With two, student A answering a question
+demotes it for student B, who has never seen it; and B could be handed the same question twice
+while an unseen one sat in the same cell at lower priority. Ordering on the student's own history
+first fixes both without touching the global column and without disabling reuse: once the cell's
+unseen questions are exhausted, seen ones are offered again, which is the reuse the design asks
+for.
+
+**4. An empty cell relaxes difficulty before it redraws.**
+
+Roulette can name a subtopic whose (subtopic, difficulty) cell holds no question. The engine tries,
+in order: the same subtopic at the nearest other difficulty; then a fresh roulette draw excluding
+the exhausted subtopic; then it raises. Every fallback is logged.
+
+**Why difficulty first:** the subtopic is the measured weakness and the thing worth practising.
+Difficulty is derived from a coarse three-band mapping and is the cheaper of the two to compromise.
+From `medium` the engine steps to `easy` before `hard` — serving a struggling student something too
+hard is the worse error.
+
+**Why it is logged and not absorbed:** a bank with gaps will fall back constantly, and an engine
+that silently serves the wrong difficulty still looks like an engine that is adapting. The coverage
+grid (ADR-036) already names those gaps; the log is what ties one served question to one of them.
+
+**Implications:**
+
+- Per-student state rows are created on first touch, with `p_init` and
+  `INITIAL_SUBTOPIC_WEAKNESS`, never seeded in bulk. A subtopic added to the curriculum after a
+  student began is therefore ordinary rather than a special case.
+- `MIN_SUBTOPIC_WEAKNESS` and the learning rate live in `app/adaptive/state.py`, not
+  `app/domain/mastery.py`. The domain module owns the values both loops share and states that the
+  updates themselves belong to this package.
+- The roulette takes an injected `random.Random` and iterates its weights in sorted id order.
+  Selection that depended on dict ordering could not be reproduced from a recorded seed, and the
+  tests would be flaky.
+- **Student-submitted code is executed by `LocalCodeRunner`, which is a bounded subprocess and not
+  a sandbox.** It was built for model-generated code (ADR-023). Arbitrary submitted code is a
+  larger threat, and this is acceptable only while the application runs locally for one professor.
+  Exposing training to real students over a network requires a real sandbox first; that is a
+  separate decision, not an implementation detail of this one.
+- **`app/adaptive` depends on `app/validation`, and on nothing else new.** Scoring a submitted
+  program means running it, and duplicating a runner would be worse than the dependency. Reading a
+  question's stored test cases moved to `app.validation.runner.parse_test_cases` for this reason:
+  the parser used to live in `type_checks.py` and would have dragged `app.generation.schemas` into
+  the student loop. The engine therefore imports **no** part of `app.generation`, which
+  `tests/test_boundaries.py` now enforces alongside the existing ban on `app.web` and the ADR-001
+  separation from `app.personalization`.
+- **A served question is recorded before it is answered, and re-asking returns it.** `serve_next`
+  is idempotent while an attempt is open. Otherwise reloading the page would abandon the open
+  attempt and let a student skip any question they disliked — a selection bias the mastery estimate
+  cannot see, because the skipped question leaves no trace.
+- **Parsons puzzles are scored on block order only.** The stored `indents` are not assessed:
+  nothing collects indentation from a student yet, and marking against a field the answer cannot
+  express would fail every submission. This becomes a partial score when the ordering UI grows
+  indentation.
+- **A malformed answer is a wrong answer, not an error.** Typing `banana` where an option index was
+  expected scores zero. Only a question that cannot be marked at all — no options, no test cases —
+  raises, because that is a defect in an approved question rather than in the answer.
+- ADR-036 records that no training link is built because there was no engine to link to. When the
+  engine ships the coverage page gains that link; nothing else in ADR-036 changes.
+
+**A served question never carries its own answer.** `ServedQuestionOut` lists every presentable
+field explicitly instead of publishing the stored `content`, which holds `correct_option_index`,
+`correct_answer`, `expected_output`, `correct_order` and `reference_solution`. A whitelist per type
+is the only shape in which adding a question format cannot leak its answer by default. Parsons
+blocks are additionally shuffled, seeded on the attempt id — stored order *is* the correct order,
+and a reload must not re-pose the puzzle differently.
+
+**Implementation status:** complete and reachable. `app/adaptive/state.py`, `selection.py`,
+`scoring.py` and `service.py` over the five student tables in `app/persistence/models.py`;
+`app/web/routes/api/students.py` exposes the nine endpoints; `/students`, `/students/{id}` and
+`/training/{id}` are the pages. `get_adaptive_engine(session)` returns the real
+`AdaptiveTrainingEngine`; `NullAdaptiveEngine` is gone.
+
+Not built, and not pretended to be: item analysis per frozen set, any notion of a cohort, and
+indentation in Parsons answers.
+
+One branch is defensive rather than reachable: because the roulette is weighted only over
+subtopics the set can answer, and the difficulty fallback tries all three bands, "subtopic
+exhausted at every difficulty" cannot occur through the empty-cell route. It survives as insurance
+against the two queries drifting apart. What *is* reachable, and tested, is a question whose
+subtopic tag outlived the subtopic: there is no topic behind it, so no difficulty can be derived
+and the engine drops it.

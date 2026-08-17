@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -45,6 +46,7 @@ from app.domain.enums import (
     StructureConfidence,
     StructureSource,
 )
+from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.domain.questions import DEFAULT_PRIORITY, GenerationAttempt, QuestionValidationReport
 from app.persistence.database import Base
 from app.persistence.types import (
@@ -758,3 +760,177 @@ class JudgePromptRow(TimestampMixin, Base):
     learned: Mapped[bool] = mapped_column(Boolean, default=False)
 
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class StudentRow(TimestampMixin, Base):
+    """A learner the adaptive engine tracks.
+
+    There is no authentication in this application, so a student is a named row
+    a professor creates and picks from a list. ``display_name`` is unique because
+    that list is the only way to tell two students apart; a cohort containing two
+    identical names has to distinguish them, since an ambiguous picker would
+    attach one learner's mastery to the other.
+    """
+
+    __tablename__ = "students"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+
+
+class StudentTopicMasteryRow(Base):
+    """One topic's BKT state for one student.
+
+    Created on first touch with :attr:`BKTParameters.p_init`, never seeded in
+    bulk (ADR-041). A topic added to the curriculum after a student began is
+    therefore ordinary rather than a special case, and a student who has answered
+    nothing owns no rows at all.
+    """
+
+    __tablename__ = "student_topic_mastery"
+    __table_args__ = (
+        UniqueConstraint("student_id", "topic_id", name="uq_student_topic_mastery_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id", ondelete="CASCADE"), index=True)
+
+    #: P(the student knows this topic). Drives the difficulty band.
+    p_known: Mapped[float] = mapped_column(Float, default=DEFAULT_BKT_PARAMETERS.p_init)
+    #: How many scores have moved this value, so a confident-looking mastery
+    #: built from one answer is distinguishable from one built from twenty.
+    observations: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class StudentSubtopicWeaknessRow(Base):
+    """One subtopic's weakness for one student -- the roulette weight.
+
+    Created on first touch at :data:`INITIAL_SUBTOPIC_WEAKNESS`, which is the
+    maximum, so an untouched subtopic is the most likely to be drawn. It is
+    floored rather than allowed to reach zero (ADR-041): a zero weight would
+    remove the subtopic from selection permanently.
+    """
+
+    __tablename__ = "student_subtopic_weakness"
+    __table_args__ = (
+        UniqueConstraint("student_id", "subtopic_id", name="uq_student_subtopic_weakness_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True
+    )
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), index=True
+    )
+
+    weakness: Mapped[float] = mapped_column(Float, default=INITIAL_SUBTOPIC_WEAKNESS)
+    observations: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class TrainingSessionRow(TimestampMixin, Base):
+    """One student's run against one frozen question set (ADR-036).
+
+    The set is pinned at creation rather than resolved per question, so a run
+    stays answerable afterwards: what a student was asked cannot be restated by a
+    bank that has grown since.
+
+    ``set_version_id`` is nullable only so that deleting a set leaves the record
+    of what students did standing. A session that lost its set reads as damaged
+    -- the engine refuses to serve from it -- rather than falling back to the
+    live bank, which would be a different experiment wearing the same id.
+
+    ``rng_seed`` makes the roulette reproducible. Each draw uses
+    ``Random(f"{rng_seed}:{ordinal}")``, so a run can be replayed exactly without
+    storing generator state between requests.
+    """
+
+    __tablename__ = "training_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True
+    )
+    set_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_set_versions.id", ondelete="SET NULL"), default=None, index=True
+    )
+    rng_seed: Mapped[int] = mapped_column(Integer, default=0)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    student: Mapped[StudentRow] = relationship()
+    attempts: Mapped[list[StudentAttemptRow]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="StudentAttemptRow.ordinal",
+    )
+
+
+class StudentAttemptRow(TimestampMixin, Base):
+    """One question served to one student, and what happened to it.
+
+    A row is written when the question is *served*, not when it is answered, so
+    a question the engine handed out is never lost if the student walks away.
+    ``score is None`` is precisely "served, not yet answered".
+
+    ``subtopic_id`` records the subtopic the roulette drew. It is not derivable
+    afterwards: a question may carry three subtopics, and which one was being
+    exercised is what the draw decided.
+
+    ``requested_difficulty`` and ``served_difficulty`` differ exactly when the
+    cell was empty and the engine relaxed difficulty (ADR-041). Storing both is
+    what makes an adaptive-looking run auditable -- otherwise a bank with gaps
+    reads as a bank that chose those difficulties deliberately.
+    """
+
+    __tablename__ = "student_attempts"
+    __table_args__ = (
+        UniqueConstraint("session_id", "ordinal", name="uq_student_attempts_session_ordinal"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("training_sessions.id", ondelete="CASCADE"), index=True
+    )
+    #: Denormalized from the session so "everything this student has answered"
+    #: is one indexed query rather than a join across every session they own.
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), index=True
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    #: Position within the session, from 1. Also the roulette draw counter.
+    ordinal: Mapped[int] = mapped_column(Integer, default=1)
+
+    subtopic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="SET NULL"), default=None, index=True
+    )
+    requested_difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+    served_difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+
+    #: The topic's mastery immediately before and after this score, so a progress
+    #: page can show movement without replaying every attempt through the model.
+    mastery_before: Mapped[float | None] = mapped_column(Float, default=None)
+    mastery_after: Mapped[float | None] = mapped_column(Float, default=None)
+
+    #: What the student submitted, verbatim. Text because it is source code for
+    #: an executable type and an option index for a discrete one.
+    answer: Mapped[str | None] = mapped_column(Text, default=None)
+    score: Mapped[float | None] = mapped_column(Float, default=None)
+    #: Populated only for executable types, where the score is a test fraction.
+    #: Kept beside the score so 60 is distinguishable as 3/5 rather than 6/10.
+    passed_tests: Mapped[int | None] = mapped_column(Integer, default=None)
+    total_tests: Mapped[int | None] = mapped_column(Integer, default=None)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    session: Mapped[TrainingSessionRow] = relationship(back_populates="attempts")
+    question: Mapped[QuestionRow] = relationship()

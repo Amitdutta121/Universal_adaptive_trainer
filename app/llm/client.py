@@ -88,8 +88,11 @@ class InstructorStructuredClient:
 
     provider_label = "openrouter"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, temperature: float | None = None) -> None:
         self._settings = settings
+        #: ``None`` leaves the provider default. Judges pass 0.0 so that a
+        #: verdict is a measurement rather than a sample.
+        self._temperature = temperature
         key = settings.llm_api_key
         if key is None:  # pragma: no cover - get_structured_client checks first
             raise ConfigurationError("No LLM API key is configured.")
@@ -120,9 +123,13 @@ class InstructorStructuredClient:
     ) -> ModelT:
         """Return an Instructor-validated structured response without repair retries."""
         try:
+            extra: dict[str, object] = {}
+            if self._temperature is not None:
+                extra["temperature"] = self._temperature
             return self._client.chat.completions.create(
                 model=self._settings.llm_model,
                 max_tokens=self._settings.llm_max_output_tokens,
+                **extra,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
@@ -142,11 +149,18 @@ class InstructorStructuredClient:
             ) from exc
 
 
-def get_structured_client(settings: Settings | None = None) -> StructuredLLMClient:
-    """Return the configured OpenRouter structured-output client."""
+def get_structured_client(
+    settings: Settings | None = None, *, temperature: float | None = None
+) -> StructuredLLMClient:
+    """Return the configured OpenRouter structured-output client.
+
+    ``temperature`` is passed by callers that need a repeatable answer rather
+    than a creative one -- the judges. Left ``None`` elsewhere, so generation
+    keeps the provider default and stays diverse.
+    """
     settings = require_llm(settings or get_settings())
     if settings.llm_provider is LLMProvider.OPENROUTER:
-        return InstructorStructuredClient(settings)
+        return InstructorStructuredClient(settings, temperature=temperature)
     raise ConfigurationError(
         f"No structured client exists for provider {settings.llm_provider.value!r}."
     )

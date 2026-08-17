@@ -51,7 +51,11 @@ Where this lives in code:
 
 - shared value objects and the mastery → difficulty mapping: `app/domain/mastery.py`;
 - priority constants: `app/domain/questions.py`;
-- the engine boundary (not implemented): `app/adaptive/__init__.py`.
+- the engine: `app/adaptive/` (see ADR-041 for the four rules the list above left open —
+  partial-credit BKT, the weakness floor, the per-student reuse filter, the empty-cell fallback).
+
+A student answers questions at `/training/{session_id}`, having been enrolled and started from
+`/students`. A run is always served from a **frozen question set** (ADR-036), never the live bank.
 
 ## Fixed curriculum decisions
 
@@ -250,7 +254,11 @@ app/
   calibration/        Judge vs professor agreement, read-only   (IMPLEMENTED)
   personalization/    Per-type instructions learned from reviews (IMPLEMENTED)
     instructions.py   Rules accumulated per question type, rendered into the type slot. ADR-033.
-  adaptive/           Student adaptive engine                   (boundary only, by instruction)
+  adaptive/           Student adaptive engine                   (IMPLEMENTED)
+    state.py          BKT mastery and subtopic weakness updates. ADR-041.
+    selection.py      Weakness-weighted roulette, candidate order, difficulty fallback.
+    scoring.py        A submitted answer to a 0-100 score, per question type.
+    service.py        The loop: serve a question, fold in the score.
   llm/                All outbound LLM traffic                  (STRUCTURED OUTPUT IMPLEMENTED)
     client.py         Synchronous structured output via Instructor. ADR-020.
     batch.py          Asynchronous batch jobs, built by hand. ADR-030.

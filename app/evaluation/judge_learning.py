@@ -26,13 +26,19 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.calibration.schema import PROFESSOR_OBJECTIONS
+from app.config import Settings, get_settings
 from app.domain.enums import JudgeMetricId, QuadrantCell
 from app.domain.feedback import REJECTION_REASON_LABELS, professor_edits
-from app.evaluation.prompts import SYSTEM_PROMPT_FOR
+from app.domain.questions import Question
+from app.errors import AdaptiveTrainerError
+from app.evaluation.prompts import SYSTEM_PROMPT_FOR, build_user_prompt
+from app.evaluation.schema import RESPONSE_MODEL_FOR
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import JudgePromptRow, ReviewOutcomeRow
 from app.persistence.repositories import JudgePromptRepository, ReviewOutcomeRepository
@@ -151,6 +157,73 @@ def disagreements_for(session: Session, metric: JudgeMetricId) -> list[ReviewOut
     )
 
 
+def agreements_for(
+    session: Session, metric: JudgeMetricId, *, limit: int
+) -> list[ReviewOutcomeRow]:
+    """Cases this judge got *right*, as a counterweight to its failures.
+
+    A judge shown only its errors has no base rate: it cannot tell being wrong
+    ten times out of twenty from ten times out of five hundred, and will break
+    correct behaviour to fix a rare fault. Continual-learning practice calls the
+    fix a replay buffer; here it is simply a sample of the agreeing cells.
+    """
+    rows = ReviewOutcomeRepository(session).list_in_cells(
+        [QuadrantCell.CONFIRMED_GOOD, QuadrantCell.CONFIRMED_BAD],
+        include_held_out=False,
+        limit=limit,
+    )
+    return rows[:limit]
+
+
+def score_prompt(
+    session: Session,
+    metric: JudgeMetricId,
+    system_prompt: str,
+    pairs: list[ReviewOutcomeRow],
+    *,
+    client: StructuredLLMClient,
+) -> tuple[int, int]:
+    """Run one candidate prompt over labelled pairs; return (agreements, scored).
+
+    Agreement is per metric, not per cell: the professor objected on one of this
+    judge's own reasons, or they did not, and the judge either flagged it or did
+    not. Cell agreement would hide a judge that was wrong inside a question the
+    two sides happened to agree about overall.
+
+    A pair whose context cannot be rebuilt, or whose call fails, is skipped
+    rather than counted as a failure -- an absent measurement is not evidence
+    against the candidate.
+    """
+    from app.evaluation.service import build_judge_context, result_from_verdict
+
+    owned = PROFESSOR_OBJECTIONS.get(metric, frozenset())
+    agreements = 0
+    scored = 0
+    for row in pairs:
+        question_row = row.question
+        review = row.review
+        if question_row is None or review is None:
+            continue
+        try:
+            question = Question.model_validate(question_row)
+            context = build_judge_context(session, question)
+            verdict = client.complete_structured(
+                system=system_prompt,
+                prompt=build_user_prompt(metric, context),
+                response_model=RESPONSE_MODEL_FOR[metric],
+            )
+            result = result_from_verdict(metric, verdict, question)
+        except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
+            logger.warning("Scoring skipped question %s for %s: %s", row.question_id, metric, exc)
+            continue
+        if result.passed is None:
+            continue
+        objected = bool(set(review.reasons or []) & owned)
+        agreements += int(result.passed is not objected)
+        scored += 1
+    return agreements, scored
+
+
 def refresh_judge_prompt(
     session: Session,
     metric: JudgeMetricId,
@@ -168,9 +241,15 @@ def refresh_judge_prompt(
     it learns, and the hand-written text would be lost. Callers that may hit a
     hand-edited judge check :attr:`JudgePromptRow.learned` first.
     """
+    settings = get_settings()
     rows = disagreements_for(session, metric)
-    if not rows:
-        logger.info("No attributable disagreement for %s; prompt left unchanged.", metric.value)
+    if len(rows) < settings.judge_repair_min_disagreements:
+        logger.info(
+            "Only %s disagreement(s) for %s; %s needed. Prompt left unchanged.",
+            len(rows),
+            metric.value,
+            settings.judge_repair_min_disagreements,
+        )
         return None
 
     repository = JudgePromptRepository(session)
@@ -178,6 +257,8 @@ def refresh_judge_prompt(
     current = [
         LearnedJudgeRule.model_validate(rule) for rule in (existing.rules if existing else [])
     ]
+    incumbent = existing.system_prompt if existing else SYSTEM_PROMPT_FOR[metric]
+    kept = agreements_for(session, metric, limit=len(rows))
 
     llm = client or get_structured_client()
     learned = llm.complete_structured(
@@ -188,25 +269,95 @@ def refresh_judge_prompt(
             f"Rules already learned:\n{json.dumps([r.model_dump() for r in current], indent=2)}\n\n"
             f"Cases where it disagreed with the professor ({len(rows)}):\n"
             f"{_serialize(metric, rows)}\n\n"
+            f"Cases where it AGREED with the professor, which your rules must not "
+            f"break ({len(kept)}):\n{_serialize(metric, kept)}\n\n"
             "Return the edited rules."
         ),
         response_model=LearnedJudgeRules,
     )
 
+    candidate = render_judge_prompt(SYSTEM_PROMPT_FOR[metric], learned.rules)
+    verdict = _gate(session, metric, incumbent, candidate, client=llm, settings=settings)
+    if not verdict.accepted:
+        logger.info("Rewritten %s judge refused: %s", metric.value, verdict.detail)
+        return None
+
     row = repository.save(
         metric,
-        system_prompt=render_judge_prompt(SYSTEM_PROMPT_FOR[metric], learned.rules),
-        note=f"Learned from {len(rows)} disagreement(s).",
+        system_prompt=candidate,
+        note=f"Learned from {len(rows)} disagreement(s). {verdict.detail}",
         rules=[rule.model_dump() for rule in learned.rules],
         evidence_count=len(rows),
         learned=True,
     )
     session.commit()
     logger.info(
-        "Relearned the %s judge from %s disagreements: %s rules (was %s).",
+        "Relearned the %s judge from %s disagreements: %s rules (was %s). %s",
         metric.value,
         len(rows),
         len(learned.rules),
         len(current),
+        verdict.detail,
     )
     return row
+
+
+@dataclass(frozen=True)
+class GateVerdict:
+    """Whether a rewritten judge earned adoption, and on what evidence."""
+
+    accepted: bool
+    detail: str
+
+
+def _gate(
+    session: Session,
+    metric: JudgeMetricId,
+    incumbent: str,
+    candidate: str,
+    *,
+    client: StructuredLLMClient,
+    settings: Settings,
+) -> GateVerdict:
+    """Adopt a rewritten judge only if it does not lose on the held-out pairs.
+
+    Refuses rather than applies when there is too little held-out evidence to
+    tell an improvement from noise. That deliberately means a young installation
+    learns nothing: an unvalidated rewrite is not a smaller version of a
+    validated one, it is an unmeasured behaviour change.
+
+    **A tie is a refusal.** This was measured (E3, ADR-042): a reflective
+    rewrite, the shipped prompt and an eight-example few-shot prompt all scored
+    8/12 on the same held-out set *and produced identical error sets*. A tying
+    candidate is not a candidate that held its ground -- it is one that changed
+    nothing that could be observed. Adopting it would still re-name the panel,
+    fragmenting the evidence that any later figure has to accumulate under one
+    version.
+    """
+    if not settings.judge_repair_gate_enabled:
+        return GateVerdict(accepted=True, detail="Gate disabled; adopted unscored.")
+
+    pairs = ReviewOutcomeRepository(session).list_held_out(
+        limit=settings.judge_repair_scoring_pairs
+    )
+    if len(pairs) < settings.judge_repair_min_scoring_pairs:
+        return GateVerdict(
+            accepted=False,
+            detail=(
+                f"Only {len(pairs)} held-out pair(s); "
+                f"{settings.judge_repair_min_scoring_pairs} needed to score a rewrite."
+            ),
+        )
+
+    before, n_before = score_prompt(session, metric, incumbent, pairs, client=client)
+    after, n_after = score_prompt(session, metric, candidate, pairs, client=client)
+    if n_before == 0 or n_after == 0:
+        return GateVerdict(accepted=False, detail="No held-out pair could be scored.")
+
+    rate_before = before / n_before
+    rate_after = after / n_after
+    detail = (
+        f"Held-out agreement {before}/{n_before} ({rate_before:.0%}) -> "
+        f"{after}/{n_after} ({rate_after:.0%})."
+    )
+    return GateVerdict(accepted=rate_after > rate_before, detail=detail)

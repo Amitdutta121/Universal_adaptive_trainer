@@ -91,6 +91,37 @@ class Settings(BaseSettings):
     judge_batch_max_requests_per_job: int = Field(default=200, gt=0)
     judge_batch_timeout_seconds: float = Field(default=120.0, gt=0)
 
+    #: Sampling temperature for judge calls. Zero by default: a judge is a
+    #: measuring instrument, and the OpenAI default of 1.0 was measured here to
+    #: flip 20% of verdicts between runs of the *same* prompt on the *same*
+    #: question -- enough to manufacture the disagreements that trigger a repair.
+    judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+
+    # -- Learning loops (ADR-042) -------------------------------------------
+    # Both loops can be frozen independently. A judge cannot be measured while
+    # the generator is also adapting: the question population moves under the
+    # measurement, and no agreement change can be attributed to either.
+    judge_learning_enabled: bool = True
+    generator_learning_enabled: bool = True
+
+    #: Disagreements naming one judge before its prompt may be rewritten.
+    #: Rewriting on a single case was measured to produce a rule about that one
+    #: question ("do not report technically_incorrect if swapping logic in an
+    #: operation is correct"), which is overfitting, not learning.
+    judge_repair_min_disagreements: int = Field(default=5, gt=0)
+
+    #: Score a rewritten judge before adopting it, and keep it only if it does
+    #: not lose. Every published prompt optimiser does this -- GEPA's minibatch
+    #: acceptance, MIPRO's validation search, OPRO's scored meta-prompt. Applying
+    #: an unscored candidate is mutation without selection, which is drift.
+    judge_repair_gate_enabled: bool = True
+    #: Held-out pairs a candidate is scored on. Each costs one judge call per
+    #: prompt, so this is the cost dial for the gate.
+    judge_repair_scoring_pairs: int = Field(default=8, gt=0)
+    #: Below this many held-out pairs the gate cannot tell a real improvement
+    #: from judge noise, so the repair is refused rather than applied blind.
+    judge_repair_min_scoring_pairs: int = Field(default=5, gt=0)
+
     # -- Book ingestion -----------------------------------------------------
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)

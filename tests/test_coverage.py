@@ -420,12 +420,22 @@ def test_the_page_reports_a_refused_freeze_without_crashing(
     assert "Could not freeze the set" in response.text
 
 
-def test_the_page_offers_no_training_link_yet(client: TestClient, session: Session) -> None:
-    """`app/adaptive/` is a boundary with no engine, so there is nothing to link to."""
+def test_a_frozen_set_offers_a_training_link(client: TestClient, session: Session) -> None:
+    """Replaces the previous "no training link yet" assertion.
+
+    That held while `app/adaptive/` was a boundary with no engine (ADR-036). The
+    engine exists now (ADR-041), so a set that could be trained against links to
+    where a run is started -- and a page that still said "deferred" would be
+    lying about a capability that works.
+    """
     version, (subtopic_id,) = _taxonomy(session)
-    _question(session, version=version, subtopic_id=subtopic_id)
+    question = _question(session, version=version, subtopic_id=subtopic_id)
+    QuestionSetRepository(session).create(
+        label="Week 1", question_ids=[question.id], curriculum_version_id=version.id
+    )
+    session.commit()
 
     body = client.get("/coverage").text
 
-    assert "Create an adaptive training link" in body
-    assert "/train" not in body
+    assert "/students#start" in body
+    assert "Create an adaptive training link" not in body

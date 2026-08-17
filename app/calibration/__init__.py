@@ -66,6 +66,7 @@ from app.calibration.service import (
     reports_by_type,
 )
 from app.calibration.trend import (
+    MIN_PANEL_SAMPLE,
     AgreementTrend,
     MetricFaults,
     TrendPoint,
@@ -75,6 +76,7 @@ from app.calibration.trend import (
 __all__ = [
     "HELD_OUT_DIVISOR",
     "MIN_INFORMATIVE_SAMPLE",
+    "MIN_PANEL_SAMPLE",
     "PROFESSOR_OBJECTIONS",
     "USABLE_EVAL_STATUSES",
     "AgreementTrend",

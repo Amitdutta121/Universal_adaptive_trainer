@@ -174,7 +174,10 @@
               </td>
               <td>{{ entry.curriculum_version_id or "—" }}</td>
               <td>{{ entry.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-              <td><a href="/coverage?set_version_id={{ entry.id }}">Measure this set</a></td>
+                      <td>
+                <a href="/coverage?set_version_id={{ entry.id }}">Measure</a> ·
+                <a href="/students#start">Train</a>
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -201,8 +204,7 @@
   </section>
 
   {{ deferred("Planned for this section", [
-    "Create an adaptive training link from a frozen question set.",
-    "Serve questions to students by weakness-weighted subtopic selection, then difficulty, then priority.",
-    "Report per-set item statistics once students have answered.",
+    "Report per-set item statistics once students have answered: which questions discriminate, and which are answered correctly by everyone.",
+    "Show which cells a running cohort is actually being served from, so a gap the engine works around is visible here too.",
   ]) }}
 {% endblock %}

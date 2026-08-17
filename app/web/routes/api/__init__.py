@@ -23,6 +23,7 @@ from app.web.routes.api import (
     instructions,
     judge_prompts,
     questions,
+    students,
     system,
 )
 
@@ -36,6 +37,7 @@ router.include_router(instructions.router)
 router.include_router(judge_prompts.router)
 router.include_router(calibration.router)
 router.include_router(coverage.router)
+router.include_router(students.router)
 # After ``questions``: this router also serves /questions/{id}/evaluations, and
 # including it first would let that path shadow /questions/{question_id}.
 router.include_router(evaluation.router)
@@ -51,5 +53,6 @@ __all__ = [
     "judge_prompts",
     "questions",
     "router",
+    "students",
     "system",
 ]

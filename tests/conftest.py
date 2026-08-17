@@ -39,6 +39,13 @@ TEST_ENV: dict[str, str] = {
     "JUDGE_BATCH_API_KEY": "",
     "JUDGE_BATCH_MODEL": "",
     "CORS_ALLOW_ORIGINS": "http://localhost:5173",
+    # Judge repair policy is pinned permissive here so that the tests which
+    # exercise the learning *mechanism* are not also asserting the *policy*
+    # (ADR-042). The threshold and the acceptance gate have their own tests,
+    # which set these explicitly; a developer changing the shipped policy must
+    # not thereby silently change what every other test is measuring.
+    "JUDGE_REPAIR_MIN_DISAGREEMENTS": "1",
+    "JUDGE_REPAIR_GATE_ENABLED": "false",
 }
 
 

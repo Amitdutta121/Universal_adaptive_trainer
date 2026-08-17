@@ -5,10 +5,19 @@ Responsibility
     student's state.
 
 Status
-    **Not implemented in this task, by instruction.** This package exists to
-    hold the boundary so the engine can be dropped in without touching the
-    professor pipeline. The shared value objects it will build on already exist
-    in :mod:`app.domain.mastery`.
+    **Implemented, and reachable end to end.** The pure state transitions
+    (:mod:`app.adaptive.state`), the pure selection helpers
+    (:mod:`app.adaptive.selection`), the scorer (:mod:`app.adaptive.scoring`) and
+    the engine (:mod:`app.adaptive.service`) all exist and are tested; the rules
+    they encode are decided in ADR-041. A student is enrolled and started at
+    ``/students``, then answers at ``/training/{training_session_id}``; the JSON
+    API under ``/api`` is the single implementation of both capabilities and the
+    page is one of its clients (ADR-027). A run is always served from a frozen
+    question set (ADR-036), never the live bank. The shared value objects the two
+    loops agree on live in :mod:`app.domain.mastery`.
+
+    Traffic is one-way: the web layer calls :func:`get_adaptive_engine` and this
+    package never calls back out to it.
 
 The mechanism below is a *fixed* design decision. Do not redesign it without an
 explicit instruction:
@@ -40,50 +49,51 @@ Separation of loops
     beyond the questions it produces.
 
 Allowed dependencies
-    ``app.config``, ``app.domain``, ``app.errors``, ``app.persistence``.
-    Must not import ``app.generation``, ``app.personalization`` or ``app.web``.
+    ``app.config``, ``app.domain``, ``app.errors``, ``app.persistence``,
+    ``app.validation``. The last is what executes a submitted program and reads a
+    question's stored test cases; duplicating a runner here would be worse than
+    the dependency. Must not import ``app.generation``, ``app.personalization``
+    or ``app.web``.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from app.domain.questions import Question
-from app.errors import FeatureNotAvailableError
+from sqlalchemy.orm import Session
+
+from app.adaptive.service import AdaptiveTrainingEngine, AnsweredAttempt, ServedQuestion
 
 
 class AdaptiveEngine(Protocol):
-    """Selects the next question for a student and folds in the resulting score."""
+    """Selects the next question for a student and folds in the resulting score.
 
-    def select_next_question(self, student_id: int) -> Question:
+    The unit of work is a **training session** (ADR-036), not a bare student: a
+    run is pinned to one frozen question set, and a served question has to be
+    recorded as an attempt before it can be answered. So the two operations take
+    a session id and an attempt id rather than the student id an earlier sketch
+    of this protocol assumed.
+    """
+
+    def serve_next(self, training_session_id: int) -> ServedQuestion:
         """Pick a subtopic by weakness-weighted roulette, derive difficulty from
-        BKT mastery, then take the highest-priority matching question."""
+        BKT mastery, then serve the highest-priority matching question."""
         ...
 
-    def record_score(self, student_id: int, question_id: int, score: float) -> None:
-        """Update BKT topic mastery and the question's subtopic weaknesses."""
+    def submit_answer(self, attempt_id: int, answer: str) -> AnsweredAttempt:
+        """Score the answer, then update BKT mastery and subtopic weaknesses."""
         ...
 
 
-class NullAdaptiveEngine:
-    """Placeholder engine. Raises so no fake training session appears to work."""
-
-    def select_next_question(self, student_id: int) -> Question:
-        raise FeatureNotAvailableError(
-            "The student adaptive engine is not implemented yet.",
-            detail=f"Requested next question for student {student_id}.",
-        )
-
-    def record_score(self, student_id: int, question_id: int, score: float) -> None:
-        raise FeatureNotAvailableError(
-            "The student adaptive engine is not implemented yet.",
-            detail=f"Requested score update for student {student_id}, question {question_id}.",
-        )
+def get_adaptive_engine(session: Session) -> AdaptiveEngine:
+    """Return the engine bound to a database session."""
+    return AdaptiveTrainingEngine(session)
 
 
-def get_adaptive_engine() -> AdaptiveEngine:
-    """Return the configured engine. Currently always the null implementation."""
-    return NullAdaptiveEngine()
-
-
-__all__ = ["AdaptiveEngine", "NullAdaptiveEngine", "get_adaptive_engine"]
+__all__ = [
+    "AdaptiveEngine",
+    "AdaptiveTrainingEngine",
+    "AnsweredAttempt",
+    "ServedQuestion",
+    "get_adaptive_engine",
+]

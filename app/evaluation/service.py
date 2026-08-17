@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.domain.enums import Difficulty, JudgeMetricId
 from app.domain.questions import Question
 from app.errors import (
@@ -12,7 +13,8 @@ from app.errors import (
     MalformedModelOutputError,
     NotFoundError,
 )
-from app.evaluation.prompts import SYSTEM_PROMPT_FOR, JudgeContext, build_user_prompt
+from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
+from app.evaluation.prompts import JudgeContext, build_user_prompt
 from app.evaluation.schema import (
     RESPONSE_MODEL_FOR,
     DifficultyVerdict,
@@ -144,7 +146,13 @@ class PedagogicalJudge:
 
     def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
         self._session = session
-        self._client = client or get_structured_client()
+        # Temperature 0: a judge is an instrument, and E1 measured the provider
+        # default flipping 20% of verdicts between runs (ADR-042).
+        self._client = client or get_structured_client(temperature=get_settings().judge_temperature)
+        # Resolved once per judge, not per metric: all four answers belong to one
+        # panel, and re-reading between them could straddle a professor's edit.
+        self._prompts = resolve_system_prompts(session)
+        self._rubric_version = effective_rubric_version(session)
 
     def evaluate(self, question: Question) -> PedagogicalEvaluation:
         """Return one evaluation, with a failed judge recorded rather than raised.
@@ -161,16 +169,22 @@ class PedagogicalJudge:
                 [failed_metric(metric, detail=detail) for metric in JudgeMetricId],
                 question_id=question.id,
                 judge_model=model,
+                rubric_version=self._rubric_version,
             )
 
         metrics = [self._run_metric(metric, context, question) for metric in JudgeMetricId]
-        return evaluation_from_metrics(metrics, question_id=question.id, judge_model=model)
+        return evaluation_from_metrics(
+            metrics,
+            question_id=question.id,
+            judge_model=model,
+            rubric_version=self._rubric_version,
+        )
 
     def _run_metric(
         self, metric: JudgeMetricId, context: JudgeContext, question: Question
     ) -> MetricResult:
         """One judge, retried on transport and shape failures alike."""
-        system = SYSTEM_PROMPT_FOR[metric]
+        system = self._prompts[metric]
         prompt = build_user_prompt(metric, context)
         last_detail = "unknown"
         for _ in range(JUDGE_MAX_ATTEMPTS):

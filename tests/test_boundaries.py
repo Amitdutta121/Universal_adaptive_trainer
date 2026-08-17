@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from app.adaptive import get_adaptive_engine
+from app.adaptive import AdaptiveTrainingEngine, get_adaptive_engine
 from app.domain.enums import Difficulty, GeneratorKind, QuestionType
 from app.domain.questions import QuestionValidationReport
-from app.errors import ConfigurationError, FeatureNotAvailableError
+from app.errors import ConfigurationError, NotFoundError
 from app.generation import GenerationRequest, GeneratorDescriptor, get_question_generator
 from app.llm import describe_availability, require_llm
 from app.validation import get_question_validator
@@ -251,12 +251,14 @@ def test_personalization_is_the_type_instruction(session) -> None:
     assert callable(refresh_type_instruction)
 
 
-def test_adaptive_engine_fails_loudly() -> None:
-    engine = get_adaptive_engine()
-    with pytest.raises(FeatureNotAvailableError):
-        engine.select_next_question(1)
-    with pytest.raises(FeatureNotAvailableError):
-        engine.record_score(1, 1, 90.0)
+def test_adaptive_engine_is_implemented(session) -> None:
+    """The engine is real (ADR-041); an unknown session is not found, not stubbed."""
+    engine = get_adaptive_engine(session)
+    assert isinstance(engine, AdaptiveTrainingEngine)
+    with pytest.raises(NotFoundError):
+        engine.serve_next(404)
+    with pytest.raises(NotFoundError):
+        engine.submit_answer(404, "answer")
 
 
 class TestLLMBoundary:
@@ -300,3 +302,21 @@ def test_the_two_loops_do_not_import_each_other() -> None:
         text = path.read_text(encoding="utf-8")
         assert "import app.adaptive" not in text
         assert "from app.adaptive" not in text
+
+
+def test_the_adaptive_engine_keeps_its_declared_dependencies() -> None:
+    """``app/adaptive`` names its allowed imports in its docstring; enforce them.
+
+    ``app.generation`` is the tempting one: scoring a submitted program needs the
+    question's stored test cases, whose schema lives there. The engine reaches
+    them through :func:`app.validation.runner.parse_test_cases` instead, so the
+    student loop stays clear of the generator entirely.
+    """
+    adaptive_root = Path(importlib.import_module("app.adaptive").__file__).parent
+    forbidden = ("app.generation", "app.web")
+
+    for path in adaptive_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for package in forbidden:
+            assert f"import {package}" not in text, f"{path.name} imports {package}"
+            assert f"from {package}" not in text, f"{path.name} imports {package}"

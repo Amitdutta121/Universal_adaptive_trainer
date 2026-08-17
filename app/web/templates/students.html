@@ -1,37 +1,99 @@
 {% extends "base.html" %}
-{% from "_placeholder.html" import deferred %}
 
 {% block subheading %}
-  <p class="lede">The student adaptive-training loop. Separate from the professor content loop.</p>
+  <p class="lede">
+    The student adaptive-training loop, separate from the professor content loop. A run is served
+    from a <strong>frozen question set</strong>, so what a cohort was asked stays answerable later.
+  </p>
 {% endblock %}
 
 {% block content %}
-  <section class="panel">
+  {% if error %}
+    <section class="panel panel-error" role="alert">
+      <h2>Could not do that</h2>
+      <p class="error-message">{{ error }}</p>
+    </section>
+  {% endif %}
+
+  <section class="panel" id="enrolled">
     <h2>Enrolled students</h2>
-    <p class="empty">
-      No student records exist yet. The adaptive engine is intentionally out of scope for
-      this foundation task, so nothing here is simulated.
-    </p>
+    {% if students %}
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>Name</th><th>Answered</th><th>Enrolled</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for student in students %}
+            <tr>
+              <td>{{ student.id }}</td>
+              <td><a href="/students/{{ student.id }}">{{ student.display_name }}</a></td>
+              <td>{{ student.answered_count }}</td>
+              <td>{{ student.created_at.strftime("%Y-%m-%d") }}</td>
+              <td><a href="/students/{{ student.id }}">Progress</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No students are enrolled yet.</p>
+    {% endif %}
+
+    <form class="upload-form" action="/students" method="post">
+      <div class="field">
+        <label for="student-name">Student name</label>
+        <input id="student-name" name="display_name" type="text" required maxlength="200"
+               placeholder="e.g. Ada Lovelace">
+      </div>
+      <button class="button" type="submit">Enrol student</button>
+      <p class="hint">
+        There is no login. A name identifies a student here, so two students cannot share one.
+      </p>
+    </form>
   </section>
 
-  <section class="panel">
-    <h2>Fixed adaptive mechanism</h2>
-    <p class="note">This design is settled and is not to be redesigned without an explicit instruction.</p>
+  <section class="panel" id="start">
+    <h2>Start a training run</h2>
+    {% if not students %}
+      <p class="empty">Enrol a student first.</p>
+    {% elif not question_sets %}
+      <p class="empty">
+        No question set has been frozen yet. A run is served from a snapshot, not the live bank —
+        freeze one on the <a href="/coverage#sets">Coverage</a> page.
+      </p>
+    {% else %}
+      <p class="note">
+        Pick the student, then the set they should be served from. The
+        <a href="/coverage">Coverage</a> grid says whether a set can answer every request the
+        engine might make — a subtopic with no question at some difficulty is a gap the engine
+        works around by relaxing difficulty, and it says so on the question.
+      </p>
+      {% for student in students %}
+        <form class="inline-form stack" action="/students/{{ student.id }}/sessions" method="post">
+          <label for="set-for-{{ student.id }}">{{ student.display_name }}</label>
+          <select id="set-for-{{ student.id }}" name="set_version_id">
+            {% for entry in question_sets %}
+              <option value="{{ entry.id }}">
+                #{{ entry.id }} · {{ entry.label }} ({{ entry.member_count }} questions)
+              </option>
+            {% endfor %}
+          </select>
+          <button class="button" type="submit">Start a run</button>
+        </form>
+      {% endfor %}
+    {% endif %}
+  </section>
+
+  <section class="panel" id="mechanism">
+    <h2>How the next question is chosen</h2>
+    <p class="note">This mechanism is settled; see ADR-041 for the rules it left open.</p>
     <ul class="checklist">
-      <li>Topic mastery is tracked with BKT.</li>
-      <li>Every subtopic carries a weakness value; all weaknesses start equal.</li>
-      <li>Weakness-weighted roulette selection chooses the next subtopic — exploiting weak areas while still exploring.</li>
-      <li>BKT topic mastery sets difficulty: low → easy, medium → medium, high → hard.</li>
-      <li>A question is selected by desired subtopic, desired difficulty, then priority.</li>
-      <li>A served question drops to lowest priority, so unused questions are preferred; reuse resumes once the others have been used.</li>
-      <li>Scores run 0–100. Testable programming questions score <code>passed_tests / total_tests × 100</code>; naturally discrete questions score 0 or 100.</li>
-      <li>A score updates the topic's BKT state and the weaknesses of the question's subtopics.</li>
+      <li>Every subtopic carries a <strong>weakness</strong>; all start equal, so the first draw is uniform.</li>
+      <li><strong>Weakness-weighted roulette</strong> picks the subtopic — exploiting weak areas while still exploring. A mastered subtopic keeps a small floor, so it can always come back.</li>
+      <li>That subtopic's topic <strong>BKT mastery</strong> sets the difficulty: low → easy, medium → medium, high → hard.</li>
+      <li>Within the cell, a question this student has <em>not</em> answered comes first, then highest priority, then least used.</li>
+      <li>A served question drops to lowest priority, so another is preferred next time; reuse resumes once the others have been used.</li>
+      <li>Scores run 0–100. Testable programming questions score <code>passed_tests / total_tests × 100</code>; discrete questions score 0 or 100.</li>
+      <li>One score updates the topic's BKT state <em>and</em> the weakness of every subtopic the question was tagged with.</li>
     </ul>
   </section>
-
-  {{ deferred("Planned for this section", [
-    "Implement selection: weakness-weighted roulette, then difficulty, then priority.",
-    "Implement BKT and weakness updates from submitted scores.",
-    "Add student progress storage (BKT state, subtopic weakness, attempt history).",
-  ]) }}
 {% endblock %}

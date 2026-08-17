@@ -18,6 +18,7 @@ from app.persistence.repositories import (
     CurriculumRepository,
     ProfessorReviewRepository,
     QuestionRepository,
+    StudentRepository,
     TypeInstructionRepository,
 )
 from app.web.routes.api.deps import DbSession
@@ -73,12 +74,12 @@ def config() -> ConfigResponse:
 
 @router.get("/counts", response_model=CountsResponse)
 def counts(session: DbSession) -> CountsResponse:
-    """One count per section. ``students`` stays 0 until the adaptive engine exists."""
+    """One count per section."""
     return CountsResponse(
         books=BookRepository(session).count(),
         curriculum_versions=CurriculumRepository(session).count(),
         questions=QuestionRepository(session).count(),
         reviews=ProfessorReviewRepository(session).count(),
         learned_instructions=len(TypeInstructionRepository(session).list_all()),
-        students=0,
+        students=StudentRepository(session).count(),
     )

@@ -23,6 +23,7 @@ from app.domain.enums import (
     QuestionStatus,
     QuestionType,
 )
+from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.errors import NotFoundError
 from app.persistence.models import (
     BookChapterRow,
@@ -38,9 +39,14 @@ from app.persistence.models import (
     QuestionSetVersionRow,
     QuestionSubtopicRow,
     ReviewOutcomeRow,
+    StudentAttemptRow,
+    StudentRow,
+    StudentSubtopicWeaknessRow,
+    StudentTopicMasteryRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
+    TrainingSessionRow,
     TypeInstructionRow,
 )
 
@@ -266,6 +272,47 @@ class CurriculumRepository:
         if row is None:
             raise NotFoundError(f"Subtopic {subtopic_id} does not exist.")
         return row
+
+    def topic_ids_for(self, subtopic_ids: Collection[int]) -> dict[int, int]:
+        """Map each subtopic id to the id of the topic that owns it.
+
+        A light lookup on purpose. :meth:`get_subtopic` eagerly loads evidence,
+        books and sections for the display page; the adaptive engine needs one
+        integer per draw and must not pay for that.
+        """
+        ids = list(subtopic_ids)
+        if not ids:
+            return {}
+        stmt = select(SubtopicRow.id, SubtopicRow.topic_id).where(SubtopicRow.id.in_(ids))
+        return dict(self._session.execute(stmt).all())
+
+    def topic_names_for(self, topic_ids: Collection[int]) -> dict[int, str]:
+        """Display name per topic id, for ids that still exist."""
+        ids = list(topic_ids)
+        if not ids:
+            return {}
+        stmt = select(TopicRow.id, TopicRow.name).where(TopicRow.id.in_(ids))
+        return dict(self._session.execute(stmt).all())
+
+    def subtopic_labels_for(self, subtopic_ids: Collection[int]) -> dict[int, tuple[str, str]]:
+        """``(subtopic name, owning topic name)`` per subtopic id.
+
+        One query rather than :meth:`get_subtopic` per row: a progress page names
+        every subtopic a student has been measured on, and that page must not
+        cost one round trip each.
+        """
+        ids = list(subtopic_ids)
+        if not ids:
+            return {}
+        stmt = (
+            select(SubtopicRow.id, SubtopicRow.name, TopicRow.name)
+            .join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
+            .where(SubtopicRow.id.in_(ids))
+        )
+        return {
+            subtopic_id: (subtopic_name, topic_name)
+            for subtopic_id, subtopic_name, topic_name in self._session.execute(stmt)
+        }
 
     def subtopic_count(self, version_id: int) -> int:
         stmt = (
@@ -689,6 +736,25 @@ class ReviewOutcomeRepository:
         named = [row for row in rows if metric in (row.attributed_metrics or [])]
         return named[:limit]
 
+    def list_held_out(self, *, limit: int = 50) -> list[ReviewOutcomeRow]:
+        """The reserved third, newest first, with review and question loaded.
+
+        These are the pairs a rewritten judge is *scored* on (ADR-035). They are
+        deliberately the complement of what a repair may read, which is what
+        makes the score a test rather than a restatement of the training data.
+        """
+        stmt = (
+            select(ReviewOutcomeRow)
+            .options(
+                joinedload(ReviewOutcomeRow.review),
+                joinedload(ReviewOutcomeRow.question),
+            )
+            .where(ReviewOutcomeRow.held_out.is_(True))
+            .order_by(ReviewOutcomeRow.created_at.desc(), ReviewOutcomeRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt).unique())
+
     def count_by_cell(self) -> dict[QuadrantCell, int]:
         stmt = select(ReviewOutcomeRow.cell, func.count()).group_by(ReviewOutcomeRow.cell)
         return dict(self._session.execute(stmt).all())
@@ -902,3 +968,318 @@ class QuestionSetRepository:
             (subtopic_id, Difficulty(difficulty)): count
             for subtopic_id, difficulty, count in self._session.execute(stmt)
         }
+
+    def servable_subtopic_ids(self, set_version_id: int) -> set[int]:
+        """Subtopics this set can actually answer a request for.
+
+        The roulette is weighted over these rather than over the whole taxonomy.
+        Drawing a subtopic the set holds no question for would mean redrawing
+        until one lands, which biases the draw away from exactly the subtopics
+        the professor has not written for yet -- silently, and worst when the
+        bank is thinnest.
+        """
+        stmt = (
+            select(QuestionSubtopicRow.subtopic_id)
+            .join(QuestionRow, QuestionRow.id == QuestionSubtopicRow.question_id)
+            .join(QuestionSetMemberRow, QuestionSetMemberRow.question_id == QuestionRow.id)
+            .where(
+                QuestionSetMemberRow.set_version_id == set_version_id,
+                QuestionRow.status == QuestionStatus.APPROVED,
+            )
+            .distinct()
+        )
+        return set(self._session.scalars(stmt))
+
+    def candidates_for_cell(
+        self, set_version_id: int, *, subtopic_id: int, difficulty: Difficulty
+    ) -> list[tuple[int, int, int]]:
+        """``(question_id, priority, times_used)`` for one cell of one set.
+
+        Ordering is left to :func:`app.adaptive.selection.rank_candidates`, which
+        also needs the student's own history -- something this query has no
+        business knowing about.
+
+        Approval is re-checked rather than assumed from membership. A set is
+        immutable (ADR-036), but a professor can reject a question after it was
+        frozen into one, and a question whose approval was withdrawn must not
+        reach a student.
+        """
+        stmt = (
+            select(QuestionRow.id, QuestionRow.priority, QuestionRow.times_used)
+            .join(QuestionSetMemberRow, QuestionSetMemberRow.question_id == QuestionRow.id)
+            .join(QuestionSubtopicRow, QuestionSubtopicRow.question_id == QuestionRow.id)
+            .where(
+                QuestionSetMemberRow.set_version_id == set_version_id,
+                QuestionSubtopicRow.subtopic_id == subtopic_id,
+                QuestionRow.difficulty == difficulty,
+                QuestionRow.status == QuestionStatus.APPROVED,
+            )
+            .order_by(QuestionRow.id)
+        )
+        return [(row[0], row[1], row[2]) for row in self._session.execute(stmt)]
+
+
+class StudentRepository:
+    """Learners the adaptive engine tracks."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def count(self) -> int:
+        return self._session.scalar(select(func.count()).select_from(StudentRow)) or 0
+
+    def list_all(self) -> list[StudentRow]:
+        stmt = select(StudentRow).order_by(StudentRow.display_name)
+        return list(self._session.scalars(stmt))
+
+    def get(self, student_id: int) -> StudentRow:
+        """One student.
+
+        Raises:
+            NotFoundError: if no such student exists.
+        """
+        row = self._session.get(StudentRow, student_id)
+        if row is None:
+            raise NotFoundError(f"Student {student_id} was not found.")
+        return row
+
+    def get_by_name(self, display_name: str) -> StudentRow | None:
+        stmt = select(StudentRow).where(StudentRow.display_name == display_name)
+        return self._session.scalars(stmt).first()
+
+    def add(self, display_name: str) -> StudentRow:
+        row = StudentRow(display_name=display_name)
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+
+class StudentStateRepository:
+    """Per-student BKT mastery and subtopic weakness (ADR-041).
+
+    Reads never create a row; writes do. An unseen topic or subtopic reads as its
+    starting value, which is what "created on first touch" means -- rendering a
+    progress page must not seed a hundred rows, and a bulk seed would also break
+    the moment the curriculum gains a subtopic.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def mastery_for(self, student_id: int, topic_id: int) -> float:
+        """Stored mastery, or the BKT prior if this topic was never scored."""
+        stmt = select(StudentTopicMasteryRow.p_known).where(
+            StudentTopicMasteryRow.student_id == student_id,
+            StudentTopicMasteryRow.topic_id == topic_id,
+        )
+        stored = self._session.scalars(stmt).first()
+        return DEFAULT_BKT_PARAMETERS.p_init if stored is None else stored
+
+    def weaknesses_for(self, student_id: int, subtopic_ids: Collection[int]) -> dict[int, float]:
+        """Weakness per requested subtopic, defaulting the ones never scored.
+
+        Every requested id is present in the result, so the caller can hand the
+        mapping straight to the roulette without deciding what an absent row
+        means.
+        """
+        ids = list(subtopic_ids)
+        if not ids:
+            return {}
+        stmt = select(
+            StudentSubtopicWeaknessRow.subtopic_id, StudentSubtopicWeaknessRow.weakness
+        ).where(
+            StudentSubtopicWeaknessRow.student_id == student_id,
+            StudentSubtopicWeaknessRow.subtopic_id.in_(ids),
+        )
+        stored = dict(self._session.execute(stmt).all())
+        return {
+            subtopic_id: stored.get(subtopic_id, INITIAL_SUBTOPIC_WEAKNESS) for subtopic_id in ids
+        }
+
+    def list_mastery(self, student_id: int) -> list[StudentTopicMasteryRow]:
+        stmt = (
+            select(StudentTopicMasteryRow)
+            .where(StudentTopicMasteryRow.student_id == student_id)
+            .order_by(StudentTopicMasteryRow.topic_id)
+        )
+        return list(self._session.scalars(stmt))
+
+    def list_weakness(self, student_id: int) -> list[StudentSubtopicWeaknessRow]:
+        stmt = (
+            select(StudentSubtopicWeaknessRow)
+            .where(StudentSubtopicWeaknessRow.student_id == student_id)
+            .order_by(StudentSubtopicWeaknessRow.subtopic_id)
+        )
+        return list(self._session.scalars(stmt))
+
+    def record_mastery(
+        self, student_id: int, topic_id: int, p_known: float
+    ) -> StudentTopicMasteryRow:
+        """Store a new mastery for this topic, creating the row if needed."""
+        stmt = select(StudentTopicMasteryRow).where(
+            StudentTopicMasteryRow.student_id == student_id,
+            StudentTopicMasteryRow.topic_id == topic_id,
+        )
+        row = self._session.scalars(stmt).first()
+        if row is None:
+            row = StudentTopicMasteryRow(student_id=student_id, topic_id=topic_id)
+            self._session.add(row)
+        else:
+            row.updated_at = datetime.now(UTC)
+        row.p_known = p_known
+        row.observations = (row.observations or 0) + 1
+        self._session.flush()
+        return row
+
+    def record_weakness(
+        self, student_id: int, subtopic_id: int, weakness: float
+    ) -> StudentSubtopicWeaknessRow:
+        """Store a new weakness for this subtopic, creating the row if needed."""
+        stmt = select(StudentSubtopicWeaknessRow).where(
+            StudentSubtopicWeaknessRow.student_id == student_id,
+            StudentSubtopicWeaknessRow.subtopic_id == subtopic_id,
+        )
+        row = self._session.scalars(stmt).first()
+        if row is None:
+            row = StudentSubtopicWeaknessRow(student_id=student_id, subtopic_id=subtopic_id)
+            self._session.add(row)
+        else:
+            row.updated_at = datetime.now(UTC)
+        row.weakness = weakness
+        row.observations = (row.observations or 0) + 1
+        self._session.flush()
+        return row
+
+
+class TrainingSessionRepository:
+    """A student's run against one frozen question set (ADR-036)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(self, *, student_id: int, set_version_id: int, rng_seed: int) -> TrainingSessionRow:
+        row = TrainingSessionRow(
+            student_id=student_id, set_version_id=set_version_id, rng_seed=rng_seed
+        )
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, session_id: int) -> TrainingSessionRow:
+        """One session.
+
+        Raises:
+            NotFoundError: if no such session exists.
+        """
+        row = self._session.get(TrainingSessionRow, session_id)
+        if row is None:
+            raise NotFoundError(f"Training session {session_id} was not found.")
+        return row
+
+    def list_for_student(self, student_id: int, limit: int = 50) -> list[TrainingSessionRow]:
+        stmt = (
+            select(TrainingSessionRow)
+            .where(TrainingSessionRow.student_id == student_id)
+            .order_by(TrainingSessionRow.created_at.desc(), TrainingSessionRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt))
+
+    def end(self, row: TrainingSessionRow) -> TrainingSessionRow:
+        row.ended_at = datetime.now(UTC)
+        self._session.flush()
+        return row
+
+
+class StudentAttemptRepository:
+    """Questions served to students, and the scores they came back with."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: StudentAttemptRow) -> StudentAttemptRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, attempt_id: int) -> StudentAttemptRow:
+        """One attempt.
+
+        Raises:
+            NotFoundError: if no such attempt exists.
+        """
+        row = self._session.get(StudentAttemptRow, attempt_id)
+        if row is None:
+            raise NotFoundError(f"Attempt {attempt_id} was not found.")
+        return row
+
+    def next_ordinal(self, session_id: int) -> int:
+        """Position for the next question in this session, counting from 1."""
+        stmt = select(func.max(StudentAttemptRow.ordinal)).where(
+            StudentAttemptRow.session_id == session_id
+        )
+        return (self._session.scalar(stmt) or 0) + 1
+
+    def open_attempt(self, session_id: int) -> StudentAttemptRow | None:
+        """The question this session is waiting on an answer for, if any.
+
+        Serving a second question while one is unanswered would leave the first
+        permanently open and let a student skip anything they disliked, which is
+        a selection bias the mastery estimate cannot see.
+        """
+        stmt = (
+            select(StudentAttemptRow)
+            .where(
+                StudentAttemptRow.session_id == session_id,
+                StudentAttemptRow.score.is_(None),
+            )
+            .order_by(StudentAttemptRow.ordinal.desc())
+        )
+        return self._session.scalars(stmt).first()
+
+    def answered_question_ids(self, student_id: int) -> set[int]:
+        """Every question this student has already scored, across all sessions.
+
+        Feeds ADR-041's per-student ordering key. Scoped to the student and not
+        to the session: meeting the same question again in a new session is the
+        same repeat.
+        """
+        stmt = (
+            select(StudentAttemptRow.question_id)
+            .where(
+                StudentAttemptRow.student_id == student_id,
+                StudentAttemptRow.score.is_not(None),
+            )
+            .distinct()
+        )
+        return set(self._session.scalars(stmt))
+
+    def list_for_session(self, session_id: int) -> list[StudentAttemptRow]:
+        stmt = (
+            select(StudentAttemptRow)
+            .options(joinedload(StudentAttemptRow.question))
+            .where(StudentAttemptRow.session_id == session_id)
+            .order_by(StudentAttemptRow.ordinal)
+        )
+        return list(self._session.scalars(stmt))
+
+    def list_for_student(self, student_id: int, limit: int = 100) -> list[StudentAttemptRow]:
+        stmt = (
+            select(StudentAttemptRow)
+            .options(joinedload(StudentAttemptRow.question))
+            .where(StudentAttemptRow.student_id == student_id)
+            .order_by(StudentAttemptRow.created_at.desc(), StudentAttemptRow.id.desc())
+            .limit(limit)
+        )
+        return list(self._session.scalars(stmt))
+
+    def count_answered(self, student_id: int) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(StudentAttemptRow)
+            .where(
+                StudentAttemptRow.student_id == student_id,
+                StudentAttemptRow.score.is_not(None),
+            )
+        )
+        return self._session.scalar(stmt) or 0

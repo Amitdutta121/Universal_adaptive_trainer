@@ -18,6 +18,7 @@ import logging
 
 from fastapi import APIRouter, status
 
+from app.config import get_settings
 from app.domain.enums import (
     JudgeMetricId,
     QuestionType,
@@ -85,9 +86,10 @@ def create_review(session: DbSession, question_id: int, payload: ReviewRequest) 
     # wrote a question the professor would not keep, and the judge passed it. One
     # lesson belongs to each, and dropping either would waste half the evidence
     # the professor just produced.
-    if outcome.calls_for_instruction_refresh:
+    settings = get_settings()
+    if outcome.calls_for_instruction_refresh and settings.generator_learning_enabled:
         _relearn_for(session, outcome, review.question.question_type, result.outcome)
-    if outcome.calls_for_judge_repair:
+    if outcome.calls_for_judge_repair and settings.judge_learning_enabled:
         _relearn_judges(session, outcome, result.outcome)
     return result
 

@@ -5,13 +5,17 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 
-from pydantic import ValidationError
-
 from app.domain.enums import QuestionType
 from app.domain.questions import Question, QuestionCheck
 from app.generation.schemas import ExecutableTestCase
 from app.validation.report import make_check
-from app.validation.runner import EVIDENCE_LIMIT, LocalCodeRunner, TestRunSummary, normalize_output
+from app.validation.runner import (
+    EVIDENCE_LIMIT,
+    LocalCodeRunner,
+    TestRunSummary,
+    normalize_output,
+    parse_test_cases,
+)
 
 
 def check_type(
@@ -36,12 +40,8 @@ def _parses(source: str) -> bool:
 
 
 def _parse_tests(raw: object) -> list[ExecutableTestCase] | None:
-    if not isinstance(raw, list) or not raw:
-        return None
-    try:
-        return [ExecutableTestCase.model_validate(case) for case in raw]
-    except (ValidationError, TypeError):
-        return None
+    """Kept as the local name; the implementation moved to the runner."""
+    return parse_test_cases(raw)
 
 
 def _multiple_choice(content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:

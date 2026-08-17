@@ -13,6 +13,7 @@ REQUIRED_LABELS = (
     "Questions",
     "Professor Feedback",
     "Instructions",
+    "Judges",
     "Coverage",
     "Students",
 )

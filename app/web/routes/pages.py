@@ -46,6 +46,7 @@ from app.errors import (
     InvalidTaxonomyDocumentError,
     LLMRequestError,
     MalformedModelOutputError,
+    NoQuestionAvailableError,
     NotFoundError,
     UnsupportedFileError,
 )
@@ -67,14 +68,18 @@ from app.web.routes.api import feedback as api_feedback
 from app.web.routes.api import instructions as api_instructions
 from app.web.routes.api import judge_prompts as api_judge_prompts
 from app.web.routes.api import questions as api_questions
+from app.web.routes.api import students as api_students
 from app.web.routes.api import system as api_system
 from app.web.routes.api.schemas import (
+    AnswerRequest,
     CreateQuestionSetRequest,
+    CreateStudentRequest,
     GenerateQuestionsRequest,
     JudgePromptRequest,
     ReviewOutcomeOut,
     ReviewQueueMode,
     ReviewRequest,
+    StartTrainingSessionRequest,
 )
 from app.web.templating import render
 
@@ -1072,16 +1077,162 @@ def create_question_set_page(
     )
 
 
-@router.get("/students", response_class=HTMLResponse, name="students")
-def students(request: Request) -> HTMLResponse:
-    """Students section.
-
-    No student tables exist yet: the adaptive engine is deliberately out of scope
-    for this task, so this page documents the fixed mechanism instead of showing
-    invented progress data.
-    """
+def _students_page(
+    request: Request,
+    session: Session,
+    *,
+    error: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    listing = api_students.list_students(session)
     return render(
         request,
         "students.html",
-        {"page_title": "Students", "active_section": "students"},
+        {
+            "page_title": "Students",
+            "active_section": "students",
+            "students": listing.students,
+            "question_sets": api_coverage.list_question_sets(session).sets,
+            "error": error,
+        },
+        status_code=status_code,
+    )
+
+
+@router.get("/students", response_class=HTMLResponse, name="students")
+def students(request: Request, session: DbSession) -> HTMLResponse:
+    """Enrolled learners, and where to start a training run."""
+    return _students_page(request, session)
+
+
+@router.post("/students", name="create_student_page")
+def create_student_page(
+    request: Request,
+    session: DbSession,
+    display_name: Annotated[str, Form()],
+) -> Response:
+    try:
+        api_students.create_student(session, CreateStudentRequest(display_name=display_name))
+    except DomainRuleError as exc:
+        return _students_page(request, session, error=exc.message, status_code=exc.status_code)
+    except ValidationError:
+        return _students_page(
+            request,
+            session,
+            error="That name is not usable. A name is required and may be at most 200 characters.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    return RedirectResponse(url="/students", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/students/{student_id}", response_class=HTMLResponse, name="student_detail")
+def student_detail(request: Request, session: DbSession, student_id: int) -> HTMLResponse:
+    """One learner's measured mastery, weakness and history."""
+    progress = api_students.student_progress(session, student_id)
+    return render(
+        request,
+        "student_detail.html",
+        {
+            "page_title": progress.student.display_name,
+            "active_section": "students",
+            "progress": progress,
+            "question_sets": api_coverage.list_question_sets(session).sets,
+        },
+    )
+
+
+@router.post("/students/{student_id}/sessions", name="start_training_session_page")
+def start_training_session_page(
+    request: Request,
+    session: DbSession,
+    student_id: int,
+    set_version_id: Annotated[int, Form()],
+) -> Response:
+    try:
+        run = api_students.start_training_session(
+            session,
+            StartTrainingSessionRequest(student_id=student_id, set_version_id=set_version_id),
+        )
+    except (DomainRuleError, NotFoundError) as exc:
+        return _students_page(request, session, error=exc.message, status_code=exc.status_code)
+    return RedirectResponse(url=f"/training/{run.id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _training_page(
+    request: Request,
+    session: Session,
+    training_session_id: int,
+    *,
+    result: object | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render a training session: either its current question, or a just-scored answer.
+
+    A question is drawn only when no result is being shown. Otherwise reporting a
+    score would silently serve the next question as well, and the student would
+    never see what they got right.
+    """
+    run = api_students.get_training_session(session, training_session_id)
+    served = None
+    unavailable = None
+    if result is None and run.ended_at is None:
+        try:
+            served = api_students.next_question(session, training_session_id)
+        except NoQuestionAvailableError as exc:
+            unavailable = f"{exc.message} {exc.detail or ''}".strip()
+        except DomainRuleError as exc:
+            error = error or exc.message
+    return render(
+        request,
+        "training.html",
+        {
+            "page_title": f"Training · {run.student_name}",
+            "active_section": "students",
+            "run": run,
+            "served": served,
+            "result": result,
+            "unavailable": unavailable,
+            "error": error,
+        },
+        status_code=status_code,
+    )
+
+
+@router.get("/training/{training_session_id}", response_class=HTMLResponse, name="training")
+def training(request: Request, session: DbSession, training_session_id: int) -> HTMLResponse:
+    """The session's current question."""
+    return _training_page(request, session, training_session_id)
+
+
+@router.post("/training/{training_session_id}/answer", name="submit_training_answer_page")
+def submit_training_answer_page(
+    request: Request,
+    session: DbSession,
+    training_session_id: int,
+    attempt_id: Annotated[int, Form()],
+    answer: Annotated[str, Form()] = "",
+) -> Response:
+    """Score an answer and show the result, rather than redirecting.
+
+    The failing-test evidence and the author's explanation are produced by
+    scoring and are not stored on the attempt, so a redirect would lose exactly
+    the part the student learns from.
+    """
+    try:
+        result = api_students.answer_attempt(session, attempt_id, AnswerRequest(answer=answer))
+    except (DomainRuleError, NotFoundError) as exc:
+        return _training_page(
+            request, session, training_session_id, error=exc.message, status_code=exc.status_code
+        )
+    return _training_page(request, session, training_session_id, result=result)
+
+
+@router.post("/training/{training_session_id}/end", name="end_training_session_page")
+def end_training_session_page(
+    request: Request, session: DbSession, training_session_id: int
+) -> Response:
+    run = api_students.end_training_session(session, training_session_id)
+    return RedirectResponse(
+        url=f"/students/{run.student_id}", status_code=status.HTTP_303_SEE_OTHER
     )

@@ -140,12 +140,26 @@ class SchemaOutOfDateError(AdaptiveTrainerError):
 class FeatureNotAvailableError(AdaptiveTrainerError):
     """A module boundary exists but the feature behind it is not implemented yet.
 
-    Used by the deferred subsystems (book extraction, LLM generation, adaptive
-    engine) so callers get an explicit, honest failure instead of a silent no-op.
+    Used by the deferred subsystems (book extraction, LLM generation) so callers
+    get an explicit, honest failure instead of a silent no-op.
     """
 
     status_code = status.HTTP_501_NOT_IMPLEMENTED
     code = "feature_not_available"
+
+
+class NoQuestionAvailableError(AdaptiveTrainerError):
+    """The adaptive engine could not find a question to serve (ADR-041).
+
+    Distinct from a domain rule violation: the request was valid and the engine
+    worked correctly. The question set simply holds nothing for any subtopic it
+    could draw, even after relaxing difficulty. The remedy is to write questions
+    for the gap the coverage grid names, so this is reported as a state of the
+    bank rather than as a bad request.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "no_question_available"
 
 
 def _wants_json(request: Request) -> bool:
