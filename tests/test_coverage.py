@@ -352,9 +352,12 @@ def test_the_page_says_not_ready_and_names_the_gaps(client: TestClient, session:
     body = client.get("/coverage").text
 
     assert "not ready" in body
-    assert "Gaps to fill" in body
+    assert "Coverage by topic" in body
     assert "Subtopic 0" in body
     assert "medium" in body
+    # Each gap is selectable, and carries the cell it would fill.
+    assert f'value="{subtopic_id}:medium"' in body
+    assert f'value="{subtopic_id}:hard"' in body
 
 
 def test_the_page_says_ready_when_every_cell_is_full(client: TestClient, session: Session) -> None:
@@ -366,7 +369,9 @@ def test_the_page_says_ready_when_every_cell_is_full(client: TestClient, session
     body = client.get("/coverage").text
 
     assert "ready" in body
-    assert "Gaps to fill" not in body
+    # Nothing is short, so the topic offers no gap to select.
+    assert 'name="target"' not in body
+    assert "Fully covered" in body
 
 
 def test_the_page_distinguishes_servable_from_ready(client: TestClient, session: Session) -> None:
@@ -377,7 +382,8 @@ def test_the_page_distinguishes_servable_from_ready(client: TestClient, session:
     body = client.get("/coverage").text
 
     assert "servable, but thin" in body
-    assert "Gaps to fill" not in body
+    # Thin cells are still gaps: servable is not the same as nothing to do.
+    assert body.count('name="target"') == 3
 
 
 def test_the_page_says_a_gap_cannot_be_requested_directly(
@@ -389,7 +395,7 @@ def test_the_page_says_a_gap_cannot_be_requested_directly(
 
     body = client.get("/coverage").text
 
-    assert "the generator chooses its own topic and subtopics" in body
+    assert "it cannot be aimed at a named subtopic" in body
 
 
 def test_the_page_states_an_honest_missing_curriculum(client: TestClient) -> None:
@@ -439,3 +445,153 @@ def test_a_frozen_set_offers_a_training_link(client: TestClient, session: Sessio
 
     assert "/students#start" in body
     assert "Create an adaptive training link" not in body
+
+
+# ------------------------------------------------------------ topic grouping
+
+
+def test_the_report_groups_rows_by_topic(session: Session) -> None:
+    """The unit a professor acts on. A chunk teaches one topic, so a gap in
+    another topic is not work they can do in the same breath."""
+    version, subtopic_ids = _taxonomy(session, subtopics=2)
+    _question(session, version=version, subtopic_id=subtopic_ids[0])
+
+    report = build_coverage_report(session)
+
+    assert [topic.topic_name for topic in report.topics] == ["Loops"]
+    topic = report.topics[0]
+    assert [row.subtopic_name for row in topic.subtopics] == ["Subtopic 0", "Subtopic 1"]
+    assert topic.total_cells == 6
+    assert topic.empty_cells == 5
+    assert topic.thin_cells == 1
+    assert topic.ready_cells == 0
+    assert topic.is_complete is False
+
+
+def test_the_flat_row_list_is_derived_from_the_grouping(session: Session) -> None:
+    """One source of truth: two lists of the same rows would eventually
+    disagree, and the professor would be reading whichever one did."""
+    _, subtopic_ids = _taxonomy(session, subtopics=3)
+
+    report = build_coverage_report(session)
+
+    assert report.subtopics == [row for topic in report.topics for row in topic.subtopics]
+    assert [row.subtopic_id for row in report.subtopics] == subtopic_ids
+
+
+def test_a_cell_reports_what_it_still_owes(session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.EASY)
+
+    report = build_coverage_report(session)
+    cells = {cell.difficulty: cell for cell in report.subtopics[0].cells}
+
+    assert cells[Difficulty.EASY].needed == MIN_QUESTIONS_PER_CELL - 1
+    assert cells[Difficulty.HARD].needed == MIN_QUESTIONS_PER_CELL
+    assert report.gap_count == 3
+    assert report.questions_needed == MIN_QUESTIONS_PER_CELL * 3 - 1
+
+
+def test_a_ready_cell_owes_nothing(session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    for difficulty in Difficulty:
+        for _ in range(MIN_QUESTIONS_PER_CELL + 2):
+            _question(session, version=version, subtopic_id=subtopic_id, difficulty=difficulty)
+
+    report = build_coverage_report(session)
+
+    assert report.gap_count == 0
+    assert report.questions_needed == 0
+    assert report.complete_topics == report.topics
+    assert report.incomplete_topics == []
+
+
+def test_a_topic_counts_distinct_questions_not_filled_cells(session: Session) -> None:
+    """A question claiming three subtopics fills three cells but is one question."""
+    version, subtopic_ids = _taxonomy(session, subtopics=3)
+    question = _question(session, version=version, subtopic_id=subtopic_ids[0])
+    question.topic_id = session.get(SubtopicRow, subtopic_ids[0]).topic_id
+    for subtopic_id in subtopic_ids[1:]:
+        session.add(QuestionSubtopicRow(question_id=question.id, subtopic_id=subtopic_id))
+    session.commit()
+
+    report = build_coverage_report(session)
+
+    assert sum(row.cells[0].count for row in report.subtopics) == 3
+    assert report.topics[0].approved_questions == 1
+
+
+def test_a_frozen_set_scopes_the_per_topic_question_count(session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    topic_id = session.get(SubtopicRow, subtopic_id).topic_id
+    first = _question(session, version=version, subtopic_id=subtopic_id)
+    first.topic_id = topic_id
+    session.commit()
+    frozen = create_question_set(session, label="Autumn 2026")
+    later = _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.HARD)
+    later.topic_id = topic_id
+    session.commit()
+
+    live = build_coverage_report(session)
+    snapshot = build_coverage_report(session, set_version_id=frozen.id)
+
+    assert live.topics[0].approved_questions == 2
+    assert snapshot.topics[0].approved_questions == 1
+
+
+def test_the_endpoint_publishes_the_topic_grouping(client: TestClient, session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.EASY)
+
+    payload = client.get("/api/coverage").json()
+
+    assert payload["gap_count"] == 3
+    assert payload["ready_cells"] == 0
+    assert [topic["topic_name"] for topic in payload["topics"]] == ["Loops"]
+    assert payload["topics"][0]["subtopics"][0]["cells"][0]["needed"] == MIN_QUESTIONS_PER_CELL - 1
+
+
+# -------------------------------------------- selecting gaps, and refusing them
+
+
+def test_asking_to_fill_a_gap_is_refused_as_not_implemented(client: TestClient) -> None:
+    """ADR-031 gives the generator the choice of subtopic, and nothing ranks
+    chunks by what they teach, so there is no honest targeted run to start."""
+    response = client.post(
+        "/api/coverage/generation-runs",
+        json={"targets": [{"subtopic_id": 1, "difficulty": "hard"}]},
+    )
+
+    assert response.status_code == 501
+    assert response.json()["error"]["code"] == "feature_not_available"
+    assert "cannot be aimed" in response.text
+
+
+def test_asking_to_fill_no_gaps_at_all_is_rejected(client: TestClient) -> None:
+    response = client.post("/api/coverage/generation-runs", json={"targets": []})
+
+    assert response.status_code == 422
+
+
+def test_the_page_reports_the_missing_generation_step(client: TestClient, session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.EASY)
+
+    response = client.post("/coverage/gaps", data={"target": [f"{subtopic_id}:hard"]})
+
+    assert response.status_code == 501
+    assert "cannot be aimed" in response.text
+
+
+def test_the_page_refuses_a_submission_with_nothing_selected(client: TestClient) -> None:
+    response = client.post("/coverage/gaps", data={})
+
+    assert response.status_code == 422
+    assert "Select at least one gap" in response.text
+
+
+def test_the_page_refuses_a_target_it_cannot_parse(client: TestClient) -> None:
+    """The value is professor-supplied over the wire, so it is not trusted."""
+    response = client.post("/coverage/gaps", data={"target": ["7:impossible"]})
+
+    assert response.status_code == 422

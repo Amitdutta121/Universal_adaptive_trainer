@@ -969,6 +969,29 @@ class QuestionSetRepository:
             for subtopic_id, difficulty, count in self._session.execute(stmt)
         }
 
+    def approved_question_counts_by_topic(
+        self, *, question_ids: Collection[int] | None = None
+    ) -> dict[int, int]:
+        """Distinct approved questions claiming each topic.
+
+        Counted off ``QuestionRow.topic_id`` rather than by joining through the
+        subtopics, because a question claims exactly one topic (ADR-031) but up
+        to three of its subtopics. Joining would multiply a question by its
+        subtopics and report a topic as holding more questions than exist.
+        """
+        stmt = (
+            select(QuestionRow.topic_id, func.count(func.distinct(QuestionRow.id)))
+            .where(QuestionRow.status == QuestionStatus.APPROVED)
+            .where(QuestionRow.topic_id.is_not(None))
+            .group_by(QuestionRow.topic_id)
+        )
+        if question_ids is not None:
+            ids = list(question_ids)
+            if not ids:
+                return {}
+            stmt = stmt.where(QuestionRow.id.in_(ids))
+        return dict(self._session.execute(stmt).all())  # type: ignore[arg-type]
+
     def servable_subtopic_ids(self, set_version_id: int) -> set[int]:
         """Subtopics this set can actually answer a request for.
 

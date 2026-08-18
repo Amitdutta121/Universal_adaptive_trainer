@@ -463,3 +463,88 @@ kbd {
   font: inherit; font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px;
   border-radius: 4px; padding: 0 4px; background: #fbfbfc; color: var(--ink-soft);
 }
+
+/* --- Coverage by topic --------------------------------------------------- */
+
+.coverage-form { display: flex; flex-direction: column; gap: 10px; }
+
+.topic-card { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.topic-card[open] { border-color: #cfd5df; }
+.topic-card-done { background: #fbfcfd; }
+
+.topic-summary {
+  position: relative;
+  display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(170px, 1fr) auto;
+  align-items: center; gap: 8px 18px; padding: 12px 14px 12px 30px;
+  cursor: pointer; list-style: none;
+}
+.topic-summary::-webkit-details-marker { display: none; }
+.topic-summary::before {
+  content: "\25B8"; position: absolute; left: 13px; top: 14px;
+  color: var(--ink-soft); font-size: 11px;
+}
+.topic-card[open] > .topic-summary::before { content: "\25BE"; }
+.topic-summary:hover { background: #fafbfc; }
+
+.topic-head { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.topic-name { font-weight: 600; font-size: 15px; }
+.topic-meta { font-size: 12px; color: var(--ink-soft); }
+
+.topic-cover { display: flex; flex-direction: column; gap: 5px; }
+.coverage-bar { display: flex; height: 7px; gap: 2px; }
+.coverage-bar span { display: block; border-radius: 1px; }
+.bar-ok { background: var(--ok); }
+.bar-warn { background: var(--off); }
+.bar-bad { background: #9c2b2b; }
+.topic-counts { font-size: 12px; color: var(--ink-soft); }
+
+.topic-gaps { text-align: right; white-space: nowrap; font-size: 13px; }
+.topic-gaps strong { display: block; color: #9c2b2b; }
+
+.topic-body { padding: 0 14px 14px; border-top: 1px solid var(--line); }
+
+.worklist-controls {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin: 12px 0 10px; font-size: 13px; color: var(--ink-soft);
+}
+.worklist-controls label { cursor: pointer; }
+.button-inline { padding: 5px 11px; font-size: 12px; cursor: pointer; background: #fff; }
+.worklist-showall { margin-left: 6px; }
+/* A ready cell is not work, so it is hidden until asked for. Scoped with :has()
+   rather than a sibling combinator because the toggle sits inside the controls
+   row, not next to the table it filters. */
+.topic-body:not(:has(.worklist-showall:checked)) .worklist tr.is-ready { display: none; }
+
+.worklist-wrap { overflow-x: auto; }
+.worklist td { vertical-align: middle; }
+.worklist-subtopic { font-weight: 600; }
+.worklist-difficulty { color: var(--ink-soft); }
+.worklist-have { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.worklist-none { color: var(--line); }
+.worklist tr.is-ready td { color: var(--ink-soft); }
+.worklist tr.is-ready .worklist-subtopic { font-weight: 500; }
+
+.worklist-pick {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; font-weight: 600; padding: 4px 9px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft);
+}
+.worklist-pick:hover { border-color: var(--accent); color: var(--accent); }
+.worklist-pick:has(input:checked) {
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+}
+
+.gap-actions {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--accent-soft); padding: 12px 14px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px;
+}
+.gap-tally { margin: 0; font-size: 14px; font-weight: 600; }
+.gap-tally .topic-meta { font-weight: 400; }
+.gap-actions .button { margin: 0; }
+.gap-actions .hint { flex-basis: 100%; margin: 0; }
+
+@media (max-width: 760px) {
+  .topic-summary { grid-template-columns: 1fr; }
+  .topic-gaps { text-align: left; }
+}

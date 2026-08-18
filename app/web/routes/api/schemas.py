@@ -30,7 +30,7 @@ from app.calibration import (
     SubtopicConfusion,
     TypeCalibration,
 )
-from app.coverage import CoverageReport, SubtopicCoverage
+from app.coverage import CoverageReport, SubtopicCoverage, TopicCoverage
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
 from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
 from app.domain.enums import (
@@ -1345,8 +1345,18 @@ class CoverageReportResponse(BaseModel):
     total_cells: int
     empty_cells: int
     thin_cells: int
+    ready_cells: int
+    #: Cells still owed questions, empty and thin alike. The unit the page
+    #: counts in, because one question can close a gap in three rows at once.
+    gap_count: int
+    #: Sum of the per-cell shortfalls. An upper bound on the questions to write.
+    questions_needed: int
     is_servable: bool
     is_ready: bool
+    #: The rows grouped as the professor reads them, in taxonomy order.
+    topics: list[TopicCoverage]
+    #: The same rows, flat. Kept because a client asking "which subtopics are
+    #: short" should not have to walk a tree to find out.
     subtopics: list[SubtopicCoverage]
 
     @classmethod
@@ -1360,10 +1370,32 @@ class CoverageReportResponse(BaseModel):
             total_cells=report.total_cells,
             empty_cells=report.empty_cells,
             thin_cells=report.thin_cells,
+            ready_cells=report.ready_cells,
+            gap_count=report.gap_count,
+            questions_needed=report.questions_needed,
             is_servable=report.is_servable,
             is_ready=report.is_ready,
+            topics=report.topics,
             subtopics=report.subtopics,
         )
+
+
+class CoverageTargetRef(BaseModel):
+    """One cell a professor asked to have filled."""
+
+    subtopic_id: int
+    difficulty: Difficulty
+
+
+class FillGapsRequest(BaseModel):
+    """The gaps a professor selected on the coverage page.
+
+    Deliberately a list of *targets*, not a question count. The generator picks
+    its own topic and subtopics from the chunk it is given (ADR-031), so asking
+    for "seven questions" would promise an aim the generator does not accept.
+    """
+
+    targets: list[CoverageTargetRef] = Field(min_length=1)
 
 
 class QuestionSetOut(BaseModel):

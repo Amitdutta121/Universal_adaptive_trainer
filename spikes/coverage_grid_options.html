@@ -1,0 +1,952 @@
+<title>Four Coverage Grids</title>
+
+<style>
+  /* ---- tokens -------------------------------------------------------- */
+  :root {
+    --ground:        #F6F7F4;
+    --surface:       #FFFFFF;
+    --sunk:          #EDEFEA;
+    --ink:           #17211F;
+    --ink-2:         #3E4B48;
+    --ink-3:         #6E7A76;
+    --rule:          #DCE0DA;
+    --rule-strong:   #C3CAC2;
+    --accent:        #0E6E6B;
+    --accent-ink:    #0A5250;
+    --accent-soft:   #E1EFEC;
+
+    --none-fg:  #A8342C;  --none-bg:  #FBE9E7;  --none-line: #E4B9B3;
+    --few-fg:   #8A5A08;  --few-bg:   #FBF1DC;  --few-line:  #E7D2A4;
+    --good-fg:  #1F6B4C;  --good-bg:  #E2F1E8;  --good-line: #BCDCCA;
+
+    --shadow: 0 1px 2px rgba(23,33,31,.05), 0 8px 24px -16px rgba(23,33,31,.28);
+
+    --font-display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif;
+    --font-data: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #11181A;
+      --surface:     #192124;
+      --sunk:        #0D1315;
+      --ink:         #E7EDEA;
+      --ink-2:       #B2BEBA;
+      --ink-3:       #7F8D89;
+      --rule:        #2A3538;
+      --rule-strong: #3B494C;
+      --accent:      #4FBFB2;
+      --accent-ink:  #7FD6CB;
+      --accent-soft: #15302F;
+
+      --none-fg: #F0A096; --none-bg: #391E1B; --none-line: #5E302A;
+      --few-fg:  #E7B863; --few-bg:  #33270F; --few-line:  #503C1C;
+      --good-fg: #6ECB9E; --good-bg: #14301F; --good-line: #244B31;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #11181A;
+    --surface:     #192124;
+    --sunk:        #0D1315;
+    --ink:         #E7EDEA;
+    --ink-2:       #B2BEBA;
+    --ink-3:       #7F8D89;
+    --rule:        #2A3538;
+    --rule-strong: #3B494C;
+    --accent:      #4FBFB2;
+    --accent-ink:  #7FD6CB;
+    --accent-soft: #15302F;
+
+    --none-fg: #F0A096; --none-bg: #391E1B; --none-line: #5E302A;
+    --few-fg:  #E7B863; --few-bg:  #33270F; --few-line:  #503C1C;
+    --good-fg: #6ECB9E; --good-bg: #14301F; --good-line: #244B31;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+  }
+
+  /* ---- base ---------------------------------------------------------- */
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+  }
+
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2.1rem, 5vw, 3rem); line-height: 1.1; letter-spacing: -.015em; }
+  h2 { font-size: 1.45rem; line-height: 1.25; }
+  h3 { font-size: 1.05rem; line-height: 1.3; }
+  p  { margin: 0; }
+  a  { color: var(--accent-ink); }
+
+  .eyebrow {
+    font-family: var(--font-body);
+    font-size: .7rem;
+    font-weight: 650;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede { font-size: 1.075rem; color: var(--ink-2); max-width: 64ch; }
+  .note { font-size: .875rem; color: var(--ink-3); max-width: 68ch; }
+
+  :is(a, button, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  /* ---- masthead ------------------------------------------------------ */
+  .masthead { display: flex; flex-direction: column; gap: 18px; }
+  .masthead .rule-line { height: 3px; background: var(--ink); width: 64px; }
+
+  /* ---- shared rules panel -------------------------------------------- */
+  .shared {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 24px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-shadow: var(--shadow);
+  }
+  .shared-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 18px 28px;
+  }
+  .shared-grid dt {
+    font-size: .7rem; font-weight: 650; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px;
+  }
+  .shared-grid dd { margin: 0; font-size: .9rem; color: var(--ink-2); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--ink-2); }
+  .swatch {
+    width: 30px; height: 24px; border-radius: 3px;
+    display: grid; place-items: center;
+    font-family: var(--font-data); font-size: .78rem; font-weight: 600;
+  }
+  .swatch.s-none { background: var(--none-bg); border: 1.5px dashed var(--none-line); color: var(--none-fg); }
+  .swatch.s-few  { background: var(--few-bg);  border: 1.5px solid var(--few-line);   color: var(--few-fg); }
+  .swatch.s-good { background: var(--good-bg); border: 1.5px solid var(--good-line);  color: var(--good-fg); }
+
+  /* ---- option section ------------------------------------------------ */
+  .option { display: flex; flex-direction: column; gap: 18px; }
+  .option-head { display: flex; flex-direction: column; gap: 8px; }
+  .option-tag {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-size: .7rem; font-weight: 650; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent-ink);
+  }
+  .option-tag::before {
+    content: ""; width: 22px; height: 2px; background: var(--accent); display: block;
+  }
+  .thesis { font-size: 1rem; color: var(--ink-2); max-width: 66ch; }
+
+  .mock {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .mock-bar {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px;
+    padding: 12px 18px;
+    background: var(--sunk);
+    border-bottom: 1px solid var(--rule);
+    font-size: .82rem; color: var(--ink-3);
+  }
+  .mock-bar strong { color: var(--ink); font-weight: 600; }
+  .mock-body { padding: 18px; overflow-x: auto; }
+
+  .verdict {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: .78rem; font-weight: 600;
+    padding: 3px 9px; border-radius: 999px;
+    background: var(--none-bg); color: var(--none-fg); border: 1px solid var(--none-line);
+  }
+
+  /* ---- the grid table ------------------------------------------------ */
+  table.grid { border-collapse: separate; border-spacing: 0; width: 100%; font-size: .9rem; }
+  table.grid th, table.grid td { text-align: left; padding: 0; }
+  table.grid thead th {
+    font-family: var(--font-body);
+    font-size: .68rem; font-weight: 650; letter-spacing: .11em; text-transform: uppercase;
+    color: var(--ink-3); padding: 0 10px 10px; white-space: nowrap;
+  }
+  table.grid thead th.col-diff { text-align: center; width: 96px; }
+  table.grid tbody td { padding: 4px 10px; border-top: 1px solid var(--rule); }
+  table.grid tbody tr:first-child td { border-top: none; }
+  .topic-cell { font-size: .74rem; color: var(--ink-3); letter-spacing: .04em; white-space: nowrap; }
+  .subtopic-cell { font-weight: 550; color: var(--ink); white-space: nowrap; }
+
+  /* ---- cell button (shared by A, B, D) ------------------------------- */
+  .cell {
+    -webkit-appearance: none; appearance: none;
+    font: inherit;
+    width: 100%; min-width: 74px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    padding: 7px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .cell:hover { transform: translateY(-1px); }
+  .cell .n {
+    font-family: var(--font-data); font-size: 1rem; font-weight: 650;
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .cell .lbl { font-size: .625rem; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; opacity: .82; }
+
+  .cell.s-none { background: var(--none-bg); border: 1.5px dashed var(--none-line); color: var(--none-fg); }
+  .cell.s-few  { background: var(--few-bg);  border: 1.5px solid var(--few-line);   color: var(--few-fg); }
+  .cell.s-good { background: var(--good-bg); border: 1.5px solid var(--good-line);  color: var(--good-fg); }
+
+  .cell.is-picked { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 3px var(--accent-soft); }
+  .cell.is-picked::after {
+    content: "✓";
+    position: absolute; top: -7px; right: -7px;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-size: .6rem; font-weight: 700;
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 2px var(--surface);
+  }
+
+  /* ---- option B: slots ----------------------------------------------- */
+  .cell.slots { gap: 5px; padding: 9px 4px; }
+  .slot-row { display: flex; gap: 4px; align-items: center; }
+  .slot { width: 11px; height: 11px; border-radius: 50%; }
+  .slot.filled { background: currentColor; }
+  .slot.empty  { background: transparent; border: 1.5px dashed currentColor; opacity: .55; }
+  .slot-over {
+    font-family: var(--font-data); font-size: .66rem; font-weight: 650;
+    margin-left: 2px; opacity: .7;
+  }
+  .cell.slots .lbl { opacity: .75; }
+
+  /* ---- option C: worklist -------------------------------------------- */
+  .worklist { display: flex; flex-direction: column; gap: 8px; }
+  .work-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--rule-strong);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+  .work-row.s-none { border-left-color: var(--none-fg); }
+  .work-row.s-few  { border-left-color: var(--few-fg); }
+  .work-where { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .work-where .path { font-size: .74rem; color: var(--ink-3); }
+  .work-where .name { font-weight: 600; font-size: .95rem; }
+  .work-state { font-size: .82rem; color: var(--ink-2); text-align: right; white-space: nowrap; }
+  .work-state b { font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--ink); }
+  .pill {
+    display: inline-block; font-size: .68rem; font-weight: 650;
+    letter-spacing: .07em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-right: 8px;
+  }
+  .pill.s-none { background: var(--none-bg); color: var(--none-fg); border: 1px solid var(--none-line); }
+  .pill.s-few  { background: var(--few-bg);  color: var(--few-fg);  border: 1px solid var(--few-line); }
+
+  .btn-add {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: .82rem; font-weight: 600;
+    padding: 7px 14px; border-radius: 4px; cursor: pointer;
+    background: var(--surface); color: var(--accent-ink);
+    border: 1.5px solid var(--accent); white-space: nowrap;
+    transition: background .12s ease, color .12s ease;
+  }
+  .btn-add:hover { background: var(--accent-soft); }
+  .btn-add.is-picked { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ---- option D: topic cards ----------------------------------------- */
+  .cards { display: flex; flex-direction: column; gap: 12px; }
+  .tcard { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .tcard-head {
+    display: grid; grid-template-columns: 1fr minmax(140px, 200px) auto;
+    align-items: center; gap: 16px;
+    padding: 12px 16px; background: var(--sunk);
+  }
+  .tcard-head h3 { font-size: 1rem; }
+  .healthbar { display: flex; height: 9px; border-radius: 999px; overflow: hidden; gap: 2px; background: transparent; }
+  .healthbar span { display: block; }
+  .healthbar .h-good { background: var(--good-fg); }
+  .healthbar .h-few  { background: var(--few-fg); }
+  .healthbar .h-none { background: var(--none-fg); }
+  .tcard-count { font-size: .78rem; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tcard-body { padding: 12px 16px 16px; overflow-x: auto; }
+  .tcard.collapsed .tcard-body { display: none; }
+  .mini { display: grid; grid-template-columns: max-content repeat(3, 66px); gap: 5px 8px; align-items: center; }
+  .mini .mini-head {
+    font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 650; text-align: center;
+  }
+  .mini .mini-name { font-size: .85rem; color: var(--ink); padding-right: 6px; white-space: nowrap; }
+  .mini .cell { min-width: 0; padding: 5px 2px; }
+  .mini .cell .n { font-size: .88rem; }
+
+  /* ---- basket -------------------------------------------------------- */
+  .basket {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    padding: 13px 18px;
+    border-top: 1px solid var(--rule);
+    background: var(--accent-soft);
+    font-size: .88rem; color: var(--ink-2);
+  }
+  .basket .count { font-family: var(--font-data); font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .basket .spacer { flex: 1 1 auto; }
+  .btn-go {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: .86rem; font-weight: 650;
+    padding: 9px 18px; border-radius: 4px; border: none; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  .btn-go[disabled] { opacity: .4; cursor: not-allowed; }
+
+  /* ---- pros / cons --------------------------------------------------- */
+  .tradeoff { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 26px; }
+  .tradeoff div { display: flex; flex-direction: column; gap: 5px; }
+  .tradeoff dt {
+    font-size: .68rem; font-weight: 650; letter-spacing: .11em; text-transform: uppercase;
+  }
+  .tradeoff .t-for dt { color: var(--good-fg); }
+  .tradeoff .t-against dt { color: var(--none-fg); }
+  .tradeoff dd { margin: 0; font-size: .89rem; color: var(--ink-2); }
+
+  /* ---- closing ------------------------------------------------------- */
+  .closing {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 26px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow);
+  }
+  .closing ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+  .closing li { font-size: .92rem; color: var(--ink-2); }
+  .closing li strong { color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+    .cell:hover { transform: none; }
+  }
+
+  @media (max-width: 620px) {
+    .tcard-head { grid-template-columns: 1fr; }
+    .work-row { grid-template-columns: 1fr; }
+    .work-state { text-align: left; }
+  }
+</style>
+
+<div class="wrap">
+
+  <!-- ============================ MASTHEAD ============================ -->
+  <header class="masthead">
+    <div class="rule-line"></div>
+    <p class="eyebrow">Design options &middot; not built &middot; placeholder data</p>
+    <h1>Four ways to show the coverage grid</h1>
+    <p class="lede">
+      The professor's question is always the same: <em>what should I generate next?</em> All four
+      layouts below answer it from the same numbers and support the same action &mdash; tick the
+      gaps you want filled, then send them to the generator. They differ in what they put first.
+    </p>
+    <p class="note">
+      Every number on this page is invented. Nothing here reads the real question bank, and no
+      button does anything except tick. Pick a direction and it gets wired to
+      <code>/api/coverage</code>.
+    </p>
+  </header>
+
+  <!-- ============================ SHARED ============================== -->
+  <section class="shared">
+    <h2>What all four have in common</h2>
+    <dl class="shared-grid">
+      <div>
+        <dt>The two axes</dt>
+        <dd>Subtopic down the side, difficulty across the top &mdash; because that is exactly the
+          pair the training engine asks for when it picks a student's next question.</dd>
+      </div>
+      <div>
+        <dt>The target</dt>
+        <dd>Three questions per box. A box holding one question shows a student the same question
+          twice in a row, so three is the smallest number that rotates.</dd>
+      </div>
+      <div>
+        <dt>The action</dt>
+        <dd>Tick any box that needs filling. A running total at the bottom says how many questions
+          that adds up to, then one button hands the list to the generator.</dd>
+      </div>
+    </dl>
+    <div class="legend" role="img" aria-label="Legend: red dashed means none yet, amber solid means needs more, green means good">
+      <span class="legend-item"><span class="swatch s-none" aria-hidden="true">0</span> <strong>None yet</strong> &mdash; a student can be sent here and find nothing</span>
+      <span class="legend-item"><span class="swatch s-few" aria-hidden="true">2</span> <strong>Needs more</strong> &mdash; works, but repeats</span>
+      <span class="legend-item"><span class="swatch s-good" aria-hidden="true">5</span> <strong>Good</strong> &mdash; enough to rotate</span>
+    </div>
+    <p class="note">
+      Colour is never the only signal: the count is printed in every box, and the three states also
+      differ by border &mdash; dashed, thin solid, filled. That keeps it readable in greyscale, on a
+      projector, and for colour-blind readers.
+    </p>
+  </section>
+
+  <!-- ============================ OPTION A ============================ -->
+  <section class="option">
+    <div class="option-head">
+      <p class="option-tag">Option A</p>
+      <h2>The wall chart</h2>
+      <p class="thesis">
+        One box per subtopic and difficulty, coloured and counted. The most literal picture of the
+        curriculum &mdash; you see the whole shape of the bank at once, and the red patches are the
+        work.
+      </p>
+    </div>
+
+    <div class="mock" data-scope="a">
+      <div class="mock-bar">
+        <strong>118 approved questions</strong>
+        <span>&middot;</span><span>57 boxes</span>
+        <span>&middot;</span><span>10 empty, 15 need more</span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="verdict">Not ready to train</span>
+      </div>
+      <div class="mock-body">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Subtopic</th>
+              <th class="col-diff">Easy</th>
+              <th class="col-diff">Medium</th>
+              <th class="col-diff">Hard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="topic-cell">Variables &amp; Data Types</td>
+              <td class="subtopic-cell">Type conversion</td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">4</span><span class="lbl">good</span></button></td>
+              <td><button type="button" class="cell s-few"  data-need="1"><span class="n">2</span><span class="lbl">needs 1</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Control Flow</td>
+              <td class="subtopic-cell">if / elif / else</td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">7</span><span class="lbl">good</span></button></td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">5</span><span class="lbl">good</span></button></td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">3</span><span class="lbl">good</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Control Flow</td>
+              <td class="subtopic-cell">Nested conditionals</td>
+              <td><button type="button" class="cell s-few"  data-need="1"><span class="n">2</span><span class="lbl">needs 1</span></button></td>
+              <td><button type="button" class="cell s-few"  data-need="2"><span class="n">1</span><span class="lbl">needs 2</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Loops</td>
+              <td class="subtopic-cell">while loops</td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">3</span><span class="lbl">good</span></button></td>
+              <td><button type="button" class="cell s-few"  data-need="1"><span class="n">2</span><span class="lbl">needs 1</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Loops</td>
+              <td class="subtopic-cell">break and continue</td>
+              <td><button type="button" class="cell s-few"  data-need="2"><span class="n">1</span><span class="lbl">needs 2</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Functions</td>
+              <td class="subtopic-cell">Return values</td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">3</span><span class="lbl">good</span></button></td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">3</span><span class="lbl">good</span></button></td>
+              <td><button type="button" class="cell s-good" data-need="0"><span class="n">3</span><span class="lbl">good</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Functions</td>
+              <td class="subtopic-cell">Variable scope</td>
+              <td><button type="button" class="cell s-few"  data-need="1"><span class="n">2</span><span class="lbl">needs 1</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+              <td><button type="button" class="cell s-none" data-need="3"><span class="n">0</span><span class="lbl">needs 3</span></button></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="note" style="margin-top:14px">Showing 7 of 19 subtopics.</p>
+      </div>
+      <div class="basket">
+        <span><span class="count" data-picked>0</span> boxes ticked</span>
+        <span>&middot;</span>
+        <span><span class="count" data-total>0</span> questions to generate</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn-go" disabled data-go>Generate these</button>
+      </div>
+    </div>
+
+    <dl class="tradeoff">
+      <div class="t-for"><dt>Reads well</dt><dd>The only layout where a whole column going red is
+        visible &mdash; "we have almost no hard questions anywhere" is a pattern you can only see
+        in a matrix.</dd></div>
+      <div class="t-against"><dt>Costs</dt><dd>Nineteen subtopics is a long scroll; a real
+        taxonomy of sixty would be unusable without grouping or a filter.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ============================ OPTION B ============================ -->
+  <section class="option">
+    <div class="option-head">
+      <p class="option-tag">Option B</p>
+      <h2>Three slots to fill</h2>
+      <p class="thesis">
+        Same grid, but each box is drawn as three sockets &mdash; filled for a question you have,
+        hollow for one you still need. Nobody has to know that three is the target or remember what
+        amber means; the empty circles say it.
+      </p>
+    </div>
+
+    <div class="mock" data-scope="b">
+      <div class="mock-bar">
+        <strong>118 approved questions</strong>
+        <span>&middot;</span><span>45 sockets still empty across the whole curriculum</span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="verdict">Not ready to train</span>
+      </div>
+      <div class="mock-body">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Subtopic</th>
+              <th class="col-diff">Easy</th>
+              <th class="col-diff">Medium</th>
+              <th class="col-diff">Hard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="topic-cell">Variables &amp; Data Types</td>
+              <td class="subtopic-cell">Type conversion</td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i><b class="slot-over">+1</b></span><span class="lbl">full</span></button></td>
+              <td><button type="button" class="cell slots s-few"  data-need="1"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot empty"></i></span><span class="lbl">1 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Control Flow</td>
+              <td class="subtopic-cell">if / elif / else</td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i><b class="slot-over">+4</b></span><span class="lbl">full</span></button></td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i><b class="slot-over">+2</b></span><span class="lbl">full</span></button></td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i></span><span class="lbl">full</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Control Flow</td>
+              <td class="subtopic-cell">Nested conditionals</td>
+              <td><button type="button" class="cell slots s-few"  data-need="1"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot empty"></i></span><span class="lbl">1 to go</span></button></td>
+              <td><button type="button" class="cell slots s-few"  data-need="2"><span class="slot-row"><i class="slot filled"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">2 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Loops</td>
+              <td class="subtopic-cell">while loops</td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i></span><span class="lbl">full</span></button></td>
+              <td><button type="button" class="cell slots s-few"  data-need="1"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot empty"></i></span><span class="lbl">1 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Loops</td>
+              <td class="subtopic-cell">break and continue</td>
+              <td><button type="button" class="cell slots s-few"  data-need="2"><span class="slot-row"><i class="slot filled"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">2 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Functions</td>
+              <td class="subtopic-cell">Return values</td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i></span><span class="lbl">full</span></button></td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i></span><span class="lbl">full</span></button></td>
+              <td><button type="button" class="cell slots s-good" data-need="0"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot filled"></i></span><span class="lbl">full</span></button></td>
+            </tr>
+            <tr>
+              <td class="topic-cell">Functions</td>
+              <td class="subtopic-cell">Variable scope</td>
+              <td><button type="button" class="cell slots s-few"  data-need="1"><span class="slot-row"><i class="slot filled"></i><i class="slot filled"></i><i class="slot empty"></i></span><span class="lbl">1 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+              <td><button type="button" class="cell slots s-none" data-need="3"><span class="slot-row"><i class="slot empty"></i><i class="slot empty"></i><i class="slot empty"></i></span><span class="lbl">3 to go</span></button></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="note" style="margin-top:14px">
+          Showing 7 of 19 subtopics. <code>+4</code> means four questions beyond the three needed.
+        </p>
+      </div>
+      <div class="basket">
+        <span><span class="count" data-picked>0</span> boxes ticked</span>
+        <span>&middot;</span>
+        <span><span class="count" data-total>0</span> questions to generate</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn-go" disabled data-go>Generate these</button>
+      </div>
+    </div>
+
+    <dl class="tradeoff">
+      <div class="t-for"><dt>Reads well</dt><dd>Explains itself with no legend and no training.
+        "Fill the empty circles" is the whole instruction, and the shape carries the meaning even
+        printed in black and white.</dd></div>
+      <div class="t-against"><dt>Costs</dt><dd>Hides depth above three &mdash; a subtopic with
+        forty easy questions looks the same as one with three unless you read the <code>+n</code>.
+        Fine for filling gaps, wrong for spotting over-generation.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ============================ OPTION C ============================ -->
+  <section class="option">
+    <div class="option-head">
+      <p class="option-tag">Option C</p>
+      <h2>The worklist</h2>
+      <p class="thesis">
+        No grid at all. Just the gaps, worst first, each one a line you can act on. This is the
+        layout that treats coverage as a to-do list rather than a report &mdash; you never have to
+        find the red squares, because nothing else is on screen.
+      </p>
+    </div>
+
+    <div class="mock" data-scope="c">
+      <div class="mock-bar">
+        <strong>25 gaps</strong>
+        <span>&middot;</span><span>45 questions would close all of them</span>
+        <span>&middot;</span><span>worst first</span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="verdict">Not ready to train</span>
+      </div>
+      <div class="mock-body">
+        <div class="worklist">
+          <div class="work-row s-none">
+            <div class="work-where">
+              <span class="path">Loops</span>
+              <span class="name">break and continue &middot; Medium</span>
+            </div>
+            <div class="work-state"><span class="pill s-none">None yet</span><b>0</b> of 3</div>
+            <button type="button" class="btn-add" data-need="3">Add 3</button>
+          </div>
+          <div class="work-row s-none">
+            <div class="work-where">
+              <span class="path">Loops</span>
+              <span class="name">break and continue &middot; Hard</span>
+            </div>
+            <div class="work-state"><span class="pill s-none">None yet</span><b>0</b> of 3</div>
+            <button type="button" class="btn-add" data-need="3">Add 3</button>
+          </div>
+          <div class="work-row s-none">
+            <div class="work-where">
+              <span class="path">Functions</span>
+              <span class="name">Variable scope &middot; Medium</span>
+            </div>
+            <div class="work-state"><span class="pill s-none">None yet</span><b>0</b> of 3</div>
+            <button type="button" class="btn-add" data-need="3">Add 3</button>
+          </div>
+          <div class="work-row s-none">
+            <div class="work-where">
+              <span class="path">Control Flow</span>
+              <span class="name">Nested conditionals &middot; Hard</span>
+            </div>
+            <div class="work-state"><span class="pill s-none">None yet</span><b>0</b> of 3</div>
+            <button type="button" class="btn-add" data-need="3">Add 3</button>
+          </div>
+          <div class="work-row s-few">
+            <div class="work-where">
+              <span class="path">Control Flow</span>
+              <span class="name">Nested conditionals &middot; Medium</span>
+            </div>
+            <div class="work-state"><span class="pill s-few">Needs more</span><b>1</b> of 3</div>
+            <button type="button" class="btn-add" data-need="2">Add 2</button>
+          </div>
+          <div class="work-row s-few">
+            <div class="work-where">
+              <span class="path">Loops</span>
+              <span class="name">break and continue &middot; Easy</span>
+            </div>
+            <div class="work-state"><span class="pill s-few">Needs more</span><b>1</b> of 3</div>
+            <button type="button" class="btn-add" data-need="2">Add 2</button>
+          </div>
+          <div class="work-row s-few">
+            <div class="work-where">
+              <span class="path">Loops</span>
+              <span class="name">while loops &middot; Medium</span>
+            </div>
+            <div class="work-state"><span class="pill s-few">Needs more</span><b>2</b> of 3</div>
+            <button type="button" class="btn-add" data-need="1">Add 1</button>
+          </div>
+        </div>
+        <p class="note" style="margin-top:14px">Showing 7 of 25 gaps. Subtopics that are already full never appear.</p>
+      </div>
+      <div class="basket">
+        <span><span class="count" data-picked>0</span> gaps queued</span>
+        <span>&middot;</span>
+        <span><span class="count" data-total>0</span> questions to generate</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn-go" disabled data-go>Generate these</button>
+      </div>
+    </div>
+
+    <dl class="tradeoff">
+      <div class="t-for"><dt>Reads well</dt><dd>Zero interpretation required, and it scales to any
+        taxonomy size &mdash; a hundred subtopics still produce a list you work down. Best for
+        someone who just wants to be told what to do.</dd></div>
+      <div class="t-against"><dt>Costs</dt><dd>No overview. You cannot see that the bank is
+        healthy, cannot spot a whole topic that was never written for, and there is no sense of
+        progress from the list shrinking.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ============================ OPTION D ============================ -->
+  <section class="option">
+    <div class="option-head">
+      <p class="option-tag">Option D</p>
+      <h2>Topic by topic</h2>
+      <p class="thesis">
+        The grid folded into one card per topic, each with a one-glance health bar. Closed, the page
+        is six lines and you can see which topic is in trouble. Open, it is Option A for that topic
+        only. This is the version that survives a sixty-subtopic curriculum.
+      </p>
+    </div>
+
+    <div class="mock" data-scope="d">
+      <div class="mock-bar">
+        <strong>118 approved questions</strong>
+        <span>&middot;</span><span>5 topics</span>
+        <span>&middot;</span><span>2 topics fully covered</span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="verdict">Not ready to train</span>
+      </div>
+      <div class="mock-body">
+        <div class="cards">
+
+          <div class="tcard">
+            <div class="tcard-head">
+              <h3>Loops</h3>
+              <div class="healthbar" role="img" aria-label="Loops: 3 boxes good, 2 need more, 4 empty">
+                <span class="h-good" style="flex:3"></span>
+                <span class="h-few"  style="flex:2"></span>
+                <span class="h-none" style="flex:4"></span>
+              </div>
+              <span class="tcard-count">4 empty &middot; 2 thin</span>
+            </div>
+            <div class="tcard-body">
+              <div class="mini">
+                <span></span>
+                <span class="mini-head">Easy</span><span class="mini-head">Medium</span><span class="mini-head">Hard</span>
+
+                <span class="mini-name">for loops</span>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">5</span></button>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">4</span></button>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">3</span></button>
+
+                <span class="mini-name">while loops</span>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">3</span></button>
+                <button type="button" class="cell s-few"  data-need="1"><span class="n">2</span></button>
+                <button type="button" class="cell s-none" data-need="3"><span class="n">0</span></button>
+
+                <span class="mini-name">break and continue</span>
+                <button type="button" class="cell s-few"  data-need="2"><span class="n">1</span></button>
+                <button type="button" class="cell s-none" data-need="3"><span class="n">0</span></button>
+                <button type="button" class="cell s-none" data-need="3"><span class="n">0</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tcard">
+            <div class="tcard-head">
+              <h3>Functions</h3>
+              <div class="healthbar" role="img" aria-label="Functions: 7 boxes good, 3 need more, 2 empty">
+                <span class="h-good" style="flex:7"></span>
+                <span class="h-few"  style="flex:3"></span>
+                <span class="h-none" style="flex:2"></span>
+              </div>
+              <span class="tcard-count">2 empty &middot; 3 thin</span>
+            </div>
+            <div class="tcard-body">
+              <div class="mini">
+                <span></span>
+                <span class="mini-head">Easy</span><span class="mini-head">Medium</span><span class="mini-head">Hard</span>
+
+                <span class="mini-name">Defining functions</span>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">6</span></button>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">4</span></button>
+                <button type="button" class="cell s-few"  data-need="1"><span class="n">2</span></button>
+
+                <span class="mini-name">Parameters and arguments</span>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">4</span></button>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">3</span></button>
+                <button type="button" class="cell s-few"  data-need="2"><span class="n">1</span></button>
+
+                <span class="mini-name">Return values</span>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">3</span></button>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">3</span></button>
+                <button type="button" class="cell s-good" data-need="0"><span class="n">3</span></button>
+
+                <span class="mini-name">Variable scope</span>
+                <button type="button" class="cell s-few"  data-need="1"><span class="n">2</span></button>
+                <button type="button" class="cell s-none" data-need="3"><span class="n">0</span></button>
+                <button type="button" class="cell s-none" data-need="3"><span class="n">0</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tcard collapsed">
+            <div class="tcard-head">
+              <h3>Control Flow</h3>
+              <div class="healthbar" role="img" aria-label="Control Flow: 5 boxes good, 2 need more, 2 empty">
+                <span class="h-good" style="flex:5"></span>
+                <span class="h-few"  style="flex:2"></span>
+                <span class="h-none" style="flex:2"></span>
+              </div>
+              <span class="tcard-count">2 empty &middot; 2 thin</span>
+            </div>
+            <div class="tcard-body"></div>
+          </div>
+
+          <div class="tcard collapsed">
+            <div class="tcard-head">
+              <h3>Variables &amp; Data Types</h3>
+              <div class="healthbar" role="img" aria-label="Variables and Data Types: 8 boxes good, 3 need more, 1 empty">
+                <span class="h-good" style="flex:8"></span>
+                <span class="h-few"  style="flex:3"></span>
+                <span class="h-none" style="flex:1"></span>
+              </div>
+              <span class="tcard-count">1 empty &middot; 3 thin</span>
+            </div>
+            <div class="tcard-body"></div>
+          </div>
+
+          <div class="tcard collapsed">
+            <div class="tcard-head">
+              <h3>Lists &amp; Dictionaries</h3>
+              <div class="healthbar" role="img" aria-label="Lists and Dictionaries: 6 boxes good, 4 need more, 2 empty">
+                <span class="h-good" style="flex:6"></span>
+                <span class="h-few"  style="flex:4"></span>
+                <span class="h-none" style="flex:2"></span>
+              </div>
+              <span class="tcard-count">2 empty &middot; 4 thin</span>
+            </div>
+            <div class="tcard-body"></div>
+          </div>
+
+        </div>
+        <p class="note" style="margin-top:14px">
+          Two topics shown open, three closed. In the real page every card opens and closes; the
+          health bar is the proportion of that topic's boxes in each state.
+        </p>
+      </div>
+      <div class="basket">
+        <span><span class="count" data-picked>0</span> boxes ticked</span>
+        <span>&middot;</span>
+        <span><span class="count" data-total>0</span> questions to generate</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn-go" disabled data-go>Generate these</button>
+      </div>
+    </div>
+
+    <dl class="tradeoff">
+      <div class="t-for"><dt>Reads well</dt><dd>The only option that stays one screen tall as the
+        curriculum grows, and the health bars make topics comparable at a glance without reading a
+        single number.</dd></div>
+      <div class="t-against"><dt>Costs</dt><dd>A gap inside a closed card is invisible, so it
+        depends on the health bar being trusted. Cross-topic patterns &mdash; "hard is weak
+        everywhere" &mdash; are lost.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ============================ CLOSING ============================= -->
+  <section class="closing">
+    <h2>What I'd suggest, and what I need from you</h2>
+    <p class="lede" style="font-size:1rem">
+      <strong>B for the boxes, C underneath it.</strong> The socket idea explains the rule without a
+      legend, which is what "easy for anyone" really costs; the worklist below it means nobody has
+      to hunt for the red. Option D's topic folding is worth adding later, when a real taxonomy
+      makes the page too long &mdash; it is a change to A/B, not a replacement for them.
+    </p>
+    <p class="note">Four things would change the design, so tell me before I build:</p>
+    <ul>
+      <li><strong>How big is a real taxonomy?</strong> Seven subtopics and sixty subtopics want
+        different layouts. This is the single biggest factor.</li>
+      <li><strong>Is three per box actually your target?</strong> It is the code's current minimum.
+        If you want ten, the socket idea in Option B stops working and the counts in A win.</li>
+      <li><strong>Should ticking a box really queue generation?</strong> The generator picks its own
+        subtopic from a chunk you choose &mdash; it cannot be ordered to write for a named
+        subtopic. So "Generate these" honestly means "find me chunks that teach these", which is a
+        real feature, not a button.</li>
+      <li><strong>Is this for the professor, or for a paper?</strong> A figure wants one static
+        grid, no interaction, and print-safe colour. A working page wants all of the above.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    document.querySelectorAll(".mock").forEach(function (mock) {
+      var picks = mock.querySelectorAll("[data-need]");
+      var pickedOut = mock.querySelector("[data-picked]");
+      var totalOut = mock.querySelector("[data-total]");
+      var go = mock.querySelector("[data-go]");
+
+      function refresh() {
+        var boxes = 0;
+        var questions = 0;
+        picks.forEach(function (el) {
+          if (el.classList.contains("is-picked")) {
+            boxes += 1;
+            questions += parseInt(el.getAttribute("data-need"), 10) || 0;
+          }
+        });
+        pickedOut.textContent = boxes;
+        totalOut.textContent = questions;
+        go.disabled = boxes === 0;
+      }
+
+      picks.forEach(function (el) {
+        el.setAttribute("aria-pressed", "false");
+        el.addEventListener("click", function () {
+          var on = el.classList.toggle("is-picked");
+          el.setAttribute("aria-pressed", on ? "true" : "false");
+          if (el.classList.contains("btn-add")) {
+            el.textContent = on ? "Queued" : "Add " + el.getAttribute("data-need");
+          }
+          refresh();
+        });
+      });
+
+      refresh();
+    });
+
+    document.querySelectorAll(".tcard-head").forEach(function (head) {
+      var body = head.parentElement.querySelector(".tcard-body");
+      if (!body || !body.children.length) return;
+      head.style.cursor = "pointer";
+      head.addEventListener("click", function () {
+        head.parentElement.classList.toggle("collapsed");
+      });
+    });
+  })();
+</script>

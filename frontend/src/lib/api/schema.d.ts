@@ -1,0 +1,6391 @@
+export interface paths {
+    "/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dashboard
+         * @description The primary user-facing route.
+         */
+        get: operations["dashboard__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/books": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Books */
+        get: operations["books_books_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/books/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Book
+         * @description Import an uploaded book JSON document, then show the book that resulted.
+         *
+         *     Every rejection is rendered back onto this page with the reason, because all
+         *     three failure modes -- wrong file type, oversized file, invalid document --
+         *     are things the professor (or their producer script) can fix and retry. Nothing
+         *     is stored unless the document validates in full.
+         */
+        post: operations["upload_book_books_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/books/{book_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Book Detail
+         * @description One book: its extraction status, warnings and chapter/section hierarchy.
+         */
+        get: operations["book_detail_books__book_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/books/{book_id}/sections/{section_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Book Section
+         * @description One section: its text plus the source metadata that makes it citable.
+         */
+        get: operations["book_section_books__book_id__sections__section_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/curriculum": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Curriculum */
+        get: operations["curriculum_curriculum_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/curriculum/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Taxonomy
+         * @description Import an uploaded fixed taxonomy and open its approved version.
+         */
+        post: operations["upload_taxonomy_curriculum_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/curriculum/versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Curriculum Version
+         * @description One curriculum version: the Topic -> Subtopic hierarchy.
+         */
+        get: operations["curriculum_version_curriculum_versions__version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/curriculum/subtopics/{subtopic_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Curriculum Subtopic
+         * @description One subtopic: definition and, for legacy rows, textbook evidence.
+         */
+        get: operations["curriculum_subtopic_curriculum_subtopics__subtopic_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Questions */
+        get: operations["questions_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/judge-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Judge Run Page
+         * @description Submit a bulk judge re-run, then return to the question bank.
+         *
+         *     The re-run is asynchronous, so this redirects with a notice rather than
+         *     results: nothing has been judged yet when the professor lands back here.
+         */
+        post: operations["submit_judge_run_page_questions_judge_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/judge-runs/{run_id}/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Poll Judge Run Page
+         * @description Collect whatever a re-run has finished, then return to the question bank.
+         */
+        post: operations["poll_judge_run_page_questions_judge_runs__run_id__poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Questions
+         * @description Generate one persisted question for every selected source section.
+         *
+         *     A large run renders a confirmation page instead of generating, and only
+         *     proceeds once it comes back with ``confirmed`` set. The check lives in this
+         *     handler rather than in a separate confirm route so there is one entry point
+         *     to generation, and no second URL that quietly skips the step.
+         */
+        post: operations["generate_questions_questions_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/{question_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Question Detail
+         * @description Show generated content and the citation(s) that ground one question.
+         */
+        get: operations["question_detail_questions__question_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/{question_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Question
+         * @description Record a professor verdict and return to the reviewed question.
+         */
+        post: operations["review_question_questions__question_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Queue
+         * @description Review one question at a time, in one screen, without leaving the queue.
+         *
+         *     ``outcome`` carries what the previous submit did (ADR-037) across the
+         *     redirect, so the professor reads it on the next question instead of having
+         *     to open the calibration page to find out.
+         */
+        get: operations["review_queue_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review/{question_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Queue Review
+         * @description Record a verdict and advance to the next question in one step.
+         *
+         *     Advancing on submit is the point of this route: the question detail page
+         *     returns to the question just reviewed, which costs two navigations per
+         *     verdict and makes a hundred-question pass far slower than it needs to be.
+         */
+        post: operations["submit_queue_review_review__question_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Instructions */
+        get: operations["instructions_instructions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/instructions/{question_type}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Instruction Page */
+        post: operations["refresh_instruction_page_instructions__question_type__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/judges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Judges */
+        get: operations["judges_judges_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/judges/{metric}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Judge Prompt Page
+         * @description Save or revert one judge prompt, then report the version it now answers under.
+         */
+        post: operations["save_judge_prompt_page_judges__metric__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/judges/{metric}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Judge Page
+         * @description Relearn one judge's prompt from the cases it got wrong (ADR-039).
+         */
+        post: operations["refresh_judge_page_judges__metric__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Feedback */
+        get: operations["feedback_feedback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Coverage */
+        get: operations["coverage_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/coverage/sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Question Set Page */
+        post: operations["create_question_set_page_coverage_sets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/coverage/gaps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fill Coverage Gaps Page
+         * @description Hand the selected gaps to the generation step, which does not exist yet.
+         *
+         *     Each ``target`` is ``"<subtopic_id>:<difficulty>"``, the value the checkbox
+         *     on the coverage page carries. Parsing them here rather than on the page
+         *     keeps the API the single implementation: it is what refuses, and the error
+         *     handler renders the refusal as HTML (ADR-027).
+         */
+        post: operations["fill_coverage_gaps_page_coverage_gaps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/students": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Students
+         * @description Enrolled learners, and where to start a training run.
+         */
+        get: operations["students_students_get"];
+        put?: never;
+        /** Create Student Page */
+        post: operations["create_student_page_students_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/students/{student_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Student Detail
+         * @description One learner's measured mastery, weakness and history.
+         */
+        get: operations["student_detail_students__student_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/students/{student_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Training Session Page */
+        post: operations["start_training_session_page_students__student_id__sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/training/{training_session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Training
+         * @description The session's current question.
+         */
+        get: operations["training_training__training_session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/training/{training_session_id}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Training Answer Page
+         * @description Score an answer and show the result, rather than redirecting.
+         *
+         *     The failing-test evidence and the author's explanation are produced by
+         *     scoring and are not stored on the attempt, so a redirect would lose exactly
+         *     the part the student learns from.
+         */
+        post: operations["submit_training_answer_page_training__training_session_id__answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/training/{training_session_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End Training Session Page */
+        post: operations["end_training_session_page_training__training_session_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health
+         * @description Liveness plus a real database round-trip.
+         */
+        get: operations["health_api_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Config
+         * @description Enum vocabularies and limits, so a client never hard-codes them.
+         */
+        get: operations["config_api_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Counts
+         * @description One count per section.
+         */
+        get: operations["counts_api_counts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Books
+         * @description Every imported book, newest first.
+         *
+         *     ``usable_only`` restricts the list to books that have sections to generate
+         *     from, which is what a generation form needs.
+         */
+        get: operations["list_books_api_books_get"];
+        put?: never;
+        /**
+         * Import Book
+         * @description Validate and import an uploaded book JSON document.
+         *
+         *     Reading the spooled file synchronously is safe here: the route runs in a
+         *     worker thread, so it does not block the event loop.
+         */
+        post: operations["import_book_api_books_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Book
+         * @description One book: import status, warnings and its chapter/section hierarchy.
+         */
+        get: operations["get_book_api_books__book_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sections
+         * @description Every section of one book in reading order, without section text.
+         */
+        get: operations["list_sections_api_books__book_id__sections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/sections/{section_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Section
+         * @description One section's verbatim text plus the citation that makes it traceable.
+         */
+        get: operations["get_section_api_books__book_id__sections__section_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Versions
+         * @description Every curriculum version, newest first, plus which one is approved.
+         */
+        get: operations["list_versions_api_curriculum_versions_get"];
+        put?: never;
+        /**
+         * Import Taxonomy
+         * @description Validate and import a fixed Topic -> Subtopic taxonomy document.
+         */
+        post: operations["import_taxonomy_api_curriculum_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Approved
+         * @description The curriculum version question generation is allowed to use.
+         */
+        get: operations["get_approved_api_curriculum_approved_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Version
+         * @description One curriculum version with its full Topic -> Subtopic hierarchy.
+         */
+        get: operations["get_version_api_curriculum_versions__version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/subtopics/{subtopic_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Subtopic
+         * @description One subtopic: its approved definition and any legacy textbook evidence.
+         */
+        get: operations["get_subtopic_api_curriculum_subtopics__subtopic_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Questions
+         * @description The question bank, newest first, with counts by lifecycle status.
+         *
+         *     ``status`` narrows the listing; without it nothing is hidden. The API does not
+         *     filter by default even though the page does, because a caller reading the bank
+         *     over JSON has no way to discover rows an unrequested default removed.
+         *     ``status_counts`` and ``total`` always describe the whole bank, so a filtered
+         *     listing still says how much it is showing of what.
+         */
+        get: operations["list_questions_api_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Questions
+         * @description Generate and persist one question per selected source section.
+         *
+         *     Every spec is validated before the first model call, so an invalid id later
+         *     in the list cannot leave a partially generated batch behind.
+         */
+        post: operations["generate_questions_api_questions_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/generation-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Generation Plan
+         * @description What generating from this selection would produce, before it runs.
+         *
+         *     Read-only and free: it makes no model call, so a professor can price a run
+         *     and revise it as often as they like. The arithmetic lives here rather than in
+         *     the template because the page is only one client of it (ADR-027).
+         */
+        get: operations["generation_plan_api_questions_generation_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/review-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Queue
+         * @description The next question awaiting a professor verdict, plus progress counts.
+         *
+         *     The queue holds no state. ``after`` is a plain cursor over question ids,
+         *     which is what lets a professor skip a question -- and lets a submitted
+         *     review advance to the next one -- without a stored position per professor.
+         *
+         *     Questions that failed deterministic validation are never offered (ADR-032),
+         *     and ``total`` counts only reviewable ones, so a completed pass reads as
+         *     ``remaining == 0`` rather than stalling on questions the queue excludes.
+         */
+        get: operations["review_queue_api_questions_review_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/{question_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Question
+         * @description One question with its validation report, judge evaluation and provenance.
+         */
+        get: operations["get_question_api_questions__question_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/{question_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Review
+         * @description Record a professor verdict, then act on the cell it lands in (ADR-037).
+         */
+        post: operations["create_review_api_questions__question_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reviews
+         * @description The professor's review history, newest first.
+         */
+        get: operations["list_reviews_api_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reviews/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Stats
+         * @description Decision totals and the rejection-reason distribution.
+         */
+        get: operations["review_stats_api_reviews_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Instructions
+         * @description Every question type, with whatever has been learned for it.
+         *
+         *     Types with nothing learned are listed too, carrying the shipped instruction
+         *     and a review count -- that is how a professor sees which types have enough
+         *     feedback to be worth refreshing.
+         */
+        get: operations["list_instructions_api_instructions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/instructions/{question_type}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Re-learn one type's instruction from its reviews. Requires a configured LLM.
+         */
+        post: operations["refresh_api_instructions__question_type__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/judge-prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Judge Prompts
+         * @description All four judges, each with the text it runs and the text it shipped with.
+         */
+        get: operations["list_judge_prompts_api_judge_prompts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/judge-prompts/{metric}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Judge Prompt
+         * @description Replace one judge's system prompt, and re-name the panel.
+         *
+         *     Existing evaluations are left alone. Re-judging the bank under the new prompt
+         *     is a separate, explicit act (ADR-030) -- rewriting stored verdicts here would
+         *     destroy the very pairs the repair is supposed to be scored against.
+         */
+        put: operations["save_judge_prompt_api_judge_prompts__metric__put"];
+        post?: never;
+        /**
+         * Revert Judge Prompt
+         * @description Drop one override so the judge runs its shipped prompt again.
+         */
+        delete: operations["revert_judge_prompt_api_judge_prompts__metric__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/judge-prompts/{metric}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Re-learn one judge's prompt from the questions it got wrong (ADR-039).
+         *
+         *     The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
+         *     the disagreements this judge is named in, minus the held-out third, so the
+         *     reserved questions stay available to score the result.
+         */
+        post: operations["refresh_api_judge_prompts__metric__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Calibration Results
+         * @description Judge/professor agreement over every reviewed, judged question.
+         */
+        get: operations["calibration_results_api_calibration_results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/pairs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Calibration Pairs
+         * @description The questions behind the figures, so a rate can be checked against rows.
+         */
+        get: operations["calibration_pairs_api_calibration_pairs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/quadrant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Calibration Quadrant
+         * @description The four-cell breakdown per question type, with the questions in each.
+         *
+         *     ``rubric_version`` narrows the pairs to one judge. Without it the response
+         *     reports every version it drew on, so a figure spanning two judges is
+         *     visible rather than implied.
+         */
+        get: operations["calibration_quadrant_api_calibration_quadrant_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agreement Trend
+         * @description Agreement per judge panel, in the order the panels ran (ADR-041).
+         *
+         *     The measurement that can falsify ADR-039: a judge rewriting itself from its
+         *     own mistakes is assumed to converge on the professor, and this is what says
+         *     whether it did. Read-only, and built from the frozen ``review_outcomes``
+         *     rows rather than from the live evaluations, which a re-judge overwrites.
+         */
+        get: operations["agreement_trend_api_calibration_trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Coverage
+         * @description The subtopic x difficulty grid over approved questions.
+         *
+         *     Without ``set_version_id`` this is the live bank -- what to generate next.
+         *     With one it is that frozen set -- what a training run would actually serve.
+         */
+        get: operations["coverage_api_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/coverage/generation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Generation Run
+         * @description Not implemented. Selecting gaps is real; acting on them is not.
+         *
+         *     The step this endpoint would perform does not exist. A professor selects a
+         *     chunk, a difficulty and a question type, and the *generator* decides which
+         *     topic and subtopics it wrote for (ADR-031) -- so a named gap cannot be
+         *     requested. Closing one means finding chunks that teach that subtopic,
+         *     generating from them, and seeing what the generator claimed afterwards.
+         *
+         *     Nothing ranks chunks by subtopic yet. Returning a plausible-looking run here
+         *     would report targeted generation that never happened, so it refuses instead.
+         */
+        post: operations["start_generation_run_api_coverage_generation_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Question Sets */
+        get: operations["list_question_sets_api_question_sets_get"];
+        put?: never;
+        /**
+         * Create Set
+         * @description Freeze every approved question of the approved curriculum under a name.
+         */
+        post: operations["create_set_api_question_sets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets/{set_version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Question Set */
+        get: operations["get_question_set_api_question_sets__set_version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/students": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Students */
+        get: operations["list_students_api_students_get"];
+        put?: never;
+        /**
+         * Create Student
+         * @description Enrol a learner.
+         *
+         *     Names are unique because the picker is by name, so a duplicate would attach
+         *     one learner's mastery to another. That is reported as a rule violation rather
+         *     than left to surface as a database error.
+         */
+        post: operations["create_student_api_students_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/students/{student_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Student */
+        get: operations["get_student_api_students__student_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/students/{student_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Student Progress
+         * @description Measured mastery, weakness and history for one learner.
+         *
+         *     Only what has been scored appears. State rows are created on first touch
+         *     (ADR-041), so a subtopic nobody has been asked about is absent rather than
+         *     shown at a starting value it was never actually assigned.
+         */
+        get: operations["student_progress_api_students__student_id__progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Training Sessions */
+        get: operations["list_training_sessions_api_training_sessions_get"];
+        put?: never;
+        /**
+         * Start Training Session
+         * @description Begin a run for one student against one frozen question set (ADR-036).
+         *
+         *     The seed is generated here and stored, which is what makes the run
+         *     replayable: every roulette draw derives from it and the question's position.
+         */
+        post: operations["start_training_session_api_training_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Training Session */
+        get: operations["get_training_session_api_training_sessions__training_session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Next Question
+         * @description Serve the next question.
+         *
+         *     Not idempotent in the HTTP sense -- it writes an attempt row and lowers the
+         *     served question's priority -- but it *is* idempotent while a question is
+         *     outstanding: asking again returns the same one rather than drawing another.
+         *     A GET is still the honest verb, because what a client wants here is the
+         *     session's current question.
+         */
+        get: operations["next_question_api_training_sessions__training_session_id__next_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attempts/{attempt_id}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer Attempt
+         * @description Score a submitted answer and fold it into the student's state.
+         */
+        post: operations["answer_attempt_api_attempts__attempt_id__answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attempts/{attempt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Attempt */
+        get: operations["get_attempt_api_attempts__attempt_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End Training Session */
+        post: operations["end_training_session_api_training_sessions__training_session_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/batch-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Batch Runs
+         * @description Recent re-runs, newest first.
+         */
+        get: operations["list_batch_runs_api_evaluation_batch_runs_get"];
+        put?: never;
+        /**
+         * Submit Batch Run
+         * @description Submit the eligible question bank for re-judging.
+         *
+         *     202 rather than 201: the run is accepted, not finished. Nothing has been
+         *     evaluated when this returns, and results appear only after a poll.
+         */
+        post: operations["submit_batch_run_api_evaluation_batch_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/batch-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Batch Run
+         * @description One re-run's stored status, without contacting the provider.
+         */
+        get: operations["get_batch_run_api_evaluation_batch_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/batch-runs/{run_id}/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Poll Batch Run
+         * @description Ask the provider about a run and record whatever has finished.
+         *
+         *     Idempotent. Polling a run whose results are already recorded reports them as
+         *     ``already_recorded`` and writes nothing.
+         */
+        post: operations["poll_batch_run_api_evaluation_batch_runs__run_id__poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/{question_id}/evaluations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Question Evaluations
+         * @description Every evaluation this question has received, newest first.
+         *
+         *     The newest row is flagged ``is_current`` because it is what
+         *     ``questions.pedagogical_eval_json`` holds; the older rows are what the judge
+         *     said before, retained rather than overwritten.
+         */
+        get: operations["question_evaluations_api_questions__question_id__evaluations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
+export type webhooks = Record<string, never>;
+export interface components {
+    schemas: {
+        /**
+         * AgreementTrendResponse
+         * @description Agreement panel by panel, oldest first (ADR-041).
+         */
+        AgreementTrendResponse: {
+            /** Points */
+            points: components["schemas"]["TrendPointOut"][];
+            /** Total */
+            total: number;
+            /** Improved */
+            improved: boolean | null;
+            /** Min Panel Sample */
+            min_panel_sample: number;
+        };
+        /** AnswerRequest */
+        AnswerRequest: {
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+        };
+        /**
+         * AnsweredOut
+         * @description What one submitted answer was worth, and what it moved.
+         */
+        AnsweredOut: {
+            /** Training Session Id */
+            training_session_id: number;
+            /** Attempt Id */
+            attempt_id: number;
+            /** Question Id */
+            question_id: number;
+            /** Score */
+            score: number;
+            /** Passed Tests */
+            passed_tests: number | null;
+            /** Total Tests */
+            total_tests: number | null;
+            /** Detail */
+            detail: string | null;
+            /** Mastery Before */
+            mastery_before: number | null;
+            /** Mastery After */
+            mastery_after: number | null;
+        };
+        /**
+         * AttemptOut
+         * @description One question served to a student, answered or not.
+         */
+        AttemptOut: {
+            /** Id */
+            id: number;
+            /** Session Id */
+            session_id: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Question Id */
+            question_id: number;
+            question_type: components["schemas"]["QuestionType"] | null;
+            /** Subtopic Id */
+            subtopic_id: number | null;
+            requested_difficulty: components["schemas"]["Difficulty"];
+            served_difficulty: components["schemas"]["Difficulty"];
+            /** Score */
+            score: number | null;
+            /** Passed Tests */
+            passed_tests: number | null;
+            /** Total Tests */
+            total_tests: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Answered At */
+            answered_at: string | null;
+        };
+        /** BatchRunListResponse */
+        BatchRunListResponse: {
+            /** Runs */
+            runs: components["schemas"]["JudgeBatchRunOut"][];
+            /** Total */
+            total: number;
+        };
+        /** Body_create_question_set_page_coverage_sets_post */
+        Body_create_question_set_page_coverage_sets_post: {
+            /** Label */
+            label: string;
+            /** Notes */
+            notes?: string | null;
+        };
+        /** Body_create_student_page_students_post */
+        Body_create_student_page_students_post: {
+            /** Display Name */
+            display_name: string;
+        };
+        /** Body_fill_coverage_gaps_page_coverage_gaps_post */
+        Body_fill_coverage_gaps_page_coverage_gaps_post: {
+            /** Target */
+            target?: string[] | null;
+        };
+        /** Body_generate_questions_questions_generate_post */
+        Body_generate_questions_questions_generate_post: {
+            /** Difficulty */
+            difficulty: string;
+            /** Question Type */
+            question_type: string;
+            /** Book Id */
+            book_id: number;
+            /** Section Ids */
+            section_ids?: number[] | null;
+            /** All Sections */
+            all_sections?: string | null;
+            /** Confirmed */
+            confirmed?: string | null;
+        };
+        /** Body_import_book_api_books_post */
+        Body_import_book_api_books_post: {
+            /** File */
+            file: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /** Body_import_taxonomy_api_curriculum_versions_post */
+        Body_import_taxonomy_api_curriculum_versions_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_review_question_questions__question_id__review_post */
+        Body_review_question_questions__question_id__review_post: {
+            /** Decision */
+            decision: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+            /** Reasons */
+            reasons?: string[] | null;
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
+            /**
+             * Reference Solution
+             * @default
+             */
+            reference_solution: string;
+            /**
+             * Tests
+             * @default
+             */
+            tests: string;
+        };
+        /** Body_save_judge_prompt_page_judges__metric__post */
+        Body_save_judge_prompt_page_judges__metric__post: {
+            /**
+             * System Prompt
+             * @default
+             */
+            system_prompt: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Revert */
+            revert?: string | null;
+        };
+        /** Body_start_training_session_page_students__student_id__sessions_post */
+        Body_start_training_session_page_students__student_id__sessions_post: {
+            /** Set Version Id */
+            set_version_id: number;
+        };
+        /** Body_submit_queue_review_review__question_id__post */
+        Body_submit_queue_review_review__question_id__post: {
+            /** Decision */
+            decision: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+            /** Reasons */
+            reasons?: string[] | null;
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
+            /**
+             * Reference Solution
+             * @default
+             */
+            reference_solution: string;
+            /**
+             * Tests
+             * @default
+             */
+            tests: string;
+            /**
+             * Mode
+             * @default all
+             */
+            mode: string;
+        };
+        /** Body_submit_training_answer_page_training__training_session_id__answer_post */
+        Body_submit_training_answer_page_training__training_session_id__answer_post: {
+            /** Attempt Id */
+            attempt_id: number;
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+        };
+        /** Body_upload_book_books_upload_post */
+        Body_upload_book_books_upload_post: {
+            /** File */
+            file: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /** Body_upload_taxonomy_curriculum_upload_post */
+        Body_upload_taxonomy_curriculum_upload_post: {
+            /** File */
+            file: string;
+        };
+        /**
+         * BookDetail
+         * @description One book with its chapter/section hierarchy and import warnings.
+         */
+        BookDetail: {
+            book: components["schemas"]["BookSummary"];
+            /** Section Count */
+            section_count: number;
+            /** Chapters */
+            chapters: components["schemas"]["ChapterOut"][];
+            /** Warnings */
+            warnings: components["schemas"]["ExtractionWarning"][];
+        };
+        /** BookListResponse */
+        BookListResponse: {
+            /** Books */
+            books: components["schemas"]["BookSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * BookStatus
+         * @description Lifecycle of an imported textbook.
+         *
+         *     A book document that fails validation is rejected before any row is written,
+         *     so there is no ``FAILED`` state: a book in the database is always one whose
+         *     structure validated. ``PARTIAL`` is a success-with-caveats state, used when
+         *     the document itself declares defects or low-confidence units, so a professor
+         *     is never told a caveated import was clean.
+         * @enum {string}
+         */
+        BookStatus: "imported" | "partial";
+        /**
+         * BookSummary
+         * @description One book, without its structure.
+         */
+        BookSummary: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Author */
+            author: string | null;
+            status: components["schemas"]["BookStatus"];
+            source_format: components["schemas"]["SourceFormat"];
+            /** Original Filename */
+            original_filename: string;
+            /** Source Filename */
+            source_filename: string | null;
+            /** Producer */
+            producer: string | null;
+            /** Page Count */
+            page_count: number | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** Notes */
+            notes: string | null;
+            /** Warning Count */
+            warning_count: number;
+            /** Defect Count */
+            defect_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Imported At */
+            imported_at: string | null;
+        };
+        /**
+         * CalibrationLabel
+         * @description The shared vocabulary the judge gate and the professor verdict project onto.
+         *
+         *     Lives here rather than in :mod:`app.calibration` because a review outcome is
+         *     now *stored* at review time (ADR-037), and persistence may not import a
+         *     subsystem.
+         * @enum {string}
+         */
+        CalibrationLabel: "accept" | "needs_review";
+        /**
+         * CalibrationPairOut
+         * @description One counted question: what the judge said, what the professor said.
+         *
+         *     The evidence behind the rates, kept out of ``CalibrationResultsResponse`` so
+         *     that response stays the fixed five-figure summary. Questions excluded from
+         *     the measurement do not appear here at all.
+         */
+        CalibrationPairOut: {
+            /** Question Id */
+            question_id: number;
+            judge: components["schemas"]["CalibrationLabel"];
+            professor: components["schemas"]["CalibrationLabel"];
+            /** Agrees */
+            agrees: boolean;
+            cell: components["schemas"]["QuadrantCell"];
+            question_type: components["schemas"]["QuestionType"] | null;
+            /** Rubric Version */
+            rubric_version: string | null;
+            /** Held Out */
+            held_out: boolean;
+            /** Missed Metrics */
+            missed_metrics: components["schemas"]["JudgeMetricId"][];
+            /** False Alarm Metrics */
+            false_alarm_metrics: components["schemas"]["JudgeMetricId"][];
+        };
+        /** CalibrationPairsResponse */
+        CalibrationPairsResponse: {
+            /** Pairs */
+            pairs: components["schemas"]["CalibrationPairOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * CalibrationQuadrantResponse
+         * @description The four-cell breakdown, whole-corpus and per question type.
+         */
+        CalibrationQuadrantResponse: {
+            overall: components["schemas"]["CalibrationResultsResponse"];
+            /** Types */
+            types: components["schemas"]["TypeCalibrationOut"][];
+            /** Unattributable Metrics */
+            unattributable_metrics: components["schemas"]["JudgeMetricId"][];
+            /** Held Out Divisor */
+            held_out_divisor: number;
+        };
+        /**
+         * CalibrationResultsResponse
+         * @description How often the advisory judge agreed with the professor (ADR-029).
+         *
+         *     Every rate is ``null`` when its denominator is zero, so a client can tell
+         *     "no data yet" from "agreed with nothing". ``n`` counts questions, not
+         *     reviews, and ``judge_accept_count`` is published so a rate resting on two
+         *     questions is not read as a property of the judge.
+         */
+        CalibrationResultsResponse: {
+            /** N */
+            n: number;
+            /** Judge Accept Count */
+            judge_accept_count: number;
+            /** Agreement */
+            agreement: number | null;
+            /** Auto Accept Precision */
+            auto_accept_precision: number | null;
+            /** Unsafe Auto Accept Rate */
+            unsafe_auto_accept_rate: number | null;
+            quadrant: components["schemas"]["QuadrantCounts"];
+            /** Rubric Versions */
+            rubric_versions: string[];
+            /** Metrics */
+            metrics: components["schemas"]["MetricAgreement"][];
+            /** Subtopic Confusions */
+            subtopic_confusions: components["schemas"]["SubtopicConfusion"][];
+            /** Difficulty Confusions */
+            difficulty_confusions: components["schemas"]["DifficultyConfusion"][];
+        };
+        /**
+         * ChapterOut
+         * @description One chapter and the sections beneath it.
+         */
+        ChapterOut: {
+            /** Id */
+            id: number;
+            /** Book Id */
+            book_id: number;
+            /** Number */
+            number: string | null;
+            /** Title */
+            title: string | null;
+            /** Position */
+            position: number;
+            /** Start Page */
+            start_page: number | null;
+            /** End Page */
+            end_page: number | null;
+            /** Location Label */
+            location_label: string | null;
+            /** Is Unlabelled */
+            is_unlabelled: boolean;
+            structure_source: components["schemas"]["StructureSource"];
+            structure_confidence: components["schemas"]["StructureConfidence"];
+            /** Sections */
+            sections: components["schemas"]["SectionSummary"][];
+        };
+        /**
+         * ClaimViolation
+         * @description Why a generator's taxonomy claim was refused (ADR-032).
+         *
+         *     Named rather than free text because the retry prompt, the deterministic
+         *     check and any later "how does this generator fail?" count all read the same
+         *     value. A claim can break more than one rule at once, so these accumulate.
+         * @enum {string}
+         */
+        ClaimViolation: "unknown_topic" | "unknown_subtopics" | "no_subtopic" | "too_many_subtopics" | "foreign_subtopics";
+        /**
+         * ConceptConfidence
+         * @description How sure the analysis is about a proposed concept or grouping.
+         *
+         *     A coarse three-value band rather than a number: a model asked for "0.83"
+         *     produces a figure with no calibration behind it, whereas high / medium / low
+         *     is a judgement it can actually make and a professor can actually act on.
+         *     Deliberately distinct from :class:`StructureConfidence`, which is about
+         *     *boundaries declared by a book document*, not about instructional analysis.
+         * @enum {string}
+         */
+        ConceptConfidence: "high" | "medium" | "low";
+        /**
+         * ConfigResponse
+         * @description Everything a client needs to render forms without hard-coding enums.
+         */
+        ConfigResponse: {
+            /** App Name */
+            app_name: string;
+            /** Version */
+            version: string;
+            /** Environment */
+            environment: string;
+            /** Llm Configured */
+            llm_configured: boolean;
+            /** Llm Status */
+            llm_status: string;
+            /** Llm Model */
+            llm_model: string;
+            /** Embedding Model */
+            embedding_model: string;
+            /** Book Schema Version */
+            book_schema_version: string;
+            /** Taxonomy Schema Version */
+            taxonomy_schema_version: string;
+            /** Supported Book Extensions */
+            supported_book_extensions: string[];
+            /** Max Book Upload Mb */
+            max_book_upload_mb: number;
+            /** Difficulties */
+            difficulties: components["schemas"]["EnumOption"][];
+            /** Question Types */
+            question_types: components["schemas"]["EnumOption"][];
+            /** Question Statuses */
+            question_statuses: components["schemas"]["EnumOption"][];
+            /** Review Decisions */
+            review_decisions: components["schemas"]["EnumOption"][];
+            /** Rejection Reasons */
+            rejection_reasons: components["schemas"]["EnumOption"][];
+        };
+        /**
+         * CountsResponse
+         * @description Dashboard counts, one per section.
+         */
+        CountsResponse: {
+            /** Books */
+            books: number;
+            /** Curriculum Versions */
+            curriculum_versions: number;
+            /** Questions */
+            questions: number;
+            /** Reviews */
+            reviews: number;
+            /** Learned Instructions */
+            learned_instructions: number;
+            /** Students */
+            students: number;
+        };
+        /**
+         * CoverageCell
+         * @description One (subtopic, difficulty) pair and how many questions cover it.
+         */
+        CoverageCell: {
+            difficulty: components["schemas"]["Difficulty"];
+            /** Count */
+            count: number;
+            state: components["schemas"]["CoverageState"];
+            /**
+             * Needed
+             * @default 0
+             */
+            needed: number;
+        };
+        /**
+         * CoverageReportResponse
+         * @description The subtopic x difficulty grid, and what it means (ADR-036).
+         *
+         *     ``empty_cells`` and ``thin_cells`` stay separate: an empty cell is a request
+         *     the adaptive engine cannot satisfy, a thin one is satisfied repetitively.
+         *     ``is_servable`` is the blocking condition; ``is_ready`` is the comfortable
+         *     one.
+         */
+        CoverageReportResponse: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number | null;
+            /** Curriculum Label */
+            curriculum_label: string | null;
+            /** Set Version Id */
+            set_version_id: number | null;
+            /** Minimum Per Cell */
+            minimum_per_cell: number;
+            /** Question Count */
+            question_count: number;
+            /** Total Cells */
+            total_cells: number;
+            /** Empty Cells */
+            empty_cells: number;
+            /** Thin Cells */
+            thin_cells: number;
+            /** Ready Cells */
+            ready_cells: number;
+            /** Gap Count */
+            gap_count: number;
+            /** Questions Needed */
+            questions_needed: number;
+            /** Is Servable */
+            is_servable: boolean;
+            /** Is Ready */
+            is_ready: boolean;
+            /** Topics */
+            topics: components["schemas"]["TopicCoverage"][];
+            /** Subtopics */
+            subtopics: components["schemas"]["SubtopicCoverage"][];
+        };
+        /**
+         * CoverageState
+         * @description What one cell of the grid means for a training run.
+         * @enum {string}
+         */
+        CoverageState: "empty" | "thin" | "ready";
+        /**
+         * CoverageTargetRef
+         * @description One cell a professor asked to have filled.
+         */
+        CoverageTargetRef: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            difficulty: components["schemas"]["Difficulty"];
+        };
+        /**
+         * CreateQuestionSetRequest
+         * @description Freeze the currently approved questions under a name.
+         */
+        CreateQuestionSetRequest: {
+            /** Label */
+            label: string;
+            /** Notes */
+            notes?: string | null;
+        };
+        /** CreateStudentRequest */
+        CreateStudentRequest: {
+            /** Display Name */
+            display_name: string;
+        };
+        /**
+         * CurriculumItemStatus
+         * @description A professor's verdict on one proposed topic or subtopic.
+         *
+         *     Separate from :class:`CurriculumStatus`, which is the whole version's state:
+         *     a professor works through a proposal item by item, so each item carries its
+         *     own review status. Everything the proposer writes starts at ``PROPOSED``;
+         *     nothing is ever persisted as though it had already been reviewed.
+         * @enum {string}
+         */
+        CurriculumItemStatus: "proposed" | "accepted" | "edited" | "rejected";
+        /** CurriculumListResponse */
+        CurriculumListResponse: {
+            /** Versions */
+            versions: components["schemas"]["CurriculumVersionSummary"][];
+            /** Approved Version Id */
+            approved_version_id: number | null;
+            /** Latest Version Id */
+            latest_version_id: number | null;
+            /** Total */
+            total: number;
+        };
+        /**
+         * CurriculumStatus
+         * @description Lifecycle of a proposed Topic -> Subtopic curriculum.
+         *
+         *     Only an ``APPROVED`` curriculum version may ground question generation.
+         * @enum {string}
+         */
+        CurriculumStatus: "proposed" | "under_review" | "approved" | "superseded";
+        /**
+         * CurriculumVersionDetail
+         * @description One curriculum version with its Topic -> Subtopic hierarchy.
+         */
+        CurriculumVersionDetail: {
+            version: components["schemas"]["CurriculumVersionSummary"];
+            /** Topic Count */
+            topic_count: number;
+            /** Subtopic Count */
+            subtopic_count: number;
+            /** Topics */
+            topics: components["schemas"]["TopicOut"][];
+            /** Books */
+            books: components["schemas"]["BookSummary"][];
+            extraction_metadata: components["schemas"]["DisplayExtractionMetadata"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["DisplayProposalWarning"][];
+        };
+        /**
+         * CurriculumVersionSummary
+         * @description One curriculum version, without its tree.
+         */
+        CurriculumVersionSummary: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            status: components["schemas"]["CurriculumStatus"];
+            /** Generated By */
+            generated_by: string | null;
+            /** Source Book Ids */
+            source_book_ids: number[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Approved At */
+            approved_at: string | null;
+        };
+        /**
+         * Difficulty
+         * @description Question difficulty. Selected from student topic mastery.
+         * @enum {string}
+         */
+        Difficulty: "easy" | "medium" | "hard";
+        /**
+         * DifficultyConfusion
+         * @description One pair of disagreeing difficulties, and how often it occurred.
+         */
+        DifficultyConfusion: {
+            requested: components["schemas"]["Difficulty"];
+            judged: components["schemas"]["Difficulty"];
+            /** Count */
+            count: number;
+        };
+        /**
+         * DisplayExtractionMetadata
+         * @description Legacy LLM proposal metadata used only to render existing rows.
+         */
+        DisplayExtractionMetadata: {
+            /** Generated By */
+            generated_by: string;
+            /** Stage A Version */
+            stage_a_version: string;
+            /** Stage B Version */
+            stage_b_version: string;
+            /**
+             * Books Analysed
+             * @default 0
+             */
+            books_analysed: number;
+            /**
+             * Sections Analysed
+             * @default 0
+             */
+            sections_analysed: number;
+            /**
+             * Sections Skipped
+             * @default 0
+             */
+            sections_skipped: number;
+            /**
+             * Candidates Extracted
+             * @default 0
+             */
+            candidates_extracted: number;
+            /**
+             * Groups Returned
+             * @default 0
+             */
+            groups_returned: number;
+        };
+        /**
+         * DisplayProposalWarning
+         * @description One warning retained on a legacy LLM-generated curriculum version.
+         */
+        DisplayProposalWarning: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Location */
+            location?: string | null;
+        };
+        /**
+         * EnumOption
+         * @description One selectable enum value plus the label a UI should show for it.
+         */
+        EnumOption: {
+            /** Value */
+            value: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * EvaluationHistoryEntry
+         * @description One retained evaluation of a question (ADR-030).
+         *
+         *     ``evaluation`` is the stored blob rather than a parsed
+         *     :class:`PedagogicalEvaluation`, because history includes rows written under
+         *     an older rubric that may no longer validate. Dropping them would be losing
+         *     the record this table exists to keep, so the summary columns beside it are
+         *     what a client should read first.
+         */
+        EvaluationHistoryEntry: {
+            /** Id */
+            id: number;
+            /** Question Id */
+            question_id: number;
+            /** Run Id */
+            run_id: string;
+            trigger: components["schemas"]["EvaluationTrigger"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Judge Model */
+            judge_model: string | null;
+            /** Rubric Version */
+            rubric_version: string | null;
+            /** Eval Status */
+            eval_status: string | null;
+            /** Gate */
+            gate: string | null;
+            /** Passed Metrics */
+            passed_metrics: number | null;
+            /** Is Current */
+            is_current: boolean;
+            /** Evaluation */
+            evaluation: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * EvaluationHistoryResponse
+         * @description A question's judge history, newest first.
+         */
+        EvaluationHistoryResponse: {
+            /** Question Id */
+            question_id: number;
+            /** Evaluations */
+            evaluations: components["schemas"]["EvaluationHistoryEntry"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * EvaluationTrigger
+         * @description What caused a pedagogical evaluation to be recorded.
+         *
+         *     Every stored evaluation names its cause, so a bulk re-run's output stays
+         *     distinguishable from the evaluation a question received when it was first
+         *     generated (ADR-030).
+         * @enum {string}
+         */
+        EvaluationTrigger: "generation" | "batch_rerun";
+        /**
+         * ExtractionWarning
+         * @description One thing that went wrong, or could not be determined, during extraction.
+         *
+         *     Warnings are surfaced to the professor rather than logged and forgotten: an
+         *     extraction that quietly dropped half a book is worse than one that says so.
+         */
+        ExtractionWarning: {
+            code: components["schemas"]["ExtractionWarningCode"];
+            /** Message */
+            message: string;
+            /** Location */
+            location?: string | null;
+            /** @default defect */
+            severity: components["schemas"]["WarningSeverity"];
+        };
+        /**
+         * ExtractionWarningCode
+         * @description Machine-readable caveats a book document may declare about itself.
+         *
+         *     A closed vocabulary so the UI can group and explain them; ``OTHER`` is the
+         *     escape hatch for a producer-specific caveat, whose detail lives in the
+         *     warning's message.
+         * @enum {string}
+         */
+        ExtractionWarningCode: "no_page_numbers" | "producer_inferred_structure" | "missing_heading" | "source_text_unreadable" | "section_text_truncated" | "metadata_unavailable" | "other";
+        /**
+         * FillGapsRequest
+         * @description The gaps a professor selected on the coverage page.
+         *
+         *     Deliberately a list of *targets*, not a question count. The generator picks
+         *     its own topic and subtopics from the chunk it is given (ADR-031), so asking
+         *     for "seven questions" would promise an aim the generator does not accept.
+         */
+        FillGapsRequest: {
+            /** Targets */
+            targets: components["schemas"]["CoverageTargetRef"][];
+        };
+        /**
+         * GenerateQuestionsRequest
+         * @description A generation request.
+         *
+         *     Exactly one source selection is required: either ``section_ids`` or
+         *     ``all_sections_of_book``. One question is generated per resolved section.
+         *
+         *     No topic or subtopic: the generator reads the section and classifies its own
+         *     question against the approved taxonomy (ADR-031).
+         */
+        GenerateQuestionsRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id?: number | null;
+            question_type: components["schemas"]["QuestionType"];
+            difficulty: components["schemas"]["Difficulty"];
+            /** Book Id */
+            book_id?: number | null;
+            /** Section Ids */
+            section_ids?: number[] | null;
+            /**
+             * All Sections Of Book
+             * @default false
+             */
+            all_sections_of_book: boolean;
+            /** Seed */
+            seed?: string | null;
+        };
+        /** GenerateQuestionsResponse */
+        GenerateQuestionsResponse: {
+            /** Created */
+            created: number;
+            /** Question Ids */
+            question_ids: number[];
+            /** Questions */
+            questions: components["schemas"]["QuestionSummary"][];
+        };
+        /**
+         * GenerationAttempt
+         * @description One model call that tried to produce this question (ADR-032).
+         *
+         *     A question that took three attempts is one question with three attempts, not
+         *     three questions: separate rows would fill the bank with drafts that every
+         *     later query would have to learn to exclude, and the adaptive engine has no
+         *     use for a draft that was never valid.
+         *
+         *     The claim is recorded as the model made it, duplicates and non-existent ids
+         *     included, because it is the evidence for how this generator fails. What
+         *     actually reached the columns is narrower -- see
+         *     :class:`~app.generation.spec.TaxonomyClaimOutcome`.
+         */
+        GenerationAttempt: {
+            /** Number */
+            number: number;
+            /** Claimed Topic Id */
+            claimed_topic_id?: number | null;
+            /** Claimed Subtopic Ids */
+            claimed_subtopic_ids?: number[];
+            /** Violations */
+            violations?: components["schemas"]["ClaimViolation"][];
+            /** Detail */
+            detail?: string | null;
+            /** Failed Checks */
+            failed_checks?: components["schemas"]["QuestionCheck"][];
+            /**
+             * Malformed
+             * @default false
+             */
+            malformed: boolean;
+            /** Accepted */
+            accepted: boolean;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * GenerationPlanChapter
+         * @description One chapter, and the candidate sections beneath it.
+         */
+        GenerationPlanChapter: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Location Label */
+            location_label: string | null;
+            /** Sections */
+            sections: components["schemas"]["GenerationPlanSection"][];
+        };
+        /**
+         * GenerationPlanResponse
+         * @description The chunk plan: every candidate section, and the cost of the selection.
+         */
+        GenerationPlanResponse: {
+            book: components["schemas"]["BookSummary"];
+            /** Chapters */
+            chapters: components["schemas"]["GenerationPlanChapter"][];
+            totals: components["schemas"]["GenerationPlanTotals"];
+            /** Blockers */
+            blockers: string[];
+        };
+        /**
+         * GenerationPlanSection
+         * @description One candidate source section, and what generating from it would mean.
+         */
+        GenerationPlanSection: {
+            section: components["schemas"]["SectionSummary"];
+            /** Existing Question Count */
+            existing_question_count: number;
+            /** Selected */
+            selected: boolean;
+            /** Selectable */
+            selectable: boolean;
+        };
+        /**
+         * GenerationPlanTotals
+         * @description What the selected run costs, before any model call is made.
+         */
+        GenerationPlanTotals: {
+            /** Sections Available */
+            sections_available: number;
+            /** Sections Selected */
+            sections_selected: number;
+            /** Questions To Create */
+            questions_to_create: number;
+            /** Generation Calls */
+            generation_calls: number;
+            /** Judge Calls */
+            judge_calls: number;
+            /** Source Chars */
+            source_chars: number;
+        };
+        /**
+         * GeneratorKind
+         * @description Which generator produced a question.
+         *
+         *     Base and personalized generators must stay distinguishable so their output
+         *     quality can be compared over time.
+         * @enum {string}
+         */
+        GeneratorKind: "base" | "personalized";
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthResponse
+         * @description Liveness, including a real database round-trip.
+         */
+        HealthResponse: {
+            /** Status */
+            status: string;
+            /** Version */
+            version: string;
+            /** Environment */
+            environment: string;
+            /** Database Ok */
+            database_ok: boolean;
+            /** Llm Configured */
+            llm_configured: boolean;
+            /** Llm Status */
+            llm_status: string;
+        };
+        /**
+         * InstructionStamp
+         * @description Which type instruction produced a question (ADR-040).
+         *
+         *     ``generator_label`` names the code path and is always ``base@1``; this names
+         *     the text. Two questions with the same label and different fingerprints were
+         *     written from different instructions.
+         */
+        InstructionStamp: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "learned" | "shipped";
+            /** Fingerprint */
+            fingerprint: string;
+            /** Rule Count */
+            rule_count: number;
+            /** Review Count */
+            review_count: number;
+        };
+        /**
+         * JudgeBatchRunOut
+         * @description One bulk re-run, as a professor needs to see it.
+         *
+         *     ``provider_batch_ids`` is a list because a bank larger than the per-job cap
+         *     is split into several provider jobs that share this one run id.
+         */
+        JudgeBatchRunOut: {
+            /** Run Id */
+            run_id: string;
+            status: components["schemas"]["JudgeBatchStatus"];
+            /** Model */
+            model: string;
+            /** Rubric Version */
+            rubric_version: string;
+            /** Provider Batch Ids */
+            provider_batch_ids: string[];
+            /** Question Count */
+            question_count: number;
+            /** Completed Count */
+            completed_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Error Detail */
+            error_detail: string | null;
+        };
+        /**
+         * JudgeBatchStatus
+         * @description Lifecycle of one bulk judge re-run.
+         *
+         *     The provider reports a finer sequence (``validating``, ``finalizing``);
+         *     those map onto ``IN_PROGRESS`` because they mean the same thing to a
+         *     professor waiting for results. ``CANCELLED`` at the provider is recorded as
+         *     ``FAILED`` with the cancellation named in ``error_detail``.
+         * @enum {string}
+         */
+        JudgeBatchStatus: "submitted" | "in_progress" | "completed" | "failed" | "expired";
+        /**
+         * JudgeGate
+         * @description The judge's overall suggestion, derived from how many metrics passed.
+         *
+         *     Advisory only. The professor's own :class:`ReviewDecision` is the authority;
+         *     this is what the professor sees beside the question while deciding.
+         * @enum {string}
+         */
+        JudgeGate: "approved" | "needs_review" | "reject";
+        /**
+         * JudgeMetricId
+         * @description The four things the advisory judge is asked, one model call each.
+         *
+         *     Separate calls rather than one rubric: a single reviewer asked for four
+         *     unrelated judgements at once lets a strong opinion on one bleed into the
+         *     others, and a malformed answer costs all four.
+         * @enum {string}
+         */
+        JudgeMetricId: "issues" | "subtopic" | "difficulty" | "generatability";
+        /** JudgePromptListResponse */
+        JudgePromptListResponse: {
+            /** Prompts */
+            prompts: components["schemas"]["JudgePromptOut"][];
+            /** Rubric Version */
+            rubric_version: string;
+            /** Shipped Rubric Version */
+            shipped_rubric_version: string;
+        };
+        /**
+         * JudgePromptOut
+         * @description One metric judge's system prompt, shipped or professor-edited (ADR-038).
+         */
+        JudgePromptOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** Label */
+            label: string;
+            /** System Prompt */
+            system_prompt: string;
+            /** Shipped Prompt */
+            shipped_prompt: string;
+            /** Edited */
+            edited: boolean;
+            /** Learned */
+            learned: boolean;
+            /** Rules */
+            rules: string[];
+            /** Evidence Count */
+            evidence_count: number;
+            /** Available Disagreements */
+            available_disagreements: number;
+            /** Revision */
+            revision: number;
+            /** Note */
+            note: string | null;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * JudgePromptRefreshResponse
+         * @description What one learned judge repair did (ADR-039).
+         */
+        JudgePromptRefreshResponse: {
+            prompt: components["schemas"]["JudgePromptOut"];
+            /** Rubric Version */
+            rubric_version: string;
+            /** Rubric Version Changed */
+            rubric_version_changed: boolean;
+            /** Learned */
+            learned: boolean;
+            /** Rule Count */
+            rule_count: number;
+            /** Evidence Count */
+            evidence_count: number;
+        };
+        /**
+         * JudgePromptRequest
+         * @description A professor's replacement text for one judge.
+         */
+        JudgePromptRequest: {
+            /** System Prompt */
+            system_prompt: string;
+            /** Note */
+            note?: string | null;
+        };
+        /** JudgePromptSaveResponse */
+        JudgePromptSaveResponse: {
+            prompt: components["schemas"]["JudgePromptOut"];
+            /** Rubric Version */
+            rubric_version: string;
+            /** Rubric Version Changed */
+            rubric_version_changed: boolean;
+        };
+        /**
+         * MasteryBand
+         * @description Coarse band derived from a BKT mastery probability.
+         * @enum {string}
+         */
+        MasteryBand: "low" | "medium" | "high";
+        /**
+         * MetricAgreement
+         * @description How often one judge's answer matched the professor's on the same point.
+         */
+        MetricAgreement: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** N */
+            n: number;
+            /** Agreement */
+            agreement: number | null;
+            /** Missed */
+            missed: number;
+            /** False Alarms */
+            false_alarms: number;
+        };
+        /**
+         * MetricFaultsOut
+         * @description How often one judge was at fault within one panel (ADR-041).
+         */
+        MetricFaultsOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** Label */
+            label: string;
+            /** Missed */
+            missed: number;
+            /** False Alarms */
+            false_alarms: number;
+            /** Faults */
+            faults: number;
+            /** Fault Rate */
+            fault_rate: number | null;
+        };
+        /**
+         * MetricResult
+         * @description One judge's answer, reduced to a pass flag plus what it actually said.
+         *
+         *     ``passed`` is derived, never reported by the judge: three of the four judges
+         *     return a value rather than a verdict, and whether that value counts as a pass
+         *     is decided here by comparing it with what the generator claimed. A judge
+         *     asked to grade itself would be answering a different question.
+         */
+        MetricResult: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** @default completed */
+            status: components["schemas"]["MetricStatus"];
+            /** Passed */
+            passed?: boolean | null;
+            /** Rationale */
+            rationale?: string | null;
+            /** Error Detail */
+            error_detail?: string | null;
+            /** Issue Codes */
+            issue_codes?: components["schemas"]["RejectionReason"][];
+            /** Custom Issue */
+            custom_issue?: string | null;
+            /** Proposed Topic Id */
+            proposed_topic_id?: number | null;
+            /** Proposed Subtopic Ids */
+            proposed_subtopic_ids?: number[];
+            proposed_difficulty?: components["schemas"]["Difficulty"] | null;
+        };
+        /**
+         * MetricStatus
+         * @description Whether one judge answered.
+         * @enum {string}
+         */
+        MetricStatus: "completed" | "error";
+        /**
+         * ParsonsBlockOut
+         * @description One draggable block. Its stored ``indent`` is deliberately not published.
+         */
+        ParsonsBlockOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * PedagogicalEvalStatus
+         * @description Whether the judges ran at all, and how completely.
+         * @enum {string}
+         */
+        PedagogicalEvalStatus: "completed" | "partial" | "skipped" | "error";
+        /**
+         * PedagogicalEvaluation
+         * @description Every judge answer for one question, plus the gate derived from them.
+         */
+        PedagogicalEvaluation: {
+            /** Question Id */
+            question_id?: number | null;
+            status: components["schemas"]["PedagogicalEvalStatus"];
+            /** Skip Reason */
+            skip_reason?: string | null;
+            gate?: components["schemas"]["JudgeGate"] | null;
+            /** Metrics */
+            metrics?: components["schemas"]["MetricResult"][];
+            /** Judge Model */
+            judge_model?: string | null;
+            /**
+             * Rubric Version
+             * @default question-metrics@1
+             */
+            rubric_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at?: string;
+        };
+        /**
+         * PersonalizationEvidence
+         * @description Which preferences and reviews shaped a personalized question (ADR-025).
+         */
+        PersonalizationEvidence: {
+            /** Preference Ids */
+            preference_ids: number[];
+            /** Review Ids */
+            review_ids: number[];
+            /** Profile Version */
+            profile_version?: string | null;
+        };
+        /**
+         * PollBatchRunResponse
+         * @description What one poll collected.
+         *
+         *     ``already_recorded`` is published so that re-polling a finished run reads as
+         *     "nothing new" rather than as a run that produced nothing.
+         */
+        PollBatchRunResponse: {
+            run: components["schemas"]["JudgeBatchRunOut"];
+            status: components["schemas"]["JudgeBatchStatus"];
+            /** Ingested */
+            ingested: number;
+            /** Failed */
+            failed: number;
+            /** Already Recorded */
+            already_recorded: number;
+        };
+        /**
+         * QuadrantCell
+         * @description Which of the four judge/professor outcomes a reviewed question fell into.
+         *
+         *     The two agreeing cells are not interchangeable and neither are the two
+         *     disagreeing ones (ADR-034). Only :attr:`MISSED` makes auto-acceptance unsafe:
+         *     it is the sole cell where the judge vouched for a question the professor
+         *     would not have kept.
+         * @enum {string}
+         */
+        QuadrantCell: "confirmed_good" | "missed" | "false_alarm" | "confirmed_bad";
+        /**
+         * QuadrantCounts
+         * @description How many pairs fell into each of the four outcomes (ADR-034).
+         *
+         *     ``auto_accept_precision`` is ``confirmed_good / (confirmed_good + missed)``:
+         *     the two cells where the judge did *not* accept are absent from it, because
+         *     auto-acceptance would never have released those questions. Publishing all
+         *     four makes that visible, so a professor can see which cell to work on rather
+         *     than inferring it from a rate.
+         */
+        QuadrantCounts: {
+            /**
+             * Confirmed Good
+             * @default 0
+             */
+            confirmed_good: number;
+            /**
+             * Missed
+             * @default 0
+             */
+            missed: number;
+            /**
+             * False Alarm
+             * @default 0
+             */
+            false_alarm: number;
+            /**
+             * Confirmed Bad
+             * @default 0
+             */
+            confirmed_bad: number;
+        };
+        /**
+         * QuestionCheck
+         * @description One deterministic or LLM check performed on a question.
+         */
+        QuestionCheck: {
+            /** Name */
+            name: string;
+            /** Passed */
+            passed: boolean;
+            /**
+             * Deterministic
+             * @default true
+             */
+            deterministic: boolean;
+            /**
+             * Severity
+             * @default error
+             * @constant
+             */
+            severity: "error";
+            /** Detail */
+            detail?: string | null;
+            /** Evidence */
+            evidence?: string | null;
+        };
+        /**
+         * QuestionDetail
+         * @description One question with everything the review screen needs.
+         */
+        QuestionDetail: {
+            question: components["schemas"]["QuestionSummary"];
+            /** Reference Solution */
+            reference_solution: string | null;
+            /** Tests */
+            tests: string | null;
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            } | null;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            } | null;
+            /** Sources */
+            sources: {
+                [key: string]: unknown;
+            }[];
+            taxonomy: components["schemas"]["QuestionTaxonomy"];
+            /** Validation Passed */
+            validation_passed: boolean | null;
+            /** Validation Checks */
+            validation_checks: components["schemas"]["QuestionCheck"][];
+            /** Generation Attempts */
+            generation_attempts: components["schemas"]["GenerationAttempt"][];
+            pedagogical_eval: components["schemas"]["PedagogicalEvaluation"] | null;
+            /** Pedagogical Error Message */
+            pedagogical_error_message: string | null;
+            personalization: components["schemas"]["PersonalizationEvidence"] | null;
+            /** Original Prompt */
+            original_prompt: string | null;
+            /** Original Reference Solution */
+            original_reference_solution: string | null;
+            /** Original Tests */
+            original_tests: string | null;
+            /** Reviews */
+            reviews: components["schemas"]["ReviewOut"][];
+        };
+        /**
+         * QuestionKind
+         * @description How a question is scored.
+         *
+         *     ``TESTABLE_PROGRAM``: score = passed_tests / total_tests * 100.
+         *     ``DISCRETE``: naturally discrete, scored 0 or 100.
+         * @enum {string}
+         */
+        QuestionKind: "testable_program" | "discrete";
+        /** QuestionListResponse */
+        QuestionListResponse: {
+            /** Questions */
+            questions: components["schemas"]["QuestionSummary"][];
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+            status?: components["schemas"]["QuestionStatus"] | null;
+        };
+        /** QuestionSetListResponse */
+        QuestionSetListResponse: {
+            /** Sets */
+            sets: components["schemas"]["QuestionSetOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * QuestionSetOut
+         * @description One frozen set of approved questions.
+         *
+         *     ``question_count`` is what was frozen; ``member_count`` is what is still
+         *     there. They differ only if a member question was deleted, and publishing
+         *     both is what makes that visible rather than silently rewriting the set's
+         *     size.
+         */
+        QuestionSetOut: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Notes */
+            notes: string | null;
+            /** Curriculum Version Id */
+            curriculum_version_id: number | null;
+            /** Question Count */
+            question_count: number;
+            /** Member Count */
+            member_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Question Ids */
+            question_ids: number[];
+        };
+        /**
+         * QuestionStatus
+         * @description Lifecycle of a generated question through validation and review.
+         * @enum {string}
+         */
+        QuestionStatus: "generated" | "validation_passed" | "validation_failed" | "approved" | "rejected";
+        /**
+         * QuestionSummary
+         * @description One generated question, without its solution, tests or reports.
+         */
+        QuestionSummary: {
+            /** Id */
+            id: number;
+            /** Prompt */
+            prompt: string;
+            kind: components["schemas"]["QuestionKind"];
+            question_type: components["schemas"]["QuestionType"] | null;
+            difficulty: components["schemas"]["Difficulty"];
+            status: components["schemas"]["QuestionStatus"];
+            /** Curriculum Version Id */
+            curriculum_version_id: number | null;
+            /** Topic Id */
+            topic_id: number | null;
+            /** Subtopic Ids */
+            subtopic_ids: number[];
+            generator_kind: components["schemas"]["GeneratorKind"];
+            /** Generator Name */
+            generator_name: string;
+            /** Generator Version */
+            generator_version: string;
+            /** Generator Label */
+            generator_label: string;
+            instruction: components["schemas"]["InstructionStamp"] | null;
+            /** Validation Passed */
+            validation_passed: boolean | null;
+            /** Priority */
+            priority: number;
+            /** Times Used */
+            times_used: number;
+            /** Is Edited */
+            is_edited: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * QuestionTaxonomy
+         * @description Display names for the ids a question carries, resolved where possible.
+         */
+        QuestionTaxonomy: {
+            /** Curriculum */
+            curriculum: string;
+            /** Topic */
+            topic: string;
+            /** Subtopics */
+            subtopics: string[];
+        };
+        /**
+         * QuestionType
+         * @description Assessment format (independent of scoring mode).
+         * @enum {string}
+         */
+        QuestionType: "multiple_choice" | "true_false" | "output_prediction" | "code_completion" | "debugging" | "parsons" | "coding";
+        /** ReasonCount */
+        ReasonCount: {
+            code: components["schemas"]["RejectionReason"];
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * RejectionReason
+         * @description Structured professor rationale for reject or edit decisions.
+         * @enum {string}
+         */
+        RejectionReason: "technically_incorrect" | "incorrect_answer" | "incorrect_tests" | "not_grounded_in_source" | "wrong_topic_subtopic" | "too_easy" | "too_difficult" | "ambiguous" | "poor_wording" | "poor_distractors" | "poor_tests" | "not_pedagogically_useful" | "too_similar_repetitive" | "other";
+        /**
+         * ReviewDecision
+         * @description A professor's verdict on a generated question.
+         *
+         *     ``EDIT`` means approved-with-changes; the generated original is always
+         *     retained alongside the edit (see ``docs/DECISIONS.md``).
+         * @enum {string}
+         */
+        ReviewDecision: "approve" | "reject" | "edit";
+        /** ReviewListResponse */
+        ReviewListResponse: {
+            /** Reviews */
+            reviews: components["schemas"]["ReviewOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ReviewOut
+         * @description One immutable review record.
+         */
+        ReviewOut: {
+            /** Id */
+            id: number;
+            /** Question Id */
+            question_id: number;
+            decision: components["schemas"]["ReviewDecision"];
+            /** Reasons */
+            reasons: components["schemas"]["RejectionReason"][];
+            /** Reason Labels */
+            reason_labels: string[];
+            /** Comment */
+            comment: string | null;
+            /** Changed Fields */
+            changed_fields: string[];
+            /** Professor Id */
+            professor_id: number | null;
+            /** Reviewed Generator Name */
+            reviewed_generator_name: string | null;
+            /** Reviewed Generator Version */
+            reviewed_generator_version: string | null;
+            /** Generator Label */
+            generator_label: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            outcome?: components["schemas"]["ReviewOutcomeOut"] | null;
+        };
+        /**
+         * ReviewOutcomeOut
+         * @description What the system did with one review the moment it landed (ADR-037).
+         */
+        ReviewOutcomeOut: {
+            cell: components["schemas"]["QuadrantCell"];
+            judge: components["schemas"]["CalibrationLabel"];
+            professor: components["schemas"]["CalibrationLabel"];
+            /** Attributed Metrics */
+            attributed_metrics: components["schemas"]["JudgeMetricId"][];
+            /** Attributed Labels */
+            attributed_labels: string[];
+            /** Held Out */
+            held_out: boolean;
+            /** Action */
+            action: string;
+            /**
+             * Instruction Refreshed
+             * @default false
+             */
+            instruction_refreshed: boolean;
+            /** Refresh Error */
+            refresh_error?: string | null;
+            /** Refresh Rule Count */
+            refresh_rule_count?: number | null;
+            /** Judges Refreshed */
+            judges_refreshed?: components["schemas"]["JudgeMetricId"][];
+        };
+        /**
+         * ReviewQueueResponse
+         * @description The next question to review, with enough counts to show progress.
+         */
+        ReviewQueueResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "all" | "scoreable";
+            /** Total */
+            total: number;
+            /** Reviewed */
+            reviewed: number;
+            /** Remaining */
+            remaining: number;
+            /** Scoreable Remaining */
+            scoreable_remaining: number;
+            question: components["schemas"]["QuestionDetail"] | null;
+        };
+        /**
+         * ReviewRequest
+         * @description A professor verdict.
+         *
+         *     ``prompt`` / ``reference_solution`` / ``tests`` are only read for an ``edit``
+         *     decision; the generated original is never overwritten (ADR-002).
+         */
+        ReviewRequest: {
+            decision: components["schemas"]["ReviewDecision"];
+            /** Reasons */
+            reasons?: components["schemas"]["RejectionReason"][];
+            /** Comment */
+            comment?: string | null;
+            /** Prompt */
+            prompt?: string | null;
+            /** Reference Solution */
+            reference_solution?: string | null;
+            /** Tests */
+            tests?: string | null;
+            /** Professor Id */
+            professor_id?: number | null;
+        };
+        /** ReviewStatsResponse */
+        ReviewStatsResponse: {
+            /** Reviewed */
+            reviewed: number;
+            /** Approved */
+            approved: number;
+            /** Rejected */
+            rejected: number;
+            /** Edited */
+            edited: number;
+            /** Reason Distribution */
+            reason_distribution: components["schemas"]["ReasonCount"][];
+        };
+        /**
+         * SectionDetail
+         * @description One section's full text plus the citation that makes it traceable.
+         */
+        SectionDetail: {
+            section: components["schemas"]["SectionSummary"];
+            /** Text */
+            text: string;
+            /** Warnings */
+            warnings: components["schemas"]["ExtractionWarning"][];
+            source: components["schemas"]["SectionSource"];
+            /** Citation */
+            citation: string;
+        };
+        /** SectionListResponse */
+        SectionListResponse: {
+            /** Sections */
+            sections: components["schemas"]["SectionSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * SectionSource
+         * @description Everything needed to cite a section back to the book it came from.
+         *
+         *     This is the traceability contract that later question generation depends on:
+         *     given a section, a generated question can name the book, chapter, section and
+         *     pages it was grounded in.
+         */
+        SectionSource: {
+            /** Book Id */
+            book_id: number;
+            /** Book Title */
+            book_title: string;
+            /** Book Author */
+            book_author?: string | null;
+            /** Section Id */
+            section_id: number;
+            /** Chapter Id */
+            chapter_id?: number | null;
+            /** Chapter Number */
+            chapter_number?: string | null;
+            /** Chapter Title */
+            chapter_title?: string | null;
+            /** Section Number */
+            section_number?: string | null;
+            /** Section Title */
+            section_title?: string | null;
+            /** Start Page */
+            start_page?: number | null;
+            /** End Page */
+            end_page?: number | null;
+            structure_source: components["schemas"]["StructureSource"];
+            structure_confidence: components["schemas"]["StructureConfidence"];
+            /**
+             * Location Label
+             * @description Human-readable page location, or ``None`` if pages are unknown.
+             */
+            readonly location_label: string | null;
+        };
+        /**
+         * SectionSummary
+         * @description One section's identity and location, without its text.
+         */
+        SectionSummary: {
+            /** Id */
+            id: number;
+            /** Book Id */
+            book_id: number;
+            /** Chapter Id */
+            chapter_id: number | null;
+            /** Number */
+            number: string | null;
+            /** Title */
+            title: string | null;
+            /** Display Title */
+            display_title: string;
+            /** Position */
+            position: number;
+            /** Char Count */
+            char_count: number;
+            /** Start Page */
+            start_page: number | null;
+            /** End Page */
+            end_page: number | null;
+            /** Location Label */
+            location_label: string | null;
+            /** Is Unlabelled */
+            is_unlabelled: boolean;
+            /** Is Empty */
+            is_empty: boolean;
+            structure_source: components["schemas"]["StructureSource"];
+            structure_confidence: components["schemas"]["StructureConfidence"];
+        };
+        /**
+         * ServedQuestionOut
+         * @description One question as the student sees it.
+         *
+         *     Every presentable field is listed explicitly. The stored ``content`` is never
+         *     published as-is, because it holds the answer -- ``correct_option_index``,
+         *     ``correct_answer``, ``expected_output``, ``correct_order`` and
+         *     ``reference_solution`` all live there. A whitelist per type is the only shape
+         *     where adding a question format cannot leak its answer by default.
+         */
+        ServedQuestionOut: {
+            /** Training Session Id */
+            training_session_id: number;
+            /** Attempt Id */
+            attempt_id: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Resumed */
+            resumed: boolean;
+            /** Fallback Used */
+            fallback_used: boolean;
+            requested_difficulty: components["schemas"]["Difficulty"];
+            served_difficulty: components["schemas"]["Difficulty"];
+            /** Subtopic Id */
+            subtopic_id: number | null;
+            /** Subtopic Name */
+            subtopic_name: string | null;
+            /** Question Id */
+            question_id: number;
+            question_type: components["schemas"]["QuestionType"] | null;
+            /** Prompt */
+            prompt: string;
+            /** Options */
+            options?: string[] | null;
+            /** Code */
+            code?: string | null;
+            /** Blocks */
+            blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
+        };
+        /**
+         * SourceFormat
+         * @description Accepted upload formats.
+         *
+         *     Structured book JSON is the only input the application accepts. Producing that
+         *     JSON from a raw book is out of scope for this application entirely.
+         * @enum {string}
+         */
+        SourceFormat: "book_json";
+        /** StartTrainingSessionRequest */
+        StartTrainingSessionRequest: {
+            /** Student Id */
+            student_id: number;
+            /** Set Version Id */
+            set_version_id: number;
+        };
+        /**
+         * StructureConfidence
+         * @description How much to trust a boundary.
+         *
+         *     ``LOW`` means the producer guessed; such units must never be presented as
+         *     though the source document had declared them.
+         * @enum {string}
+         */
+        StructureConfidence: "high" | "medium" | "low";
+        /**
+         * StructureSource
+         * @description How a chapter or section boundary was determined.
+         *
+         *     Declared *by the book document*, never inferred by this application. It
+         *     records what the producer of the JSON actually relied on, so the professor
+         *     can tell a boundary the source document stated from one a producer guessed at.
+         * @enum {string}
+         */
+        StructureSource: "pdf_outline" | "markdown_heading" | "manual" | "structured_json" | "producer_inferred";
+        /** StudentListResponse */
+        StudentListResponse: {
+            /** Students */
+            students: components["schemas"]["StudentOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * StudentOut
+         * @description One learner. No credentials: there is no authentication (ADR-041).
+         */
+        StudentOut: {
+            /** Id */
+            id: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Answered Count
+             * @default 0
+             */
+            answered_count: number;
+        };
+        /**
+         * StudentProgressOut
+         * @description Everything measured about one learner.
+         *
+         *     ``topics`` and ``subtopics`` list only what has actually been scored. State
+         *     rows are created on first touch (ADR-041), so an untouched subtopic has no
+         *     row and appears here as nothing rather than as a fabricated starting value.
+         */
+        StudentProgressOut: {
+            student: components["schemas"]["StudentOut"];
+            /** Answered */
+            answered: number;
+            /** Average Score */
+            average_score: number | null;
+            /** Topics */
+            topics: components["schemas"]["TopicMasteryOut"][];
+            /** Subtopics */
+            subtopics: components["schemas"]["SubtopicWeaknessOut"][];
+            /** Recent Attempts */
+            recent_attempts: components["schemas"]["AttemptOut"][];
+            /** Sessions */
+            sessions: components["schemas"]["TrainingSessionOut"][];
+        };
+        /**
+         * SubmitBatchRunRequest
+         * @description Optional narrowing of a re-run to named questions.
+         *
+         *     Omitted means the whole eligible bank. Ineligible ids are dropped rather
+         *     than rejected: the eligibility rule is ADR-024's, not the caller's to waive.
+         */
+        SubmitBatchRunRequest: {
+            /** Question Ids */
+            question_ids?: number[] | null;
+        };
+        /**
+         * SubmitBatchRunResponse
+         * @description What a submission did, including the one-off backfill it may have run.
+         */
+        SubmitBatchRunResponse: {
+            run: components["schemas"]["JudgeBatchRunOut"];
+            /** Submitted */
+            submitted: number;
+            /** Skipped */
+            skipped: number;
+            /** Backfilled */
+            backfilled: number;
+        };
+        /**
+         * SubtopicConfusion
+         * @description One pair of disagreeing subtopic claims, and how often it occurred.
+         */
+        SubtopicConfusion: {
+            /** Claimed Subtopic Ids */
+            claimed_subtopic_ids: number[];
+            /** Judge Subtopic Ids */
+            judge_subtopic_ids: number[];
+            /** Count */
+            count: number;
+        };
+        /**
+         * SubtopicCoverage
+         * @description One subtopic's row of the grid, one cell per difficulty.
+         */
+        SubtopicCoverage: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Subtopic Name */
+            subtopic_name: string;
+            /** Topic Id */
+            topic_id: number;
+            /** Topic Name */
+            topic_name: string;
+            /** Cells */
+            cells?: components["schemas"]["CoverageCell"][];
+        };
+        /**
+         * SubtopicDetail
+         * @description One subtopic with its parent topic and any legacy evidence.
+         */
+        SubtopicDetail: {
+            subtopic: components["schemas"]["SubtopicSummary"];
+            topic: components["schemas"]["SubtopicParent"];
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Is Taxonomy Upload */
+            is_taxonomy_upload: boolean;
+            /** Candidate Labels */
+            candidate_labels: string[];
+            /** Grouping Reason */
+            grouping_reason: string | null;
+            confidence: components["schemas"]["ConceptConfidence"] | null;
+            /** Evidence */
+            evidence: components["schemas"]["SubtopicEvidenceOut"][];
+            /** Book Count */
+            book_count: number;
+        };
+        /**
+         * SubtopicEvidenceOut
+         * @description Legacy textbook evidence for a subtopic. Taxonomy uploads carry none.
+         */
+        SubtopicEvidenceOut: {
+            /** Id */
+            id: number;
+            /** Book Id */
+            book_id: number;
+            /** Section Id */
+            section_id: number;
+            /** Candidate Label */
+            candidate_label: string;
+            /** Definition */
+            definition: string | null;
+            /** Citation */
+            citation: string;
+            /** Quotes */
+            quotes: string[];
+        };
+        /**
+         * SubtopicParent
+         * @description The topic a subtopic hangs from, without recursing into its siblings.
+         */
+        SubtopicParent: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Stable Id */
+            stable_id: string | null;
+        };
+        /**
+         * SubtopicSummary
+         * @description One approved subtopic: the unit the adaptive engine tracks weakness for.
+         */
+        SubtopicSummary: {
+            /** Id */
+            id: number;
+            /** Topic Id */
+            topic_id: number;
+            /** Stable Id */
+            stable_id: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Position */
+            position: number;
+            review_status: components["schemas"]["CurriculumItemStatus"];
+        };
+        /**
+         * SubtopicWeaknessOut
+         * @description One subtopic's weakness -- its weight in the roulette.
+         */
+        SubtopicWeaknessOut: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Subtopic Name */
+            subtopic_name: string;
+            /** Topic Name */
+            topic_name: string;
+            /** Weakness */
+            weakness: number;
+            /** Observations */
+            observations: number;
+        };
+        /**
+         * TopicCoverage
+         * @description One topic's rows, and what a professor would have to do about it.
+         *
+         *     The grouping the coverage page is read through. A professor decides what to
+         *     write next a topic at a time -- a chunk teaches one topic, so a gap in
+         *     another topic is not work they can act on in the same breath.
+         */
+        TopicCoverage: {
+            /** Topic Id */
+            topic_id: number;
+            /** Topic Name */
+            topic_name: string;
+            /**
+             * Approved Questions
+             * @default 0
+             */
+            approved_questions: number;
+            /** Subtopics */
+            subtopics?: components["schemas"]["SubtopicCoverage"][];
+        };
+        /**
+         * TopicMasteryOut
+         * @description One topic's BKT state, and the difficulty it currently implies.
+         */
+        TopicMasteryOut: {
+            /** Topic Id */
+            topic_id: number;
+            /** Topic Name */
+            topic_name: string;
+            /** P Known */
+            p_known: number;
+            band: components["schemas"]["MasteryBand"];
+            next_difficulty: components["schemas"]["Difficulty"];
+            /** Observations */
+            observations: number;
+        };
+        /**
+         * TopicOut
+         * @description One topic: the unit BKT tracks mastery for.
+         */
+        TopicOut: {
+            /** Id */
+            id: number;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Stable Id */
+            stable_id: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Position */
+            position: number;
+            review_status: components["schemas"]["CurriculumItemStatus"];
+            /** Subtopics */
+            subtopics: components["schemas"]["SubtopicSummary"][];
+        };
+        /** TrainingSessionListResponse */
+        TrainingSessionListResponse: {
+            /** Sessions */
+            sessions: components["schemas"]["TrainingSessionOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * TrainingSessionOut
+         * @description One run against one frozen question set (ADR-036).
+         */
+        TrainingSessionOut: {
+            /** Id */
+            id: number;
+            /** Student Id */
+            student_id: number;
+            /** Student Name */
+            student_name: string | null;
+            /** Set Version Id */
+            set_version_id: number | null;
+            /** Set Label */
+            set_label: string | null;
+            /** Rng Seed */
+            rng_seed: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ended At */
+            ended_at: string | null;
+            /** Served Count */
+            served_count: number;
+            /** Answered Count */
+            answered_count: number;
+        };
+        /**
+         * TrendPointOut
+         * @description One judge panel's agreement record.
+         */
+        TrendPointOut: {
+            /** Rubric Version */
+            rubric_version: string | null;
+            /** N */
+            n: number;
+            /** First Seen */
+            first_seen: string | null;
+            /** Last Seen */
+            last_seen: string | null;
+            /** Confirmed Good */
+            confirmed_good: number;
+            /** Missed */
+            missed: number;
+            /** False Alarm */
+            false_alarm: number;
+            /** Confirmed Bad */
+            confirmed_bad: number;
+            /** Agreement */
+            agreement: number | null;
+            /** Auto Accept Precision */
+            auto_accept_precision: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+            /** Metrics */
+            metrics: components["schemas"]["MetricFaultsOut"][];
+        };
+        /**
+         * TypeCalibrationOut
+         * @description One question type's four-cell report (ADR-034).
+         *
+         *     The type is the unit a professor would authorise, because the instruction
+         *     the generator follows is per type (ADR-033). A pooled figure describes a
+         *     mixture of generators and authorises none of them.
+         */
+        TypeCalibrationOut: {
+            question_type: components["schemas"]["QuestionType"] | null;
+            report: components["schemas"]["CalibrationResultsResponse"];
+            check_report: components["schemas"]["CalibrationResultsResponse"];
+            /** Pairs */
+            pairs: components["schemas"]["CalibrationPairOut"][];
+        };
+        /** TypeInstructionListResponse */
+        TypeInstructionListResponse: {
+            /** Instructions */
+            instructions: components["schemas"]["TypeInstructionOut"][];
+        };
+        /**
+         * TypeInstructionOut
+         * @description What the generator is told for one question type (ADR-033).
+         *
+         *     ``learned`` distinguishes an instruction built from reviews from the shipped
+         *     default, so a professor can see at a glance which types their feedback has
+         *     actually reached. ``available_reviews`` is how many reviews a refresh would
+         *     draw on now, which is what makes a stale instruction visible.
+         */
+        TypeInstructionOut: {
+            question_type: components["schemas"]["QuestionType"];
+            /** Instruction */
+            instruction: string;
+            /** Rules */
+            rules: string[];
+            /** Learned */
+            learned: boolean;
+            /** Review Count */
+            review_count: number;
+            /** Available Reviews */
+            available_reviews: number;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /** TypeInstructionRefreshResponse */
+        TypeInstructionRefreshResponse: {
+            question_type: components["schemas"]["QuestionType"];
+            /** Learned */
+            learned: boolean;
+            /** Rule Count */
+            rule_count: number;
+            /** Review Count */
+            review_count: number;
+            /** Instruction */
+            instruction: string;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /**
+         * WarningSeverity
+         * @description Whether a warning describes a defect or merely states a fact.
+         *
+         *     Only ``DEFECT`` warnings make a book ``PARTIAL``. Without this split, a
+         *     document that simply carries no page numbers would be flagged forever, and a
+         *     badge that is always on teaches the professor to ignore it.
+         * @enum {string}
+         */
+        WarningSeverity: "defect" | "info";
+    };
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
+}
+export type $defs = Record<string, never>;
+export interface operations {
+    dashboard__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    books_books_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    upload_book_books_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_book_books_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    book_detail_books__book_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    book_section_books__book_id__sections__section_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+                section_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    curriculum_curriculum_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    upload_taxonomy_curriculum_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_taxonomy_curriculum_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    curriculum_version_curriculum_versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    curriculum_subtopic_curriculum_subtopics__subtopic_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subtopic_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    questions_questions_get: {
+        parameters: {
+            query?: {
+                book_id?: number | null;
+                section_ids?: number[] | null;
+                chapter_id?: number | null;
+                difficulty?: string | null;
+                question_type?: string | null;
+                created?: number | null;
+                ids?: string | null;
+                judge_notice?: string | null;
+                show_failed?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_judge_run_page_questions_judge_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    poll_judge_run_page_questions_judge_runs__run_id__poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_questions_questions_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_generate_questions_questions_generate_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    question_detail_questions__question_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_question_questions__question_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_review_question_questions__question_id__review_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_queue_review_get: {
+        parameters: {
+            query?: {
+                after?: number | null;
+                mode?: string;
+                outcome?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_queue_review_review__question_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_submit_queue_review_review__question_id__post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    instructions_instructions_get: {
+        parameters: {
+            query?: {
+                refreshed?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_instruction_page_instructions__question_type__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_type: components["schemas"]["QuestionType"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judges_judges_get: {
+        parameters: {
+            query?: {
+                saved?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_judge_prompt_page_judges__metric__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metric: components["schemas"]["JudgeMetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_save_judge_prompt_page_judges__metric__post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_judge_page_judges__metric__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metric: components["schemas"]["JudgeMetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    feedback_feedback_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    coverage_coverage_get: {
+        parameters: {
+            query?: {
+                set_version_id?: number | null;
+                created?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_question_set_page_coverage_sets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_question_set_page_coverage_sets_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fill_coverage_gaps_page_coverage_gaps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_fill_coverage_gaps_page_coverage_gaps_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    students_students_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    create_student_page_students_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_student_page_students_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    student_detail_students__student_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                student_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_training_session_page_students__student_id__sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                student_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_start_training_session_page_students__student_id__sessions_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    training_training__training_session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_training_answer_page_training__training_session_id__answer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_submit_training_answer_page_training__training_session_id__answer_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    end_training_session_page_training__training_session_id__end_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    health_api_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    config_api_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigResponse"];
+                };
+            };
+        };
+    };
+    counts_api_counts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountsResponse"];
+                };
+            };
+        };
+    };
+    list_books_api_books_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                usable_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_book_api_books_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_book_api_books_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_book_api_books__book_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sections_api_books__book_id__sections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_section_api_books__book_id__sections__section_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+                section_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_versions_api_curriculum_versions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_taxonomy_api_curriculum_versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_taxonomy_api_curriculum_versions_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_approved_api_curriculum_approved_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+        };
+    };
+    get_version_api_curriculum_versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_subtopic_api_curriculum_subtopics__subtopic_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subtopic_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubtopicDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_questions_api_questions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                status?: components["schemas"]["QuestionStatus"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_questions_api_questions_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateQuestionsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateQuestionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generation_plan_api_questions_generation_plan_get: {
+        parameters: {
+            query: {
+                book_id: number;
+                section_ids?: number[] | null;
+                all_sections?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_queue_api_questions_review_queue_get: {
+        parameters: {
+            query?: {
+                after?: number | null;
+                mode?: "all" | "scoreable";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewQueueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_question_api_questions__question_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_review_api_questions__question_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reviews_api_reviews_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_stats_api_reviews_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewStatsResponse"];
+                };
+            };
+        };
+    };
+    list_instructions_api_instructions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TypeInstructionListResponse"];
+                };
+            };
+        };
+    };
+    refresh_api_instructions__question_type__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_type: components["schemas"]["QuestionType"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TypeInstructionRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_judge_prompts_api_judge_prompts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgePromptListResponse"];
+                };
+            };
+        };
+    };
+    save_judge_prompt_api_judge_prompts__metric__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metric: components["schemas"]["JudgeMetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JudgePromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgePromptSaveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revert_judge_prompt_api_judge_prompts__metric__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metric: components["schemas"]["JudgeMetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgePromptSaveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_api_judge_prompts__metric__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metric: components["schemas"]["JudgeMetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgePromptRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calibration_results_api_calibration_results_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationResultsResponse"];
+                };
+            };
+        };
+    };
+    calibration_pairs_api_calibration_pairs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationPairsResponse"];
+                };
+            };
+        };
+    };
+    calibration_quadrant_api_calibration_quadrant_get: {
+        parameters: {
+            query?: {
+                rubric_version?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationQuadrantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agreement_trend_api_calibration_trend_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementTrendResponse"];
+                };
+            };
+        };
+    };
+    coverage_api_coverage_get: {
+        parameters: {
+            query?: {
+                set_version_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_generation_run_api_coverage_generation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FillGapsRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Successful Response */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_question_sets_api_question_sets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetListResponse"];
+                };
+            };
+        };
+    };
+    create_set_api_question_sets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateQuestionSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_question_set_api_question_sets__set_version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                set_version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_students_api_students_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentListResponse"];
+                };
+            };
+        };
+    };
+    create_student_api_students_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateStudentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_student_api_students__student_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                student_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    student_progress_api_students__student_id__progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                student_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentProgressOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_training_sessions_api_training_sessions_get: {
+        parameters: {
+            query: {
+                student_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSessionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_training_session_api_training_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartTrainingSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSessionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_training_session_api_training_sessions__training_session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSessionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    next_question_api_training_sessions__training_session_id__next_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServedQuestionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_attempt_api_attempts__attempt_id__answer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnsweredOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attempt_api_attempts__attempt_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttemptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    end_training_session_api_training_sessions__training_session_id__end_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingSessionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_batch_runs_api_evaluation_batch_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchRunListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_batch_run_api_evaluation_batch_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SubmitBatchRunRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitBatchRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_batch_run_api_evaluation_batch_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeBatchRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    poll_batch_run_api_evaluation_batch_runs__run_id__poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PollBatchRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    question_evaluations_api_questions__question_id__evaluations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+}

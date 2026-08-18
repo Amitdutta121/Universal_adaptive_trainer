@@ -205,7 +205,8 @@ data that reads as success.
 | Concern              | Choice                                                        |
 | -------------------- | ------------------------------------------------------------- |
 | Backend              | FastAPI (ASGI), uvicorn                                       |
-| Frontend             | Server-rendered Jinja2 templates + one plain CSS file. No JS build step, no SPA framework. |
+| Frontend (server)    | Server-rendered Jinja2 templates + one plain CSS file, under `app/web/`. No build step. |
+| Frontend (console)   | Next.js 16 App Router + TypeScript in `frontend/`, a second client of the JSON API. Tailwind v4 + shadcn/ui, TanStack Query for server state, types compiled from the backend's OpenAPI. ADR-043. |
 | Persistence          | SQLite via SQLAlchemy 2.0 ORM                                 |
 | Book input           | Structured book JSON, validated by Pydantic. No parsing anywhere. |
 | LLM access           | Instructor + OpenAI SDK → OpenRouter. Structured output only — Pydantic model in, validated instance out. |
@@ -266,6 +267,8 @@ app/
     routes/api/       The JSON API under /api. One module per resource. ADR-027.
     routes/pages.py   Server-rendered pages. Delegates every action to routes/api/.
 tests/                pytest suite mirroring the modules above
+frontend/             Next.js professor console. A client of /api, never a second implementation
+                      of a rule. Its types are generated from the backend; see frontend/README.md.
 docs/DECISIONS.md     Architectural decision log
 docs/book_document_example.json     A valid book document, kept valid by a test
 docs/taxonomy_document_example.json A valid taxonomy document, kept valid by a test

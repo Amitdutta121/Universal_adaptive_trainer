@@ -72,8 +72,10 @@ from app.web.routes.api import students as api_students
 from app.web.routes.api import system as api_system
 from app.web.routes.api.schemas import (
     AnswerRequest,
+    CoverageTargetRef,
     CreateQuestionSetRequest,
     CreateStudentRequest,
+    FillGapsRequest,
     GenerateQuestionsRequest,
     JudgePromptRequest,
     ReviewOutcomeOut,
@@ -1075,6 +1077,29 @@ def create_question_set_page(
         url=f"/coverage?created={quote(notice)}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@router.post("/coverage/gaps", name="fill_coverage_gaps_page")
+def fill_coverage_gaps_page(target: Annotated[list[str] | None, Form()] = None) -> Response:
+    """Hand the selected gaps to the generation step, which does not exist yet.
+
+    Each ``target`` is ``"<subtopic_id>:<difficulty>"``, the value the checkbox
+    on the coverage page carries. Parsing them here rather than on the page
+    keeps the API the single implementation: it is what refuses, and the error
+    handler renders the refusal as HTML (ADR-027).
+    """
+    targets = []
+    for value in target or []:
+        subtopic_id, _, difficulty = value.partition(":")
+        try:
+            targets.append(
+                CoverageTargetRef(subtopic_id=int(subtopic_id), difficulty=Difficulty(difficulty))
+            )
+        except ValueError as exc:
+            raise DomainRuleError(f"{value!r} does not name a coverage target.") from exc
+    if not targets:
+        raise DomainRuleError("Select at least one gap before asking for candidates.")
+    return api_coverage.start_generation_run(FillGapsRequest(targets=targets))
 
 
 def _students_page(

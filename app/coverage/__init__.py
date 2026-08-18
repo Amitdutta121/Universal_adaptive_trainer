@@ -38,6 +38,8 @@ from app.coverage.schema import (
     CoverageReport,
     CoverageState,
     SubtopicCoverage,
+    TopicCoverage,
+    needed_for,
     state_for,
 )
 from app.coverage.service import build_coverage_report, create_question_set
@@ -48,7 +50,9 @@ __all__ = [
     "CoverageReport",
     "CoverageState",
     "SubtopicCoverage",
+    "TopicCoverage",
     "build_coverage_report",
     "create_question_set",
+    "needed_for",
     "state_for",
 ]

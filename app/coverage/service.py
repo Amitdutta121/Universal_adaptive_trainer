@@ -17,6 +17,8 @@ from app.coverage.schema import (
     CoverageCell,
     CoverageReport,
     SubtopicCoverage,
+    TopicCoverage,
+    needed_for,
     state_for,
 )
 from app.domain.enums import Difficulty
@@ -69,25 +71,39 @@ def build_coverage_report(
         question_ids = sets.approved_question_ids(curriculum_version_id=version.id)
 
     counts = sets.coverage_counts(question_ids=question_ids)
-    rows = [
-        SubtopicCoverage(
-            subtopic_id=subtopic.id,
-            subtopic_name=subtopic.name,
-            topic_id=topic.id,
-            topic_name=topic.name,
-            cells=[
+    per_topic = sets.approved_question_counts_by_topic(question_ids=question_ids)
+
+    def _cells(subtopic_id: int) -> list[CoverageCell]:
+        cells = []
+        for difficulty in Difficulty:
+            count = counts.get((subtopic_id, difficulty), 0)
+            cells.append(
                 CoverageCell(
                     difficulty=difficulty,
-                    count=counts.get((subtopic.id, difficulty), 0),
-                    state=state_for(
-                        counts.get((subtopic.id, difficulty), 0), minimum=minimum_per_cell
-                    ),
+                    count=count,
+                    state=state_for(count, minimum=minimum_per_cell),
+                    needed=needed_for(count, minimum=minimum_per_cell),
                 )
-                for difficulty in Difficulty
+            )
+        return cells
+
+    topics = [
+        TopicCoverage(
+            topic_id=topic.id,
+            topic_name=topic.name,
+            approved_questions=per_topic.get(topic.id, 0),
+            subtopics=[
+                SubtopicCoverage(
+                    subtopic_id=subtopic.id,
+                    subtopic_name=subtopic.name,
+                    topic_id=topic.id,
+                    topic_name=topic.name,
+                    cells=_cells(subtopic.id),
+                )
+                for subtopic in sorted(topic.subtopics, key=lambda row: (row.position, row.id))
             ],
         )
         for topic in sorted(version.topics, key=lambda row: (row.position, row.id))
-        for subtopic in sorted(topic.subtopics, key=lambda row: (row.position, row.id))
     ]
 
     return CoverageReport(
@@ -95,7 +111,7 @@ def build_coverage_report(
         curriculum_label=version.label,
         set_version_id=set_version_id,
         minimum_per_cell=minimum_per_cell,
-        subtopics=rows,
+        topics=topics,
         question_count=len(question_ids or []),
     )
 

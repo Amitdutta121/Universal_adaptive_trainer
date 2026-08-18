@@ -42,12 +42,25 @@ def state_for(count: int, *, minimum: int = MIN_QUESTIONS_PER_CELL) -> CoverageS
     return CoverageState.READY
 
 
+def needed_for(count: int, *, minimum: int = MIN_QUESTIONS_PER_CELL) -> int:
+    """How many more questions this cell needs before it stops repeating.
+
+    An upper bound on the *work*, not on the questions: one question may claim
+    three subtopics, so a single generation can close this cell in three rows at
+    once. Summing these across a topic therefore overstates how many questions
+    must be written, which is why the page counts gaps and hedges the questions.
+    """
+    return max(0, minimum - count)
+
+
 class CoverageCell(BaseModel):
     """One (subtopic, difficulty) pair and how many questions cover it."""
 
     difficulty: Difficulty
     count: int
     state: CoverageState
+    #: Questions still owed to this cell. Zero once it is ready.
+    needed: int = 0
 
 
 class SubtopicCoverage(BaseModel):
@@ -77,6 +90,60 @@ class SubtopicCoverage(BaseModel):
         """
         return sum(cell.count for cell in self.cells)
 
+    @property
+    def gap_count(self) -> int:
+        """Cells in this row still owed questions, empty and thin alike."""
+        return sum(1 for cell in self.cells if cell.needed > 0)
+
+    @property
+    def questions_needed(self) -> int:
+        return sum(cell.needed for cell in self.cells)
+
+
+class TopicCoverage(BaseModel):
+    """One topic's rows, and what a professor would have to do about it.
+
+    The grouping the coverage page is read through. A professor decides what to
+    write next a topic at a time -- a chunk teaches one topic, so a gap in
+    another topic is not work they can act on in the same breath.
+    """
+
+    topic_id: int
+    topic_name: str
+    #: Distinct approved questions claiming this topic. Lower than the sum of
+    #: the cells, because one question may claim three of its subtopics.
+    approved_questions: int = 0
+    subtopics: list[SubtopicCoverage] = Field(default_factory=list)
+
+    @property
+    def total_cells(self) -> int:
+        return sum(len(row.cells) for row in self.subtopics)
+
+    @property
+    def empty_cells(self) -> int:
+        return sum(row.empty_count for row in self.subtopics)
+
+    @property
+    def thin_cells(self) -> int:
+        return sum(row.thin_count for row in self.subtopics)
+
+    @property
+    def ready_cells(self) -> int:
+        return self.total_cells - self.empty_cells - self.thin_cells
+
+    @property
+    def gap_count(self) -> int:
+        return sum(row.gap_count for row in self.subtopics)
+
+    @property
+    def questions_needed(self) -> int:
+        return sum(row.questions_needed for row in self.subtopics)
+
+    @property
+    def is_complete(self) -> bool:
+        """Every cell at or above the target, so there is nothing to do here."""
+        return self.total_cells > 0 and self.gap_count == 0
+
 
 class CoverageReport(BaseModel):
     """The whole grid, plus the two counts a verdict rests on.
@@ -95,10 +162,40 @@ class CoverageReport(BaseModel):
     #: The frozen set this grid describes, or ``None`` for the live bank.
     set_version_id: int | None = None
     minimum_per_cell: int = MIN_QUESTIONS_PER_CELL
-    subtopics: list[SubtopicCoverage] = Field(default_factory=list)
+    topics: list[TopicCoverage] = Field(default_factory=list)
     #: Distinct approved questions behind the grid. Lower than the sum of the
     #: cells whenever a question claims more than one subtopic.
     question_count: int = 0
+
+    @property
+    def subtopics(self) -> list[SubtopicCoverage]:
+        """Every row, flat, in taxonomy order.
+
+        Derived from :attr:`topics` rather than stored beside it. Two lists of
+        the same rows would eventually disagree, and the one that disagreed
+        would be whichever the professor happened to be reading.
+        """
+        return [row for topic in self.topics for row in topic.subtopics]
+
+    @property
+    def incomplete_topics(self) -> list[TopicCoverage]:
+        return [topic for topic in self.topics if not topic.is_complete]
+
+    @property
+    def complete_topics(self) -> list[TopicCoverage]:
+        return [topic for topic in self.topics if topic.is_complete]
+
+    @property
+    def gap_count(self) -> int:
+        return sum(topic.gap_count for topic in self.topics)
+
+    @property
+    def questions_needed(self) -> int:
+        return sum(topic.questions_needed for topic in self.topics)
+
+    @property
+    def ready_cells(self) -> int:
+        return self.total_cells - self.empty_cells - self.thin_cells
 
     @property
     def total_cells(self) -> int:

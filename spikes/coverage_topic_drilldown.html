@@ -1,0 +1,717 @@
+<title>Coverage by Topic</title>
+
+<style>
+  /* ---- tokens (same system as the four-options page) ------------------ */
+  :root {
+    --ground:        #F6F7F4;
+    --surface:       #FFFFFF;
+    --sunk:          #EDEFEA;
+    --sunk-2:        #E4E8E1;
+    --ink:           #17211F;
+    --ink-2:         #3E4B48;
+    --ink-3:         #6E7A76;
+    --rule:          #DCE0DA;
+    --rule-strong:   #C3CAC2;
+    --accent:        #0E6E6B;
+    --accent-ink:    #0A5250;
+    --accent-soft:   #E1EFEC;
+
+    --none-fg:  #A8342C;  --none-bg:  #FBE9E7;  --none-line: #E4B9B3;
+    --few-fg:   #8A5A08;  --few-bg:   #FBF1DC;  --few-line:  #E7D2A4;
+    --good-fg:  #1F6B4C;  --good-bg:  #E2F1E8;  --good-line: #BCDCCA;
+
+    --shadow: 0 1px 2px rgba(23,33,31,.05), 0 8px 24px -16px rgba(23,33,31,.28);
+
+    --font-display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif;
+    --font-data: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #11181A; --surface: #192124; --sunk: #0F1618; --sunk-2: #131B1E;
+      --ink: #E7EDEA; --ink-2: #B2BEBA; --ink-3: #7F8D89;
+      --rule: #2A3538; --rule-strong: #3B494C;
+      --accent: #4FBFB2; --accent-ink: #7FD6CB; --accent-soft: #15302F;
+      --none-fg: #F0A096; --none-bg: #391E1B; --none-line: #5E302A;
+      --few-fg:  #E7B863; --few-bg:  #33270F; --few-line:  #503C1C;
+      --good-fg: #6ECB9E; --good-bg: #14301F; --good-line: #244B31;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #11181A; --surface: #192124; --sunk: #0F1618; --sunk-2: #131B1E;
+    --ink: #E7EDEA; --ink-2: #B2BEBA; --ink-3: #7F8D89;
+    --rule: #2A3538; --rule-strong: #3B494C;
+    --accent: #4FBFB2; --accent-ink: #7FD6CB; --accent-soft: #15302F;
+    --none-fg: #F0A096; --none-bg: #391E1B; --none-line: #5E302A;
+    --few-fg:  #E7B863; --few-bg:  #33270F; --few-line:  #503C1C;
+    --good-fg: #6ECB9E; --good-bg: #14301F; --good-line: #244B31;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+  }
+
+  /* ---- base ---------------------------------------------------------- */
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 52px 22px 90px;
+          display: flex; flex-direction: column; gap: 44px; }
+
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2rem, 5vw, 2.8rem); line-height: 1.1; letter-spacing: -.015em; }
+  h2 { font-size: 1.35rem; line-height: 1.25; }
+  p { margin: 0; }
+  code { font-family: var(--font-data); font-size: .88em; }
+
+  .eyebrow { font-size: .7rem; font-weight: 650; letter-spacing: .14em;
+             text-transform: uppercase; color: var(--ink-3); }
+  .lede { font-size: 1.05rem; color: var(--ink-2); max-width: 64ch; }
+  .note { font-size: .86rem; color: var(--ink-3); max-width: 70ch; }
+
+  :is(a, button, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px;
+  }
+
+  .masthead { display: flex; flex-direction: column; gap: 16px; }
+  .masthead .rule-line { height: 3px; width: 64px; background: var(--ink); }
+
+  /* ---- the mock shell ------------------------------------------------ */
+  .mock {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 4px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .mock-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+    padding: 14px 20px; background: var(--sunk); border-bottom: 1px solid var(--rule);
+    font-size: .85rem; color: var(--ink-3);
+  }
+  .mock-bar strong { color: var(--ink); font-weight: 600; }
+  .mock-bar .spacer { flex: 1 1 auto; }
+  .verdict {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .76rem; font-weight: 650; padding: 3px 10px; border-radius: 999px;
+    background: var(--none-bg); color: var(--none-fg); border: 1px solid var(--none-line);
+  }
+
+  .scroller { overflow-x: auto; }
+
+  /* ---- outer table: topics ------------------------------------------- */
+  table.topics { border-collapse: collapse; width: 100%; min-width: 640px; }
+  table.topics thead th {
+    text-align: left; font-size: .67rem; font-weight: 650; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-3);
+    padding: 12px 16px; border-bottom: 1px solid var(--rule); white-space: nowrap;
+  }
+  table.topics thead th.num { text-align: right; }
+  table.topics thead th.act { text-align: right; }
+
+  tr.topic-row > td {
+    padding: 14px 16px; border-bottom: 1px solid var(--rule);
+    vertical-align: middle; background: var(--surface);
+  }
+  tr.topic-row { cursor: pointer; }
+  tr.topic-row:hover > td { background: var(--sunk-2); }
+  tr.topic-row.is-open > td { background: var(--sunk-2); border-bottom-color: transparent; }
+
+  .topic-name { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .caret {
+    width: 0; height: 0; flex: none;
+    border-left: 6px solid var(--ink-3);
+    border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent;
+    transition: transform .15s ease;
+  }
+  tr.topic-row.is-open .caret { transform: rotate(90deg); }
+  .topic-name b { font-size: 1rem; font-weight: 600; }
+  .topic-name .sub { font-size: .76rem; color: var(--ink-3); font-weight: 400; }
+
+  .healthbar { display: flex; height: 9px; gap: 2px; min-width: 130px; }
+  .healthbar span { display: block; border-radius: 1px; }
+  .healthbar .h-good { background: var(--good-fg); }
+  .healthbar .h-few  { background: var(--few-fg); }
+  .healthbar .h-none { background: var(--none-fg); }
+
+  .state-line { font-size: .82rem; color: var(--ink-2); white-space: nowrap; margin-top: 5px; }
+  .state-line .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+                     margin-right: 4px; vertical-align: baseline; }
+  .state-line .dot.d-none { background: var(--none-fg); }
+  .state-line .dot.d-few  { background: var(--few-fg); }
+  .state-line .sep { color: var(--rule-strong); margin: 0 7px; }
+
+  td.num { text-align: right; font-family: var(--font-data);
+           font-variant-numeric: tabular-nums; font-size: .95rem; color: var(--ink); }
+  td.act { text-align: right; white-space: nowrap; }
+
+  .badge-clear {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .78rem; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+    background: var(--good-bg); color: var(--good-fg); border: 1px solid var(--good-line);
+  }
+
+  /* ---- buttons ------------------------------------------------------- */
+  .btn {
+    -webkit-appearance: none; appearance: none; font: inherit;
+    font-size: .82rem; font-weight: 600; padding: 7px 14px;
+    border-radius: 4px; cursor: pointer; white-space: nowrap;
+    background: var(--surface); color: var(--accent-ink);
+    border: 1.5px solid var(--accent);
+    transition: background .12s ease, color .12s ease;
+  }
+  .btn:hover { background: var(--accent-soft); }
+  .btn.is-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.solid:hover { filter: brightness(1.08); }
+  .btn.ghost { border-color: var(--rule-strong); color: var(--ink-3); }
+  .btn.ghost:hover { background: var(--sunk); color: var(--ink-2); }
+  .btn.small { font-size: .76rem; padding: 5px 11px; }
+  .btn[disabled] { opacity: .35; cursor: not-allowed; }
+
+  /* ---- inner drawer: the worklist ------------------------------------ */
+  tr.detail-row.is-hidden { display: none; }
+  tr.detail-row > td { padding: 0; border-bottom: 1px solid var(--rule); background: var(--sunk); }
+
+  .drawer { padding: 4px 16px 18px 32px; }
+  .drawer-head {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+    padding: 12px 0 14px;
+  }
+  .drawer-head .title { font-size: .82rem; color: var(--ink-2); }
+  .drawer-head .title b { color: var(--ink); font-family: var(--font-data);
+                          font-variant-numeric: tabular-nums; }
+  .drawer-head .spacer { flex: 1 1 auto; }
+
+  .seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 4px; overflow: hidden; }
+  .seg button {
+    -webkit-appearance: none; appearance: none; font: inherit;
+    font-size: .74rem; font-weight: 600; padding: 5px 11px;
+    background: var(--surface); color: var(--ink-3); border: none; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--rule-strong); }
+  .seg button.is-on { background: var(--ink); color: var(--ground); }
+
+  table.work { border-collapse: collapse; width: 100%; min-width: 560px;
+               background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; }
+  table.work thead th {
+    text-align: left; font-size: .64rem; font-weight: 650; letter-spacing: .11em;
+    text-transform: uppercase; color: var(--ink-3);
+    padding: 9px 14px; border-bottom: 1px solid var(--rule); white-space: nowrap;
+  }
+  table.work thead th.act { text-align: right; }
+  table.work tbody td { padding: 9px 14px; border-bottom: 1px solid var(--rule);
+                        font-size: .88rem; vertical-align: middle; }
+  table.work tbody tr:last-child td { border-bottom: none; }
+  table.work tbody tr.is-hidden { display: none; }
+  table.work tbody tr.full td { color: var(--ink-3); }
+  table.work td.act { text-align: right; white-space: nowrap; }
+
+  .where { white-space: nowrap; }
+  .where .st { font-weight: 600; color: var(--ink); }
+  .where.full .st { color: var(--ink-3); font-weight: 500; }
+  .where .df { color: var(--ink-3); }
+
+  .have { font-family: var(--font-data); font-variant-numeric: tabular-nums;
+          white-space: nowrap; }
+  .have b { color: var(--ink); font-weight: 650; }
+  .have.zero b { color: var(--none-fg); }
+  tr.full .have b { color: var(--ink-3); font-weight: 500; }
+
+  .pill {
+    display: inline-block; font-size: .67rem; font-weight: 650;
+    letter-spacing: .07em; text-transform: uppercase;
+    padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .pill.s-none { background: var(--none-bg); color: var(--none-fg); border: 1px solid var(--none-line); }
+  .pill.s-few  { background: var(--few-bg);  color: var(--few-fg);  border: 1px solid var(--few-line); }
+  .pill.s-good { background: var(--good-bg); color: var(--good-fg); border: 1px solid var(--good-line); }
+
+  .dash { color: var(--rule-strong); }
+
+  /* ---- basket -------------------------------------------------------- */
+  .basket {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    padding: 14px 20px; background: var(--accent-soft); border-top: 1px solid var(--rule);
+    font-size: .88rem; color: var(--ink-2);
+  }
+  .basket .count { font-family: var(--font-data); font-weight: 650;
+                   font-variant-numeric: tabular-nums; color: var(--ink); }
+  .basket .spacer { flex: 1 1 auto; }
+
+  /* ---- notes panel --------------------------------------------------- */
+  .panel {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 24px 26px; display: flex; flex-direction: column; gap: 14px;
+    box-shadow: var(--shadow);
+  }
+  .panel ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .panel li { font-size: .92rem; color: var(--ink-2); }
+  .panel li strong { color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  @media (max-width: 700px) { .drawer { padding-left: 14px; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="rule-line"></div>
+    <p class="eyebrow">Mock-up &middot; not built &middot; placeholder data</p>
+    <h1>Coverage by topic, opened out</h1>
+    <p class="lede">
+      Topics on top. Click one and its worklist drops out underneath &mdash; every subtopic and
+      difficulty that still needs questions, each with its own <em>Add</em>. The topic row has its
+      own button so a professor who doesn't want the detail can fill the whole topic in one click.
+    </p>
+    <p class="note">
+      Every number is invented. Nothing reads the real bank; the buttons only tick. Click a topic
+      row to open or close it &mdash; <strong>Loops</strong> starts open.
+    </p>
+  </header>
+
+  <div class="mock">
+    <div class="mock-bar">
+      <strong>118 approved questions</strong>
+      <span>&middot;</span><span>18 subtopics, 54 boxes</span>
+      <span>&middot;</span><span>10 empty, 15 need more</span>
+      <span class="spacer"></span>
+      <span class="verdict">Not ready to train</span>
+    </div>
+
+    <div class="scroller">
+      <table class="topics">
+        <thead>
+          <tr>
+            <th>Topic</th>
+            <th>Coverage</th>
+            <th class="num">Questions</th>
+            <th class="num">Still needed</th>
+            <th class="act">&nbsp;</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <!-- ============ TOPIC 1 ============ -->
+          <tr class="topic-row" data-topic="vars">
+            <td>
+              <span class="topic-name"><i class="caret"></i><b>Variables &amp; Data Types</b>
+                <span class="sub">4 subtopics</span></span>
+            </td>
+            <td>
+              <div class="healthbar" role="img" aria-label="8 boxes good, 3 need more, 1 empty">
+                <span class="h-good" style="flex:8"></span>
+                <span class="h-few" style="flex:3"></span>
+                <span class="h-none" style="flex:1"></span>
+              </div>
+              <div class="state-line">
+                <span class="dot d-none"></span>1 empty
+                <span class="sep">|</span>
+                <span class="dot d-few"></span>3 need more
+              </div>
+            </td>
+            <td class="num">36</td>
+            <td class="num">7</td>
+            <td class="act"><button type="button" class="btn" data-fill="vars">Generate 7</button></td>
+          </tr>
+          <tr class="detail-row is-hidden" data-detail="vars">
+            <td colspan="5">
+              <div class="drawer">
+                <div class="drawer-head">
+                  <span class="title">Gaps in <b>Variables &amp; Data Types</b></span>
+                  <span class="spacer"></span>
+                  <span class="seg" role="group" aria-label="Which rows to show">
+                    <button type="button" class="is-on" data-show="gaps">Gaps only</button>
+                    <button type="button" data-show="all">Everything</button>
+                  </span>
+                </div>
+                <div class="scroller">
+                  <table class="work">
+                    <thead>
+                      <tr><th>Subtopic &amp; difficulty</th><th>Have</th><th>State</th><th class="act">&nbsp;</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr class="full"><td class="where full"><span class="st">Numbers and arithmetic</span> <span class="df">&middot; Easy</span></td><td class="have"><b>6</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Numbers and arithmetic</span> <span class="df">&middot; Medium</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Numbers and arithmetic</span> <span class="df">&middot; Hard</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Strings and text</span> <span class="df">&middot; Easy</span></td><td class="have"><b>5</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Strings and text</span> <span class="df">&middot; Medium</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Strings and text</span> <span class="df">&middot; Hard</span></td><td class="have"><b>1</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="2" data-of="vars">Add 2</button></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Type conversion</span> <span class="df">&middot; Easy</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Type conversion</span> <span class="df">&middot; Medium</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="vars">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Type conversion</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="vars">Add 3</button></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Booleans</span> <span class="df">&middot; Easy</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Booleans</span> <span class="df">&middot; Medium</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Booleans</span> <span class="df">&middot; Hard</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="vars">Add 1</button></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- ============ TOPIC 2 ============ -->
+          <tr class="topic-row" data-topic="flow">
+            <td>
+              <span class="topic-name"><i class="caret"></i><b>Control Flow</b>
+                <span class="sub">3 subtopics</span></span>
+            </td>
+            <td>
+              <div class="healthbar" role="img" aria-label="5 boxes good, 2 need more, 2 empty">
+                <span class="h-good" style="flex:5"></span>
+                <span class="h-few" style="flex:2"></span>
+                <span class="h-none" style="flex:2"></span>
+              </div>
+              <div class="state-line">
+                <span class="dot d-none"></span>2 empty
+                <span class="sep">|</span>
+                <span class="dot d-few"></span>2 need more
+              </div>
+            </td>
+            <td class="num">25</td>
+            <td class="num">9</td>
+            <td class="act"><button type="button" class="btn" data-fill="flow">Generate 9</button></td>
+          </tr>
+          <tr class="detail-row is-hidden" data-detail="flow">
+            <td colspan="5">
+              <div class="drawer">
+                <div class="drawer-head">
+                  <span class="title">Gaps in <b>Control Flow</b></span>
+                  <span class="spacer"></span>
+                  <span class="seg" role="group" aria-label="Which rows to show">
+                    <button type="button" class="is-on" data-show="gaps">Gaps only</button>
+                    <button type="button" data-show="all">Everything</button>
+                  </span>
+                </div>
+                <div class="scroller">
+                  <table class="work">
+                    <thead>
+                      <tr><th>Subtopic &amp; difficulty</th><th>Have</th><th>State</th><th class="act">&nbsp;</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr class="full"><td class="where full"><span class="st">if / elif / else</span> <span class="df">&middot; Easy</span></td><td class="have"><b>7</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">if / elif / else</span> <span class="df">&middot; Medium</span></td><td class="have"><b>5</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">if / elif / else</span> <span class="df">&middot; Hard</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Comparison operators</span> <span class="df">&middot; Easy</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Comparison operators</span> <span class="df">&middot; Medium</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Comparison operators</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="flow">Add 3</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Nested conditionals</span> <span class="df">&middot; Easy</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="flow">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Nested conditionals</span> <span class="df">&middot; Medium</span></td><td class="have"><b>1</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="2" data-of="flow">Add 2</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Nested conditionals</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="flow">Add 3</button></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- ============ TOPIC 3 — open by default ============ -->
+          <tr class="topic-row is-open" data-topic="loops">
+            <td>
+              <span class="topic-name"><i class="caret"></i><b>Loops</b>
+                <span class="sub">3 subtopics</span></span>
+            </td>
+            <td>
+              <div class="healthbar" role="img" aria-label="4 boxes good, 2 need more, 3 empty">
+                <span class="h-good" style="flex:4"></span>
+                <span class="h-few" style="flex:2"></span>
+                <span class="h-none" style="flex:3"></span>
+              </div>
+              <div class="state-line">
+                <span class="dot d-none"></span>3 empty
+                <span class="sep">|</span>
+                <span class="dot d-few"></span>2 need more
+              </div>
+            </td>
+            <td class="num">18</td>
+            <td class="num">12</td>
+            <td class="act"><button type="button" class="btn" data-fill="loops">Generate 12</button></td>
+          </tr>
+          <tr class="detail-row" data-detail="loops">
+            <td colspan="5">
+              <div class="drawer">
+                <div class="drawer-head">
+                  <span class="title">Gaps in <b>Loops</b> &mdash; 5 boxes, 12 questions</span>
+                  <span class="spacer"></span>
+                  <span class="seg" role="group" aria-label="Which rows to show">
+                    <button type="button" class="is-on" data-show="gaps">Gaps only</button>
+                    <button type="button" data-show="all">Everything</button>
+                  </span>
+                </div>
+                <div class="scroller">
+                  <table class="work">
+                    <thead>
+                      <tr><th>Subtopic &amp; difficulty</th><th>Have</th><th>State</th><th class="act">&nbsp;</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr class="full"><td class="where full"><span class="st">for loops</span> <span class="df">&middot; Easy</span></td><td class="have"><b>5</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">for loops</span> <span class="df">&middot; Medium</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">for loops</span> <span class="df">&middot; Hard</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">while loops</span> <span class="df">&middot; Easy</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">while loops</span> <span class="df">&middot; Medium</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="loops">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">while loops</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="loops">Add 3</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">break and continue</span> <span class="df">&middot; Easy</span></td><td class="have"><b>1</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="2" data-of="loops">Add 2</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">break and continue</span> <span class="df">&middot; Medium</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="loops">Add 3</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">break and continue</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="loops">Add 3</button></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- ============ TOPIC 4 ============ -->
+          <tr class="topic-row" data-topic="funcs">
+            <td>
+              <span class="topic-name"><i class="caret"></i><b>Functions</b>
+                <span class="sub">4 subtopics</span></span>
+            </td>
+            <td>
+              <div class="healthbar" role="img" aria-label="7 boxes good, 3 need more, 2 empty">
+                <span class="h-good" style="flex:7"></span>
+                <span class="h-few" style="flex:3"></span>
+                <span class="h-none" style="flex:2"></span>
+              </div>
+              <div class="state-line">
+                <span class="dot d-none"></span>2 empty
+                <span class="sep">|</span>
+                <span class="dot d-few"></span>3 need more
+              </div>
+            </td>
+            <td class="num">31</td>
+            <td class="num">10</td>
+            <td class="act"><button type="button" class="btn" data-fill="funcs">Generate 10</button></td>
+          </tr>
+          <tr class="detail-row is-hidden" data-detail="funcs">
+            <td colspan="5">
+              <div class="drawer">
+                <div class="drawer-head">
+                  <span class="title">Gaps in <b>Functions</b></span>
+                  <span class="spacer"></span>
+                  <span class="seg" role="group" aria-label="Which rows to show">
+                    <button type="button" class="is-on" data-show="gaps">Gaps only</button>
+                    <button type="button" data-show="all">Everything</button>
+                  </span>
+                </div>
+                <div class="scroller">
+                  <table class="work">
+                    <thead>
+                      <tr><th>Subtopic &amp; difficulty</th><th>Have</th><th>State</th><th class="act">&nbsp;</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr class="full"><td class="where full"><span class="st">Defining functions</span> <span class="df">&middot; Easy</span></td><td class="have"><b>6</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Defining functions</span> <span class="df">&middot; Medium</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Defining functions</span> <span class="df">&middot; Hard</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="funcs">Add 1</button></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Parameters and arguments</span> <span class="df">&middot; Easy</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Parameters and arguments</span> <span class="df">&middot; Medium</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Parameters and arguments</span> <span class="df">&middot; Hard</span></td><td class="have"><b>1</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="2" data-of="funcs">Add 2</button></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Return values</span> <span class="df">&middot; Easy</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Return values</span> <span class="df">&middot; Medium</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Return values</span> <span class="df">&middot; Hard</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Variable scope</span> <span class="df">&middot; Easy</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="funcs">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Variable scope</span> <span class="df">&middot; Medium</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="funcs">Add 3</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Variable scope</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="funcs">Add 3</button></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- ============ TOPIC 5 ============ -->
+          <tr class="topic-row" data-topic="lists">
+            <td>
+              <span class="topic-name"><i class="caret"></i><b>Lists &amp; Dictionaries</b>
+                <span class="sub">4 subtopics</span></span>
+            </td>
+            <td>
+              <div class="healthbar" role="img" aria-label="5 boxes good, 5 need more, 2 empty">
+                <span class="h-good" style="flex:5"></span>
+                <span class="h-few" style="flex:5"></span>
+                <span class="h-none" style="flex:2"></span>
+              </div>
+              <div class="state-line">
+                <span class="dot d-none"></span>2 empty
+                <span class="sep">|</span>
+                <span class="dot d-few"></span>5 need more
+              </div>
+            </td>
+            <td class="num">27</td>
+            <td class="num">13</td>
+            <td class="act"><button type="button" class="btn" data-fill="lists">Generate 13</button></td>
+          </tr>
+          <tr class="detail-row is-hidden" data-detail="lists">
+            <td colspan="5">
+              <div class="drawer">
+                <div class="drawer-head">
+                  <span class="title">Gaps in <b>Lists &amp; Dictionaries</b></span>
+                  <span class="spacer"></span>
+                  <span class="seg" role="group" aria-label="Which rows to show">
+                    <button type="button" class="is-on" data-show="gaps">Gaps only</button>
+                    <button type="button" data-show="all">Everything</button>
+                  </span>
+                </div>
+                <div class="scroller">
+                  <table class="work">
+                    <thead>
+                      <tr><th>Subtopic &amp; difficulty</th><th>Have</th><th>State</th><th class="act">&nbsp;</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr class="full"><td class="where full"><span class="st">List basics</span> <span class="df">&middot; Easy</span></td><td class="have"><b>5</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">List basics</span> <span class="df">&middot; Medium</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">List basics</span> <span class="df">&middot; Hard</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">List methods</span> <span class="df">&middot; Easy</span></td><td class="have"><b>3</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">List methods</span> <span class="df">&middot; Medium</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="lists">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">List methods</span> <span class="df">&middot; Hard</span></td><td class="have"><b>1</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="2" data-of="lists">Add 2</button></td></tr>
+                      <tr class="full"><td class="where full"><span class="st">Dictionary basics</span> <span class="df">&middot; Easy</span></td><td class="have"><b>4</b> of 3</td><td><span class="pill s-good">Full</span></td><td class="act"><span class="dash">&mdash;</span></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Dictionary basics</span> <span class="df">&middot; Medium</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="lists">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Dictionary basics</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="lists">Add 3</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Iterating collections</span> <span class="df">&middot; Easy</span></td><td class="have"><b>2</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="1" data-of="lists">Add 1</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Iterating collections</span> <span class="df">&middot; Medium</span></td><td class="have"><b>1</b> of 3</td><td><span class="pill s-few">Needs more</span></td><td class="act"><button type="button" class="btn small" data-need="2" data-of="lists">Add 2</button></td></tr>
+                      <tr class="gap"><td class="where"><span class="st">Iterating collections</span> <span class="df">&middot; Hard</span></td><td class="have zero"><b>0</b> of 3</td><td><span class="pill s-none">None yet</span></td><td class="act"><button type="button" class="btn small" data-need="3" data-of="lists">Add 3</button></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+    <div class="basket">
+      <span><span class="count" id="b-boxes">0</span> boxes queued</span>
+      <span>&middot;</span>
+      <span><span class="count" id="b-questions">0</span> questions to generate</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost small" id="b-clear" disabled>Clear</button>
+      <button type="button" class="btn solid" id="b-go" disabled>Generate these</button>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>How it behaves, and the bits still open</h2>
+    <ul>
+      <li><strong>The topic button and the row buttons are the same queue.</strong> Pressing
+        <em>Generate 12</em> on Loops opens the topic and ticks all five of its gaps &mdash; you can
+        then untick the ones you don't want. Nothing is hidden from you by using the shortcut.</li>
+      <li><strong>Gaps only by default.</strong> A full topic's drawer would otherwise be twelve
+        rows of "Full", which is noise. <em>Everything</em> switches to the complete picture when
+        you want to check a subtopic that is already covered.</li>
+      <li><strong>A topic with nothing missing</strong> would show a green <em>Fully covered</em>
+        badge instead of a Generate button. No topic in this fake data qualifies &mdash; worth
+        deciding whether those topics stay in the table or collapse to a single line at the
+        bottom.</li>
+      <li><strong>"Questions" per topic counts slots, not rows.</strong> One question can claim up
+        to three subtopics, so the per-topic numbers add up to more than the 118 in the bank. The
+        header shows the honest distinct count; the column shows what the engine would find.</li>
+      <li><strong>What <em>Generate</em> actually does is the real open question.</strong> The
+        generator picks its own subtopic from a textbook chunk you choose &mdash; it can't be told
+        to write for "while loops · Hard". So this button honestly means "find chunks that teach
+        these and generate from them, then check what came back". That's a feature to design, not a
+        click handler.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    var boxesOut = document.getElementById("b-boxes");
+    var questionsOut = document.getElementById("b-questions");
+    var goBtn = document.getElementById("b-go");
+    var clearBtn = document.getElementById("b-clear");
+    var adds = Array.prototype.slice.call(document.querySelectorAll("[data-need]"));
+
+    function refresh() {
+      var boxes = 0, questions = 0;
+      adds.forEach(function (btn) {
+        if (btn.classList.contains("is-on")) {
+          boxes += 1;
+          questions += parseInt(btn.getAttribute("data-need"), 10) || 0;
+        }
+      });
+      boxesOut.textContent = boxes;
+      questionsOut.textContent = questions;
+      goBtn.disabled = boxes === 0;
+      clearBtn.disabled = boxes === 0;
+
+      // A topic button reads "Queued" only while every gap under it is ticked.
+      document.querySelectorAll("[data-fill]").forEach(function (topicBtn) {
+        var key = topicBtn.getAttribute("data-fill");
+        var mine = adds.filter(function (b) { return b.getAttribute("data-of") === key; });
+        var on = mine.length > 0 && mine.every(function (b) { return b.classList.contains("is-on"); });
+        topicBtn.classList.toggle("is-on", on);
+        topicBtn.textContent = on ? "Queued" : topicBtn.getAttribute("data-label");
+      });
+    }
+
+    function setAdd(btn, on) {
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.textContent = on ? "Queued" : "Add " + btn.getAttribute("data-need");
+    }
+
+    adds.forEach(function (btn) {
+      btn.setAttribute("aria-pressed", "false");
+      btn.addEventListener("click", function (event) {
+        event.stopPropagation();
+        setAdd(btn, !btn.classList.contains("is-on"));
+        refresh();
+      });
+    });
+
+    function openTopic(row) {
+      var key = row.getAttribute("data-topic");
+      var detail = document.querySelector('[data-detail="' + key + '"]');
+      row.classList.add("is-open");
+      detail.classList.remove("is-hidden");
+    }
+
+    document.querySelectorAll("[data-fill]").forEach(function (topicBtn) {
+      topicBtn.setAttribute("data-label", topicBtn.textContent);
+      topicBtn.addEventListener("click", function (event) {
+        event.stopPropagation();
+        var key = topicBtn.getAttribute("data-fill");
+        var mine = adds.filter(function (b) { return b.getAttribute("data-of") === key; });
+        var turningOn = !topicBtn.classList.contains("is-on");
+        mine.forEach(function (b) { setAdd(b, turningOn); });
+        if (turningOn) openTopic(topicBtn.closest("tr.topic-row"));
+        refresh();
+      });
+    });
+
+    document.querySelectorAll("tr.topic-row").forEach(function (row) {
+      row.addEventListener("click", function () {
+        var key = row.getAttribute("data-topic");
+        var detail = document.querySelector('[data-detail="' + key + '"]');
+        var opening = detail.classList.contains("is-hidden");
+        row.classList.toggle("is-open", opening);
+        detail.classList.toggle("is-hidden", !opening);
+      });
+    });
+
+    document.querySelectorAll(".seg").forEach(function (seg) {
+      var table = seg.closest(".drawer").querySelector("table.work");
+      seg.querySelectorAll("button").forEach(function (btn) {
+        btn.addEventListener("click", function (event) {
+          event.stopPropagation();
+          seg.querySelectorAll("button").forEach(function (b) { b.classList.remove("is-on"); });
+          btn.classList.add("is-on");
+          var showAll = btn.getAttribute("data-show") === "all";
+          table.querySelectorAll("tbody tr.full").forEach(function (tr) {
+            tr.classList.toggle("is-hidden", !showAll);
+          });
+        });
+      });
+      // Gaps only is the default, so hide the full rows on load.
+      table.querySelectorAll("tbody tr.full").forEach(function (tr) { tr.classList.add("is-hidden"); });
+    });
+
+    clearBtn.addEventListener("click", function () {
+      adds.forEach(function (b) { setAdd(b, false); });
+      refresh();
+    });
+
+    refresh();
+  })();
+</script>

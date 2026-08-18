@@ -8,15 +8,18 @@ edited (ADR-036).
 from __future__ import annotations
 
 import logging
+from typing import NoReturn
 
 from fastapi import APIRouter, status
 
 from app.coverage import build_coverage_report, create_question_set
+from app.errors import FeatureNotAvailableError
 from app.persistence.repositories import QuestionSetRepository
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
     CoverageReportResponse,
     CreateQuestionSetRequest,
+    FillGapsRequest,
     QuestionSetListResponse,
     QuestionSetOut,
 )
@@ -35,6 +38,34 @@ def coverage(session: DbSession, set_version_id: int | None = None) -> CoverageR
     """
     return CoverageReportResponse.from_report(
         build_coverage_report(session, set_version_id=set_version_id)
+    )
+
+
+@router.post(
+    "/coverage/generation-runs",
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    # This handler only ever raises, so there is no schema to derive from its
+    # return annotation.
+    response_model=None,
+)
+def start_generation_run(payload: FillGapsRequest) -> NoReturn:
+    """Not implemented. Selecting gaps is real; acting on them is not.
+
+    The step this endpoint would perform does not exist. A professor selects a
+    chunk, a difficulty and a question type, and the *generator* decides which
+    topic and subtopics it wrote for (ADR-031) -- so a named gap cannot be
+    requested. Closing one means finding chunks that teach that subtopic,
+    generating from them, and seeing what the generator claimed afterwards.
+
+    Nothing ranks chunks by subtopic yet. Returning a plausible-looking run here
+    would report targeted generation that never happened, so it refuses instead.
+    """
+    raise FeatureNotAvailableError(
+        f"{len(payload.targets)} coverage gap(s) were selected, but generating for a named "
+        "subtopic is not built. The generator classifies what it wrote (ADR-031); it cannot be "
+        "aimed. Nothing ranks textbook chunks by the subtopic they teach yet, so there is no "
+        "honest way to start a targeted run. Generate from a chunk on the questions page, then "
+        "check what the generator claimed."
     )
 
 

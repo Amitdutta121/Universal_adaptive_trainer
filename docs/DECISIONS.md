@@ -1526,3 +1526,112 @@ exhausted at every difficulty" cannot occur through the empty-cell route. It sur
 against the two queries drifting apart. What *is* reachable, and tested, is a question whose
 subtopic tag outlived the subtopic: there is no topic behind it, so no difficulty can be derived
 and the engine drops it.
+
+## ADR-042 — The coverage page is read topic-first, and the button that would close a gap refuses
+
+**Status:** accepted. Supersedes nothing; it changes how ADR-036's grid is *presented* and adds a
+deliberately unimplemented endpoint beside it.
+
+**Context.** ADR-036 gave the professor a flat subtopic × difficulty grid and a gap list. Both are
+correct and neither is usable at curriculum scale: a taxonomy with sixty subtopics renders as a
+hundred and eighty rows in taxonomy order, with the empty cells scattered through it. The
+professor's question is not "what does the bank contain" but "what should I write next", and the
+old page answered the first.
+
+**Decisions.**
+
+- **The topic is the unit the page is read in.** `CoverageReport.topics` groups the rows;
+  `TopicCoverage` carries that topic's cell states, its distinct approved questions, its gap count
+  and its shortfall. A topic is the right grouping because a *chunk teaches one topic* — a gap in
+  another topic is not work the professor can act on in the same breath.
+- **`subtopics` is derived from `topics`, not stored beside it.** Two lists of the same rows
+  eventually disagree, and the one that disagreed would be whichever the professor happened to be
+  reading. The flat list survives on the API because a client asking "which subtopics are short"
+  should not have to walk a tree.
+- **Cells that are already ready are hidden by default.** They are not work. They stay one
+  checkbox away, because a professor checking whether a subtopic they remember writing for is
+  actually covered is a real question the page must still answer.
+- **Gaps are counted in gaps, and questions are hedged.** A topic reports "5 gaps · up to 12
+  questions". The shortfall sum is an *upper* bound, not a minimum: a question may claim three
+  subtopics (ADR-031), so one generation can close a cell in three rows at once. Reporting "12
+  questions needed" would overstate the work by up to three times, and reporting a computed minimum
+  would understate it, because whether one question can serve three subtopics depends on what the
+  generator writes.
+- **Per-topic question counts come off `QuestionRow.topic_id`, never from a join through the
+  subtopics.** A question claims exactly one topic but up to three of its subtopics, so joining
+  would multiply it and report a topic as holding more questions than exist.
+- **The target is a setting, not a constant.** `MIN_QUESTIONS_PER_CELL` is the default of
+  `build_coverage_report(minimum_per_cell=...)`, and every fraction the page prints is derived from
+  the value in force and shown next to it. Baking `3` into the copy would make the page lie the
+  first time anyone raises it.
+
+**The refusing endpoint.** `POST /api/coverage/generation-runs` accepts the selected targets and
+raises `FeatureNotAvailableError` (501). This is deliberate, and it is the honest shape:
+
+- Selecting gaps is real work the professor can do, and the selection is meaningful data.
+- Acting on it is not built and cannot be faked. The generator chooses its own topic and subtopics
+  from the chunk it is given (ADR-031); it cannot be aimed at "while loops · hard". Closing that
+  gap means finding a chunk that teaches while loops, generating from it, and reading back what the
+  generator claimed — and **nothing ranks chunks by the subtopic they teach**. That retrieval step
+  is the missing piece, not the button.
+- The alternative was to omit the control entirely. Rejected: the page would then show the
+  professor exactly what is missing and no way to say so, and the missing capability would be
+  invisible instead of named. The endpoint states which step does not exist, which is what
+  `CLAUDE.md` requires of a placeholder.
+
+**Implementation status:** the grouping, the per-topic counts, the gap selection and the refusal are
+complete and tested (`tests/test_coverage.py`). Chunk ranking by subtopic is not started. Until it
+exists, a professor closes a gap by generating from a chunk on the questions page and checking the
+claim afterwards, exactly as before — the coverage page now tells them which chunk to look for.
+
+## ADR-043 — The professor console is a Next.js client of the JSON API, beside the Jinja UI
+
+**Status:** accepted. Amends the stack table in `CLAUDE.md`, which said "no JS build step, no SPA
+framework". Supersedes nothing: the server-rendered Jinja UI keeps working and keeps its routes.
+
+**Context.** ADR-027 already settled that `routes/api/` is the single implementation of every
+professor capability and that `routes/pages.py` is *one of its clients*. The API is complete in that
+sense — 52 endpoints, 138 Pydantic response models, and no capability reachable only through a
+template. That leaves the presentation layer genuinely swappable, which is what makes a second
+client cheap rather than a fork.
+
+The Jinja UI is at its limit for three screens in particular. The coverage grid, the review queue
+and the judge batch runs all want interaction the server-rendered page cannot give without
+reloading: a filter that does not lose scroll position, a poll that updates one region, an editor
+beside a diff. Two spikes in `spikes/` were attempts to get there with more CSS.
+
+**Decisions.**
+
+- **The frontend is a client of the JSON API and nothing else.** It holds no business rule, no
+  scoring, no taxonomy validation, no gate arithmetic. Anything it needs that the API does not
+  expose is added to `routes/api/` first, exactly as a page would be. This keeps ADR-027's
+  direction intact with a second client attached.
+- **Its types are compiled from the backend's own OpenAPI document**, not written by hand
+  (`frontend/scripts/generate-api-types.mjs` → `src/lib/api/schema.d.ts`). A hand-written interface
+  is a second declaration of a shape Pydantic already owns, and it drifts silently. Compiling it
+  means a renamed field is a failed build, not a blank column. The compiled file is committed so a
+  build needs no Python; the dump is not.
+- **The browser talks to `/api/*` on its own origin** and Next forwards it to FastAPI. CORS is a
+  deployment concern, not a development one, and the backend origin never enters the client bundle.
+  `CORS_ALLOW_ORIGINS` stays for the case where the two are deployed apart.
+- **The error envelope is the contract.** `app/errors.py` answers JSON only when the request asked
+  for it, so the client always sends `Accept: application/json`, and it surfaces the backend's own
+  `code`, `message` and `detail` rather than a generic failure string. The API states *why* it
+  refused — an invalid document, a question with no verdict, an unreachable provider — and that
+  sentence is the useful one.
+- **Both UIs stay.** The Jinja templates are not deleted, not frozen and not reimplemented ahead of
+  need. A section moves when its Next.js screen is actually built; until then the console links to
+  the section and says the screen does not exist yet. A stub that renders an empty table would read
+  as "there is nothing here", which is the same failure `CLAUDE.md` forbids of a placeholder
+  service.
+
+**Alternatives rejected.** Replacing the Jinja UI wholesale: it works, it is tested, and a rewrite
+would trade working screens for unwritten ones with no capability gained. Adding client-side
+JavaScript to the existing templates: it reintroduces a build step anyway, without types over the
+API. A separate repository: the type generation reads the FastAPI app in-process, so keeping them
+together is what makes `pnpm run api:types` a single command.
+
+**Implementation status.** Shell, navigation, typed client, query layer, dashboard and the questions
+list and detail screens are built and verified against a running backend. The other seven sections
+are stubs that name their endpoints. `pnpm run check` (types, lint, tests) and `pnpm run build`
+pass; the backend suite is unchanged by this work.

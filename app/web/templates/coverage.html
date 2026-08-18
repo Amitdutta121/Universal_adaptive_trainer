@@ -53,6 +53,8 @@
         <dd>{{ coverage.question_count }}</dd>
         <dt>Cells</dt>
         <dd>{{ coverage.total_cells }} ({{ coverage.subtopics | length }} subtopics × 3)</dd>
+        <dt>Ready</dt>
+        <dd>{{ coverage.ready_cells }}</dd>
         <dt>Empty</dt>
         <dd>{{ coverage.empty_cells }}</dd>
         <dt>Thin</dt>
@@ -81,67 +83,165 @@
     {% endif %}
   </section>
 
-  {% if coverage.empty_cells %}
-    <section class="panel" id="gaps">
-      <h2>Gaps to fill</h2>
+  {% if coverage.topics %}
+    <section class="panel" id="topics">
+      <h2>Coverage by topic</h2>
       <p class="note">
-        In taxonomy order. Note that the generator chooses its own topic and subtopics (ADR-031):
-        you select a chunk, a difficulty and a question type, and the generator classifies what it
-        wrote. So a gap is filled by generating from a chunk that teaches that subtopic, then
-        checking what the generator claimed — not by requesting the subtopic directly.
+        In taxonomy order. Open a topic to see which of its subtopics are short and at which
+        difficulty. Cells that already hold {{ coverage.minimum_per_cell }} questions are hidden
+        until you ask for them, because they are not work.
       </p>
-      <table class="table">
-        <thead>
-          <tr><th>Topic</th><th>Subtopic</th><th>Difficulty</th></tr>
-        </thead>
-        <tbody>
-          {% for row in coverage.subtopics %}
-            {% for cell in row.cells %}
-              {% if cell.state == "empty" %}
-                <tr>
-                  <td>{{ row.topic_name }}</td>
-                  <td>{{ row.subtopic_name }}</td>
-                  <td><span class="status status-bad">{{ cell.difficulty }}</span></td>
-                </tr>
-              {% endif %}
-            {% endfor %}
-          {% endfor %}
-        </tbody>
-      </table>
-    </section>
-  {% endif %}
 
-  {% if coverage.subtopics %}
-    <section class="panel" id="grid">
-      <h2>The grid</h2>
-      <table class="table">
-        <thead>
-          <tr><th>Topic</th><th>Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th></tr>
-        </thead>
-        <tbody>
-          {% for row in coverage.subtopics %}
-            <tr>
-              <td>{{ row.topic_name }}</td>
-              <td>{{ row.subtopic_name }}</td>
-              {% for cell in row.cells %}
-                <td>
-                  {% if cell.state == "empty" %}
-                    <span class="status status-bad">0</span>
-                  {% elif cell.state == "thin" %}
-                    <span class="status status-warn">{{ cell.count }}</span>
-                  {% else %}
-                    <span class="status status-ok">{{ cell.count }}</span>
-                  {% endif %}
-                </td>
-              {% endfor %}
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <p class="note">
-        A question may claim up to three subtopics, so one question can fill a cell in three rows.
-        That is correct: the engine would find it under each of them.
-      </p>
+      {# Filtered on TopicCoverage.is_complete rather than on a second list, so
+         the page and the API cannot disagree about which topics need work. #}
+      {% set complete_topics = coverage.topics | selectattr("is_complete") | list %}
+      <form method="post" action="/coverage/gaps" id="gap-form" class="coverage-form">
+        {% for topic in coverage.topics | rejectattr("is_complete") %}
+          <details class="topic-card" {{ "open" if loop.first }}>
+            <summary class="topic-summary">
+              <span class="topic-head">
+                <span class="topic-name">{{ topic.topic_name }}</span>
+                <span class="topic-meta">
+                  {{ topic.subtopics | length }} subtopic{{ "" if topic.subtopics | length == 1 else "s" }}
+                  · {{ topic.approved_questions }} approved question{{ "" if topic.approved_questions == 1 else "s" }}
+                </span>
+              </span>
+              <span class="topic-cover">
+                <span class="coverage-bar" role="img"
+                      aria-label="{{ topic.ready_cells }} ready, {{ topic.thin_cells }} thin,
+                                  {{ topic.empty_cells }} empty of {{ topic.total_cells }}">
+                  {% if topic.ready_cells %}<span class="bar-ok" style="flex: {{ topic.ready_cells }}"></span>{% endif %}
+                  {% if topic.thin_cells %}<span class="bar-warn" style="flex: {{ topic.thin_cells }}"></span>{% endif %}
+                  {% if topic.empty_cells %}<span class="bar-bad" style="flex: {{ topic.empty_cells }}"></span>{% endif %}
+                </span>
+                <span class="topic-counts">
+                  {{ topic.ready_cells }} / {{ topic.total_cells }} cells ready
+                  {%- if topic.empty_cells %} · {{ topic.empty_cells }} empty{% endif %}
+                  {%- if topic.thin_cells %} · {{ topic.thin_cells }} thin{% endif %}
+                </span>
+              </span>
+              <span class="topic-gaps">
+                <strong>{{ topic.gap_count }} gap{{ "" if topic.gap_count == 1 else "s" }}</strong>
+                <span class="topic-meta">up to {{ topic.questions_needed }} questions</span>
+              </span>
+            </summary>
+
+            <div class="topic-body">
+              <p class="worklist-controls">
+                <button class="button-secondary button-inline" type="button"
+                        data-select-topic="{{ topic.topic_id }}">
+                  Select all {{ topic.gap_count }} gap{{ "" if topic.gap_count == 1 else "s" }}
+                </button>
+                <input type="checkbox" id="showall-{{ topic.topic_id }}" class="worklist-showall">
+                <label for="showall-{{ topic.topic_id }}">Show cells that are already ready</label>
+              </p>
+
+              <div class="worklist-wrap">
+                <table class="table worklist">
+                  <thead>
+                    <tr>
+                      <th>Subtopic &amp; difficulty</th>
+                      <th>Have</th>
+                      <th>State</th>
+                      <th>Select</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in topic.subtopics %}
+                      {% for cell in row.cells %}
+                        <tr class="{{ 'is-ready' if cell.needed == 0 else 'is-gap' }}">
+                          <td>
+                            <span class="worklist-subtopic">{{ row.subtopic_name }}</span>
+                            <span class="worklist-difficulty">· {{ cell.difficulty }}</span>
+                          </td>
+                          <td class="worklist-have">
+                            {{ cell.count }} of {{ coverage.minimum_per_cell }}
+                          </td>
+                          <td>
+                            {% if cell.state == "empty" %}
+                              <span class="status status-bad">none yet</span>
+                            {% elif cell.state == "thin" %}
+                              <span class="status status-warn">needs more</span>
+                            {% else %}
+                              <span class="status status-ok">ready</span>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if cell.needed %}
+                              <label class="worklist-pick">
+                                <input type="checkbox" name="target"
+                                       data-topic="{{ topic.topic_id }}"
+                                       data-needed="{{ cell.needed }}"
+                                       value="{{ row.subtopic_id }}:{{ cell.difficulty }}">
+                                add {{ cell.needed }}
+                              </label>
+                            {% else %}
+                              <span class="worklist-none">—</span>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        {% endfor %}
+
+        {% if complete_topics %}
+          <details class="topic-card topic-card-done">
+            <summary class="topic-summary">
+              <span class="topic-head">
+                <span class="topic-name">Fully covered</span>
+                <span class="topic-meta">
+                  {{ complete_topics | length }} topic{{ "" if complete_topics | length == 1 else "s" }}
+                  with nothing missing
+                </span>
+              </span>
+            </summary>
+            <div class="topic-body">
+              <table class="table">
+                <thead>
+                  <tr><th>Topic</th><th>Subtopics</th><th>Approved questions</th><th>Cells</th></tr>
+                </thead>
+                <tbody>
+                  {% for topic in complete_topics %}
+                    <tr>
+                      <td>{{ topic.topic_name }}</td>
+                      <td>{{ topic.subtopics | length }}</td>
+                      <td>{{ topic.approved_questions }}</td>
+                      <td>
+                        <span class="status status-ok">
+                          {{ topic.total_cells }} / {{ topic.total_cells }} ready
+                        </span>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        {% endif %}
+
+        {% if coverage.gap_count %}
+          <div class="gap-actions">
+            <p class="gap-tally" aria-live="polite">
+              <span id="gap-selected">0</span> of {{ coverage.gap_count }} coverage gaps selected
+              <span class="topic-meta" id="gap-questions"></span>
+            </p>
+            <button class="button" type="submit">Generate candidates</button>
+            <p class="hint">
+              <strong>Not built yet, and it says so.</strong> This reports HTTP 501 rather than
+              starting a run. The generator classifies what it wrote (ADR-031), so
+              it cannot be aimed at a named subtopic.
+              Closing a gap means finding a chunk that teaches it, generating, then checking the
+              claim — and nothing ranks chunks by subtopic yet. Selecting gaps is the only honest
+              half of this workflow that exists.
+            </p>
+          </div>
+        {% endif %}
+      </form>
     </section>
   {% endif %}
 
@@ -204,7 +304,55 @@
   </section>
 
   {{ deferred("Planned for this section", [
+    "Rank textbook chunks by the subtopic they teach, so a selected gap can lead to a generation run instead of a 501.",
     "Report per-set item statistics once students have answered: which questions discriminate, and which are answered correctly by everyone.",
     "Show which cells a running cohort is actually being served from, so a gap the engine works around is visible here too.",
   ]) }}
+
+  <script>
+    // Progressive enhancement only. Without it the checkboxes and the submit
+    // button still post the same form; this adds the running tally and the
+    // per-topic select-all, neither of which changes what is submitted.
+    (function () {
+      var form = document.getElementById("gap-form");
+      if (!form) { return; }
+
+      var picks = Array.prototype.slice.call(form.querySelectorAll("input[name='target']"));
+      var selectedOut = document.getElementById("gap-selected");
+      var questionsOut = document.getElementById("gap-questions");
+
+      function refresh() {
+        var gaps = 0;
+        var questions = 0;
+        picks.forEach(function (box) {
+          if (box.checked) {
+            gaps += 1;
+            questions += parseInt(box.getAttribute("data-needed"), 10) || 0;
+          }
+        });
+        if (selectedOut) { selectedOut.textContent = gaps; }
+        if (questionsOut) {
+          // "Up to", never "exactly": one question may claim three subtopics,
+          // so a single generation can close this many cells at once.
+          questionsOut.textContent = gaps ? "· up to " + questions + " questions to write" : "";
+        }
+      }
+
+      picks.forEach(function (box) { box.addEventListener("change", refresh); });
+
+      form.querySelectorAll("[data-select-topic]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var topicId = button.getAttribute("data-select-topic");
+          var mine = picks.filter(function (box) {
+            return box.getAttribute("data-topic") === topicId;
+          });
+          var turningOn = mine.some(function (box) { return !box.checked; });
+          mine.forEach(function (box) { box.checked = turningOn; });
+          refresh();
+        });
+      });
+
+      refresh();
+    })();
+  </script>
 {% endblock %}

@@ -1,0 +1,749 @@
+<title>Question Coverage</title>
+
+<style>
+  :root {
+    --ground:#F6F7F4; --surface:#FFFFFF; --sunk:#EDEFEA; --sunk-2:#E4E8E1;
+    --ink:#17211F; --ink-2:#3E4B48; --ink-3:#6E7A76; --ink-4:#96A09C;
+    --rule:#DCE0DA; --rule-strong:#C3CAC2;
+    --accent:#0E6E6B; --accent-ink:#0A5250; --accent-soft:#E1EFEC;
+    --none-fg:#A8342C; --none-bg:#FBE9E7; --none-line:#E4B9B3;
+    --few-fg:#8A5A08;  --few-bg:#FBF1DC;  --few-line:#E7D2A4;
+    --good-fg:#1F6B4C; --good-bg:#E2F1E8; --good-line:#BCDCCA;
+    --shadow:0 1px 2px rgba(23,33,31,.05), 0 8px 24px -16px rgba(23,33,31,.28);
+    --font-display: ui-serif,"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --font-body: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,sans-serif;
+    --font-data: ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#11181A; --surface:#192124; --sunk:#0F1618; --sunk-2:#131B1E;
+      --ink:#E7EDEA; --ink-2:#B2BEBA; --ink-3:#7F8D89; --ink-4:#66736F;
+      --rule:#2A3538; --rule-strong:#3B494C;
+      --accent:#4FBFB2; --accent-ink:#7FD6CB; --accent-soft:#15302F;
+      --none-fg:#F0A096; --none-bg:#391E1B; --none-line:#5E302A;
+      --few-fg:#E7B863;  --few-bg:#33270F;  --few-line:#503C1C;
+      --good-fg:#6ECB9E; --good-bg:#14301F; --good-line:#244B31;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#11181A; --surface:#192124; --sunk:#0F1618; --sunk-2:#131B1E;
+    --ink:#E7EDEA; --ink-2:#B2BEBA; --ink-3:#7F8D89; --ink-4:#66736F;
+    --rule:#2A3538; --rule-strong:#3B494C;
+    --accent:#4FBFB2; --accent-ink:#7FD6CB; --accent-soft:#15302F;
+    --none-fg:#F0A096; --none-bg:#391E1B; --none-line:#5E302A;
+    --few-fg:#E7B863;  --few-bg:#33270F;  --few-line:#503C1C;
+    --good-fg:#6ECB9E; --good-bg:#14301F; --good-line:#244B31;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+  }
+
+  body { background:var(--ground); color:var(--ink); font-family:var(--font-body);
+         font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:980px; margin:0 auto; padding:52px 22px 60px;
+          display:flex; flex-direction:column; gap:40px; }
+  h1,h2,h3 { font-family:var(--font-display); font-weight:600; text-wrap:balance; margin:0; }
+  h1 { font-size:clamp(2rem,5vw,2.7rem); line-height:1.1; letter-spacing:-.015em; }
+  h2 { font-size:1.3rem; }
+  h3 { font-size:1rem; }
+  p { margin:0; }
+  code { font-family:var(--font-data); font-size:.88em; }
+  .eyebrow { font-size:.7rem; font-weight:650; letter-spacing:.14em;
+             text-transform:uppercase; color:var(--ink-3); }
+  .note { font-size:.85rem; color:var(--ink-3); max-width:72ch; }
+  :is(a,button,[tabindex]):focus-visible { outline:2px solid var(--accent);
+    outline-offset:2px; border-radius:3px; }
+  .masthead { display:flex; flex-direction:column; gap:14px; }
+  .masthead .rule-line { height:3px; width:64px; background:var(--ink); }
+  .lede { font-size:1.02rem; color:var(--ink-2); max-width:64ch; }
+
+  /* ---- shell --------------------------------------------------------- */
+  .mock { background:var(--surface); border:1px solid var(--rule); border-radius:4px;
+          box-shadow:var(--shadow); overflow:visible; }
+
+  /* ---- LEVEL 1: dataset summary -------------------------------------- */
+  .summary { padding:24px 24px 22px; border-bottom:1px solid var(--rule); background:var(--sunk); }
+  .summary-top { display:flex; flex-wrap:wrap; align-items:flex-start;
+                 justify-content:space-between; gap:14px 20px; }
+  .headline { display:flex; flex-direction:column; gap:2px; }
+  .headline .big { font-family:var(--font-data); font-size:1.7rem; font-weight:650;
+                   font-variant-numeric:tabular-nums; line-height:1.15; color:var(--ink); }
+  .headline .big small { font-size:.95rem; font-weight:500; color:var(--ink-3);
+                         font-family:var(--font-body); margin-left:8px; }
+  .headline .cap { font-size:.72rem; font-weight:650; letter-spacing:.11em;
+                   text-transform:uppercase; color:var(--ink-3); }
+  .chip { display:inline-flex; align-items:center; gap:7px; font-size:.78rem; font-weight:650;
+          padding:4px 12px; border-radius:999px; white-space:nowrap;
+          background:var(--few-bg); color:var(--few-fg); border:1px solid var(--few-line); }
+
+  .bigbar { display:flex; height:12px; gap:2px; margin:16px 0 12px; }
+  .bigbar span { display:block; border-radius:1px; }
+  .h-good { background:var(--good-fg); } .h-few { background:var(--few-fg); }
+  .h-none { background:var(--none-fg); }
+
+  .keys { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:.85rem; color:var(--ink-2); }
+  .keys b { font-family:var(--font-data); font-variant-numeric:tabular-nums;
+            color:var(--ink); font-weight:650; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .dot.d-good { background:var(--good-fg); } .dot.d-few { background:var(--few-fg); }
+  .dot.d-none { background:var(--none-fg); }
+
+  /* ---- LEVEL 2: topic list ------------------------------------------- */
+  .group-head { display:flex; align-items:center; gap:12px; padding:18px 24px 10px; }
+  .group-head h2 { font-size:.75rem; font-family:var(--font-body); font-weight:700;
+                   letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); }
+  .group-head .line { flex:1 1 auto; height:1px; background:var(--rule); }
+
+  .topic { border-top:1px solid var(--rule); }
+  .topic:first-of-type { border-top:none; }
+  .topic-row { display:grid; grid-template-columns:minmax(190px,1.15fr) minmax(190px,1fr) auto;
+               align-items:center; gap:16px 22px; padding:16px 24px; cursor:pointer;
+               background:var(--surface); }
+  .topic-row:hover { background:var(--sunk-2); }
+  .topic.is-open .topic-row { background:var(--sunk-2); }
+
+  .t-id { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .t-id .nm { display:flex; align-items:center; gap:9px; font-size:1.02rem; font-weight:600; }
+  .caret { width:0; height:0; flex:none; border-left:6px solid var(--ink-3);
+           border-top:4.5px solid transparent; border-bottom:4.5px solid transparent;
+           transition:transform .15s ease; }
+  .topic.is-open .caret { transform:rotate(90deg); }
+  .t-id .meta { font-size:.78rem; color:var(--ink-4); padding-left:15px; }
+
+  .t-cov { display:flex; flex-direction:column; gap:5px; }
+  .t-cov .frac { font-size:.85rem; color:var(--ink-2); }
+  .t-cov .frac b { font-family:var(--font-data); font-variant-numeric:tabular-nums;
+                   color:var(--ink); font-weight:650; }
+  .minibar { display:flex; height:8px; gap:2px; }
+  .minibar span { display:block; border-radius:1px; }
+  .t-cov .breakdown { font-size:.8rem; color:var(--ink-2); }
+
+  .t-act { display:flex; flex-direction:column; align-items:flex-end; gap:5px; white-space:nowrap; }
+  .t-act .gapline { font-size:.78rem; color:var(--ink-3); }
+  .t-act .gapline b { color:var(--none-fg); font-weight:650; }
+
+  .btn { -webkit-appearance:none; appearance:none; font:inherit; font-size:.82rem;
+         font-weight:600; padding:7px 15px; border-radius:4px; cursor:pointer;
+         white-space:nowrap; background:var(--surface); color:var(--accent-ink);
+         border:1.5px solid var(--accent); transition:background .12s ease,color .12s ease; }
+  .btn:hover { background:var(--accent-soft); }
+  .btn.is-on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.solid { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.solid:hover { filter:brightness(1.08); }
+  .btn.ghost { border-color:var(--rule-strong); color:var(--ink-3); background:transparent; }
+  .btn.ghost:hover { background:var(--sunk); color:var(--ink-2); }
+  .btn[disabled] { opacity:.35; cursor:not-allowed; }
+
+  .badge-ok { display:inline-flex; align-items:center; gap:6px; font-size:.78rem;
+              font-weight:600; padding:4px 11px; border-radius:999px;
+              background:var(--good-bg); color:var(--good-fg); border:1px solid var(--good-line); }
+
+  /* ---- LEVEL 3: the matrix ------------------------------------------- */
+  .drawer { padding:0 24px 22px 39px; background:var(--sunk); }
+  .topic:not(.is-open) .drawer { display:none; }
+  .drawer-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px;
+                 padding:14px 0 12px; font-size:.82rem; color:var(--ink-3); }
+  .drawer-head .spacer { flex:1 1 auto; }
+  .modelink { -webkit-appearance:none; appearance:none; background:none; border:none;
+              font:inherit; font-size:.8rem; color:var(--accent-ink); cursor:pointer;
+              padding:0; text-decoration:underline; text-underline-offset:3px; }
+  .modestate { font-size:.8rem; color:var(--ink-4); }
+
+  .scroller { overflow-x:auto; }
+  table.mx { border-collapse:collapse; width:100%; min-width:560px;
+             background:var(--surface); border:1px solid var(--rule); border-radius:4px; }
+  table.mx thead th { font-size:.64rem; font-weight:700; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3); padding:10px 12px;
+    border-bottom:1px solid var(--rule); text-align:center; white-space:nowrap; }
+  table.mx thead th.sub { text-align:left; }
+  table.mx thead th.need { text-align:right; }
+  table.mx tbody td { padding:6px 12px; border-bottom:1px solid var(--rule); text-align:center; }
+  table.mx tbody tr:last-child td { border-bottom:none; }
+  table.mx tbody td.sub { text-align:left; font-size:.9rem; font-weight:550;
+                          color:var(--ink); white-space:nowrap; }
+  table.mx tbody td.need { text-align:right; font-family:var(--font-data);
+    font-variant-numeric:tabular-nums; font-size:.85rem; color:var(--none-fg); font-weight:650;
+    white-space:nowrap; }
+  table.mx tbody tr.row-ok td.sub { color:var(--ink-3); font-weight:500; }
+  table.mx tbody tr.row-ok td.need { color:var(--good-fg); font-weight:600; }
+  table.mx tbody tr.is-hidden { display:none; }
+
+  /* a covered cell: quiet, not a control */
+  .mc-ok { display:inline-flex; align-items:baseline; gap:5px; padding:6px 10px;
+           font-family:var(--font-data); font-variant-numeric:tabular-nums;
+           font-size:.92rem; color:var(--good-fg); opacity:.85; }
+  .mc-ok .tick { font-family:var(--font-body); font-size:.85rem; }
+
+  /* a gap cell: a control */
+  .mc { -webkit-appearance:none; appearance:none; font:inherit; cursor:pointer;
+        min-width:74px; padding:7px 10px; border-radius:4px; position:relative;
+        font-family:var(--font-data); font-variant-numeric:tabular-nums;
+        font-size:.92rem; font-weight:650; line-height:1.15;
+        transition:transform .12s ease; }
+  .mc:hover { transform:translateY(-1px); }
+  .mc .of { font-weight:500; opacity:.72; }
+  .mc.part { background:var(--few-bg); border:1.5px solid var(--few-line); color:var(--few-fg); }
+  .mc.none { background:var(--none-bg); border:1.5px dashed var(--none-line); color:var(--none-fg); }
+  .mc.is-on { box-shadow:inset 0 0 0 2px var(--accent), 0 0 0 3px var(--accent-soft); }
+  .mc.is-on::after { content:"✓"; position:absolute; top:-7px; right:-7px;
+    width:17px; height:17px; border-radius:50%; background:var(--accent); color:#fff;
+    font-family:var(--font-body); font-size:.6rem; font-weight:700;
+    display:grid; place-items:center; box-shadow:0 0 0 2px var(--surface); }
+
+  /* ---- collapsed "fully covered" ------------------------------------- */
+  .covered-fold { border-top:1px solid var(--rule); }
+  .covered-head { display:flex; align-items:center; gap:10px; padding:14px 24px;
+                  cursor:pointer; font-size:.85rem; color:var(--ink-3); }
+  .covered-head:hover { background:var(--sunk-2); }
+  .covered-head b { color:var(--ink-2); font-weight:600; }
+  .covered-body { padding:0 24px 16px; display:flex; flex-direction:column; gap:2px; }
+  .covered-fold:not(.is-open) .covered-body { display:none; }
+  .covered-fold:not(.is-open) .caret { transform:none; }
+  .covered-fold.is-open .caret { transform:rotate(90deg); }
+  .covered-item { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px;
+                  padding:9px 0 9px 15px; border-top:1px solid var(--rule);
+                  font-size:.9rem; color:var(--ink-2); }
+  .covered-item .cn { font-weight:600; color:var(--ink); }
+  .covered-item .sp { flex:1 1 auto; }
+
+  /* ---- LEVEL 4: action bar ------------------------------------------- */
+  .actionbar { position:sticky; bottom:0; display:flex; flex-wrap:wrap; align-items:center;
+    gap:10px 18px; padding:14px 24px; background:var(--accent-soft);
+    border-top:1px solid var(--accent); font-size:.9rem; color:var(--ink-2); }
+  .actionbar.is-hidden { display:none; }
+  .actionbar .count { font-family:var(--font-data); font-weight:650;
+                      font-variant-numeric:tabular-nums; color:var(--ink); }
+  .actionbar .spacer { flex:1 1 auto; }
+  .actionbar .flow { flex-basis:100%; font-size:.76rem; color:var(--ink-3); }
+  .actionbar .flow b { color:var(--ink-2); font-weight:600; }
+
+  /* ---- notes --------------------------------------------------------- */
+  .panel { background:var(--surface); border:1px solid var(--rule); border-radius:4px;
+    padding:24px 26px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--shadow); }
+  .panel ul { margin:0; padding-left:20px; display:flex; flex-direction:column; gap:9px; }
+  .panel li { font-size:.92rem; color:var(--ink-2); }
+  .panel li strong { color:var(--ink); }
+  .vocab { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px 26px; }
+  .vocab dt { font-size:.72rem; font-weight:700; letter-spacing:.09em;
+              text-transform:uppercase; color:var(--accent-ink); margin-bottom:3px; }
+  .vocab dd { margin:0; font-size:.87rem; color:var(--ink-2); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; }
+    .mc:hover { transform:none; } }
+  @media (max-width:760px) {
+    .topic-row { grid-template-columns:1fr; }
+    .t-act { align-items:flex-start; }
+    .drawer { padding-left:16px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="rule-line"></div>
+    <p class="eyebrow">Mock-up &middot; not built &middot; placeholder data</p>
+    <h1>Question coverage, third pass</h1>
+    <p class="lede">
+      Deficiencies first, inventory second. The topic list answers <em>where am I missing
+      questions</em>; opening a topic answers <em>exactly which ones</em> as a subtopic &times;
+      difficulty matrix; selecting gaps starts the generation workflow.
+    </p>
+    <p class="note">
+      Numbers are invented. <strong>Loops</strong> starts open. Click any amber or red cell to
+      select that gap, or use a topic's <em>Fill gaps</em> to take all of them at once.
+    </p>
+  </header>
+
+  <div class="mock">
+
+    <!-- ================= LEVEL 1 ================= -->
+    <section class="summary">
+      <div class="summary-top">
+        <div class="headline">
+          <span class="cap">Coverage</span>
+          <span class="big">41 <small>of 66 coverage targets complete</small></span>
+        </div>
+        <span class="chip">Coverage incomplete</span>
+      </div>
+
+      <div class="bigbar" role="img" aria-label="41 targets complete, 15 partial, 10 empty of 66">
+        <span class="h-good" style="flex:41"></span>
+        <span class="h-few"  style="flex:15"></span>
+        <span class="h-none" style="flex:10"></span>
+      </div>
+
+      <div class="keys">
+        <span><span class="dot d-good"></span><b>41</b> complete</span>
+        <span><span class="dot d-few"></span><b>15</b> partial</span>
+        <span><span class="dot d-none"></span><b>10</b> empty</span>
+        <span style="color:var(--ink-3)"><b>151</b> approved questions across 22 subtopics</span>
+      </div>
+      <p class="note" style="margin-top:10px">
+        A coverage target is one subtopic at one difficulty. Each needs <strong>3</strong>
+        questions &mdash; the current setting, not a fixed rule; raise it and every fraction on this
+        page changes with it.
+      </p>
+    </section>
+
+    <!-- ================= LEVEL 2 ================= -->
+    <div class="group-head"><h2>Needs attention</h2><span class="line"></span></div>
+
+    <!-- ---------------- LOOPS (open) ---------------- -->
+    <section class="topic is-open" data-topic="loops">
+      <div class="topic-row" data-toggle>
+        <div class="t-id">
+          <span class="nm"><i class="caret"></i>Loops</span>
+          <span class="meta">3 subtopics &middot; 14 approved questions</span>
+        </div>
+        <div class="t-cov">
+          <span class="frac"><b>4 / 9</b> targets complete</span>
+          <div class="minibar" role="img" aria-label="4 complete, 2 partial, 3 empty of 9">
+            <span class="h-good" style="flex:4"></span>
+            <span class="h-few" style="flex:2"></span>
+            <span class="h-none" style="flex:3"></span>
+          </div>
+          <span class="breakdown">3 empty &middot; 2 partial</span>
+        </div>
+        <div class="t-act">
+          <span class="gapline"><b>5 gaps</b> &middot; up to 12 questions</span>
+          <button type="button" class="btn" data-fill="loops">Fill gaps</button>
+        </div>
+      </div>
+
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="modestate" data-modestate>Showing gaps only</span>
+          <span class="spacer"></span>
+          <button type="button" class="modelink" data-mode>Show all coverage</button>
+        </div>
+        <div class="scroller">
+          <table class="mx">
+            <thead><tr><th class="sub">Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th><th class="need">Needs</th></tr></thead>
+            <tbody>
+              <tr class="row-ok"><td class="sub">for loops</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>5</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td class="need">—</td></tr>
+              <tr><td class="sub">while loops</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><button type="button" class="mc part" data-need="1" data-of="loops" aria-label="while loops, Medium: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="loops" aria-label="while loops, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">4</td></tr>
+              <tr><td class="sub">break and continue</td>
+                <td><button type="button" class="mc part" data-need="2" data-of="loops" aria-label="break and continue, Easy: 1 of 3, needs 2">1<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="loops" aria-label="break and continue, Medium: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="loops" aria-label="break and continue, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">8</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- LISTS ---------------- -->
+    <section class="topic" data-topic="lists">
+      <div class="topic-row" data-toggle>
+        <div class="t-id">
+          <span class="nm"><i class="caret"></i>Lists &amp; Dictionaries</span>
+          <span class="meta">4 subtopics &middot; 24 approved questions</span>
+        </div>
+        <div class="t-cov">
+          <span class="frac"><b>5 / 12</b> targets complete</span>
+          <div class="minibar" role="img" aria-label="5 complete, 5 partial, 2 empty of 12">
+            <span class="h-good" style="flex:5"></span>
+            <span class="h-few" style="flex:5"></span>
+            <span class="h-none" style="flex:2"></span>
+          </div>
+          <span class="breakdown">2 empty &middot; 5 partial</span>
+        </div>
+        <div class="t-act">
+          <span class="gapline"><b>7 gaps</b> &middot; up to 13 questions</span>
+          <button type="button" class="btn" data-fill="lists">Fill gaps</button>
+        </div>
+      </div>
+
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="modestate" data-modestate>Showing gaps only</span>
+          <span class="spacer"></span>
+          <button type="button" class="modelink" data-mode>Show all coverage</button>
+        </div>
+        <div class="scroller">
+          <table class="mx">
+            <thead><tr><th class="sub">Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th><th class="need">Needs</th></tr></thead>
+            <tbody>
+              <tr class="row-ok"><td class="sub">List basics</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>5</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td class="need">—</td></tr>
+              <tr><td class="sub">List methods</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><button type="button" class="mc part" data-need="1" data-of="lists" aria-label="List methods, Medium: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc part" data-need="2" data-of="lists" aria-label="List methods, Hard: 1 of 3, needs 2">1<span class="of">/3</span></button></td>
+                <td class="need">3</td></tr>
+              <tr><td class="sub">Dictionary basics</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><button type="button" class="mc part" data-need="1" data-of="lists" aria-label="Dictionary basics, Medium: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="lists" aria-label="Dictionary basics, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">4</td></tr>
+              <tr><td class="sub">Iterating collections</td>
+                <td><button type="button" class="mc part" data-need="1" data-of="lists" aria-label="Iterating collections, Easy: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc part" data-need="2" data-of="lists" aria-label="Iterating collections, Medium: 1 of 3, needs 2">1<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="lists" aria-label="Iterating collections, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">6</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- FUNCTIONS ---------------- -->
+    <section class="topic" data-topic="funcs">
+      <div class="topic-row" data-toggle>
+        <div class="t-id">
+          <span class="nm"><i class="caret"></i>Functions</span>
+          <span class="meta">4 subtopics &middot; 28 approved questions</span>
+        </div>
+        <div class="t-cov">
+          <span class="frac"><b>7 / 12</b> targets complete</span>
+          <div class="minibar" role="img" aria-label="7 complete, 3 partial, 2 empty of 12">
+            <span class="h-good" style="flex:7"></span>
+            <span class="h-few" style="flex:3"></span>
+            <span class="h-none" style="flex:2"></span>
+          </div>
+          <span class="breakdown">2 empty &middot; 3 partial</span>
+        </div>
+        <div class="t-act">
+          <span class="gapline"><b>5 gaps</b> &middot; up to 10 questions</span>
+          <button type="button" class="btn" data-fill="funcs">Fill gaps</button>
+        </div>
+      </div>
+
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="modestate" data-modestate>Showing gaps only</span>
+          <span class="spacer"></span>
+          <button type="button" class="modelink" data-mode>Show all coverage</button>
+        </div>
+        <div class="scroller">
+          <table class="mx">
+            <thead><tr><th class="sub">Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th><th class="need">Needs</th></tr></thead>
+            <tbody>
+              <tr><td class="sub">Defining functions</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>6</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><button type="button" class="mc part" data-need="1" data-of="funcs" aria-label="Defining functions, Hard: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td class="need">1</td></tr>
+              <tr><td class="sub">Parameters and arguments</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><button type="button" class="mc part" data-need="2" data-of="funcs" aria-label="Parameters and arguments, Hard: 1 of 3, needs 2">1<span class="of">/3</span></button></td>
+                <td class="need">2</td></tr>
+              <tr class="row-ok"><td class="sub">Return values</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td class="need">—</td></tr>
+              <tr><td class="sub">Variable scope</td>
+                <td><button type="button" class="mc part" data-need="1" data-of="funcs" aria-label="Variable scope, Easy: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="funcs" aria-label="Variable scope, Medium: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="funcs" aria-label="Variable scope, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">7</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- CONTROL FLOW ---------------- -->
+    <section class="topic" data-topic="flow">
+      <div class="topic-row" data-toggle>
+        <div class="t-id">
+          <span class="nm"><i class="caret"></i>Control Flow</span>
+          <span class="meta">3 subtopics &middot; 22 approved questions</span>
+        </div>
+        <div class="t-cov">
+          <span class="frac"><b>5 / 9</b> targets complete</span>
+          <div class="minibar" role="img" aria-label="5 complete, 2 partial, 2 empty of 9">
+            <span class="h-good" style="flex:5"></span>
+            <span class="h-few" style="flex:2"></span>
+            <span class="h-none" style="flex:2"></span>
+          </div>
+          <span class="breakdown">2 empty &middot; 2 partial</span>
+        </div>
+        <div class="t-act">
+          <span class="gapline"><b>4 gaps</b> &middot; up to 9 questions</span>
+          <button type="button" class="btn" data-fill="flow">Fill gaps</button>
+        </div>
+      </div>
+
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="modestate" data-modestate>Showing gaps only</span>
+          <span class="spacer"></span>
+          <button type="button" class="modelink" data-mode>Show all coverage</button>
+        </div>
+        <div class="scroller">
+          <table class="mx">
+            <thead><tr><th class="sub">Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th><th class="need">Needs</th></tr></thead>
+            <tbody>
+              <tr class="row-ok"><td class="sub">if / elif / else</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>7</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>5</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td class="need">—</td></tr>
+              <tr><td class="sub">Comparison operators</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="flow" aria-label="Comparison operators, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">3</td></tr>
+              <tr><td class="sub">Nested conditionals</td>
+                <td><button type="button" class="mc part" data-need="1" data-of="flow" aria-label="Nested conditionals, Easy: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc part" data-need="2" data-of="flow" aria-label="Nested conditionals, Medium: 1 of 3, needs 2">1<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="flow" aria-label="Nested conditionals, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">6</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- VARIABLES ---------------- -->
+    <section class="topic" data-topic="vars">
+      <div class="topic-row" data-toggle>
+        <div class="t-id">
+          <span class="nm"><i class="caret"></i>Variables &amp; Data Types</span>
+          <span class="meta">4 subtopics &middot; 30 approved questions</span>
+        </div>
+        <div class="t-cov">
+          <span class="frac"><b>8 / 12</b> targets complete</span>
+          <div class="minibar" role="img" aria-label="8 complete, 3 partial, 1 empty of 12">
+            <span class="h-good" style="flex:8"></span>
+            <span class="h-few" style="flex:3"></span>
+            <span class="h-none" style="flex:1"></span>
+          </div>
+          <span class="breakdown">1 empty &middot; 3 partial</span>
+        </div>
+        <div class="t-act">
+          <span class="gapline"><b>4 gaps</b> &middot; up to 7 questions</span>
+          <button type="button" class="btn" data-fill="vars">Fill gaps</button>
+        </div>
+      </div>
+
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="modestate" data-modestate>Showing gaps only</span>
+          <span class="spacer"></span>
+          <button type="button" class="modelink" data-mode>Show all coverage</button>
+        </div>
+        <div class="scroller">
+          <table class="mx">
+            <thead><tr><th class="sub">Subtopic</th><th>Easy</th><th>Medium</th><th>Hard</th><th class="need">Needs</th></tr></thead>
+            <tbody>
+              <tr class="row-ok"><td class="sub">Numbers and arithmetic</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>6</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td class="need">—</td></tr>
+              <tr><td class="sub">Strings and text</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>5</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><button type="button" class="mc part" data-need="2" data-of="vars" aria-label="Strings and text, Hard: 1 of 3, needs 2">1<span class="of">/3</span></button></td>
+                <td class="need">2</td></tr>
+              <tr><td class="sub">Type conversion</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>4</span></td>
+                <td><button type="button" class="mc part" data-need="1" data-of="vars" aria-label="Type conversion, Medium: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td><button type="button" class="mc none" data-need="3" data-of="vars" aria-label="Type conversion, Hard: 0 of 3, needs 3">0<span class="of">/3</span></button></td>
+                <td class="need">4</td></tr>
+              <tr><td class="sub">Booleans</td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><span class="mc-ok"><i class="tick">✓</i>3</span></td>
+                <td><button type="button" class="mc part" data-need="1" data-of="vars" aria-label="Booleans, Hard: 2 of 3, needs 1">2<span class="of">/3</span></button></td>
+                <td class="need">1</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- FULLY COVERED ---------------- -->
+    <div class="covered-fold">
+      <div class="covered-head" data-covered>
+        <i class="caret"></i><b>Fully covered</b> &mdash; 2 topics, 12 targets, nothing to do
+      </div>
+      <div class="covered-body">
+        <div class="covered-item">
+          <span class="cn">Input &amp; Output</span>
+          <span>2 subtopics &middot; 18 approved questions</span>
+          <span class="sp"></span>
+          <span class="badge-ok">6 / 6 complete</span>
+        </div>
+        <div class="covered-item">
+          <span class="cn">Comments &amp; Style</span>
+          <span>2 subtopics &middot; 15 approved questions</span>
+          <span class="sp"></span>
+          <span class="badge-ok">6 / 6 complete</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= LEVEL 4 ================= -->
+    <div class="actionbar is-hidden" id="bar">
+      <span><span class="count" id="b-gaps">0</span> coverage gaps selected</span>
+      <span style="color:var(--ink-3)">&middot; up to <span class="count" id="b-q">0</span> questions</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" id="b-clear">Clear</button>
+      <button type="button" class="btn solid" id="b-go">Generate candidates →</button>
+      <span class="flow">
+        Next: <b>find textbook chunks</b> that teach these → <b>generate candidates</b> →
+        <b>validate &amp; judge</b> → <b>recheck coverage</b>. What actually lands in these cells is
+        decided at the last step, not this one.
+      </span>
+    </div>
+  </div>
+
+  <!-- ================= NOTES ================= -->
+  <section class="panel">
+    <h2>The words, fixed in one place</h2>
+    <dl class="vocab">
+      <div><dt>Question</dt><dd>One approved question in the bank.</dd></div>
+      <div><dt>Coverage target</dt><dd>One subtopic at one difficulty. 66 of them here.</dd></div>
+      <div><dt>Gap</dt><dd>A coverage target holding fewer questions than the target count.</dd></div>
+      <div><dt>Candidate</dt><dd>A newly generated question, not yet validated or approved.</dd></div>
+    </dl>
+    <p class="note">
+      No "boxes", "slots", "cells to fill" or "queued items" anywhere on the page. Those were mine
+      and they were implementation words leaking into the interface.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Three things worth arguing about</h2>
+    <ul>
+      <li><strong>"Up to 12 questions", not "12 questions needed."</strong> A question may claim up
+        to three subtopics, so one generation can close a gap in three rows at once. Summing the
+        deficits gives an upper bound; the true minimum could be a third of it. That's why
+        <em>gaps</em> is the unit everywhere and questions is the hedge.</li>
+      <li><strong>The target of 3 is a setting, not a law.</strong> It is
+        <code>MIN_QUESTIONS_PER_CELL</code>, and <code>build_coverage_report</code> already takes it
+        as a parameter. Every <code>2 / 3</code> and <code>✓ 6</code> on this page is derived from
+        it &mdash; set it to 10 and most of the green turns amber. The page states the number rather
+        than assuming everyone knows it.</li>
+      <li><strong>Covered cells stay as a faint <span style="color:var(--good-fg)">✓ 5</span>, never
+        an em-dash.</strong> A dash reads as "no data", which is the one thing a covered cell is
+        not. In gaps-only mode whole clean rows drop out; the surviving rows keep their ticks so the
+        row still reads as a row.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>Still open</h2>
+    <ul>
+      <li><strong>What "Generate candidates" actually opens.</strong> Per ADR-031 the generator
+        picks its own topic and subtopics from a chunk you choose. So this button leads to a chunk
+        picker, not a generation run &mdash; and something has to rank chunks by how likely they are
+        to teach the selected subtopics. That ranking does not exist yet and is the real work behind
+        this screen.</li>
+      <li><strong>Sort order of "Needs attention".</strong> Currently worst-first by empty targets,
+        then by gap count. Taxonomy order is the alternative and is more predictable term to term.</li>
+      <li><strong>Whether a professor can raise the target per topic.</strong> A capstone topic may
+        deserve 6; an introductory one 2. The report already accepts a single
+        <code>minimum_per_cell</code>; per-topic would be a schema change.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    var bar = document.getElementById("bar");
+    var gapsOut = document.getElementById("b-gaps");
+    var qOut = document.getElementById("b-q");
+    var clearBtn = document.getElementById("b-clear");
+    var cells = Array.prototype.slice.call(document.querySelectorAll(".mc[data-need]"));
+
+    function refresh() {
+      var gaps = 0, questions = 0;
+      cells.forEach(function (c) {
+        if (c.classList.contains("is-on")) {
+          gaps += 1;
+          questions += parseInt(c.getAttribute("data-need"), 10) || 0;
+        }
+      });
+      gapsOut.textContent = gaps;
+      qOut.textContent = questions;
+      bar.classList.toggle("is-hidden", gaps === 0);
+
+      document.querySelectorAll("[data-fill]").forEach(function (btn) {
+        var key = btn.getAttribute("data-fill");
+        var mine = cells.filter(function (c) { return c.getAttribute("data-of") === key; });
+        var all = mine.length > 0 && mine.every(function (c) { return c.classList.contains("is-on"); });
+        btn.classList.toggle("is-on", all);
+        btn.textContent = all ? "All gaps selected" : "Fill gaps";
+      });
+    }
+
+    function setCell(c, on) {
+      c.classList.toggle("is-on", on);
+      c.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+
+    cells.forEach(function (c) {
+      c.setAttribute("aria-pressed", "false");
+      c.addEventListener("click", function (e) {
+        e.stopPropagation();
+        setCell(c, !c.classList.contains("is-on"));
+        refresh();
+      });
+    });
+
+    document.querySelectorAll("[data-fill]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var key = btn.getAttribute("data-fill");
+        var mine = cells.filter(function (c) { return c.getAttribute("data-of") === key; });
+        var on = !btn.classList.contains("is-on");
+        mine.forEach(function (c) { setCell(c, on); });
+        if (on) btn.closest(".topic").classList.add("is-open");
+        refresh();
+      });
+    });
+
+    document.querySelectorAll("[data-toggle]").forEach(function (row) {
+      row.addEventListener("click", function () {
+        row.closest(".topic").classList.toggle("is-open");
+      });
+    });
+
+    document.querySelectorAll("[data-mode]").forEach(function (link) {
+      var drawer = link.closest(".drawer");
+      var state = drawer.querySelector("[data-modestate]");
+      var okRows = drawer.querySelectorAll("tr.row-ok");
+      var showingAll = false;
+      function apply() {
+        okRows.forEach(function (r) { r.classList.toggle("is-hidden", !showingAll); });
+        state.textContent = showingAll ? "Showing all coverage" : "Showing gaps only";
+        link.textContent = showingAll ? "Show gaps only" : "Show all coverage";
+      }
+      link.addEventListener("click", function (e) {
+        e.stopPropagation();
+        showingAll = !showingAll;
+        apply();
+      });
+      apply();
+    });
+
+    var fold = document.querySelector(".covered-fold");
+    fold.querySelector("[data-covered]").addEventListener("click", function () {
+      fold.classList.toggle("is-open");
+    });
+
+    clearBtn.addEventListener("click", function () {
+      cells.forEach(function (c) { setCell(c, false); });
+      refresh();
+    });
+
+    refresh();
+  })();
+</script>
