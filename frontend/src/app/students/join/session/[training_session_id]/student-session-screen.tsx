@@ -25,7 +25,9 @@ import {
   ArrowUpRight,
   CheckCircle2,
   CircleDashed,
+  Flame,
   GripVertical,
+  Lightbulb,
   XCircle,
 } from "lucide-react";
 import type { Route } from "next";
@@ -38,15 +40,30 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api/client";
 import {
   useAnswerAttempt,
   useEndTrainingSession,
   useNextQuestion,
+  useQuestion,
+  useStudentProgress,
   useTrainingSession,
 } from "@/lib/api/queries";
-import type { AnsweredOut, ServedQuestionOut } from "@/lib/api/types";
+import type {
+  AnsweredOut,
+  AttemptOut,
+  QuestionDetail,
+  ServedQuestionOut,
+  StudentProgressOut,
+} from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 function scoreTone(score: number) {
@@ -109,6 +126,334 @@ function questionTypeLabel(questionType: ServedQuestionOut["question_type"]) {
   return questionType ? questionType.replace(/_/g, " ") : "";
 }
 
+function attemptTone(attempt: AttemptOut) {
+  if (attempt.score === null) return "current";
+  if (attempt.score >= 100) return "success";
+  if (attempt.score > 0) return "warn";
+  return "error";
+}
+
+function masteryPercent(value: number) {
+  return Math.max(0, Math.min(100, value * 100));
+}
+
+function weaknessPercent(value: number) {
+  return Math.max(0, Math.min(100, value * 100));
+}
+
+/**
+ * The stored ``content`` dict carries the answer key -- ``correct_option_index``,
+ * ``correct_answer``, ``expected_output``, ``correct_order`` -- which is why the
+ * student-facing serve schema never publishes it (see `ServedQuestionOut`). Once a
+ * question is answered there is nothing left to protect, so this same field is
+ * read back here to show the student what was actually correct.
+ */
+function answerKeyContent(detail: QuestionDetail): Record<string, unknown> {
+  return (detail.content ?? {}) as Record<string, unknown>;
+}
+
+function parsonsCorrectBlocks(content: Record<string, unknown>): ParsonsBlock[] {
+  const rawBlocks = Array.isArray(content.blocks)
+    ? (content.blocks as Array<{ id?: unknown; text?: unknown; indent?: unknown }>)
+    : [];
+  const order = Array.isArray(content.correct_order) ? (content.correct_order as unknown[]) : [];
+  const byId = new Map(
+    rawBlocks
+      .filter((block) => typeof block.id === "string")
+      .map((block) => [block.id as string, block]),
+  );
+  return order
+    .filter((id): id is string => typeof id === "string")
+    .map((id) => byId.get(id))
+    .filter((block): block is { id?: unknown; text?: unknown; indent?: unknown } => Boolean(block))
+    .map((block) => ({
+      id: String(block.id),
+      text: typeof block.text === "string" ? block.text : "",
+      indent: typeof block.indent === "number" ? block.indent : 0,
+    }));
+}
+
+function MultipleChoiceReview({
+  content,
+  submittedAnswer,
+}: {
+  content: Record<string, unknown>;
+  submittedAnswer?: string;
+}) {
+  const options = Array.isArray(content.options)
+    ? (content.options as unknown[]).filter(
+        (option): option is string => typeof option === "string",
+      )
+    : [];
+  const correctIndex =
+    typeof content.correct_option_index === "number" ? content.correct_option_index : null;
+  if (options.length === 0 || correctIndex === null) return null;
+  const chosenIndex =
+    submittedAnswer !== undefined && submittedAnswer.trim() !== ""
+      ? Number.parseInt(submittedAnswer, 10)
+      : null;
+
+  return (
+    <div className="space-y-2">
+      {options.map((option, index) => {
+        const isCorrect = index === correctIndex;
+        const isChosenWrong = chosenIndex === index && !isCorrect;
+        return (
+          <div
+            key={option}
+            className={cn(
+              "flex items-center justify-between gap-3 rounded-[0.9rem] border px-3 py-2 text-sm",
+              isCorrect
+                ? "border-emerald-500/35 bg-emerald-50 text-emerald-900"
+                : isChosenWrong
+                  ? "border-rose-500/30 bg-rose-50 text-rose-900"
+                  : "border-border/60 bg-muted/10 text-foreground",
+            )}
+          >
+            <span>
+              {String.fromCharCode(65 + index)}. {option}
+            </span>
+            <span className="flex shrink-0 items-center gap-1 text-xs font-medium">
+              {isCorrect ? (
+                <>
+                  <CheckCircle2 className="size-3.5" /> Correct answer
+                </>
+              ) : null}
+              {isChosenWrong ? (
+                <>
+                  <XCircle className="size-3.5" /> Your answer
+                </>
+              ) : null}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TrueFalseReview({
+  content,
+  submittedAnswer,
+}: {
+  content: Record<string, unknown>;
+  submittedAnswer?: string;
+}) {
+  const correct = content.correct_answer;
+  if (typeof correct !== "boolean") return null;
+  const correctLabel = correct ? "True" : "False";
+  const submittedNormalized = submittedAnswer?.trim().toLowerCase();
+  const submittedLabel =
+    submittedNormalized === "true" ? "True" : submittedNormalized === "false" ? "False" : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <Badge variant="secondary">Correct answer: {correctLabel}</Badge>
+      {submittedLabel && submittedLabel !== correctLabel ? (
+        <Badge variant="destructive">Your answer: {submittedLabel}</Badge>
+      ) : null}
+    </div>
+  );
+}
+
+function OutputPredictionReview({
+  content,
+  submittedAnswer,
+}: {
+  content: Record<string, unknown>;
+  submittedAnswer?: string;
+}) {
+  const expected = typeof content.expected_output === "string" ? content.expected_output : null;
+  if (expected === null) return null;
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-1">
+        <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Expected output
+        </div>
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-6 text-foreground">
+          {expected}
+        </pre>
+      </div>
+      {submittedAnswer !== undefined ? (
+        <div className="space-y-1">
+          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            Your output
+          </div>
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-6 text-foreground">
+            {submittedAnswer.trim() === "" ? "(nothing submitted)" : submittedAnswer}
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ParsonsReview({ content }: { content: Record<string, unknown> }) {
+  const blocks = parsonsCorrectBlocks(content);
+  if (blocks.length === 0) return null;
+
+  return (
+    <div className="space-y-1">
+      <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        Correct order
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-6 text-foreground">
+        {renderParsonsPreview(blocks)}
+      </pre>
+    </div>
+  );
+}
+
+function ReferenceSolutionBlock({ detail }: { detail: QuestionDetail }) {
+  return (
+    <>
+      {detail.reference_solution ? (
+        <div className="space-y-2">
+          <div className="font-medium text-sm text-foreground">Reference solution</div>
+          <pre className="overflow-x-auto rounded-[1rem] border border-border/70 bg-slate-950 p-4 font-mono text-[13px] leading-6 text-slate-50">
+            {detail.reference_solution}
+          </pre>
+        </div>
+      ) : null}
+
+      {detail.tests ? (
+        <div className="space-y-2">
+          <div className="font-medium text-sm text-foreground">Tests</div>
+          <pre className="overflow-x-auto rounded-[1rem] border border-border/70 bg-muted/20 p-4 font-mono text-[13px] leading-6 text-foreground">
+            {detail.tests}
+          </pre>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * What was actually correct, read back from an answered question. Shared by the
+ * in-flow result card (which also knows what the student submitted) and the past
+ * question sheet (which only knows the question, not the historical submission).
+ */
+function AnswerReview({
+  detail,
+  submittedAnswer,
+}: {
+  detail: QuestionDetail;
+  submittedAnswer?: string;
+}) {
+  const content = answerKeyContent(detail);
+  const questionType = detail.question.question_type;
+  // For MCQ / true-false / output-prediction / parsons the stored "reference
+  // solution" is just the correct option/answer/order restated -- already shown
+  // above by the type-specific review, so showing it again would be redundant.
+  // It carries new information only for the executable formats.
+  const showReferenceSolution =
+    questionType === null ||
+    questionType === "code_completion" ||
+    questionType === "debugging" ||
+    questionType === "coding";
+
+  return (
+    <div className="space-y-4">
+      {questionType === "multiple_choice" ? (
+        <MultipleChoiceReview content={content} submittedAnswer={submittedAnswer} />
+      ) : null}
+      {questionType === "true_false" ? (
+        <TrueFalseReview content={content} submittedAnswer={submittedAnswer} />
+      ) : null}
+      {questionType === "output_prediction" ? (
+        <OutputPredictionReview content={content} submittedAnswer={submittedAnswer} />
+      ) : null}
+      {questionType === "parsons" ? <ParsonsReview content={content} /> : null}
+      {showReferenceSolution ? <ReferenceSolutionBlock detail={detail} /> : null}
+    </div>
+  );
+}
+
+function PastQuestionSheet({
+  attempt,
+  detail,
+  isOpen,
+  onOpenChange,
+}: {
+  attempt: AttemptOut | null;
+  detail: QuestionDetail | null;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const isAnsweredAttempt = attempt?.score !== null;
+
+  return (
+    <Sheet open={isOpen} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full max-w-2xl overflow-y-auto border-l border-border bg-background p-0 sm:max-w-2xl"
+      >
+        <SheetHeader className="border-b border-border/70 px-5 py-4">
+          <SheetTitle>{attempt ? `Question ${attempt.ordinal}` : "Past question"}</SheetTitle>
+          <SheetDescription>
+            Review a past question, then close this panel to continue the current session.
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="space-y-5 px-5 py-5">
+          {attempt ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">Attempt #{attempt.id}</Badge>
+              <Badge variant="outline">{attempt.served_difficulty}</Badge>
+              {attempt.question_type ? (
+                <Badge variant="outline" className="capitalize">
+                  {questionTypeLabel(attempt.question_type)}
+                </Badge>
+              ) : null}
+              <Badge
+                variant={
+                  attempt.score === null
+                    ? "outline"
+                    : attempt.score >= 100
+                      ? "secondary"
+                      : attempt.score > 0
+                        ? "outline"
+                        : "destructive"
+                }
+              >
+                {attempt.score === null ? "Open" : `${attempt.score.toFixed(0)} / 100`}
+              </Badge>
+            </div>
+          ) : null}
+
+          {detail ? (
+            <>
+              <div className="space-y-2">
+                <div className="font-medium text-sm text-foreground">
+                  {detail.taxonomy.topic}
+                  {detail.taxonomy.subtopics.length > 0
+                    ? ` - ${detail.taxonomy.subtopics.join(", ")}`
+                    : ""}
+                </div>
+                <div className="whitespace-pre-wrap rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-sm leading-7 text-foreground">
+                  {detail.question.prompt}
+                </div>
+              </div>
+
+              {!isAnsweredAttempt ? (
+                <div className="rounded-[1rem] border border-amber-500/25 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  This question is still active in the session, so its solution details are hidden.
+                </div>
+              ) : (
+                <AnswerReview detail={detail} />
+              )}
+            </>
+          ) : (
+            <div className="text-muted-foreground text-sm">Loading question details…</div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function parseParsonsAnswer(blocks: ParsonsBlock[], answer: string) {
   const blockById = new Map(blocks.map((block) => [block.id, block]));
   const requestedLayout = answer
@@ -144,7 +489,15 @@ function SortableParsonsBlock({
   block: ParsonsBlock;
   onIndentChange: (blockId: string, nextIndent: number) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id: block.id,
   });
 
@@ -162,22 +515,19 @@ function SortableParsonsBlock({
           "scale-[1.015] border-primary/40 shadow-[0_20px_50px_-24px_rgb(19_26_28_/_0.35)]",
       )}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        type="button"
-        className={cn(
-          "flex items-start gap-2.5 rounded-[0.95rem] px-2.5 py-2.5 text-left",
-          "cursor-grab active:cursor-grabbing",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-        )}
-        aria-label={`Move block ${block.id}`}
-      >
+      <div className={cn("flex items-start gap-2.5 rounded-[0.95rem] px-2.5 py-2.5 text-left")}>
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <div className="mt-0.5 flex shrink-0 flex-col items-center">
-            <div className="rounded-full bg-muted p-0.5 text-muted-foreground transition-colors group-hover:bg-accent group-hover:text-accent-foreground">
+            <button
+              {...attributes}
+              {...listeners}
+              ref={setActivatorNodeRef}
+              type="button"
+              className="cursor-grab rounded-full bg-muted p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 active:cursor-grabbing"
+              aria-label={`Move block ${block.id}`}
+            >
               <GripVertical className="size-3.5" />
-            </div>
+            </button>
           </div>
           <div className="min-w-0 flex-1 space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -229,7 +579,7 @@ function SortableParsonsBlock({
             </div>
           </div>
         </div>
-      </button>
+      </div>
     </div>
   );
 }
@@ -509,6 +859,12 @@ function AnswerForm({
             id={`answer-${question.attempt_id}`}
             value={answer}
             onChange={(event) => onAnswerChange(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                onSubmit();
+              }
+            }}
             rows={question.question_type === "output_prediction" ? 6 : 14}
             className="rounded-[1.2rem] border-border/80 bg-card/85 px-4 py-3 text-sm leading-7 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]"
             placeholder={
@@ -517,6 +873,9 @@ function AnswerForm({
                 : "Write your answer here"
             }
           />
+          <p className="text-xs text-muted-foreground">
+            Tip: press Ctrl+Enter (⌘+Enter on Mac) to submit without leaving the keyboard.
+          </p>
         </div>
       )}
 
@@ -542,7 +901,17 @@ function AnswerForm({
   );
 }
 
-function ResultCard({ result, onNext }: { result: AnsweredOut; onNext: () => void }) {
+function ResultCard({
+  result,
+  detail,
+  submittedAnswer,
+  onNext,
+}: {
+  result: AnsweredOut;
+  detail: QuestionDetail | null;
+  submittedAnswer: string;
+  onNext: () => void;
+}) {
   const tone = scoreTone(result.score);
   const Icon = resultIcon(result.score);
   const badgeVariant =
@@ -593,12 +962,9 @@ function ResultCard({ result, onNext }: { result: AnsweredOut; onNext: () => voi
         </div>
       </CardHeader>
       <CardContent className="space-y-5 px-5 pb-5 sm:px-6">
-
         {result.detail ? (
-          <div className="rounded-[1.1rem] border border-border/70 bg-muted/15 px-4 py-3">
-            <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              Feedback
-            </div>
+          <div className="space-y-1.5">
+            <div className="font-medium text-foreground text-sm">Feedback</div>
             <pre className="overflow-x-auto whitespace-pre-wrap text-sm leading-7 text-foreground">
               {result.detail}
             </pre>
@@ -609,9 +975,9 @@ function ResultCard({ result, onNext }: { result: AnsweredOut; onNext: () => voi
           <div className="space-y-2.5">
             <div className="flex items-center justify-between gap-3">
               <span className="font-medium text-foreground text-sm">Topic mastery</span>
-              <span>
-                {result.mastery_before.toFixed(3)} →{" "}
-                <strong>{result.mastery_after.toFixed(3)}</strong>
+              <span className="text-muted-foreground text-sm">
+                {result.mastery_before.toFixed(3)} to{" "}
+                <strong className="text-foreground">{result.mastery_after.toFixed(3)}</strong>
               </span>
             </div>
             <Progress
@@ -621,6 +987,94 @@ function ResultCard({ result, onNext }: { result: AnsweredOut; onNext: () => voi
           </div>
         ) : null}
 
+        <div className="space-y-3 border-t border-border/60 pt-4">
+          <div className="flex items-center gap-2 font-medium text-foreground text-sm">
+            <Lightbulb className="size-4 text-primary" />
+            What was correct
+          </div>
+          {detail ? (
+            <AnswerReview detail={detail} submittedAnswer={submittedAnswer} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Loading the correct answer…</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProgressSidebar({ progress }: { progress: StudentProgressOut }) {
+  const weakestSubtopics = useMemo(
+    () => [...progress.subtopics].sort((left, right) => right.weakness - left.weakness).slice(0, 5),
+    [progress.subtopics],
+  );
+
+  return (
+    <Card className="border-border/70 bg-white/85">
+      <CardContent className="divide-y divide-border/60 py-0">
+        <div className="flex items-center gap-6 py-4 first:pt-5">
+          <div>
+            <div className="text-muted-foreground text-xs">Answered</div>
+            <div className="font-heading text-2xl font-semibold text-foreground">
+              {progress.answered}
+            </div>
+          </div>
+          {progress.average_score !== null ? (
+            <div>
+              <div className="text-muted-foreground text-xs">Average score</div>
+              <div className="font-heading text-2xl font-semibold text-foreground">
+                {progress.average_score.toFixed(0)}
+                <span className="ml-1 font-sans text-muted-foreground text-sm">/100</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-3 py-4">
+          <div className="font-medium text-foreground text-sm">Topic mastery</div>
+          {progress.topics.length === 0 ? (
+            <p className="text-muted-foreground text-xs">
+              Mastery appears here once a question has been scored.
+            </p>
+          ) : (
+            progress.topics.map((topic) => (
+              <div key={topic.topic_id} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium text-foreground">{topic.topic_name}</span>
+                  <Badge
+                    variant={topic.band === "high" ? "secondary" : "outline"}
+                    className="text-[10px]"
+                  >
+                    {topic.band}
+                  </Badge>
+                </div>
+                <Progress value={masteryPercent(topic.p_known)} className="h-1.5" />
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="space-y-3 py-4 last:pb-5">
+          <div>
+            <div className="font-medium text-foreground text-sm">Focus areas</div>
+            <p className="text-muted-foreground text-xs">
+              What the adaptive engine is weighting most heavily for you right now.
+            </p>
+          </div>
+          {weakestSubtopics.length === 0 ? (
+            <p className="text-muted-foreground text-xs">No weak spots measured yet.</p>
+          ) : (
+            weakestSubtopics.map((subtopic) => (
+              <div key={subtopic.subtopic_id} className="space-y-1.5">
+                <div className="text-xs">
+                  <span className="font-medium text-foreground">{subtopic.subtopic_name}</span>
+                  <span className="text-muted-foreground"> · {subtopic.topic_name}</span>
+                </div>
+                <Progress value={weaknessPercent(subtopic.weakness)} className="h-1.5" />
+              </div>
+            ))
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -629,14 +1083,25 @@ function ResultCard({ result, onNext }: { result: AnsweredOut; onNext: () => voi
 export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId: number }) {
   const router = useRouter();
   const session = useTrainingSession(trainingSessionId);
+  const progress = useStudentProgress(session.data?.student_id ?? null, {
+    enabled: session.data !== undefined,
+  });
   const endTrainingSession = useEndTrainingSession();
   const answerAttempt = useAnswerAttempt();
 
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<AnsweredOut | null>(null);
+  const [lastAnswer, setLastAnswer] = useState("");
+  const [selectedPastAttempt, setSelectedPastAttempt] = useState<AttemptOut | null>(null);
 
   const currentQuestion = useNextQuestion(trainingSessionId, {
     enabled: session.data?.ended_at === null && result === null,
+  });
+  const selectedPastQuestion = useQuestion(selectedPastAttempt?.question_id ?? null, {
+    enabled: selectedPastAttempt !== null,
+  });
+  const answeredQuestion = useQuestion(result?.question_id ?? null, {
+    enabled: result !== null,
   });
 
   const unavailable =
@@ -644,15 +1109,42 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     currentQuestion.error.code === "no_question_available"
       ? currentQuestion.error
       : null;
+  const sessionAttempts = useMemo(
+    () =>
+      (progress.data?.recent_attempts ?? [])
+        .filter((attempt) => attempt.session_id === trainingSessionId)
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .slice(-10),
+    [progress.data?.recent_attempts, trainingSessionId],
+  );
+  const revisitAttempts = useMemo(
+    () => sessionAttempts.filter((attempt) => attempt.score !== null),
+    [sessionAttempts],
+  );
+  const pendingCount = sessionAttempts.filter((attempt) => attempt.score === null).length;
+  const currentStreak = useMemo(() => {
+    let streak = 0;
+    for (let index = revisitAttempts.length - 1; index >= 0; index -= 1) {
+      const score = revisitAttempts[index].score;
+      if (score !== null && score >= 80) {
+        streak += 1;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [revisitAttempts]);
 
   const submitAnswer = async () => {
     if (!currentQuestion.data || answer.trim().length === 0) return;
+    const submitted = answer;
     try {
       const scored = await answerAttempt.mutateAsync({
         attemptId: currentQuestion.data.attempt_id,
-        body: { answer },
+        body: { answer: submitted },
       });
       setResult(scored);
+      setLastAnswer(submitted);
       setAnswer("");
     } catch {
       // Mutation state renders the error.
@@ -680,172 +1172,286 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
       {session.isError ? <QueryError error={session.error} /> : null}
 
       {session.data ? (
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 pb-8">
-          <section className="rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
-                    Run #{session.data.id}
-                  </Badge>
-                  <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
-                    {session.data.answered_count} answered
-                  </Badge>
-                  <span className="text-muted-foreground text-sm">
-                    Started {learnerDate(session.data.created_at)}
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  <div className="font-medium text-muted-foreground text-sm">
-                    {session.data.student_name
-                      ? `${session.data.student_name}'s workspace`
-                      : "Training workspace"}
+        <div className="mx-auto grid w-full max-w-6xl gap-5 pb-8 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
+          <PastQuestionSheet
+            attempt={selectedPastAttempt}
+            detail={selectedPastQuestion.data ?? null}
+            isOpen={selectedPastAttempt !== null}
+            onOpenChange={(open) => {
+              if (!open) {
+                setSelectedPastAttempt(null);
+              }
+            }}
+          />
+
+          <div className="flex min-w-0 flex-col gap-5">
+            <section className="rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1 space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
+                      Run #{session.data.id}
+                    </Badge>
+                    {currentStreak >= 2 ? (
+                      <Badge className="gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-900 hover:bg-amber-100">
+                        <Flame className="size-3.5" />
+                        {currentStreak} in a row
+                      </Badge>
+                    ) : null}
+                    <span className="text-muted-foreground text-sm">
+                      Started {learnerDate(session.data.created_at)}
+                    </span>
                   </div>
-                  <h1 className="font-heading text-2xl font-semibold tracking-[-0.02em] text-foreground">
-                    {session.data.set_label ?? `Set #${session.data.set_version_id ?? "?"}`}
-                  </h1>
+
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] md:items-end">
+                    <div className="space-y-1">
+                      <div className="font-medium text-muted-foreground text-sm">
+                        {session.data.student_name
+                          ? `${session.data.student_name}'s progress`
+                          : "Session progress"}
+                      </div>
+                      <div className="font-heading text-4xl font-semibold tracking-[-0.03em] text-foreground">
+                        {session.data.answered_count}
+                        <span className="ml-2 font-sans text-base font-medium text-muted-foreground">
+                          solved
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="font-medium text-foreground text-sm">
+                          {session.data.set_label ?? `Set #${session.data.set_version_id ?? "?"}`}
+                        </div>
+                        <div className="text-muted-foreground text-sm">
+                          {session.data.answered_count} solved
+                          {pendingCount > 0
+                            ? `, ${pendingCount} in progress`
+                            : ", no pending question"}
+                        </div>
+                      </div>
+                      <div className="rounded-[1rem] border border-border/60 bg-muted/15 px-3 py-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                          <div className="font-medium text-foreground text-sm">
+                            Recent questions
+                          </div>
+                          <div className="text-muted-foreground text-xs">
+                            Select a past question to revisit it
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {revisitAttempts.length > 0 ? (
+                            revisitAttempts.map((attempt, index) => (
+                              <div key={attempt.id} className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPastAttempt(attempt)}
+                                  className={cn(
+                                    "flex min-w-14 shrink-0 flex-col items-center rounded-[0.95rem] border px-2 py-2 text-center transition-colors hover:bg-white",
+                                    attemptTone(attempt) === "success" &&
+                                      "border-emerald-500/25 bg-emerald-50 text-emerald-900",
+                                    attemptTone(attempt) === "warn" &&
+                                      "border-amber-500/25 bg-amber-50 text-amber-900",
+                                    attemptTone(attempt) === "error" &&
+                                      "border-rose-500/25 bg-rose-50 text-rose-900",
+                                    attemptTone(attempt) === "current" &&
+                                      "border-primary/25 bg-background text-foreground",
+                                  )}
+                                  title={`Review question ${attempt.question_id}`}
+                                >
+                                  <span className="text-[10px] font-medium uppercase tracking-[0.14em] opacity-70">
+                                    Q{attempt.ordinal}
+                                  </span>
+                                  <span className="mt-1 text-xs font-medium">
+                                    {attempt.score === null
+                                      ? "Open"
+                                      : `${attempt.score.toFixed(0)}`}
+                                  </span>
+                                </button>
+                                {index !== revisitAttempts.length - 1 ? (
+                                  <div className="hidden h-px w-3 shrink-0 bg-border sm:block" />
+                                ) : null}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-muted-foreground text-sm">
+                              No answered questions to revisit yet.
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                          <span>{revisitAttempts.length} answered questions available</span>
+                          <span>
+                            {session.data.ended_at
+                              ? `Closed after ${session.data.answered_count} answers`
+                              : pendingCount > 0
+                                ? "Current question still open"
+                                : "Latest served question has been answered"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                        <span>{session.data.served_count} served total</span>
+                        <span>{session.data.answered_count} solved</span>
+                        {pendingCount > 0 ? <span>{pendingCount} pending</span> : null}
+                      </div>
+                    </div>
+                  </div>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void endRun()}
+                  disabled={endTrainingSession.isPending || session.data.ended_at !== null}
+                  className="rounded-full bg-white px-4 lg:self-start"
+                >
+                  End session
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void endRun()}
-                disabled={endTrainingSession.isPending || session.data.ended_at !== null}
-                className="rounded-full bg-white px-4 lg:self-start"
-              >
-                End session
-              </Button>
-            </div>
-          </section>
+            </section>
 
-          {endTrainingSession.isError ? <QueryError error={endTrainingSession.error} /> : null}
+            {endTrainingSession.isError ? <QueryError error={endTrainingSession.error} /> : null}
 
-          {session.data.ended_at ? (
-            <Alert className="border-emerald-500/25 bg-white/80 shadow-[0_20px_44px_-34px_rgb(19_26_28_/_0.32)]">
-              <CheckCircle2 />
-              <AlertTitle>Session closed</AlertTitle>
-              <AlertDescription>
-                This run ended on {learnerDate(session.data.ended_at)}.{" "}
-                <Link href="/students">Return to the students page</Link>.
-              </AlertDescription>
-            </Alert>
-          ) : null}
+            {session.data.ended_at ? (
+              <Alert className="border-emerald-500/25 bg-white/80 shadow-[0_20px_44px_-34px_rgb(19_26_28_/_0.32)]">
+                <CheckCircle2 />
+                <AlertTitle>Session closed</AlertTitle>
+                <AlertDescription>
+                  This run ended on {learnerDate(session.data.ended_at)}.{" "}
+                  <Link href="/students">Return to the students page</Link>.
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-          {result ? <ResultCard result={result} onNext={advance} /> : null}
-          {answerAttempt.isError ? <QueryError error={answerAttempt.error} /> : null}
+            {result ? (
+              <ResultCard
+                result={result}
+                detail={answeredQuestion.data ?? null}
+                submittedAnswer={lastAnswer}
+                onNext={advance}
+              />
+            ) : null}
+            {answerAttempt.isError ? <QueryError error={answerAttempt.error} /> : null}
 
-          {unavailable ? (
-            <Alert>
-              <AlertCircle />
-              <AlertTitle>Nothing to serve</AlertTitle>
-              <AlertDescription>
-                <p>{unavailable.message}</p>
-                {unavailable.detail ? <p>{unavailable.detail}</p> : null}
-              </AlertDescription>
-            </Alert>
-          ) : null}
+            {unavailable ? (
+              <Alert>
+                <AlertCircle />
+                <AlertTitle>Nothing to serve</AlertTitle>
+                <AlertDescription>
+                  <p>{unavailable.message}</p>
+                  {unavailable.detail ? <p>{unavailable.detail}</p> : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-          {currentQuestion.isPending && result === null && !session.data.ended_at ? (
-            <TableSkeleton rows={3} />
-          ) : null}
-          {currentQuestion.isError && unavailable === null ? (
-            <QueryError error={currentQuestion.error} />
-          ) : null}
+            {currentQuestion.isPending && result === null && !session.data.ended_at ? (
+              <TableSkeleton rows={3} />
+            ) : null}
+            {currentQuestion.isError && unavailable === null ? (
+              <QueryError error={currentQuestion.error} />
+            ) : null}
 
-          {currentQuestion.data && result === null ? (
-            <Card className="overflow-hidden rounded-[2rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,250,249,0.92))] shadow-[0_30px_80px_-48px_rgb(19_26_28_/_0.45)]">
-              <CardHeader className="gap-4 border-b border-border/60 px-6 py-6 sm:px-7">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <CardTitle className="text-[1.9rem] leading-none tracking-[-0.03em]">
-                    Question {currentQuestion.data.ordinal}
-                  </CardTitle>
-                  <Badge variant="outline" className="rounded-full bg-background/80 px-3 py-1">
-                    {currentQuestion.data.served_difficulty}
-                  </Badge>
-                  {currentQuestion.data.question_type ? (
-                    <Badge
-                      variant="outline"
-                      className="rounded-full bg-background/80 px-3 py-1 capitalize"
-                    >
-                      {questionTypeLabel(currentQuestion.data.question_type)}
+            {currentQuestion.data && result === null ? (
+              <Card className="overflow-hidden rounded-[2rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,250,249,0.92))] shadow-[0_30px_80px_-48px_rgb(19_26_28_/_0.45)]">
+                <CardHeader className="gap-4 border-b border-border/60 px-6 py-6 sm:px-7">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <CardTitle className="text-[1.9rem] leading-none tracking-[-0.03em]">
+                      Question {currentQuestion.data.ordinal}
+                    </CardTitle>
+                    <Badge variant="outline" className="rounded-full bg-background/80 px-3 py-1">
+                      {currentQuestion.data.served_difficulty}
                     </Badge>
-                  ) : null}
-                  {currentQuestion.data.resumed ? (
-                    <Badge
-                      variant="outline"
-                      className="rounded-full bg-amber-50 px-3 py-1 text-amber-900"
-                    >
-                      Resumed
-                    </Badge>
-                  ) : null}
-                </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="space-y-1.5">
-                    {currentQuestion.data.subtopic_name ? (
-                      <div className="text-sm font-medium text-muted-foreground">
-                        {currentQuestion.data.subtopic_name}
+                    {currentQuestion.data.question_type ? (
+                      <Badge
+                        variant="outline"
+                        className="rounded-full bg-background/80 px-3 py-1 capitalize"
+                      >
+                        {questionTypeLabel(currentQuestion.data.question_type)}
+                      </Badge>
+                    ) : null}
+                    {currentQuestion.data.resumed ? (
+                      <Badge
+                        variant="outline"
+                        className="rounded-full bg-amber-50 px-3 py-1 text-amber-900"
+                      >
+                        Resumed
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="space-y-1.5">
+                      {currentQuestion.data.subtopic_name ? (
+                        <div className="text-sm font-medium text-muted-foreground">
+                          {currentQuestion.data.subtopic_name}
+                        </div>
+                      ) : null}
+                      <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
+                        Read the prompt carefully, then submit the strongest answer you can without
+                        overthinking the interface.
+                      </p>
+                    </div>
+                    <div className="rounded-[1rem] border border-border/60 bg-white/85 px-4 py-3 text-right shadow-[0_16px_34px_-30px_rgb(19_26_28_/_0.3)]">
+                      <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        Session progress
+                      </div>
+                      <div className="mt-1 font-heading text-2xl font-semibold tracking-[-0.03em] text-foreground">
+                        {session.data.answered_count + 1}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Current prompt position</div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-5 px-6 py-6 sm:px-7">
+                  {fallbackNotice(currentQuestion.data)}
+
+                  <div className="space-y-4">
+                    <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                          Prompt
+                        </div>
+                        <ArrowUpRight className="size-4 text-muted-foreground" />
+                      </div>
+                      <div className="whitespace-pre-wrap text-[0.98rem] leading-8 text-foreground">
+                        {currentQuestion.data.prompt}
+                      </div>
+                    </div>
+
+                    {currentQuestion.data.code ? (
+                      <div className="overflow-hidden rounded-[1.5rem] border border-slate-900/85 bg-slate-950 shadow-[0_28px_60px_-36px_rgb(2_6_23_/_0.9)]">
+                        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+                          <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+                            Reference code
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="size-2 rounded-full bg-rose-400" />
+                            <span className="size-2 rounded-full bg-amber-300" />
+                            <span className="size-2 rounded-full bg-emerald-400" />
+                          </div>
+                        </div>
+                        <pre className="overflow-x-auto p-4 font-mono text-sm leading-7 text-slate-50">
+                          {currentQuestion.data.code}
+                        </pre>
                       </div>
                     ) : null}
-                    <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
-                      Read the prompt carefully, then submit the strongest answer you can without
-                      overthinking the interface.
-                    </p>
-                  </div>
-                  <div className="rounded-[1rem] border border-border/60 bg-white/85 px-4 py-3 text-right shadow-[0_16px_34px_-30px_rgb(19_26_28_/_0.3)]">
-                    <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                      Session progress
-                    </div>
-                    <div className="mt-1 font-heading text-2xl font-semibold tracking-[-0.03em] text-foreground">
-                      {session.data.answered_count + 1}
-                    </div>
-                    <div className="text-xs text-muted-foreground">Current prompt position</div>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-5 px-6 py-6 sm:px-7">
-                {fallbackNotice(currentQuestion.data)}
-
-                <div className="space-y-4">
-                  <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                        Prompt
-                      </div>
-                      <ArrowUpRight className="size-4 text-muted-foreground" />
-                    </div>
-                    <div className="whitespace-pre-wrap text-[0.98rem] leading-8 text-foreground">
-                      {currentQuestion.data.prompt}
-                    </div>
                   </div>
 
-                  {currentQuestion.data.code ? (
-                    <div className="overflow-hidden rounded-[1.5rem] border border-slate-900/85 bg-slate-950 shadow-[0_28px_60px_-36px_rgb(2_6_23_/_0.9)]">
-                      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
-                          Reference code
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="size-2 rounded-full bg-rose-400" />
-                          <span className="size-2 rounded-full bg-amber-300" />
-                          <span className="size-2 rounded-full bg-emerald-400" />
-                        </div>
-                      </div>
-                      <pre className="overflow-x-auto p-4 font-mono text-sm leading-7 text-slate-50">
-                        {currentQuestion.data.code}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
+                  <AnswerForm
+                    question={currentQuestion.data}
+                    answer={answer}
+                    onAnswerChange={setAnswer}
+                    onSubmit={() => void submitAnswer()}
+                    submitting={answerAttempt.isPending}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
 
-                <AnswerForm
-                  question={currentQuestion.data}
-                  answer={answer}
-                  onAnswerChange={setAnswer}
-                  onSubmit={() => void submitAnswer()}
-                  submitting={answerAttempt.isPending}
-                />
-              </CardContent>
-            </Card>
+          {progress.data ? (
+            <div className="xl:sticky xl:top-6">
+              <ProgressSidebar progress={progress.data} />
+            </div>
           ) : null}
         </div>
       ) : null}
