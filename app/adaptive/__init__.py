@@ -9,12 +9,11 @@ Status
     (:mod:`app.adaptive.state`), the pure selection helpers
     (:mod:`app.adaptive.selection`), the scorer (:mod:`app.adaptive.scoring`) and
     the engine (:mod:`app.adaptive.service`) all exist and are tested; the rules
-    they encode are decided in ADR-041. A student is enrolled and started at
-    ``/students``, then answers at ``/training/{training_session_id}``; the JSON
-    API under ``/api`` is the single implementation of both capabilities and the
-    page is one of its clients (ADR-027). A run is always served from a frozen
-    question set (ADR-036), never the live bank. The shared value objects the two
-    loops agree on live in :mod:`app.domain.mastery`.
+    they encode are decided in ADR-041. The API enrols students at
+    ``/api/students``, starts runs at ``/api/training-sessions`` and scores
+    answers at ``/api/attempts/{attempt_id}/answer``. A run is always served
+    from a frozen question set (ADR-036), never the live bank. The shared value
+    objects the two loops agree on live in :mod:`app.domain.mastery`.
 
     Traffic is one-way: the web layer calls :func:`get_adaptive_engine` and this
     package never calls back out to it.

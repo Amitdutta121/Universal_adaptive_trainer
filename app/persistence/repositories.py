@@ -104,6 +104,21 @@ class BookRepository:
         self._session.flush()
         return book
 
+    def delete(self, book: BookRow) -> None:
+        """Remove a book and, by cascade, its chapters and sections.
+
+        Questions are not touched: they hold their grounding as data rather than
+        as a foreign key, so the caller is responsible for warning about the
+        citations this strands. See :class:`app.ingestion.service.BookImportService`.
+        """
+        self._session.delete(book)
+        self._session.flush()
+
+    def section_ids(self, book_id: int) -> list[int]:
+        """Every section id belonging to one book, for reference counting."""
+        stmt = select(BookSectionRow.id).where(BookSectionRow.book_id == book_id)
+        return list(self._session.scalars(stmt))
+
 
 class BookStructureRepository:
     """Extracted chapters and sections.
@@ -323,6 +338,101 @@ class CurriculumRepository:
         )
         return self._session.scalar(stmt) or 0
 
+    def subtopic_counts_for(self, version_ids: Collection[int]) -> dict[int, int]:
+        """Subtopics per curriculum version, for a list that must not cost a query per row.
+
+        A version whose topics hold no subtopics produces no group row, so callers
+        default to zero. An upload cannot produce one -- ``subtopics`` declares
+        ``min_length=1`` -- but a legacy proposal row can.
+        """
+        ids = list(version_ids)
+        if not ids:
+            return {}
+        stmt = (
+            select(TopicRow.curriculum_version_id, func.count(SubtopicRow.id))
+            .join(SubtopicRow, SubtopicRow.topic_id == TopicRow.id)
+            .where(TopicRow.curriculum_version_id.in_(ids))
+            .group_by(TopicRow.curriculum_version_id)
+        )
+        return dict(self._session.execute(stmt).all())
+
+    def get_version(self, version_id: int) -> CurriculumVersionRow:
+        """One version without its tree, for an edit or a delete.
+
+        Raises:
+            NotFoundError: if no such version exists.
+        """
+        row = self._session.get(CurriculumVersionRow, version_id)
+        if row is None:
+            raise NotFoundError(f"Curriculum version {version_id} does not exist.")
+        return row
+
+    def activate(self, version: CurriculumVersionRow) -> CurriculumVersionRow:
+        """Make this version the one ``get_approved()`` returns.
+
+        Activation is an ordering change, not a structural edit: the row stays
+        approved and simply becomes the most recently approved one.
+        """
+        version.approved_at = datetime.now(UTC)
+        self._session.flush()
+        return version
+
+    def get_topic(self, topic_id: int) -> TopicRow:
+        """One topic with its subtopics, which is what a rename has to return.
+
+        Raises:
+            NotFoundError: if no such topic exists.
+        """
+        stmt = (
+            select(TopicRow)
+            .options(selectinload(TopicRow.subtopics))
+            .where(TopicRow.id == topic_id)
+        )
+        row = self._session.scalars(stmt).first()
+        if row is None:
+            raise NotFoundError(f"Topic {topic_id} does not exist.")
+        return row
+
+    def sibling_topic_names(self, version_id: int, *, exclude_topic_id: int) -> list[str]:
+        """The names a topic in this version may not collide with once renamed."""
+        stmt = select(TopicRow.name).where(
+            TopicRow.curriculum_version_id == version_id, TopicRow.id != exclude_topic_id
+        )
+        return list(self._session.scalars(stmt))
+
+    def sibling_subtopic_names(self, topic_id: int, *, exclude_subtopic_id: int) -> list[str]:
+        """The names a subtopic under this topic may not collide with once renamed."""
+        stmt = select(SubtopicRow.name).where(
+            SubtopicRow.topic_id == topic_id, SubtopicRow.id != exclude_subtopic_id
+        )
+        return list(self._session.scalars(stmt))
+
+    def topic_ids_in(self, version_id: int) -> list[int]:
+        """Every topic id belonging to a version, for counting what cites it."""
+        stmt = select(TopicRow.id).where(TopicRow.curriculum_version_id == version_id)
+        return list(self._session.scalars(stmt))
+
+    def subtopic_ids_in(self, version_id: int) -> list[int]:
+        """Every subtopic id belonging to a version, for counting what cites it."""
+        stmt = (
+            select(SubtopicRow.id)
+            .join(TopicRow, SubtopicRow.topic_id == TopicRow.id)
+            .where(TopicRow.curriculum_version_id == version_id)
+        )
+        return list(self._session.scalars(stmt))
+
+    def delete(self, version: CurriculumVersionRow) -> None:
+        """Remove a version, and with it its topics, subtopics and evidence.
+
+        Only those four tables go. Questions, question sets and student state hold
+        plain integer references that the ORM cannot see and SQLite does not
+        enforce, so they are left pointing at rows that no longer exist -- counted
+        and reported by :class:`app.curriculum.library.CurriculumLibraryService`
+        before the caller decides, never silently repaired here.
+        """
+        self._session.delete(version)
+        self._session.flush()
+
     def add(self, version: CurriculumVersionRow) -> CurriculumVersionRow:
         self._session.add(version)
         self._session.flush()
@@ -335,6 +445,16 @@ class CurriculumRepository:
 #: professor attention is the scarcest resource in this system. Such questions
 #: stay in the bank, where the generator's failure modes are meant to be read.
 NOT_REVIEWABLE_STATUSES = (QuestionStatus.VALIDATION_FAILED,)
+
+
+def _spec_sections(spec: object) -> set[int]:
+    """The section ids a stored ``QuestionSpec`` names, tolerating older rows."""
+    if not isinstance(spec, dict):
+        return set()
+    section_ids = spec.get("source_section_ids")
+    if not isinstance(section_ids, list):
+        return set()
+    return {item for item in section_ids if isinstance(item, int)}
 
 
 class QuestionRepository:
@@ -365,19 +485,87 @@ class QuestionRepository:
         )
         return self._session.scalar(stmt) or 0
 
+    def count_grounded_in_sections(self, section_ids: Collection[int]) -> int:
+        """How many questions were generated from any of these sections.
+
+        A question records its grounding inside the frozen ``QuestionSpec`` it was
+        generated from, not as a foreign key, so this reads specs rather than
+        joining. Deleting those sections therefore would not delete the questions:
+        it would leave their citation pointing at nothing, which is exactly what
+        the caller needs to warn about before it happens.
+        """
+        wanted = set(section_ids)
+        if not wanted:
+            return 0
+        stmt = select(QuestionRow.spec).where(QuestionRow.spec.is_not(None))
+        return sum(1 for spec in self._session.scalars(stmt) if wanted & _spec_sections(spec))
+
+    def count_for_curriculum_version(self, version_id: int) -> int:
+        """Questions whose grounding names this curriculum version.
+
+        A plain column read, unlike :meth:`count_grounded_in_sections`: a
+        question's curriculum version *is* a column, even though nothing enforces
+        it. Deleting the version leaves this integer pointing at nothing.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(QuestionRow)
+            .where(QuestionRow.curriculum_version_id == version_id)
+        )
+        return self._session.scalar(stmt) or 0
+
+    def count_subtopic_links(self, subtopic_ids: Collection[int]) -> int:
+        """Question-to-subtopic taggings that name any of these subtopics.
+
+        This is what coverage counts and what adaptive selection draws from, so a
+        tagging left pointing at a deleted subtopic removes its question from both
+        without marking it as anything.
+        """
+        ids = list(subtopic_ids)
+        if not ids:
+            return 0
+        stmt = (
+            select(func.count())
+            .select_from(QuestionSubtopicRow)
+            .where(QuestionSubtopicRow.subtopic_id.in_(ids))
+        )
+        return self._session.scalar(stmt) or 0
+
     def list_recent(
-        self, limit: int = 50, *, statuses: Collection[QuestionStatus] | None = None
+        self,
+        limit: int = 50,
+        *,
+        statuses: Collection[QuestionStatus] | None = None,
+        curriculum_version_id: int | None = None,
     ) -> list[QuestionRow]:
         """The newest questions, optionally narrowed to particular statuses.
 
         ``statuses`` is a filter, never a default: both callers decide for
         themselves what to show, and an empty collection means "nothing matches"
-        rather than "no filter".
+        rather than "no filter". ``curriculum_version_id`` narrows the same way,
+        so a taxonomy filter applies to the whole bank rather than only to
+        whatever page ``limit`` happened to load.
         """
         stmt = select(QuestionRow).order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
         if statuses is not None:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return list(self._session.scalars(stmt.limit(limit)))
+
+    def count_by_curriculum_version(self) -> dict[str, int]:
+        """How many questions each curriculum version grounds, whole bank.
+
+        A question generated before this column existed has no version to name;
+        those are counted under ``"none"`` rather than dropped.
+        """
+        stmt = select(QuestionRow.curriculum_version_id, func.count()).group_by(
+            QuestionRow.curriculum_version_id
+        )
+        return {
+            (str(version_id) if version_id is not None else "none"): count
+            for version_id, count in self._session.execute(stmt)
+        }
 
     def get(self, question_id: int) -> QuestionRow:
         row = self._session.get(QuestionRow, question_id)
@@ -865,6 +1053,15 @@ class TypeInstructionRepository:
         self._session.flush()
         return row
 
+    def delete(self, question_type: QuestionType) -> bool:
+        """Drop one learned row, returning that type to its shipped instruction."""
+        row = self.get(question_type)
+        if row is None:
+            return False
+        self._session.delete(row)
+        self._session.flush()
+        return True
+
 
 class QuestionSetRepository:
     """Frozen snapshots of the approved bank, and the coverage query (ADR-036).
@@ -991,6 +1188,19 @@ class QuestionSetRepository:
                 return {}
             stmt = stmt.where(QuestionRow.id.in_(ids))
         return dict(self._session.execute(stmt).all())  # type: ignore[arg-type]
+
+    def count_for_curriculum_version(self, version_id: int) -> int:
+        """Frozen sets tagged against this curriculum version.
+
+        A set is immutable by decision (ADR-036) and nothing can delete one, so a
+        set whose taxonomy is gone can never report coverage again.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(QuestionSetVersionRow)
+            .where(QuestionSetVersionRow.curriculum_version_id == version_id)
+        )
+        return self._session.scalar(stmt) or 0
 
     def servable_subtopic_ids(self, set_version_id: int) -> set[int]:
         """Subtopics this set can actually answer a request for.
@@ -1135,6 +1345,32 @@ class StudentStateRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def count_students_measured_on(
+        self, topic_ids: Collection[int], subtopic_ids: Collection[int]
+    ) -> int:
+        """How many distinct students have been measured on any of these rows.
+
+        Mastery and weakness are what the adaptive engine has learned about a
+        learner (ADR-041), and nothing can rebuild them from an answer already
+        given. Deleting the topics and subtopics they name leaves the values in
+        place but unreadable: a progress page filters by the ids that still
+        exist, so a measured subtopic simply stops appearing.
+        """
+        topics = list(topic_ids)
+        subtopics = list(subtopic_ids)
+        measured: set[int] = set()
+        if topics:
+            stmt = select(StudentTopicMasteryRow.student_id).where(
+                StudentTopicMasteryRow.topic_id.in_(topics)
+            )
+            measured.update(self._session.scalars(stmt))
+        if subtopics:
+            stmt = select(StudentSubtopicWeaknessRow.student_id).where(
+                StudentSubtopicWeaknessRow.subtopic_id.in_(subtopics)
+            )
+            measured.update(self._session.scalars(stmt))
+        return len(measured)
+
     def record_mastery(
         self, student_id: int, topic_id: int, p_known: float
     ) -> StudentTopicMasteryRow:
@@ -1224,6 +1460,23 @@ class StudentAttemptRepository:
         self._session.add(row)
         self._session.flush()
         return row
+
+    def count_on_subtopics(self, subtopic_ids: Collection[int]) -> int:
+        """Attempts served for any of these subtopics.
+
+        Part of the cost of deleting a curriculum version: the attempt row keeps
+        its score and its question, but the subtopic it was drawn for stops
+        resolving.
+        """
+        ids = list(subtopic_ids)
+        if not ids:
+            return 0
+        stmt = (
+            select(func.count())
+            .select_from(StudentAttemptRow)
+            .where(StudentAttemptRow.subtopic_id.in_(ids))
+        )
+        return self._session.scalar(stmt) or 0
 
     def get(self, attempt_id: int) -> StudentAttemptRow:
         """One attempt.

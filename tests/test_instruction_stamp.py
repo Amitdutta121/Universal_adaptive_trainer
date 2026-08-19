@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import book_documents as docs
 import pytest
-from fastapi.testclient import TestClient
 from llm_fakes import metric_results
 from sqlalchemy.orm import Session
 
@@ -197,35 +196,3 @@ def test_is_edited_reports_the_professor_edit_not_the_seeded_original(session: S
     session.commit()
 
     assert QuestionSummary.from_row(row).is_edited is True
-
-
-def test_the_bank_page_names_the_instruction_not_only_the_generator(
-    client: TestClient, session: Session
-) -> None:
-    _question(
-        session,
-        {
-            "type_instruction": {
-                "source": "learned",
-                "fingerprint": "abcd1234",
-                "rule_count": 2,
-                "review_count": 7,
-            }
-        },
-    )
-
-    page = client.get("/questions").text
-
-    assert "learned:abcd1234" in page
-    assert "2 rules" in page
-
-
-def test_the_detail_page_explains_that_every_question_is_personalized(
-    client: TestClient, session: Session
-) -> None:
-    row = _question(session, None)
-
-    page = client.get(f"/questions/{row.id}").text
-
-    assert "names the code and not the prompt" in page
-    assert "Every" in page and "personalized" in page

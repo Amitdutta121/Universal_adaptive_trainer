@@ -508,20 +508,3 @@ def test_the_api_counts_what_is_available_to_learn_from(
     assert by_metric[DIFFICULTY.value]["available_disagreements"] == 1
     assert by_metric[JudgeMetricId.ISSUES.value]["available_disagreements"] == 0
 
-
-def test_the_page_relearns_from_disagreements(
-    client: TestClient, session: Session, rewriter: Rewriter
-) -> None:
-    _disagreement(session)
-
-    response = client.post(f"/judges/{DIFFICULTY.value}/refresh", follow_redirects=True)
-
-    assert response.status_code == 200
-    assert "1 rule(s) from 1 disagreement(s)" in response.text
-    assert "A loop alone is not hard." in response.text
-
-
-def test_the_page_says_a_reviewer_relearns_by_itself(client: TestClient) -> None:
-    response = client.get("/judges")
-
-    assert "relearns by itself" in response.text.lower()

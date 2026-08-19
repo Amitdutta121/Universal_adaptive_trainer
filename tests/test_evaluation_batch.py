@@ -778,34 +778,6 @@ def test_generated_questions_need_no_backfill(session: Session, settings: Any) -
     assert backfill_generation_history(session) == 0
 
 
-def test_the_questions_page_shows_a_submitted_run_and_offers_to_collect_it(
-    client: Any, session: Session, batch_settings: Settings, provider: FakeProvider
-) -> None:
-    from datetime import UTC, datetime
-
-    from app.persistence.models import JudgeBatchRunRow
-
-    session.add(
-        JudgeBatchRunRow(
-            run_id="abcdef0123456789",
-            provider_batch_ids=["batch_0"],
-            status=JudgeBatchStatus.SUBMITTED,
-            model="test/judge-model",
-            rubric_version=RUBRIC_VERSION,
-            submitted_at=datetime.now(UTC),
-            question_count=7,
-        )
-    )
-    session.commit()
-
-    response = client.get("/questions")
-
-    assert response.status_code == 200
-    assert "abcdef012345" in response.text
-    assert "Check for results" in response.text
-    assert "/questions/judge-runs/abcdef0123456789/poll" in response.text
-
-
 # ------------------------------------------- a failed re-run must not erase a good one
 
 

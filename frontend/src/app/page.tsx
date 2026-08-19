@@ -24,7 +24,7 @@ const COUNT_KEYS: Partial<Record<string, keyof Counts>> = {
   books: "books",
   curriculum: "curriculum_versions",
   questions: "questions",
-  feedback: "reviews",
+  review: "reviews",
   instructions: "learned_instructions",
   students: "students",
 };

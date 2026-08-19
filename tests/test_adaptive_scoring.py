@@ -163,19 +163,38 @@ class TestParsons:
         )
 
     def test_the_correct_order_scores_full_marks(self) -> None:
-        assert score_answer(self._parsons(), "a\nb").score == 100.0
+        assert score_answer(self._parsons(), "a\n    b").score == 100.0
 
     def test_comma_separated_ids_are_accepted(self) -> None:
-        assert score_answer(self._parsons(), "a, b").score == 100.0
+        assert (
+            score_answer(
+                _question(
+                    QuestionType.PARSONS,
+                    {
+                        "blocks": [
+                            {"id": "a", "text": "print(1)", "indent": 0},
+                            {"id": "b", "text": "print(2)", "indent": 0},
+                        ],
+                        "correct_order": ["a", "b"],
+                        "explanation": "x",
+                    },
+                ),
+                "a, b",
+            ).score
+            == 100.0
+        )
 
     def test_the_wrong_order_scores_nothing(self) -> None:
-        assert score_answer(self._parsons(), "b\na").score == 0.0
+        assert score_answer(self._parsons(), "b\n    a").score == 0.0
 
     def test_a_missing_block_scores_nothing(self) -> None:
         assert score_answer(self._parsons(), "a").score == 0.0
 
     def test_blank_lines_are_ignored(self) -> None:
-        assert score_answer(self._parsons(), "a\n\n\nb\n").score == 100.0
+        assert score_answer(self._parsons(), "a\n\n\n    b\n").score == 100.0
+
+    def test_the_wrong_indentation_scores_nothing(self) -> None:
+        assert score_answer(self._parsons(), "a\nb").score == 0.0
 
     def test_a_question_with_no_order_cannot_be_marked(self) -> None:
         with pytest.raises(DomainRuleError):

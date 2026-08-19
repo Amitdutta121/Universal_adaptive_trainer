@@ -1,8 +1,8 @@
 /**
- * A section whose screen has not been ported from the Jinja UI yet.
+ * A section whose screen has not been implemented yet.
  *
- * It names the API routes that are already generated and typed, so the next person
- * knows exactly where to start, and it never renders invented data.
+ * It names the API routes that are already generated and typed, so the next
+ * person knows exactly where to start, and it never renders invented data.
  */
 
 import { PageHeader } from "@/components/page-header";

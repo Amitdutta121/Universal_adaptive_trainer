@@ -68,8 +68,8 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
  * A screen that is deliberately not built yet.
  *
  * The backend's rule that a placeholder must raise rather than return invented data
- * applies to the UI too: a page with no implementation says so, instead of rendering
- * an empty table that reads as "there is nothing here".
+ * applies to the UI too: a screen with no implementation says so, instead of
+ * rendering an empty table that reads as "there is nothing here".
  */
 export function NotBuiltYet({ endpoints }: { endpoints: readonly string[] }) {
   return (
@@ -78,8 +78,8 @@ export function NotBuiltYet({ endpoints }: { endpoints: readonly string[] }) {
       <AlertTitle>This screen has not been built yet</AlertTitle>
       <AlertDescription>
         <p>
-          The starter wires up the shell, the typed client and the query layer. This section is
-          still served by the Jinja UI. Its API is already generated and typed:
+          The shell, typed client and query layer are in place. This screen does
+          not have a UI yet, but its API is already generated and typed:
         </p>
         <ul className="mt-2 space-y-0.5 font-mono text-xs">
           {endpoints.map((endpoint) => (

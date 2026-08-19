@@ -395,62 +395,6 @@ def test_a_failed_question_is_listed_only_when_asked_for(
     assert filtered["status"] == "validation_passed"
 
 
-def test_the_bank_page_hides_failed_questions_but_says_so(
-    client: TestClient, session: Session, settings
-) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
-    foreign = version.topics[1].subtopics[0].id
-    _generate(
-        session,
-        version,
-        MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign])),
-        section_ids[:1],
-    )
-
-    hidden = client.get("/questions").text
-    assert "failed validation" in hidden
-    assert "show_failed=true" in hidden
-
-    shown = client.get("/questions", params={"show_failed": "true"}).text
-    assert "validation_failed" in shown
-
-
-def test_the_detail_page_shows_every_classification_attempt(
-    client: TestClient, session: Session, settings
-) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
-    foreign = version.topics[1].subtopics[0].id
-    row = _generate(
-        session,
-        version,
-        MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign])),
-        section_ids[:1],
-    )[0]
-
-    page = client.get(f"/questions/{row.id}").text
-
-    assert "Generation attempts" in page
-    assert "foreign_subtopics" in page
-
-
-def test_the_detail_page_shows_a_malformed_attempt(
-    client: TestClient, session: Session, settings
-) -> None:
-    """A retried malformed reply must be visible, not silently absorbed."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
-    row = _generate(
-        session,
-        version,
-        MalformedThenGoodClient(malformed_replies=1, draft=_draft(topic.id, [subtopic.id])),
-        section_ids[:1],
-    )[0]
-
-    page = client.get(f"/questions/{row.id}").text
-
-    assert "Generation attempts" in page
-    assert "not a readable question" in page
-    # The question itself is fine, so the panel is not an error panel.
-    assert row.status is QuestionStatus.VALIDATION_PASSED
 
 
 # --- a provider failure mid-batch ----------------------------------------

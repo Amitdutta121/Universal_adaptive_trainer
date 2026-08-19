@@ -101,13 +101,23 @@ def get_question_generator(professor_id: int | None = None):
 
 
 from app.generation.base import BaseQuestionGenerator  # noqa: E402
+from app.generation.batch import (  # noqa: E402
+    ChunkQuestionRequest,
+    PlannedQuestion,
+    compile_chunk_requests,
+    count_identical_requests,
+)
 from app.generation.service import GenerationService  # noqa: E402
 
 __all__ = [
     "BaseQuestionGenerator",
+    "ChunkQuestionRequest",
     "GenerationRequest",
     "GenerationService",
     "GeneratorDescriptor",
+    "PlannedQuestion",
     "QuestionGenerator",
+    "compile_chunk_requests",
+    "count_identical_requests",
     "get_question_generator",
 ]

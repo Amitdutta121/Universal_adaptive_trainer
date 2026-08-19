@@ -24,6 +24,8 @@ The section is the unit
 
 Module layout
     ``schema``     the book JSON contract, and its validation
+    ``authoring``  the copy-and-paste instruction that produces a document
+    ``library``    rename and delete an imported book
     ``storage``    upload validation and retention of the uploaded document
     ``service``    the workflow: validate, store, persist
     ``retrieval``  reading sections back out with citations
@@ -33,6 +35,16 @@ Allowed dependencies
     Must not import ``app.generation``, ``app.adaptive`` or ``app.web``.
 """
 
+from app.ingestion.authoring import (
+    EXAMPLE_DOCUMENT,
+    STRUCTURE_SOURCE_TERMS,
+    WARNING_CODE_TERMS,
+    WARNING_SEVERITY_TERMS,
+    VocabularyTerm,
+    book_authoring_prompt,
+    example_json,
+)
+from app.ingestion.library import BookLibraryService
 from app.ingestion.retrieval import SourceRetrieval, chapter_from_row, section_from_row
 from app.ingestion.schema import (
     SCHEMA_VERSION,
@@ -51,16 +63,24 @@ from app.ingestion.storage import (
 )
 
 __all__ = [
+    "EXAMPLE_DOCUMENT",
     "FORMAT_BY_EXTENSION",
     "SCHEMA_VERSION",
+    "STRUCTURE_SOURCE_TERMS",
     "SUPPORTED_EXTENSIONS",
+    "WARNING_CODE_TERMS",
+    "WARNING_SEVERITY_TERMS",
     "BookDocument",
     "BookImportService",
+    "BookLibraryService",
     "ChapterInput",
     "SectionInput",
     "SourceRetrieval",
+    "VocabularyTerm",
     "WarningInput",
+    "book_authoring_prompt",
     "chapter_from_row",
+    "example_json",
     "format_for_filename",
     "parse_book_document",
     "section_from_row",

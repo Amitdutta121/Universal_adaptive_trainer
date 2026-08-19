@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import { AppSidebar } from "@/components/app-sidebar";
+import { AppChrome } from "@/components/app-chrome";
 import { Providers } from "@/components/providers";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -39,17 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="app-body flex min-h-full flex-col">
         <Providers>
-          <SidebarProvider>
-            <AppSidebar />
-            <SidebarInset className="app-inset">
-              {/* `min-w-0`: without it this flex child refuses to shrink below the
-                  width of its widest content, and a long code listing would push
-                  the whole page into horizontal scroll instead of scrolling itself. */}
-              <div className="app-shell mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6">
-                {children}
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
+          <AppChrome>{children}</AppChrome>
           <Toaster richColors closeButton />
         </Providers>
       </body>

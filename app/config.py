@@ -126,6 +126,16 @@ class Settings(BaseSettings):
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)
 
+    # -- Auth (app/auth/) -----------------------------------------------------
+    #: Signs password-reset/verification tokens. Neither flow is exposed by any
+    #: route yet, but fastapi-users requires the secret to exist regardless.
+    #: Generate a real value for anything beyond a single developer's machine.
+    auth_secret_key: SecretStr = SecretStr("dev-only-insecure-secret-change-me")
+    #: The one seeded professor account (app/auth/seed.py). Only created when
+    #: ENVIRONMENT=development -- a production run never seeds a credential.
+    dev_user_email: str = "dev@local.test"
+    dev_user_password: SecretStr = SecretStr("devpassword123")
+
     # -- Browser clients ----------------------------------------------------
     # Origins allowed to call /api from a browser. Defaults cover the Vite and
     # create-react-app development servers; set explicitly in production.

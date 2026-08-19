@@ -12,19 +12,25 @@ from app.errors import InvalidTaxonomyDocumentError
 
 SCHEMA_VERSION = "1"
 
+#: Length bounds, named once so the schema, the request models that edit these
+#: fields, and the authoring guide cannot state three different limits.
+LABEL_MAX_LENGTH = 200
+NAME_MAX_LENGTH = 300
+DESCRIPTION_MAX_LENGTH = 2000
+
 
 class TaxonomySubtopic(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str = Field(min_length=1, max_length=300)
-    description: str = Field(default="", max_length=2000)
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    description: str = Field(default="", max_length=DESCRIPTION_MAX_LENGTH)
 
 
 class TaxonomyTopic(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str = Field(min_length=1, max_length=300)
-    description: str = Field(default="", max_length=2000)
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    description: str = Field(default="", max_length=DESCRIPTION_MAX_LENGTH)
     subtopics: list[TaxonomySubtopic] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -42,7 +48,7 @@ class TaxonomyDocument(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     schema_version: Literal["1"]
-    label: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     topics: list[TaxonomyTopic] = Field(min_length=1)
 
     @model_validator(mode="after")

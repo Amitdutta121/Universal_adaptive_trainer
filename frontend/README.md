@@ -1,7 +1,7 @@
 # Professor console (Next.js)
 
-A second client of the FastAPI JSON API, beside the server-rendered Jinja UI. See
-`docs/DECISIONS.md` ADR-043 for why it exists and what it is not allowed to do.
+The React frontend for the FastAPI JSON API. See `docs/DECISIONS.md` ADR-043
+for why it exists and what it is not allowed to do.
 
 The rule that matters: **this app holds no business logic.** Scoring, taxonomy validation, the
 judge gate and the adaptive engine live in `app/`. Anything this UI needs that the API does not
@@ -57,15 +57,24 @@ src/
       page.tsx            Server shell: the Suspense boundary the URL state needs.
       questions-browser.tsx   Client: URL filters, query, table.
       [question_id]/      Server component with async params (Next 16).
+      generate/           The spec sheet: one row per book chunk, three difficulty
+                          columns, formats per row. The worked example of a feature
+                          split into files — types, hooks, and one component each.
+    books/                Import a document, then manage what it produced.
+    curriculum/           The same shape for the taxonomy: index, version, subtopic.
   components/
     providers.tsx         Query client, URL-state adapter, tooltips.
     app-sidebar.tsx       Navigation, driven by lib/navigation.ts.
     query-state.tsx       Loading, error, empty and not-built-yet states.
+    collapsible-panel.tsx Reference material that stays shut until it is asked for.
+    copy-button.tsx       Copy to clipboard, reporting a failure rather than swallowing it.
   lib/
     api/client.ts         The only place that talks to the API.
     api/queries.ts        Query keys and hooks. All server state lives here.
     api/schema.d.ts       Generated. Do not edit.
-    navigation.ts         Mirrors app/web/navigation.py.
+    display.ts            Timestamps, counts and machine codes, formatted one way.
+    json-document.ts      The upload checks that need no knowledge of a contract.
+    navigation.ts         Frontend navigation metadata for the dashboard and sidebar.
 ```
 
 ## Conventions
@@ -80,3 +89,9 @@ src/
   which is the same rule the backend follows.
 - `src/components/ui/` is shadcn/ui output. It is ours to edit, but it is excluded from linting so
   a component can be re-fetched without a diff war.
+- **A screen never re-derives a backend rule to decide what to offer.** The curriculum delete is the
+  worked example: two of its refusals have no override, and the dialog knows which by reading the
+  error code the API sent (`conflict_not_overridable`), not by reimplementing the rule.
+- **Shared by two features means a shared module.** `lib/display.ts` and `lib/json-document.ts` hold
+  what books and curriculum both need; what stays in a feature folder is the wording that carries
+  meaning there — `partial` for a book, `replaced` for a curriculum version.

@@ -1,0 +1,67 @@
+"use client";
+
+import { Sparkles } from "lucide-react";
+import type { Route } from "next";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { AppSidebar } from "@/components/app-sidebar";
+import { AuthGate } from "@/components/auth-gate";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+
+function ProfessorChrome({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthGate>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset className="app-inset">
+          {/* `min-w-0`: without it this flex child refuses to shrink below the
+              width of its widest content, and a long code listing would push
+              the whole page into horizontal scroll instead of scrolling itself. */}
+          <div className="app-shell mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6">
+            {children}
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </AuthGate>
+  );
+}
+
+function StudentChrome({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="student-shell min-h-screen">
+      <div className="student-shell__backdrop" />
+      <div className="student-shell__frame">
+        <header className="student-shell__header">
+          <Link href={"/students/join" as Route} className="student-shell__brand">
+            <span className="student-shell__brand-mark">
+              <Sparkles className="size-4" />
+            </span>
+            <span>
+              <span className="student-shell__eyebrow">Adaptive Trainer</span>
+              <span className="student-shell__title">Student Classroom</span>
+            </span>
+          </Link>
+          <Link href="/" className="student-shell__console-link">
+            Professor console
+          </Link>
+        </header>
+        <div className="student-shell__content">{children}</div>
+      </div>
+    </main>
+  );
+}
+
+export function AppChrome({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isStudentRoute = pathname.startsWith("/students/join");
+  // The login page renders full-page (see login-screen.tsx) and must never sit
+  // behind AuthGate itself, or a logged-out visitor could never reach it.
+  const isLoginRoute = pathname === "/login";
+
+  if (isLoginRoute) return <>{children}</>;
+  return isStudentRoute ? (
+    <StudentChrome>{children}</StudentChrome>
+  ) : (
+    <ProfessorChrome>{children}</ProfessorChrome>
+  );
+}

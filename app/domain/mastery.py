@@ -22,17 +22,17 @@ MAX_SCORE = 100.0
 INITIAL_SUBTOPIC_WEAKNESS = 1.0
 
 #: Boundaries on BKT P(known) separating low / medium / high mastery.
-LOW_MASTERY_CEILING = 0.4
-MEDIUM_MASTERY_CEILING = 0.75
+LOW_MASTERY_CEILING = 0.45
+MEDIUM_MASTERY_CEILING = 0.85
 
 
 class BKTParameters(BaseModel):
     """Bayesian Knowledge Tracing parameters for one topic."""
 
-    p_init: float = Field(default=0.2, ge=0.0, le=1.0)
-    p_learn: float = Field(default=0.15, ge=0.0, le=1.0)
-    p_guess: float = Field(default=0.2, ge=0.0, le=1.0)
-    p_slip: float = Field(default=0.1, ge=0.0, le=1.0)
+    p_init: float = Field(default=0.1, ge=0.0, le=1.0)
+    p_learn: float = Field(default=0.03, ge=0.0, le=1.0)
+    p_guess: float = Field(default=0.3, ge=0.0, le=1.0)
+    p_slip: float = Field(default=0.05, ge=0.0, le=1.0)
 
 
 DEFAULT_BKT_PARAMETERS = BKTParameters()

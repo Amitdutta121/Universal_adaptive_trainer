@@ -23,6 +23,7 @@ import logging
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.errors import NotFoundError
 from app.domain.enums import QuestionType, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS, professor_edits
 from app.llm import StructuredLLMClient, get_structured_client
@@ -173,3 +174,57 @@ def refresh_type_instruction(
         len(current),
     )
     return row
+
+
+def delete_type_instruction_rule(
+    session: Session,
+    question_type: QuestionType,
+    *,
+    rule_index: int,
+    base_instruction: str,
+) -> TypeInstructionRow | None:
+    """Delete one learned rule and re-render the stored instruction.
+
+    Returns ``None`` when the deleted rule was the last one, which means the
+    shipped instruction is back in force and the stored row can be dropped.
+    """
+    repository = TypeInstructionRepository(session)
+    row = repository.get(question_type)
+    if row is None:
+        raise NotFoundError(
+            f"The {question_type.value} type is already using its shipped instruction.",
+            detail="There is no learned instruction row to edit.",
+        )
+
+    rules = [LearnedRule.model_validate(rule) for rule in row.rules]
+    if rule_index < 0 or rule_index >= len(rules):
+        raise NotFoundError(
+            f"Rule {rule_index + 1} does not exist for {question_type.value}.",
+            detail="Choose a learned rule that is still present.",
+        )
+
+    removed = rules.pop(rule_index)
+    if not rules:
+        repository.delete(question_type)
+        session.commit()
+        logger.info(
+            "Deleted the last learned rule for %s (%s); reverted to shipped instruction.",
+            question_type.value,
+            removed.rule,
+        )
+        return None
+
+    updated = repository.upsert(
+        question_type,
+        instruction=render_instruction(base_instruction, rules),
+        rules=[rule.model_dump() for rule in rules],
+        review_count=row.review_count,
+    )
+    session.commit()
+    logger.info(
+        "Deleted learned rule %s for %s; %s rule(s) remain.",
+        removed.rule,
+        question_type.value,
+        len(rules),
+    )
+    return updated

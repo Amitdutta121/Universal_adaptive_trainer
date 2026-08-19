@@ -8,6 +8,16 @@ view from the repositories.
 The two loops stay separate here as everywhere else: nothing in this module
 touches judges, reviews or learned instructions, and nothing a student does
 feeds professor preference (ADR-001).
+
+This module mixes two audiences, unlike every other router under
+``routes/api``: a student reaches ``/api/students`` (enrol),
+``/api/training-sessions`` (start/serve/answer/end) and ``/api/attempts``
+anonymously by link
+(``/students/join/session/{id}`` on the frontend), plus the one frozen-set read
+that powers the join lobby (``/students/join?set=...``), so those stay public.
+Only the professor-facing reads -- listing students, one student's detail and
+progress, and listing a student's sessions -- carry
+``Depends(current_active_user)``.
 """
 
 from __future__ import annotations
@@ -15,9 +25,10 @@ from __future__ import annotations
 import logging
 import secrets
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
 from app.adaptive import AdaptiveTrainingEngine
+from app.auth.backend import current_active_user
 from app.domain.mastery import difficulty_for_mastery, mastery_band
 from app.errors import DomainRuleError
 from app.persistence.repositories import (
@@ -34,6 +45,7 @@ from app.web.routes.api.schemas import (
     AnswerRequest,
     AttemptOut,
     CreateStudentRequest,
+    QuestionSetOut,
     ServedQuestionOut,
     StartTrainingSessionRequest,
     StudentListResponse,
@@ -53,7 +65,17 @@ router = APIRouter(tags=["students"])
 RECENT_ATTEMPTS = 25
 
 
-@router.get("/students", response_model=StudentListResponse)
+@router.get("/question-sets/{set_version_id}", response_model=QuestionSetOut)
+def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
+    """One frozen set, public so an anonymous join link can describe itself."""
+    return QuestionSetOut.from_row(QuestionSetRepository(session).get(set_version_id))
+
+
+@router.get(
+    "/students",
+    response_model=StudentListResponse,
+    dependencies=[Depends(current_active_user)],
+)
 def list_students(session: DbSession) -> StudentListResponse:
     students = StudentRepository(session)
     attempts = StudentAttemptRepository(session)
@@ -89,7 +111,11 @@ def create_student(session: DbSession, payload: CreateStudentRequest) -> Student
     return StudentOut.from_row(row)
 
 
-@router.get("/students/{student_id}", response_model=StudentOut)
+@router.get(
+    "/students/{student_id}",
+    response_model=StudentOut,
+    dependencies=[Depends(current_active_user)],
+)
 def get_student(session: DbSession, student_id: int) -> StudentOut:
     row = StudentRepository(session).get(student_id)
     return StudentOut.from_row(
@@ -97,7 +123,11 @@ def get_student(session: DbSession, student_id: int) -> StudentOut:
     )
 
 
-@router.get("/students/{student_id}/progress", response_model=StudentProgressOut)
+@router.get(
+    "/students/{student_id}/progress",
+    response_model=StudentProgressOut,
+    dependencies=[Depends(current_active_user)],
+)
 def student_progress(session: DbSession, student_id: int) -> StudentProgressOut:
     """Measured mastery, weakness and history for one learner.
 
@@ -183,7 +213,11 @@ def start_training_session(
     )
 
 
-@router.get("/training-sessions", response_model=TrainingSessionListResponse)
+@router.get(
+    "/training-sessions",
+    response_model=TrainingSessionListResponse,
+    dependencies=[Depends(current_active_user)],
+)
 def list_training_sessions(session: DbSession, student_id: int) -> TrainingSessionListResponse:
     student = StudentRepository(session).get(student_id)
     rows = TrainingSessionRepository(session).list_for_student(student_id)

@@ -140,19 +140,50 @@ def _parsons_order(answer: str) -> list[str]:
     return [line.strip() for line in separated.splitlines() if line.strip()]
 
 
-def _parsons(question: Question, content: dict, answer: str) -> ScoredAnswer:
-    """Score a Parsons puzzle on block order.
+def _parsons_layout(answer: str) -> list[tuple[str, int]]:
+    """Read submitted block ids plus their indentation level.
 
-    Indentation is **not** assessed. The stored ``indents`` are available, but
-    nothing collects them from a student yet, and marking against a field the
-    answer cannot express would fail every submission. When the ordering UI grows
-    indentation this becomes a partial score rather than 0/100.
+    The student answer remains plain text. Each non-empty line names one block,
+    and leading whitespace encodes the intended indent level in multiples of
+    four spaces. Tabs are treated as one indent level each.
     """
+    if "," in answer and "\n" not in answer and "\r" not in answer:
+        return [(block_id, 0) for block_id in _parsons_order(answer)]
+
+    layout: list[tuple[str, int]] = []
+    for raw_line in answer.splitlines():
+        if not raw_line.strip():
+            continue
+        expanded = raw_line.replace("\t", "    ")
+        stripped = expanded.lstrip(" ")
+        leading_spaces = len(expanded) - len(stripped)
+        layout.append((stripped.strip(), leading_spaces // 4))
+    return layout
+
+
+def _parsons(question: Question, content: dict, answer: str) -> ScoredAnswer:
+    """Score a Parsons puzzle on block order and indentation."""
     correct_order = content.get("correct_order")
     if not isinstance(correct_order, list) or not correct_order:
         raise _unmarkable(question, "no correct block order is recorded")
+    blocks = content.get("blocks")
+    if not isinstance(blocks, list) or not blocks:
+        raise _unmarkable(question, "no blocks are recorded")
 
-    return _discrete(correct=_parsons_order(answer) == correct_order, content=content)
+    blocks_by_id = {
+        str(block.get("id")): block
+        for block in blocks
+        if isinstance(block, dict) and block.get("id") is not None
+    }
+    expected_layout: list[tuple[str, int]] = []
+    for block_id in correct_order:
+        block = blocks_by_id.get(str(block_id))
+        indent = block.get("indent") if isinstance(block, dict) else None
+        if not isinstance(indent, int) or isinstance(indent, bool) or indent < 0:
+            raise _unmarkable(question, f"block {block_id!r} has no valid indentation recorded")
+        expected_layout.append((str(block_id), indent))
+
+    return _discrete(correct=_parsons_layout(answer) == expected_layout, content=content)
 
 
 def _executable(

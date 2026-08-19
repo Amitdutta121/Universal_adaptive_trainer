@@ -14,12 +14,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useCreateStudent, useQuestionSet, useStartTrainingSession } from "@/lib/api/queries";
 
+// Local, per-browser convenience only -- not an identity mechanism. Students
+// have no accounts (ADR-041), so this just saves retyping a name on the same
+// device; it plays no part in the "names must be unique" rule the backend
+// enforces.
 const LEARNER_NAME_STORAGE_KEY = "adaptive-trainer:learner-name";
 
+// Landing page for a classroom link (`/students/join?set=<id>`): shows what
+// the frozen set contains, then creates a new learner and training session
+// and hands off to the session screen.
 export function JoinClassroomScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawSetId = searchParams.get("set");
+  // A missing or non-numeric `set` query param renders as a broken-link
+  // state below rather than a query error, since there is no id to query with.
   const setVersionId = useMemo(() => {
     const parsed = Number(rawSetId);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -31,6 +40,7 @@ export function JoinClassroomScreen() {
 
   const [displayName, setDisplayName] = useState("");
 
+  // Prefill from whatever name was last used successfully on this device.
   useEffect(() => {
     const remembered = window.localStorage.getItem(LEARNER_NAME_STORAGE_KEY);
     if (remembered) setDisplayName(remembered);
@@ -42,11 +52,16 @@ export function JoinClassroomScreen() {
     if (!trimmed) return;
 
     try {
+      // Every join creates a fresh student row -- there is no "log back in as
+      // an existing learner" here, so a name collision (handled by
+      // createStudent.isError below) is the backend's uniqueness rule doing
+      // its job, not a bug.
       const learner = await createStudent.mutateAsync({ display_name: trimmed });
       const session = await startTrainingSession.mutateAsync({
         student_id: learner.id,
         set_version_id: setVersionId,
       });
+      // Only remember the name once both calls actually succeeded.
       window.localStorage.setItem(LEARNER_NAME_STORAGE_KEY, trimmed);
       router.push(`/students/join/session/${session.id}` as Route);
     } catch {
@@ -56,6 +71,10 @@ export function JoinClassroomScreen() {
 
   return (
     <>
+      {/* No sidebar trigger (students have no console nav) and no taxonomy
+          selector (a professor-only control with no meaning here -- and it
+          can change the app's active curriculum, so it must never appear on
+          a page a student can reach). */}
       <PageHeader
         title="Join classroom"
         summary="Enter your learner name to start an adaptive training session from this frozen question set."
@@ -107,6 +126,10 @@ export function JoinClassroomScreen() {
                 so everyone joining later is still training against the same set.
               </p>
 
+              {/* Short, plain-language restatement of the fixed adaptive-training
+                  rules in CLAUDE.md (weakness-weighted roulette, BKT-driven
+                  difficulty, low-priority reuse) so a student knows what to
+                  expect before their first question. */}
               <div className="space-y-3 border-t border-border/60 pt-4">
                 <div className="font-medium text-foreground text-sm">
                   How this training adapts to you

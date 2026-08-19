@@ -197,13 +197,7 @@ function computeAddedLines(stub: string, reference: string) {
   return { stubLines, referenceLines, addedCount: added.size, added };
 }
 
-function CodeCompletionDiff({
-  stub,
-  reference,
-}: {
-  stub: string;
-  reference: string;
-}) {
+function CodeCompletionDiff({ stub, reference }: { stub: string; reference: string }) {
   const { stubLines, referenceLines, addedCount, added } = computeAddedLines(stub, reference);
 
   return (
@@ -246,7 +240,11 @@ function CodeCompletionDiff({
               {referenceLines.map((line, index) => (
                 <div
                   key={`ref-${index}`}
-                  className={added.has(index) ? "review-diff-line review-diff-line-added" : "review-diff-line"}
+                  className={
+                    added.has(index)
+                      ? "review-diff-line review-diff-line-added"
+                      : "review-diff-line"
+                  }
                 >
                   {line || " "}
                 </div>
@@ -264,10 +262,7 @@ export function ReviewQuestionSurface({
   isInlineEditing,
   promptEdit,
   onPromptEdit,
-}: Pick<
-  ReviewQuestionContentProps,
-  "detail" | "isInlineEditing" | "promptEdit" | "onPromptEdit"
->) {
+}: Pick<ReviewQuestionContentProps, "detail" | "isInlineEditing" | "promptEdit" | "onPromptEdit">) {
   return (
     <Card className="review-panel border">
       <CardHeader>
@@ -275,7 +270,9 @@ export function ReviewQuestionSurface({
         <CardTitle className="flex flex-wrap items-center gap-2">
           <span>Question {detail.question.id}</span>
           <ReviewChip>{detail.question.difficulty}</ReviewChip>
-          <ReviewChip tone="accent">{detail.question.question_type ?? detail.question.kind}</ReviewChip>
+          <ReviewChip tone="accent">
+            {detail.question.question_type ?? detail.question.kind}
+          </ReviewChip>
         </CardTitle>
         <CardDescription>
           {detail.taxonomy.topic} - {detail.taxonomy.subtopics.join(", ")}
@@ -401,14 +398,20 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
               <CardDescription>What the generator claimed.</CardDescription>
             </CardHeader>
             <CardContent>
-              {expected ? <CodeBlock>{expected}</CodeBlock> : <MissingField label="Expected output is missing." />}
+              {expected ? (
+                <CodeBlock>{expected}</CodeBlock>
+              ) : (
+                <MissingField label="Expected output is missing." />
+              )}
             </CardContent>
           </Card>
           <Card className="review-panel border">
             <CardHeader>
               <CardTitle>Observed by deterministic check</CardTitle>
               <CardDescription>
-                {observed?.passed ? "Matches the claimed output." : "Interpreter evidence from validation."}
+                {observed?.passed
+                  ? "Matches the claimed output."
+                  : "Interpreter evidence from validation."}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -439,7 +442,11 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
                 <CardDescription>The stub and its gap.</CardDescription>
               </CardHeader>
               <CardContent>
-                {source ? <CodeBlock>{source}</CodeBlock> : <MissingField label="Stub is missing." />}
+                {source ? (
+                  <CodeBlock>{source}</CodeBlock>
+                ) : (
+                  <MissingField label="Stub is missing." />
+                )}
               </CardContent>
             </Card>
             <ReferencePanel
@@ -460,7 +467,11 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
                 <CardTitle>Given to the student</CardTitle>
               </CardHeader>
               <CardContent>
-                {source ? <CodeBlock>{source}</CodeBlock> : <MissingField label="Stub is missing." />}
+                {source ? (
+                  <CodeBlock>{source}</CodeBlock>
+                ) : (
+                  <MissingField label="Stub is missing." />
+                )}
               </CardContent>
             </Card>
             <ReferencePanel
@@ -496,7 +507,11 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
               <CardDescription>The student should fix this version.</CardDescription>
             </CardHeader>
             <CardContent>
-              {broken ? <CodeBlock>{broken}</CodeBlock> : <MissingField label="Broken code is missing." />}
+              {broken ? (
+                <CodeBlock>{broken}</CodeBlock>
+              ) : (
+                <MissingField label="Broken code is missing." />
+              )}
             </CardContent>
           </Card>
           <ReferencePanel
@@ -510,7 +525,9 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
         </div>
         <Alert variant={bugCheck?.passed ? "default" : "destructive"}>
           {bugCheck?.passed ? <CheckCircle2 /> : <AlertCircle />}
-          <AlertTitle>{bugCheck?.passed ? "Bug confirmed" : "Broken code did not exhibit the issue"}</AlertTitle>
+          <AlertTitle>
+            {bugCheck?.passed ? "Bug confirmed" : "Broken code did not exhibit the issue"}
+          </AlertTitle>
           <AlertDescription>
             {bugCheck?.evidence ? (
               <p className="whitespace-pre-wrap font-mono text-xs">{bugCheck.evidence}</p>
@@ -569,11 +586,17 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
             <CardHeader>
               <CardTitle>Assembled in canonical order</CardTitle>
               <CardDescription>
-                {compiled?.passed ? "Reconstruction compiles." : "Reconstruction or compilation failed."}
+                {compiled?.passed
+                  ? "Reconstruction compiles."
+                  : "Reconstruction or compilation failed."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {assembled ? <CodeBlock>{assembled}</CodeBlock> : <MissingField label="Correct order is missing." />}
+              {assembled ? (
+                <CodeBlock>{assembled}</CodeBlock>
+              ) : (
+                <MissingField label="Correct order is missing." />
+              )}
               {compiled?.evidence ? (
                 <Alert variant="destructive">
                   <AlertCircle />

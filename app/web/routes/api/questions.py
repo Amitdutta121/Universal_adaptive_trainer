@@ -13,6 +13,7 @@ cost is answerable before it starts rather than only afterwards.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from contextlib import suppress
 from typing import Annotated
 
@@ -21,14 +22,14 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.domain.books import BookSection
-from app.domain.enums import JudgeMetricId, QuestionStatus
+from app.domain.enums import Difficulty, JudgeMetricId, QuestionStatus
 from app.errors import InvalidQuestionSpecError, NotFoundError
 from app.evaluation import (
     PedagogicalEvalStatus,
     PedagogicalEvaluation,
     humanize_judge_error_detail,
 )
-from app.generation import GenerationService
+from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
 from app.ingestion import SourceRetrieval
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import (
@@ -38,7 +39,11 @@ from app.persistence.repositories import (
 )
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
+    BatchPlanResponse,
+    BatchPlanTotals,
     BookSummary,
+    GenerateBatchRequest,
+    GenerateBatchResponse,
     GenerateQuestionsRequest,
     GenerateQuestionsResponse,
     GenerationPlanChapter,
@@ -46,6 +51,7 @@ from app.web.routes.api.schemas import (
     GenerationPlanSection,
     GenerationPlanTotals,
     PersonalizationEvidence,
+    PlannedQuestionOut,
     QuestionDetail,
     QuestionListResponse,
     QuestionSummary,
@@ -63,23 +69,33 @@ router = APIRouter(prefix="/questions", tags=["questions"])
 
 @router.get("", response_model=QuestionListResponse)
 def list_questions(
-    session: DbSession, limit: int = 50, status: QuestionStatus | None = None
+    session: DbSession,
+    limit: int = 50,
+    status: QuestionStatus | None = None,
+    curriculum_version_id: int | None = None,
 ) -> QuestionListResponse:
     """The question bank, newest first, with counts by lifecycle status.
 
-    ``status`` narrows the listing; without it nothing is hidden. The API does not
-    filter by default even though the page does, because a caller reading the bank
-    over JSON has no way to discover rows an unrequested default removed.
-    ``status_counts`` and ``total`` always describe the whole bank, so a filtered
-    listing still says how much it is showing of what.
+    ``status`` and ``curriculum_version_id`` narrow the listing; without them
+    nothing is hidden. The API does not filter by default even though the page
+    does, because a caller reading the bank over JSON has no way to discover rows
+    an unrequested default removed. ``status_counts``, ``curriculum_version_counts``
+    and ``total`` always describe the whole bank, so a filtered listing still says
+    how much it is showing of what.
     """
     repo = QuestionRepository(session)
-    rows = repo.list_recent(limit=limit, statuses=None if status is None else [status])
+    rows = repo.list_recent(
+        limit=limit,
+        statuses=None if status is None else [status],
+        curriculum_version_id=curriculum_version_id,
+    )
     return QuestionListResponse(
         questions=[QuestionSummary.from_row(row) for row in rows],
         status_counts=repo.count_by_status(),
+        curriculum_version_counts=repo.count_by_curriculum_version(),
         total=repo.count(),
         status=status,
+        curriculum_version_id=curriculum_version_id,
     )
 
 
@@ -125,6 +141,70 @@ def generate_questions(
         created=len(generated),
         question_ids=[row.id for row in generated],
         questions=[QuestionSummary.from_row(row) for row in generated],
+    )
+
+
+@router.post("/batch-plan", response_model=BatchPlanResponse)
+def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
+    """Compile a per-chunk spec sheet into the questions it would generate (ADR-044).
+
+    Read-only and free: it makes no model call and touches no row, so a professor
+    can price a spec sheet and revise it as often as they like. The compilation
+    lives here rather than in either UI because the rule that decides which format
+    each question gets must not be restated by a client (ADR-027).
+    """
+    planned = compile_chunk_requests([chunk.to_request() for chunk in payload.chunks])
+    counts = Counter(question.difficulty for question in planned)
+    return BatchPlanResponse(
+        planned=[PlannedQuestionOut.from_planned(question) for question in planned],
+        totals=BatchPlanTotals(
+            chunks_specified=len({question.section_id for question in planned}),
+            questions_to_create=len(planned),
+            generation_calls=len(planned),
+            judge_calls=len(planned) * len(JudgeMetricId),
+            easy=counts[Difficulty.EASY],
+            medium=counts[Difficulty.MEDIUM],
+            hard=counts[Difficulty.HARD],
+            identical_repeats=count_identical_requests(planned),
+        ),
+    )
+
+
+@router.post(
+    "/generate-batch", response_model=GenerateBatchResponse, status_code=status.HTTP_201_CREATED
+)
+def generate_batch(session: DbSession, payload: GenerateBatchRequest) -> GenerateBatchResponse:
+    """Generate the questions a per-chunk spec sheet asks for (ADR-044).
+
+    One chunk may produce several questions, at several difficulties, in several
+    formats — which is what separates this from ``/generate``, where a run carries
+    one difficulty and one format for every section in it.
+
+    The run is synchronous: each question costs one generation call plus one judge
+    call per metric, made in sequence. A large sheet is therefore a long request,
+    and the console warns before submitting one.
+    """
+    chunks = [chunk.to_request() for chunk in payload.chunks]
+    # Compiled before the service is built so an unusable sheet reports the
+    # fixable problem rather than an LLM-configuration error raised first.
+    planned = compile_chunk_requests(chunks)
+    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session)
+
+    try:
+        generated = GenerationService(session).generate_batch(
+            curriculum_version_id=curriculum_version_id,
+            chunks=chunks,
+            seed=payload.seed,
+        )
+    except Exception:
+        session.rollback()
+        raise
+
+    return GenerateBatchResponse(
+        created=len(generated),
+        question_ids=[row.id for row in generated],
+        questions=[QuestionSummary.from_row(row) for row in generated],
+        planned=[PlannedQuestionOut.from_planned(question) for question in planned],
     )
 
 

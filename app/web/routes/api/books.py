@@ -1,7 +1,16 @@
-"""Book endpoints: import a structured book document and read its structure back.
+"""Book endpoints: import a structured book document, read it back, edit, delete.
 
 Import is all-or-nothing. An invalid document raises before any row is written,
 and the error handler renders the reason as JSON (see :mod:`app.errors`).
+
+Editing covers the row's labels only -- title, author, notes. Structure is
+declared by the imported document (ADR-015), so correcting a chapter means
+correcting the document and importing it again, not editing rows here.
+
+Deleting refuses by default while questions still cite the book, because their
+grounding lives in a frozen spec rather than a foreign key and nothing would
+repair it. ``force=true`` is the professor overruling that, with the count in
+front of them.
 """
 
 from __future__ import annotations
@@ -12,18 +21,34 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.errors import NotFoundError
-from app.ingestion import BookImportService, SourceRetrieval
+from app.ingestion import (
+    SCHEMA_VERSION,
+    STRUCTURE_SOURCE_TERMS,
+    SUPPORTED_EXTENSIONS,
+    WARNING_CODE_TERMS,
+    WARNING_SEVERITY_TERMS,
+    BookImportService,
+    BookLibraryService,
+    SourceRetrieval,
+    book_authoring_prompt,
+    example_json,
+)
 from app.persistence.repositories import BookRepository, BookStructureRepository
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
+    BookDeletion,
     BookDetail,
+    BookDocumentGuide,
     BookListResponse,
+    BookMetadataUpdate,
     BookSummary,
     ChapterOut,
     SectionDetail,
     SectionListResponse,
     SectionSummary,
+    VocabularyTermOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +94,27 @@ def import_book(
     return BookSummary.from_row(book)
 
 
+@router.get("/document-guide", response_model=BookDocumentGuide)
+def document_guide() -> BookDocumentGuide:
+    """What a valid book document is, and the prompt that produces one.
+
+    Rendered from the ingestion contract rather than written out here, so a
+    client cannot describe a document this application would refuse. The prompt
+    is advisory: it grants nothing, and every upload is still validated in full.
+    """
+    settings = get_settings()
+    return BookDocumentGuide(
+        schema_version=SCHEMA_VERSION,
+        supported_extensions=list(SUPPORTED_EXTENSIONS),
+        max_upload_mb=settings.max_book_upload_mb,
+        prompt=book_authoring_prompt(max_upload_mb=settings.max_book_upload_mb),
+        example_json=example_json(),
+        structure_sources=VocabularyTermOut.from_terms(STRUCTURE_SOURCE_TERMS),
+        warning_codes=VocabularyTermOut.from_terms(WARNING_CODE_TERMS),
+        warning_severities=VocabularyTermOut.from_terms(WARNING_SEVERITY_TERMS),
+    )
+
+
 @router.get("/{book_id}", response_model=BookDetail)
 def get_book(session: DbSession, book_id: int) -> BookDetail:
     """One book: import status, warnings and its chapter/section hierarchy."""
@@ -79,7 +125,30 @@ def get_book(session: DbSession, book_id: int) -> BookDetail:
         section_count=BookStructureRepository(session).section_count(book_id),
         chapters=[ChapterOut.from_chapter(chapter) for chapter in chapters],
         warnings=list(book.warnings or []),
+        grounded_question_count=BookLibraryService(session).grounded_question_count(book_id),
     )
+
+
+@router.patch("/{book_id}", response_model=BookSummary)
+def update_book(session: DbSession, book_id: int, update: BookMetadataUpdate) -> BookSummary:
+    """Edit a book's labels. Omitted fields are left as they are."""
+    book = BookLibraryService(session).update_metadata(
+        book_id, title=update.title, author=update.author, notes=update.notes
+    )
+    session.commit()
+    return BookSummary.from_row(book)
+
+
+@router.delete("/{book_id}", response_model=BookDeletion)
+def delete_book(session: DbSession, book_id: int, force: bool = False) -> BookDeletion:
+    """Delete a book, its structure and its retained document.
+
+    Refuses with 409 while questions cite the book, naming how many. ``force``
+    proceeds anyway; the questions are kept and their citations are stranded.
+    """
+    stranded = BookLibraryService(session).delete(book_id, force=force)
+    session.commit()
+    return BookDeletion(deleted_book_id=book_id, stranded_question_count=stranded)
 
 
 @router.get("/{book_id}/sections", response_model=SectionListResponse)

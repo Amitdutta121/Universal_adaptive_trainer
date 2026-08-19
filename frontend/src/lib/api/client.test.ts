@@ -1,9 +1,9 @@
 /**
  * The client's contract with `app/errors.py`.
  *
- * The backend answers a failure with `{"error": {code, message, detail?}}` and only
- * does so when the request asked for JSON. Both of those are easy to break silently,
- * so they are pinned here.
+ * The backend answers a failure with `{"error": {code, message, detail?}}`, and
+ * the client always asks for that envelope. Both are easy to break silently, so
+ * they are pinned here.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -59,7 +59,7 @@ describe("unwrap", () => {
 });
 
 describe("request headers", () => {
-  it("asks for JSON, or the backend renders an HTML error page instead", async () => {
+  it("asks for JSON on every API request", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "ok" }), {
         status: 200,

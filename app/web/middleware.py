@@ -20,7 +20,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
     Attaches a request id to ``request.state`` and echoes it back in the
     response header so a log line can be tied to a specific browser action.
-    Static asset requests are logged at DEBUG to keep the console readable.
     """
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -43,9 +42,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             raise
 
         elapsed_ms = (time.perf_counter() - started) * 1000
-        level = logging.DEBUG if request.url.path.startswith("/static") else logging.INFO
         logger.log(
-            level,
+            logging.INFO,
             "[%s] %s %s -> %d (%.1fms)",
             request_id,
             request.method,

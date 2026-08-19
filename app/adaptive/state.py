@@ -31,14 +31,13 @@ from app.domain.mastery import (
 )
 
 #: How far a single score moves a subtopic's weakness toward what it implies.
-#: 0.3 takes a subtopic from untouched (1.0) to the floor in roughly nine
-#: consecutive perfect answers, which is slow enough that one lucky answer does
-#: not retire a skill.
-WEAKNESS_LEARNING_RATE = 0.3
+#: 0.15 keeps the focus responsive without letting one answer swing the roulette
+#: too abruptly.
+WEAKNESS_LEARNING_RATE = 0.15
 
 #: Weakness is the roulette weight, so zero would remove a subtopic from
-#: selection permanently. The floor keeps a mastered subtopic reachable -- about
-#: one draw in 180 against nine untouched subtopics (ADR-041).
+#: selection permanently. The floor keeps a mastered subtopic reachable while
+#: still making genuinely weak areas much more likely.
 MIN_SUBTOPIC_WEAKNESS = 0.05
 
 

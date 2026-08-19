@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.coverage import (
     MIN_QUESTIONS_PER_CELL,
     CoverageState,
@@ -322,6 +323,22 @@ def test_the_endpoint_creates_and_reads_back_a_set(client: TestClient, session: 
     assert fetched["question_ids"] == [approved.id]
     assert fetched["question_count"] == fetched["member_count"] == 1
     assert listed["total"] == 1
+
+
+def test_question_set_detail_stays_public_for_the_join_lobby(
+    settings: Settings, session: Session
+) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    approved = _question(session, version=version, subtopic_id=subtopic_id)
+    frozen = create_question_set(session, label="Autumn 2026")
+
+    from app.main import create_app
+
+    with TestClient(create_app(settings)) as public_client:
+        fetched = public_client.get(f"/api/question-sets/{frozen.id}")
+
+    assert fetched.status_code == 200
+    assert fetched.json()["question_ids"] == [approved.id]
 
 
 def test_creating_an_empty_set_is_refused_by_the_api(client: TestClient, session: Session) -> None:

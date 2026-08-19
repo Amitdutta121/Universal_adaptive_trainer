@@ -1,8 +1,4 @@
-import type {
-  QuestionCheck,
-  QuestionDetail,
-  RejectionReason,
-} from "./review-types";
+import type { QuestionCheck, QuestionDetail, RejectionReason } from "./review-types";
 import { REJECTION_REASONS } from "./review-types";
 
 export function labelize(value: string) {
@@ -33,7 +29,9 @@ export function presentStringArray(value: unknown): string[] | null {
     : null;
 }
 
-export function presentBlocks(value: unknown): Array<{ id: string; text: string; indent: number }> | null {
+export function presentBlocks(
+  value: unknown,
+): Array<{ id: string; text: string; indent: number }> | null {
   if (!Array.isArray(value)) return null;
   const blocks = value
     .filter((entry) => typeof entry === "object" && entry !== null)

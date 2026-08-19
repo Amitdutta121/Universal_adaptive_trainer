@@ -1,12 +1,12 @@
 /**
- * The professor-facing navigation, mirroring `app/web/navigation.py`.
+ * The professor-facing navigation.
  *
- * Single source of truth on this side: the sidebar and the dashboard cards both read
- * this list, so a section cannot appear in one place and be missing from another.
+ * Single source of truth on this side: the sidebar and the dashboard cards both
+ * read this list, so a section cannot appear in one place and be missing from
+ * another.
  *
- * The keys match `NAV_SECTIONS` on the backend, with one addition: `review`. The
- * Jinja UI reaches the review queue from inside the questions page, but it is the
- * screen a professor opens most, so here it is a section of its own.
+ * `review` and `generate` are distinct routes because they are screens of their
+ * own in the React console, even though their data hangs off the questions API.
  */
 
 import {
@@ -16,10 +16,10 @@ import {
   Grid3x3,
   ListChecks,
   type LucideIcon,
-  MessageSquareText,
   Network,
   Scale,
   ScrollText,
+  Wand2,
 } from "lucide-react";
 import type { Route } from "next";
 
@@ -55,18 +55,18 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     icon: ListChecks,
   },
   {
+    key: "generate",
+    label: "Generate",
+    path: "/questions/generate",
+    summary: "Set what each book chunk should produce, then generate the whole sheet at once.",
+    icon: Wand2,
+  },
+  {
     key: "review",
     label: "Review Queue",
     path: "/review",
-    summary: "Questions that passed validation and are waiting for a professor verdict.",
+    summary: "Professor feedback now lives here: review, approve, reject, or edit queued questions.",
     icon: ClipboardCheck,
-  },
-  {
-    key: "feedback",
-    label: "Professor Feedback",
-    path: "/feedback",
-    summary: "The approve / reject / edit history that teaches the generator your preferences.",
-    icon: MessageSquareText,
   },
   {
     key: "instructions",

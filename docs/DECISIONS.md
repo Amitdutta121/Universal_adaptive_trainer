@@ -1635,3 +1635,241 @@ together is what makes `pnpm run api:types` a single command.
 list and detail screens are built and verified against a running backend. The other seven sections
 are stubs that name their endpoints. `pnpm run check` (types, lint, tests) and `pnpm run build`
 pass; the backend suite is unchanged by this work.
+
+---
+
+## ADR-044 — A generation run carries a spec per chunk, and the API compiles it
+
+**Status:** accepted. Extends ADR-031's generation request; does not replace it.
+`POST /api/questions/generate` keeps working exactly as it did.
+
+**Context.** ADR-031 settled what a generation request names: a chunk, a difficulty and a question
+type. One run therefore carries one difficulty and one format for every section in it, and produces
+exactly one question per section. That is the right unit for "generate a question from this
+section", and the wrong unit for the thing a professor actually does before a course starts — fill
+a chapter.
+
+Filling a chapter is not one instruction. A six-page section on loops can carry two hard coding
+questions; the two-paragraph definition three sections later cannot carry one. Expressed through
+the existing endpoint, that is one HTTP request per (difficulty, format) pair, with the arithmetic
+of which chunk gets what reassembled in whichever client is driving — which is precisely the
+duplication ADR-027 exists to prevent.
+
+**Decisions.**
+
+- **The unit of a batch request is the chunk, not the run.** `ChunkGenerationSpec` carries a section
+  id, a count for each of easy / medium / hard, and the formats those questions may be drawn from.
+  A run is a list of them.
+- **Counts say how many questions; formats say what they may be.** Choosing three formats does not
+  triple the count. Two medium questions with three formats chosen is two questions, and the
+  compiler hands the formats out round-robin — with the cursor running across the whole chunk rather
+  than resetting per difficulty, so one easy and one medium question with two formats get one each.
+- **The compiler lives in the API** (`app/generation/batch.py`), is pure, and is exposed twice: once
+  as `POST /api/questions/batch-plan`, which prices a sheet and makes no model call, and once inside
+  `POST /api/questions/generate-batch`, which runs it. A client shows the totals the API computed
+  rather than computing a second opinion. This is ADR-027's rule applied to a request shape rather
+  than to a page.
+- **Difficulties are walked in a fixed order** (easy, then medium, then hard) so that a plan is
+  reproducible and a professor can predict which question is generated first.
+- **A repeat is counted, not refused.** Asking a chunk for three medium coding questions is three
+  identical requests today: `QuestionSpec.seed` is carried on the spec but never reaches the prompt,
+  so nothing makes the second differ from the first. `identical_repeats` reports how many planned
+  questions repeat a (chunk, difficulty, format) already planned, and the console says so before the
+  run. Refusing it would be the application overriding a professor's judgement about their own
+  material; hiding it would be letting them buy duplicates by accident.
+- **A chunk that asks for questions must name a format**, and a sheet where every chunk asks for
+  nothing is refused. Both are stated as errors rather than silently producing an empty run.
+- **The batch shares one run id** and keeps every other property of a run unchanged: one generation
+  call plus one judge call per metric per question, each question committed on its own, so a
+  provider failure part-way through keeps what has already been paid for (ADR-032).
+
+**Known limitation.** The run is synchronous. A sheet asking for thirty questions is thirty
+generation calls — up to ninety if defects are retried — plus one judge call per metric per
+question, made in sequence inside one HTTP request. There is no run record, no worker and no
+progress endpoint; the console warns before a long run and reports what was actually created
+afterwards. Making a batch outlive its request is the obvious next step, and the judge batch
+service (ADR-030) is the shape to copy.
+
+**Alternatives rejected.** Letting the client fire one `/generate` call per (difficulty, format)
+group: it puts the compiler in the browser, so the Jinja UI and the console would each need their
+own copy and could disagree about what a sheet costs. Adding a `count` to the existing request: it
+would make one difficulty and one format apply to every section in the run, which is the constraint
+this ADR exists to remove. Refusing repeats outright: see above.
+
+
+---
+
+## ADR-045 — A book can be managed after import, and the document that makes one is served
+
+**Status:** accepted. Extends ADR-012 to ADR-016; changes none of them. Structure is still declared
+by the document and never extracted by the application.
+
+**Context.** Import was the only thing that could happen to a book. A title typed wrong at upload
+stayed wrong, a book imported by mistake stayed forever, and the shape of a valid document was
+described in prose inside `books.html` — hand-written, and free to drift from
+`app/ingestion/schema.py` without anything failing. Meanwhile the professor console had no books
+screen at all.
+
+The producing problem is real: a professor has a PDF and needs structured JSON, and this repository
+will not convert one (ADR-016). What it can do is state the contract precisely enough that an
+assistant can satisfy it.
+
+**Decisions.**
+
+- **The instruction that produces a document is generated from the contract**
+  (`app/ingestion/authoring.py`), never typed into a template. The schema version, the accepted
+  extensions and all three closed vocabularies are read from the schema and the enums; a vocabulary
+  value with no professor-facing meaning fails at import, and `tests/test_ingestion_authoring.py`
+  fails if the prompt stops naming every value. The worked example inside the prompt is parsed by
+  the real validator in the same test, so the example cannot become one the application would
+  refuse.
+- **The prompt is advisory and says so.** It grants nothing. Whatever comes back is validated in
+  full by `parse_book_document`, which is why the console can offer it without weakening ADR-013's
+  "rejected in full, before any row is written".
+- **It is served, not duplicated.** `GET /api/books/document-guide` returns the prompt, the example
+  and the vocabularies, and both UIs render that one payload (ADR-027).
+- **Only labels are editable** (`PATCH /api/books/{id}`: title, author, notes). Chapters, sections
+  and section text come from the document, so a wrong boundary is corrected by fixing the document
+  and importing it again. A blank title is refused — a book must stay identifiable in a list —
+  while a blank author or note clears the field, because "no author is printed" is a correction.
+- **Deleting refuses by default while questions cite the book.** A question records its grounding
+  inside a frozen `QuestionSpec` rather than as a foreign key (ADR-036), so deletion cannot cascade
+  to it and nothing repairs the citation. `DELETE /api/books/{id}` raises `ResourceInUseError` (409)
+  naming the count; `force=true` is the professor overruling that with the number in front of them,
+  and the response reports how many citations were stranded. The questions themselves are kept.
+- **Deleting removes the retained upload.** The document is retained to make an import reproducible;
+  once the import is gone, the file is an orphan nothing can be traced back to. A file already
+  missing does not block the delete.
+- **A pasted document is a first-class input.** A reply from an assistant is text before it is a
+  file, so the console turns pasted JSON into the same multipart upload under `pasted-book.json`.
+  The browser checks only what needs no knowledge of the contract — does this parse, is it under the
+  size limit — because a second copy of the schema in the client is a copy that can disagree.
+
+**Alternatives rejected.** Writing the prompt into the console: it would drift from the schema
+silently, and the Jinja UI would need its own copy. Adding a re-import-over-this-book endpoint: the
+import path already produces a new book from a corrected document, and replacing rows underneath a
+book id would change what a question's citation refers to without saying so. Deleting silently and
+reporting afterwards: the count is only useful before the decision. Validating the document in the
+browser to fail faster: the schema has one implementation, and it is the backend's.
+
+---
+
+## ADR-046 — A curriculum version can be managed after upload, and the document that makes one is served
+
+**Status:** accepted. Extends ADR-021; changes none of it. Structure is still declared by the
+uploaded document and never edited row by row. The mirror of ADR-045 for taxonomy, with one
+deliberate divergence: deletion.
+
+**Context.** Upload was the only thing that could happen to a curriculum version. A label typed
+wrong in the document stayed wrong; a subtopic name a professor wanted reworded could only be
+changed by uploading a new document, which creates a new version with new row ids and therefore
+detaches every question's `topic_id` and every student's measured weakness — the exact loss stable
+ids exist to prevent. A version uploaded by mistake stayed forever. And the shape of a valid
+taxonomy document was described in prose inside `curriculum.html` ("Required keys: schema_version,
+label, topics, and each topic's subtopics") and in a file under `docs/` that nothing imported and
+nothing served — both free to drift from `app/curriculum/taxonomy_schema.py` without anything
+failing.
+
+Meanwhile the version page has told professors, since ADR-021, that a stable identifier "survives
+display-name edits" — a promise nothing in the product let them exercise.
+
+**Decisions.**
+
+- **The instruction that produces a taxonomy document is generated from the contract**
+  (`app/curriculum/authoring.py`), never typed into a template. A taxonomy document has no closed
+  vocabularies, so what books renders as three enum lists this renders as a **field reference read
+  out of the Pydantic field metadata**: every path, whether it is required, and both bounds. A field
+  added to `TaxonomyDocument`, `TaxonomyTopic` or `TaxonomySubtopic` without a professor-facing
+  meaning raises at import, exactly as an undescribed enum value does for books. The two rules a
+  producer cannot infer are stated explicitly: names are compared through `normalize_label`, so two
+  spellings of one name are a rejection, and `extra="forbid"` means one invented key rejects the
+  whole document.
+- **The worked example lives in the module, not in `docs/`.** `EXAMPLE_DOCUMENT` interpolates
+  `SCHEMA_VERSION`, so a schema bump cannot leave the served example claiming the old version, and
+  serving the guide never depends on a repository path or the process working directory.
+  `docs/taxonomy_document_example.json` is kept and pinned: a test asserts it equals the served
+  example, and the real `parse_taxonomy_document` parses that example, so neither can rot.
+- **It is served, not duplicated.** `GET /api/curriculum/document-guide` returns the prompt, the
+  example and the field reference, and both UIs render that one payload (ADR-027). The field
+  reference is published structurally as well as inside the prompt, so a form can bind its input
+  limits to the contract instead of hard-coding 300.
+- **Only display names are editable**, each on its own path: `PATCH /api/curriculum/versions/{id}`
+  for the label, `PATCH /api/curriculum/topics/{id}` and `PATCH /api/curriculum/subtopics/{id}` for
+  a name and a description. Separate paths rather than a nested payload under the version: a payload
+  carrying `topics: [...]` would have to decide whether an absent entry means unchanged or deleted,
+  which makes a structural edit *expressible* and merely refused. One path per row, with
+  `extra="forbid"` on a two-field model, makes it inexpressible — a stronger guarantee than a
+  validation rule. A blank label or name is refused, because a version must stay identifiable in a
+  list and a subtopic's name is what the generator and the four judges are shown; a blank
+  description clears the field, because import already stores an empty description as null.
+- **A rename changes the name and nothing else.** `stable_id` is assigned at upload from the name as
+  it then stood (`app/curriculum/taxonomy_ids.py`) and is never recomputed, which is what keeps a
+  student's measured weakness and a question's tagging attached to the same row. The consequence is
+  that after a rename the id no longer equals a hash of the current name, and **that is correct**:
+  the id is an identity, not a checksum. It records the name the concept was imported under.
+  Recomputing it would detach every measurement taken under the old id and contradict ADR-021.
+  Nothing in the codebase recomputes an id from a stored row, so the divergence is unobservable to
+  every code path — a test asserts it deliberately, rather than leaving it to be found and "fixed".
+- **A rename re-applies the document's duplicate-name rule.** This is the one check renaming a book
+  did not need. The upload validator refuses two topics whose normalised names collide, and a rename
+  can reintroduce that collision with the validator out of the path, so the service compares
+  siblings through the same `normalize_label` and names the sibling it collides with. Topic names
+  are unique within a version, subtopic names within a topic; the same name in another version is
+  fine, because versions are independent snapshots.
+- **Deleting refuses by default, and two cases are refused outright.** A curriculum version is named
+  in more ways than a book is: `questions.curriculum_version_id` and `questions.topic_id`,
+  `question_subtopics` rows, frozen question sets, and `student_topic_mastery` and
+  `student_subtopic_weakness`. **None of the declared `ondelete` clauses fire** — the engine sets no
+  `PRAGMA foreign_keys` (`app/persistence/database.py`) and SQLite defaults it off, so what actually
+  cleans up is the ORM's own `cascade="all, delete-orphan"`: version, topics, subtopics, evidence,
+  and nothing else. Everything else is left holding an integer that names a row which no longer
+  exists. `DELETE /api/curriculum/versions/{id}` therefore raises `ResourceInUseError` (409) naming
+  every count, and `force=true` is the professor overruling that with the numbers in front of them.
+- **`force` does not override a frozen question set, and does not override the approved version.**
+  A set is immutable by decision (ADR-036) and no endpoint or repository method can delete one, so a
+  set whose taxonomy is gone is a permanently failing coverage report with no remedy at all — there
+  is no professor judgement for a flag to express. And the version `GET /curriculum/approved`
+  returns is what generation grounds itself in; deleting it would either stop generation or, worse,
+  silently fall through to the previously approved version and re-ground the product on a different
+  taxonomy with nobody deciding to. The remedy there is one step and always available: upload a
+  replacement, which becomes approved immediately (ADR-021), after which the old version deletes.
+  Which taxonomy the product is grounded in then only ever changes by an upload, which is what
+  ADR-021 says.
+- **Deleting strands rather than repairs, and reports by count first.** The delete does not clear
+  `question_subtopics`, `student_topic_mastery` or `student_subtopic_weakness`. Clearing them would
+  be the delete doing more than was asked and destroying measurement without naming it. For the same
+  reason this decision does **not** enable `PRAGMA foreign_keys`: doing so would make the declared
+  CASCADE on `student_subtopic_weakness` fire and *destroy* measured weakness rather than strand it.
+  That is a whole-application behaviour change and needs its own entry.
+- **Nothing on disk is removed, because nothing was kept.** A book's retained document is deleted
+  with the book (ADR-045); a taxonomy upload retains no file, so `CurriculumLibraryService` takes no
+  `Settings` and has no counterpart to `_delete_retained_document`. The guide says so, so a client
+  does not offer a download of a file that was never stored.
+- **A versions table can show its size without a query per row.** `CurriculumVersionSummary` gains
+  `topic_count`, free because every caller already eager-loads topics, and `subtopic_count`, fed by
+  one grouped query for the whole page. It is a required keyword rather than a defaulted one: a
+  default of zero would render a populated version as empty. `CurriculumVersionDetail` keeps its own
+  top-level counts even though the nested summary now repeats them — clients already depend on them,
+  and this change is additive. The detail also carries `usage`, because the cost of a delete is only
+  useful before the decision (ADR-045).
+
+**Alternatives rejected.** *Serving `docs/taxonomy_document_example.json` as the example:* it cannot
+interpolate `SCHEMA_VERSION`, it puts filesystem IO and a working-directory dependency on a route,
+and it would make `app/` depend on `docs/`. *A nested `PATCH /versions/{id}` carrying the whole
+tree:* it makes a structural edit expressible and reduces the guarantee to a validation rule.
+*Recomputing `stable_id` on a rename so the id matches its name:* it would detach measured weakness
+and contradict ADR-021; the id is an identity, not a checksum. *A second implementation of the
+duplicate-name comparison:* the rule has one implementation, `normalize_label`, and the rename calls
+it. *Letting `force=true` delete a version a question set was frozen against:* the set cannot be
+edited or deleted and its coverage cannot be recomputed, so nothing is left for a professor to
+decide. *Letting `force=true` delete the approved version:* the dangerous outcome is not the
+failure, it is the silent fall-through to a different approved taxonomy, which a warning does not
+prevent. *Cleaning up the dangling rows during the delete:* it destroys measurement the request
+never mentioned; stranding, counted and reported first, is ADR-045's precedent. *Enabling SQLite
+foreign-key enforcement so the declared cascades fire:* it would delete student weakness instead of
+stranding it, and it changes every delete in the application. *A `label` override on
+`POST /curriculum/versions`, mirroring `POST /books`:* a book's title is the printed title of a real
+artifact a professor may need to disambiguate at upload, whereas a taxonomy's label is a name they
+invented in the document they are uploading — so a wrong label is a wrong document, and with `PATCH`
+in place the override buys nothing a rename cannot do one request later while adding a second source
+for one field.

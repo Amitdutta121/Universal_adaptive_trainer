@@ -1,4 +1,4 @@
-"""Validate curriculum database fields for server-rendered display.
+"""Validate curriculum database fields for API/frontend display.
 
 These shapes belong to the removed LLM proposal pipeline and survive only so
 existing rows still render. The columns behind them are plain JSON objects and

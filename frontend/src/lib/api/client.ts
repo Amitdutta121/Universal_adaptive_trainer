@@ -5,7 +5,9 @@
  * `schema.d.ts`, which is compiled from the backend's own OpenAPI document by
  * `pnpm run api:types`. Nothing here restates a backend model by hand.
  *
- * No other module may call `fetch` against the API.
+ * No other module may call `fetch` against the API, except the login call in
+ * `queries.ts` -- fastapi-users' cookie router expects
+ * `application/x-www-form-urlencoded`, which this client cannot produce.
  */
 
 import createClient, { type Middleware } from "openapi-fetch";
@@ -42,11 +44,7 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * `app/errors.py` chooses between a JSON body and a rendered HTML error page by
- * inspecting the `Accept` header. Without this the client would receive an HTML
- * document for every 404 and fail to parse it.
- */
+/** Every API request explicitly asks for the JSON error envelope. */
 const acceptJson: Middleware = {
   async onRequest({ request }) {
     request.headers.set("Accept", "application/json");

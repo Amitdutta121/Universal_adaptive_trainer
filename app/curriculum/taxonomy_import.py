@@ -11,13 +11,17 @@ from app.config import Settings, get_settings
 from app.curriculum.taxonomy_ids import subtopic_id_from_names, topic_id_from_name
 from app.curriculum.taxonomy_schema import TaxonomyDocument, parse_taxonomy_document
 from app.domain.enums import CurriculumItemStatus, CurriculumStatus
-from app.errors import UnsupportedFileError
+from app.errors import FileTooLargeError, UnsupportedFileError
 from app.persistence.models import CurriculumVersionRow, SubtopicRow, TopicRow
 from app.persistence.repositories import CurriculumRepository
 
 logger = logging.getLogger(__name__)
 
 GENERATED_BY = "taxonomy-upload"
+
+#: The only extension the import accepts. Named here, beside the check that
+#: enforces it, so the authoring guide cannot advertise one it would refuse.
+SUPPORTED_EXTENSIONS: tuple[str, ...] = (".json",)
 
 
 class TaxonomyImportService:
@@ -27,16 +31,14 @@ class TaxonomyImportService:
         self._curriculum = CurriculumRepository(session)
 
     def import_upload(self, *, filename: str, data: bytes) -> CurriculumVersionRow:
-        if not filename.lower().endswith(".json"):
+        if not filename.lower().endswith(SUPPORTED_EXTENSIONS):
             raise UnsupportedFileError(
-                "Only .json taxonomy documents are accepted.",
+                f"Only {', '.join(SUPPORTED_EXTENSIONS)} taxonomy documents are accepted.",
                 detail=f"Got {filename!r}.",
             )
         # Reuse book size limit — taxonomies are tiny; keeps one knob.
         max_bytes = self._settings.max_book_upload_mb * 1024 * 1024
         if len(data) > max_bytes:
-            from app.errors import FileTooLargeError
-
             raise FileTooLargeError(
                 "The taxonomy file is too large.",
                 detail=f"{len(data)} bytes exceeds the configured limit.",

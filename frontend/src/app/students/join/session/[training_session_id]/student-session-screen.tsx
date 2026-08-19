@@ -34,6 +34,7 @@ import type { Route } from "next";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { CollapsiblePanel } from "@/components/collapsible-panel";
 import { QueryError, TableSkeleton } from "@/components/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -66,24 +67,30 @@ import type {
 } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
+// Color/urgency bucket for a 0-100 score: full credit, partial credit, or none.
 function scoreTone(score: number) {
   if (score >= 100) return "success";
   if (score > 0) return "warn";
   return "error";
 }
 
+// Human label for the same 0-100 score the tone above colors.
 function formatResultLabel(score: number) {
   if (score >= 100) return "Correct";
   if (score > 0) return "Partly correct";
   return "Incorrect";
 }
 
+// Icon paired with the tone/label above for the result banner.
 function resultIcon(score: number) {
   if (score >= 100) return CheckCircle2;
   if (score > 0) return CircleDashed;
   return XCircle;
 }
 
+// Explains why a served question's difficulty doesn't match the student's
+// mastery: the set simply had nothing at the requested difficulty for this
+// subtopic, so the engine fell back rather than serving nothing at all.
 function fallbackNotice(question: ServedQuestionOut) {
   if (!question.fallback_used) return null;
   return (
@@ -101,20 +108,27 @@ function fallbackNotice(question: ServedQuestionOut) {
 
 type ParsonsBlock = NonNullable<ServedQuestionOut["blocks"]>[number];
 
+// Serializes a Parsons block order + indent back into the plain-text answer
+// format the backend scorer expects (see `_parsons_layout` in scoring.py):
+// one block id per line, indent encoded as four spaces per level.
 function toParsonsAnswer(blocks: ParsonsBlock[]) {
   return blocks.map((block) => `${"    ".repeat(block.indent)}${block.id}`).join("\n");
 }
 
+// CSS nudge so a block's visual indent matches its logical indent level.
 function parsonsIndentStyle(indent: number) {
   return {
     paddingLeft: `${indent * 1.4}rem`,
   };
 }
 
+// Renders a Parsons block sequence as the Python code it assembles into, so
+// a student can read it as a program rather than a list of block ids.
 function renderParsonsPreview(blocks: ParsonsBlock[]) {
   return blocks.map((block) => `${" ".repeat(block.indent * 4)}${block.text}`).join("\n");
 }
 
+// Localized, human-readable timestamp for session/attempt display.
 function learnerDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -122,10 +136,13 @@ function learnerDate(value: string) {
   }).format(new Date(value));
 }
 
+// "output_prediction" -> "output prediction" for display.
 function questionTypeLabel(questionType: ServedQuestionOut["question_type"]) {
   return questionType ? questionType.replace(/_/g, " ") : "";
 }
 
+// Same tone bucketing as `scoreTone`, but for a past attempt that may still
+// be open (unscored), which `scoreTone` has no case for.
 function attemptTone(attempt: AttemptOut) {
   if (attempt.score === null) return "current";
   if (attempt.score >= 100) return "success";
@@ -133,10 +150,14 @@ function attemptTone(attempt: AttemptOut) {
   return "error";
 }
 
+// BKT's p_known is a 0-1 probability; clamp defensively before feeding a
+// Progress bar, which expects 0-100.
 function masteryPercent(value: number) {
   return Math.max(0, Math.min(100, value * 100));
 }
 
+// Weakness is likewise stored as 0-1 (see INITIAL_SUBTOPIC_WEAKNESS in
+// app/domain/mastery.py), so the same clamp-and-scale applies.
 function weaknessPercent(value: number) {
   return Math.max(0, Math.min(100, value * 100));
 }
@@ -152,6 +173,9 @@ function answerKeyContent(detail: QuestionDetail): Record<string, unknown> {
   return (detail.content ?? {}) as Record<string, unknown>;
 }
 
+// Rebuilds the correctly-ordered block list from the raw answer-key content
+// (`content.blocks` for text/indent, `content.correct_order` for sequence),
+// so it can be fed straight into `renderParsonsPreview`.
 function parsonsCorrectBlocks(content: Record<string, unknown>): ParsonsBlock[] {
   const rawBlocks = Array.isArray(content.blocks)
     ? (content.blocks as Array<{ id?: unknown; text?: unknown; indent?: unknown }>)
@@ -173,6 +197,9 @@ function parsonsCorrectBlocks(content: Record<string, unknown>): ParsonsBlock[] 
     }));
 }
 
+// Every option, with the correct one and the student's (wrong) pick marked.
+// `submittedAnswer` is the raw option index as a string; absent for a past
+// attempt whose historical submission was never retained.
 function MultipleChoiceReview({
   content,
   submittedAnswer,
@@ -232,6 +259,8 @@ function MultipleChoiceReview({
   );
 }
 
+// Correct true/false answer, plus the student's answer only when it was
+// actually wrong (matching correct answers add nothing worth reading).
 function TrueFalseReview({
   content,
   submittedAnswer,
@@ -256,6 +285,7 @@ function TrueFalseReview({
   );
 }
 
+// Expected stdout side by side with what the student actually typed.
 function OutputPredictionReview({
   content,
   submittedAnswer,
@@ -290,6 +320,8 @@ function OutputPredictionReview({
   );
 }
 
+// The correctly-ordered Parsons solution, rendered as readable Python rather
+// than a raw list of block ids.
 function ParsonsReview({ content }: { content: Record<string, unknown> }) {
   const blocks = parsonsCorrectBlocks(content);
   if (blocks.length === 0) return null;
@@ -306,6 +338,9 @@ function ParsonsReview({ content }: { content: Record<string, unknown> }) {
   );
 }
 
+// Reference solution + test source for the executable question types
+// (coding/debugging/code_completion), the one place this pair carries
+// information the type-specific reviews above don't already show.
 function ReferenceSolutionBlock({ detail }: { detail: QuestionDetail }) {
   return (
     <>
@@ -371,6 +406,10 @@ function AnswerReview({
   );
 }
 
+// Side panel for revisiting a question from earlier in the session. An
+// unanswered attempt still hides its solution (it may be the current
+// question, resumed); an answered one gets the same answer-key review as
+// the in-flow result card.
 function PastQuestionSheet({
   attempt,
   detail,
@@ -454,6 +493,10 @@ function PastQuestionSheet({
   );
 }
 
+// Parses the plain-text answer buffer (one block id per line, leading
+// whitespace as indent) back into ordered blocks, so the drag-and-drop
+// composer can resume mid-session with whatever was last assembled. Blocks
+// the buffer doesn't mention yet are appended at the end, unordered.
 function parseParsonsAnswer(blocks: ParsonsBlock[], answer: string) {
   const blockById = new Map(blocks.map((block) => [block.id, block]));
   const requestedLayout = answer
@@ -482,6 +525,8 @@ function parseParsonsAnswer(blocks: ParsonsBlock[], answer: string) {
   return [...ordered, ...remainder];
 }
 
+// One draggable block in the Parsons workspace: reorder by drag, or nudge
+// indent level with the arrow buttons.
 function SortableParsonsBlock({
   block,
   onIndentChange,
@@ -584,6 +629,10 @@ function SortableParsonsBlock({
   );
 }
 
+// Full Parsons puzzle UI: a draggable block list plus a live code preview.
+// Owns its own ordering state so drag reflow feels instant, and syncs that
+// state out to the parent's plain-text `answer` buffer (and back in, if the
+// parent's buffer changes from under it, e.g. on session resume).
 function ParsonsComposer({
   question,
   answer,
@@ -655,39 +704,15 @@ function ParsonsComposer({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-[1.5rem] border border-border bg-card/80 p-5 shadow-[0_18px_45px_-34px_rgb(19_26_28_/_0.38)] backdrop-blur-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="bg-primary text-primary-foreground hover:bg-primary">
-                Parsons puzzle
-              </Badge>
-              <Badge
-                variant="outline"
-                className="border-border bg-background/60 text-muted-foreground"
-              >
-                {orderedBlocks.length} blocks
-              </Badge>
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-semibold text-base text-foreground">
-                Build the solution in order
-              </h3>
-              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                Rearrange each block until the code reads top to bottom. Drag up or down to reorder,
-                then use the indent controls on each block to adjust nesting.
-              </p>
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={resetOrder}
-            className="border-border bg-background/60 text-foreground"
-          >
-            Reset order
-          </Button>
-        </div>
+      {/* A plain instruction line, not a card -- the question header already
+          carries a "Parsons" type badge and the Prompt block above already
+          states the task, so giving this its own bordered/shadowed card made
+          it read as a second, competing question. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <p>Drag blocks up or down to reorder, then use the indent controls to adjust nesting.</p>
+        <Button type="button" variant="ghost" size="sm" onClick={resetOrder}>
+          Reset order
+        </Button>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]">
@@ -763,6 +788,9 @@ function ParsonsComposer({
   );
 }
 
+// The input widget for the current question, shaped by its question_type:
+// radio options for MCQ/true-false, the drag-and-drop composer for Parsons,
+// or a free-text box (with a Ctrl/Cmd+Enter shortcut) for everything else.
 function AnswerForm({
   question,
   answer,
@@ -883,7 +911,7 @@ function AnswerForm({
         <div className="space-y-1">
           <div className="font-medium text-sm text-foreground">Ready to submit?</div>
           <p className="text-sm text-muted-foreground">
-            Review your response once, then lock it in and move to scoring.
+            Give it one last look — once submitted, this answer is scored and locked in.
           </p>
         </div>
         <Button
@@ -901,6 +929,10 @@ function AnswerForm({
   );
 }
 
+// The post-submit screen: score, the backend's own feedback text (an
+// authored explanation for discrete types, or live test-failure evidence
+// for executable ones -- see `score_answer` in app/adaptive/scoring.py),
+// the mastery shift, and the answer-key review once it has loaded.
 function ResultCard({
   result,
   detail,
@@ -1003,7 +1035,71 @@ function ResultCard({
   );
 }
 
+// This run's served questions, most recent first, as a toggleable list in
+// the sidebar rather than a row of pills in the header -- open by default
+// since jumping back to a question is a common thing to want, but
+// collapsible because the list grows across a long session.
+function RecentQuestionsPanel({
+  attempts,
+  onSelect,
+}: {
+  attempts: AttemptOut[];
+  onSelect: (attempt: AttemptOut) => void;
+}) {
+  const ordered = [...attempts].reverse();
+
+  return (
+    <CollapsiblePanel
+      title="Recent questions"
+      summary={`${attempts.length} from this run`}
+      openLabel="Show"
+      closeLabel="Hide"
+      defaultOpen
+    >
+      {ordered.length === 0 ? (
+        <p className="text-muted-foreground text-xs">Nothing served yet this run.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {ordered.map((attempt) => (
+            <button
+              key={attempt.id}
+              type="button"
+              onClick={() => onSelect(attempt)}
+              className={cn(
+                "flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors hover:bg-white",
+                attemptTone(attempt) === "success" && "border-emerald-500/25 bg-emerald-50/70",
+                attemptTone(attempt) === "warn" && "border-amber-500/25 bg-amber-50/70",
+                attemptTone(attempt) === "error" && "border-rose-500/25 bg-rose-50/70",
+                attemptTone(attempt) === "current" && "border-border/60 bg-background",
+              )}
+            >
+              <span className="min-w-0 truncate">
+                <span className="font-medium text-foreground">Q{attempt.ordinal}</span>
+                {attempt.question_type ? (
+                  <span className="ml-1.5 text-muted-foreground">
+                    {questionTypeLabel(attempt.question_type)}
+                  </span>
+                ) : null}
+              </span>
+              <span className="shrink-0 font-medium text-foreground">
+                {attempt.score === null ? "In progress" : `${attempt.score.toFixed(0)}/100`}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </CollapsiblePanel>
+  );
+}
+
+// Persistent "why am I getting these questions" panel: overall stats, a
+// mastery bar per topic, and the weakest subtopics the roulette in
+// app/adaptive/selection.py is currently favoring. All of this comes from
+// the same student-progress fetch the session already made for the
+// "recent questions" strip -- nothing new to load.
 function ProgressSidebar({ progress }: { progress: StudentProgressOut }) {
+  // Highest weakness first: these are the subtopics most likely to be
+  // picked next by the weighted roulette.
   const weakestSubtopics = useMemo(
     () => [...progress.subtopics].sort((left, right) => right.weakness - left.weakness).slice(0, 5),
     [progress.subtopics],
@@ -1080,6 +1176,10 @@ function ProgressSidebar({ progress }: { progress: StudentProgressOut }) {
   );
 }
 
+// The training loop itself: serve a question, take an answer, show the
+// result, repeat. `result !== null` is what gates the served-question query
+// off and the result card on -- there is deliberately no separate "phase"
+// enum, since these two states already say the same thing.
 export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId: number }) {
   const router = useRouter();
   const session = useTrainingSession(trainingSessionId);
@@ -1091,6 +1191,9 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
 
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<AnsweredOut | null>(null);
+  // What was actually submitted, captured before `answer` is cleared for the
+  // next question -- the result card needs it to show "your answer" next to
+  // the correct one.
   const [lastAnswer, setLastAnswer] = useState("");
   const [selectedPastAttempt, setSelectedPastAttempt] = useState<AttemptOut | null>(null);
 
@@ -1100,15 +1203,22 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   const selectedPastQuestion = useQuestion(selectedPastAttempt?.question_id ?? null, {
     enabled: selectedPastAttempt !== null,
   });
+  // The just-answered question's full detail (answer key, reference
+  // solution), fetched only once there is a result to show it alongside.
   const answeredQuestion = useQuestion(result?.question_id ?? null, {
     enabled: result !== null,
   });
 
+  // A 404-shaped "nothing left to serve" is a state to render, not a
+  // request failure -- every other query error still falls through to
+  // QueryError below.
   const unavailable =
     currentQuestion.error instanceof ApiError &&
     currentQuestion.error.code === "no_question_available"
       ? currentQuestion.error
       : null;
+  // Recent attempts scoped to this run, oldest first, capped to the last 10
+  // so the strip doesn't grow unbounded across a long session.
   const sessionAttempts = useMemo(
     () =>
       (progress.data?.recent_attempts ?? [])
@@ -1117,11 +1227,15 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
         .slice(-10),
     [progress.data?.recent_attempts, trainingSessionId],
   );
+  // Only the answered ones are safe to revisit -- an open attempt is either
+  // the current question or one still being scored.
   const revisitAttempts = useMemo(
     () => sessionAttempts.filter((attempt) => attempt.score !== null),
     [sessionAttempts],
   );
   const pendingCount = sessionAttempts.filter((attempt) => attempt.score === null).length;
+  // Consecutive strong answers (>=80) counting back from the most recent,
+  // stopping at the first miss -- a running streak, not a lifetime best.
   const currentStreak = useMemo(() => {
     let streak = 0;
     for (let index = revisitAttempts.length - 1; index >= 0; index -= 1) {
@@ -1137,6 +1251,9 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
 
   const submitAnswer = async () => {
     if (!currentQuestion.data || answer.trim().length === 0) return;
+    // Capture before the mutation resolves: `answer` gets cleared for the
+    // next question as soon as this succeeds, but the result card still
+    // needs to know what was actually typed.
     const submitted = answer;
     try {
       const scored = await answerAttempt.mutateAsync({
@@ -1151,6 +1268,8 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     }
   };
 
+  // "Next question": clear the result so the served-question query re-enables,
+  // then force it to fetch immediately rather than waiting on cache staleness.
   const advance = () => {
     setResult(null);
     setAnswer("");
@@ -1172,6 +1291,9 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
       {session.isError ? <QueryError error={session.error} /> : null}
 
       {session.data ? (
+        // Two columns at xl+ (question flow left, progress sidebar right,
+        // sticky so it stays visible while scrolling a long prompt); a
+        // single stacked column below that.
         <div className="mx-auto grid w-full max-w-6xl gap-5 pb-8 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
           <PastQuestionSheet
             attempt={selectedPastAttempt}
@@ -1184,6 +1306,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             }}
           />
 
+          {/* Main column: run header, alerts, result, then the live question. */}
           <div className="flex min-w-0 flex-col gap-5">
             <section className="rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1207,7 +1330,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                     <div className="space-y-1">
                       <div className="font-medium text-muted-foreground text-sm">
                         {session.data.student_name
-                          ? `${session.data.student_name}'s progress`
+                          ? `${session.data.student_name} — progress`
                           : "Session progress"}
                       </div>
                       <div className="font-heading text-4xl font-semibold tracking-[-0.03em] text-foreground">
@@ -1228,66 +1351,6 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                           {pendingCount > 0
                             ? `, ${pendingCount} in progress`
                             : ", no pending question"}
-                        </div>
-                      </div>
-                      <div className="rounded-[1rem] border border-border/60 bg-muted/15 px-3 py-3">
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                          <div className="font-medium text-foreground text-sm">
-                            Recent questions
-                          </div>
-                          <div className="text-muted-foreground text-xs">
-                            Select a past question to revisit it
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {revisitAttempts.length > 0 ? (
-                            revisitAttempts.map((attempt, index) => (
-                              <div key={attempt.id} className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedPastAttempt(attempt)}
-                                  className={cn(
-                                    "flex min-w-14 shrink-0 flex-col items-center rounded-[0.95rem] border px-2 py-2 text-center transition-colors hover:bg-white",
-                                    attemptTone(attempt) === "success" &&
-                                      "border-emerald-500/25 bg-emerald-50 text-emerald-900",
-                                    attemptTone(attempt) === "warn" &&
-                                      "border-amber-500/25 bg-amber-50 text-amber-900",
-                                    attemptTone(attempt) === "error" &&
-                                      "border-rose-500/25 bg-rose-50 text-rose-900",
-                                    attemptTone(attempt) === "current" &&
-                                      "border-primary/25 bg-background text-foreground",
-                                  )}
-                                  title={`Review question ${attempt.question_id}`}
-                                >
-                                  <span className="text-[10px] font-medium uppercase tracking-[0.14em] opacity-70">
-                                    Q{attempt.ordinal}
-                                  </span>
-                                  <span className="mt-1 text-xs font-medium">
-                                    {attempt.score === null
-                                      ? "Open"
-                                      : `${attempt.score.toFixed(0)}`}
-                                  </span>
-                                </button>
-                                {index !== revisitAttempts.length - 1 ? (
-                                  <div className="hidden h-px w-3 shrink-0 bg-border sm:block" />
-                                ) : null}
-                              </div>
-                            ))
-                          ) : (
-                            <div className="text-muted-foreground text-sm">
-                              No answered questions to revisit yet.
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-                          <span>{revisitAttempts.length} answered questions available</span>
-                          <span>
-                            {session.data.ended_at
-                              ? `Closed after ${session.data.answered_count} answers`
-                              : pendingCount > 0
-                                ? "Current question still open"
-                                : "Latest served question has been answered"}
-                          </span>
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
@@ -1378,28 +1441,11 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                       </Badge>
                     ) : null}
                   </div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-1.5">
-                      {currentQuestion.data.subtopic_name ? (
-                        <div className="text-sm font-medium text-muted-foreground">
-                          {currentQuestion.data.subtopic_name}
-                        </div>
-                      ) : null}
-                      <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
-                        Read the prompt carefully, then submit the strongest answer you can without
-                        overthinking the interface.
-                      </p>
+                  {currentQuestion.data.subtopic_name ? (
+                    <div className="text-sm font-medium text-muted-foreground">
+                      {currentQuestion.data.subtopic_name}
                     </div>
-                    <div className="rounded-[1rem] border border-border/60 bg-white/85 px-4 py-3 text-right shadow-[0_16px_34px_-30px_rgb(19_26_28_/_0.3)]">
-                      <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                        Session progress
-                      </div>
-                      <div className="mt-1 font-heading text-2xl font-semibold tracking-[-0.03em] text-foreground">
-                        {session.data.answered_count + 1}
-                      </div>
-                      <div className="text-xs text-muted-foreground">Current prompt position</div>
-                    </div>
-                  </div>
+                  ) : null}
                 </CardHeader>
                 <CardContent className="space-y-5 px-6 py-6 sm:px-7">
                   {fallbackNotice(currentQuestion.data)}
@@ -1448,8 +1494,11 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             ) : null}
           </div>
 
+          {/* Sidebar column: omitted entirely until progress has loaded, rather
+              than reserving its width with a skeleton. */}
           {progress.data ? (
-            <div className="xl:sticky xl:top-6">
+            <div className="flex flex-col gap-4 xl:sticky xl:top-6">
+              <RecentQuestionsPanel attempts={sessionAttempts} onSelect={setSelectedPastAttempt} />
               <ProgressSidebar progress={progress.data} />
             </div>
           ) : null}

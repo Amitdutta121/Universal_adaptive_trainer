@@ -6,8 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import {
   DECISIONS,
-  REASON_LABEL,
   type QuestionDetail,
+  REASON_LABEL,
   type RejectionReason,
   type ReviewDecision,
 } from "../review-types";

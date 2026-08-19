@@ -1,642 +1,4 @@
 export interface paths {
-    "/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Dashboard
-         * @description The primary user-facing route.
-         */
-        get: operations["dashboard__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/books": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Books */
-        get: operations["books_books_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/books/upload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upload Book
-         * @description Import an uploaded book JSON document, then show the book that resulted.
-         *
-         *     Every rejection is rendered back onto this page with the reason, because all
-         *     three failure modes -- wrong file type, oversized file, invalid document --
-         *     are things the professor (or their producer script) can fix and retry. Nothing
-         *     is stored unless the document validates in full.
-         */
-        post: operations["upload_book_books_upload_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/books/{book_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Book Detail
-         * @description One book: its extraction status, warnings and chapter/section hierarchy.
-         */
-        get: operations["book_detail_books__book_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/books/{book_id}/sections/{section_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Book Section
-         * @description One section: its text plus the source metadata that makes it citable.
-         */
-        get: operations["book_section_books__book_id__sections__section_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/curriculum": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Curriculum */
-        get: operations["curriculum_curriculum_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/curriculum/upload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upload Taxonomy
-         * @description Import an uploaded fixed taxonomy and open its approved version.
-         */
-        post: operations["upload_taxonomy_curriculum_upload_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/curriculum/versions/{version_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Curriculum Version
-         * @description One curriculum version: the Topic -> Subtopic hierarchy.
-         */
-        get: operations["curriculum_version_curriculum_versions__version_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/curriculum/subtopics/{subtopic_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Curriculum Subtopic
-         * @description One subtopic: definition and, for legacy rows, textbook evidence.
-         */
-        get: operations["curriculum_subtopic_curriculum_subtopics__subtopic_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/questions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Questions */
-        get: operations["questions_questions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/questions/judge-runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Submit Judge Run Page
-         * @description Submit a bulk judge re-run, then return to the question bank.
-         *
-         *     The re-run is asynchronous, so this redirects with a notice rather than
-         *     results: nothing has been judged yet when the professor lands back here.
-         */
-        post: operations["submit_judge_run_page_questions_judge_runs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/questions/judge-runs/{run_id}/poll": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Poll Judge Run Page
-         * @description Collect whatever a re-run has finished, then return to the question bank.
-         */
-        post: operations["poll_judge_run_page_questions_judge_runs__run_id__poll_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/questions/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Questions
-         * @description Generate one persisted question for every selected source section.
-         *
-         *     A large run renders a confirmation page instead of generating, and only
-         *     proceeds once it comes back with ``confirmed`` set. The check lives in this
-         *     handler rather than in a separate confirm route so there is one entry point
-         *     to generation, and no second URL that quietly skips the step.
-         */
-        post: operations["generate_questions_questions_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/questions/{question_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Question Detail
-         * @description Show generated content and the citation(s) that ground one question.
-         */
-        get: operations["question_detail_questions__question_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/questions/{question_id}/review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Review Question
-         * @description Record a professor verdict and return to the reviewed question.
-         */
-        post: operations["review_question_questions__question_id__review_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Review Queue
-         * @description Review one question at a time, in one screen, without leaving the queue.
-         *
-         *     ``outcome`` carries what the previous submit did (ADR-037) across the
-         *     redirect, so the professor reads it on the next question instead of having
-         *     to open the calibration page to find out.
-         */
-        get: operations["review_queue_review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/review/{question_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Submit Queue Review
-         * @description Record a verdict and advance to the next question in one step.
-         *
-         *     Advancing on submit is the point of this route: the question detail page
-         *     returns to the question just reviewed, which costs two navigations per
-         *     verdict and makes a hundred-question pass far slower than it needs to be.
-         */
-        post: operations["submit_queue_review_review__question_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/instructions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Instructions */
-        get: operations["instructions_instructions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/instructions/{question_type}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Refresh Instruction Page */
-        post: operations["refresh_instruction_page_instructions__question_type__refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/judges": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Judges */
-        get: operations["judges_judges_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/judges/{metric}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Save Judge Prompt Page
-         * @description Save or revert one judge prompt, then report the version it now answers under.
-         */
-        post: operations["save_judge_prompt_page_judges__metric__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/judges/{metric}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Judge Page
-         * @description Relearn one judge's prompt from the cases it got wrong (ADR-039).
-         */
-        post: operations["refresh_judge_page_judges__metric__refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/feedback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Feedback */
-        get: operations["feedback_feedback_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/coverage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Coverage */
-        get: operations["coverage_coverage_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/coverage/sets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Question Set Page */
-        post: operations["create_question_set_page_coverage_sets_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/coverage/gaps": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Fill Coverage Gaps Page
-         * @description Hand the selected gaps to the generation step, which does not exist yet.
-         *
-         *     Each ``target`` is ``"<subtopic_id>:<difficulty>"``, the value the checkbox
-         *     on the coverage page carries. Parsing them here rather than on the page
-         *     keeps the API the single implementation: it is what refuses, and the error
-         *     handler renders the refusal as HTML (ADR-027).
-         */
-        post: operations["fill_coverage_gaps_page_coverage_gaps_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/students": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Students
-         * @description Enrolled learners, and where to start a training run.
-         */
-        get: operations["students_students_get"];
-        put?: never;
-        /** Create Student Page */
-        post: operations["create_student_page_students_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/students/{student_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Student Detail
-         * @description One learner's measured mastery, weakness and history.
-         */
-        get: operations["student_detail_students__student_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/students/{student_id}/sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Start Training Session Page */
-        post: operations["start_training_session_page_students__student_id__sessions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/training/{training_session_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Training
-         * @description The session's current question.
-         */
-        get: operations["training_training__training_session_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/training/{training_session_id}/answer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Submit Training Answer Page
-         * @description Score an answer and show the result, rather than redirecting.
-         *
-         *     The failing-test evidence and the author's explanation are produced by
-         *     scoring and are not stored on the attempt, so a redirect would lose exactly
-         *     the part the student learns from.
-         */
-        post: operations["submit_training_answer_page_training__training_session_id__answer_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/training/{training_session_id}/end": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** End Training Session Page */
-        post: operations["end_training_session_page_training__training_session_id__end_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -697,6 +59,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth:Cookie.Login */
+        post: operations["auth_cookie_login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth:Cookie.Logout */
+        post: operations["auth_cookie_logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Current User
+         * @description The frontend's session check: 401 with no cookie, the professor's identity otherwise.
+         */
+        get: operations["read_current_user_api_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books": {
         parameters: {
             query?: never;
@@ -727,6 +143,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/document-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Document Guide
+         * @description What a valid book document is, and the prompt that produces one.
+         *
+         *     Rendered from the ingestion contract rather than written out here, so a
+         *     client cannot describe a document this application would refuse. The prompt
+         *     is advisory: it grants nothing, and every upload is still validated in full.
+         */
+        get: operations["document_guide_api_books_document_guide_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}": {
         parameters: {
             query?: never;
@@ -741,10 +181,21 @@ export interface paths {
         get: operations["get_book_api_books__book_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Book
+         * @description Delete a book, its structure and its retained document.
+         *
+         *     Refuses with 409 while questions cite the book, naming how many. ``force``
+         *     proceeds anyway; the questions are kept and their citations are stranded.
+         */
+        delete: operations["delete_book_api_books__book_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Book
+         * @description Edit a book's labels. Omitted fields are left as they are.
+         */
+        patch: operations["update_book_api_books__book_id__patch"];
         trace?: never;
     };
     "/api/books/{book_id}/sections": {
@@ -811,6 +262,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/curriculum/document-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Document Guide
+         * @description What a valid taxonomy document is, and the prompt that produces one.
+         *
+         *     Rendered from the taxonomy contract rather than written out here, so a client
+         *     cannot describe a document this application would refuse. The prompt is
+         *     advisory: it grants nothing, and every upload is still validated in full.
+         */
+        get: operations["document_guide_api_curriculum_document_guide_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/curriculum/approved": {
         parameters: {
             query?: never;
@@ -845,10 +320,63 @@ export interface paths {
         get: operations["get_version_api_curriculum_versions__version_id__get"];
         put?: never;
         post?: never;
+        /**
+         * Delete Version
+         * @description Delete a curriculum version, its topics and its subtopics.
+         *
+         *     Refuses with 409 while questions or students still name it, reporting every
+         *     count. ``force`` proceeds anyway and the references are stranded. Two cases
+         *     have no ``force`` path -- a frozen question set names the version, or it is
+         *     the approved one -- because neither leaves a professor anything to decide.
+         */
+        delete: operations["delete_version_api_curriculum_versions__version_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Version
+         * @description Rename a curriculum version. Its status and its tree are unchanged.
+         */
+        patch: operations["update_version_api_curriculum_versions__version_id__patch"];
+        trace?: never;
+    };
+    "/api/curriculum/versions/{version_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Version
+         * @description Make an already-approved curriculum version the live one again.
+         */
+        post: operations["activate_version_api_curriculum_versions__version_id__activate_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/topics/{topic_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Topic
+         * @description Edit a topic's display name. Its stable id is untouched (ADR-021).
+         */
+        patch: operations["update_topic_api_curriculum_topics__topic_id__patch"];
         trace?: never;
     };
     "/api/curriculum/subtopics/{subtopic_id}": {
@@ -868,7 +396,14 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Subtopic
+         * @description Edit a subtopic's display name.
+         *
+         *     The stable id is not recomputed, so any weakness a student has been measured
+         *     for on this skill stays attached to it (ADR-021).
+         */
+        patch: operations["update_subtopic_api_curriculum_subtopics__subtopic_id__patch"];
         trace?: never;
     };
     "/api/questions": {
@@ -882,11 +417,12 @@ export interface paths {
          * List Questions
          * @description The question bank, newest first, with counts by lifecycle status.
          *
-         *     ``status`` narrows the listing; without it nothing is hidden. The API does not
-         *     filter by default even though the page does, because a caller reading the bank
-         *     over JSON has no way to discover rows an unrequested default removed.
-         *     ``status_counts`` and ``total`` always describe the whole bank, so a filtered
-         *     listing still says how much it is showing of what.
+         *     ``status`` and ``curriculum_version_id`` narrow the listing; without them
+         *     nothing is hidden. The API does not filter by default even though the page
+         *     does, because a caller reading the bank over JSON has no way to discover rows
+         *     an unrequested default removed. ``status_counts``, ``curriculum_version_counts``
+         *     and ``total`` always describe the whole bank, so a filtered listing still says
+         *     how much it is showing of what.
          */
         get: operations["list_questions_api_questions_get"];
         put?: never;
@@ -914,6 +450,59 @@ export interface paths {
          *     in the list cannot leave a partially generated batch behind.
          */
         post: operations["generate_questions_api_questions_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/batch-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch Plan
+         * @description Compile a per-chunk spec sheet into the questions it would generate (ADR-044).
+         *
+         *     Read-only and free: it makes no model call and touches no row, so a professor
+         *     can price a spec sheet and revise it as often as they like. The compilation
+         *     lives here rather than in either UI because the rule that decides which format
+         *     each question gets must not be restated by a client (ADR-027).
+         */
+        post: operations["batch_plan_api_questions_batch_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/questions/generate-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Batch
+         * @description Generate the questions a per-chunk spec sheet asks for (ADR-044).
+         *
+         *     One chunk may produce several questions, at several difficulties, in several
+         *     formats — which is what separates this from ``/generate``, where a run carries
+         *     one difficulty and one format for every section in it.
+         *
+         *     The run is synchronous: each question costs one generation call plus one judge
+         *     call per metric, made in sequence. A large sheet is therefore a long request,
+         *     and the console warns before submitting one.
+         */
+        post: operations["generate_batch_api_questions_generate_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1071,6 +660,46 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/instructions/{question_type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Instruction
+         * @description Delete one learned row so this type falls back to its shipped instruction.
+         */
+        delete: operations["delete_instruction_api_instructions__question_type__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/instructions/{question_type}/rules/{rule_index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Rule
+         * @description Delete one learned rule and re-render the instruction from what remains.
+         */
+        delete: operations["delete_rule_api_instructions__question_type__rules__rule_index__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1337,7 +966,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Question Set */
+        /**
+         * Get Question Set
+         * @description One frozen set, public so an anonymous join link can describe itself.
+         */
         get: operations["get_question_set_api_question_sets__set_version_id__get"];
         put?: never;
         post?: never;
@@ -1710,6 +1342,37 @@ export interface components {
             /** Answered At */
             answered_at: string | null;
         };
+        /**
+         * BatchPlanResponse
+         * @description The compiled plan for a spec sheet. Read-only: no question is generated.
+         */
+        BatchPlanResponse: {
+            /** Planned */
+            planned: components["schemas"]["PlannedQuestionOut"][];
+            totals: components["schemas"]["BatchPlanTotals"];
+        };
+        /**
+         * BatchPlanTotals
+         * @description What a compiled spec sheet costs, before any model call is made.
+         */
+        BatchPlanTotals: {
+            /** Chunks Specified */
+            chunks_specified: number;
+            /** Questions To Create */
+            questions_to_create: number;
+            /** Generation Calls */
+            generation_calls: number;
+            /** Judge Calls */
+            judge_calls: number;
+            /** Easy */
+            easy: number;
+            /** Medium */
+            medium: number;
+            /** Hard */
+            hard: number;
+            /** Identical Repeats */
+            identical_repeats: number;
+        };
         /** BatchRunListResponse */
         BatchRunListResponse: {
             /** Runs */
@@ -1717,37 +1380,29 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** Body_create_question_set_page_coverage_sets_post */
-        Body_create_question_set_page_coverage_sets_post: {
-            /** Label */
-            label: string;
-            /** Notes */
-            notes?: string | null;
-        };
-        /** Body_create_student_page_students_post */
-        Body_create_student_page_students_post: {
-            /** Display Name */
-            display_name: string;
-        };
-        /** Body_fill_coverage_gaps_page_coverage_gaps_post */
-        Body_fill_coverage_gaps_page_coverage_gaps_post: {
-            /** Target */
-            target?: string[] | null;
-        };
-        /** Body_generate_questions_questions_generate_post */
-        Body_generate_questions_questions_generate_post: {
-            /** Difficulty */
-            difficulty: string;
-            /** Question Type */
-            question_type: string;
-            /** Book Id */
-            book_id: number;
-            /** Section Ids */
-            section_ids?: number[] | null;
-            /** All Sections */
-            all_sections?: string | null;
-            /** Confirmed */
-            confirmed?: string | null;
+        /** Body_auth_cookie_login_api_auth_login_post */
+        Body_auth_cookie_login_api_auth_login_post: {
+            /** Grant Type */
+            grant_type?: string | null;
+            /** Username */
+            username: string;
+            /**
+             * Password
+             * Format: password
+             */
+            password: string;
+            /**
+             * Scope
+             * @default
+             */
+            scope: string;
+            /** Client Id */
+            client_id?: string | null;
+            /**
+             * Client Secret
+             * Format: password
+             */
+            client_secret?: string | null;
         };
         /** Body_import_book_api_books_post */
         Body_import_book_api_books_post: {
@@ -1764,109 +1419,15 @@ export interface components {
             /** File */
             file: string;
         };
-        /** Body_review_question_questions__question_id__review_post */
-        Body_review_question_questions__question_id__review_post: {
-            /** Decision */
-            decision: string;
-            /**
-             * Comment
-             * @default
-             */
-            comment: string;
-            /** Reasons */
-            reasons?: string[] | null;
-            /**
-             * Prompt
-             * @default
-             */
-            prompt: string;
-            /**
-             * Reference Solution
-             * @default
-             */
-            reference_solution: string;
-            /**
-             * Tests
-             * @default
-             */
-            tests: string;
-        };
-        /** Body_save_judge_prompt_page_judges__metric__post */
-        Body_save_judge_prompt_page_judges__metric__post: {
-            /**
-             * System Prompt
-             * @default
-             */
-            system_prompt: string;
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-            /** Revert */
-            revert?: string | null;
-        };
-        /** Body_start_training_session_page_students__student_id__sessions_post */
-        Body_start_training_session_page_students__student_id__sessions_post: {
-            /** Set Version Id */
-            set_version_id: number;
-        };
-        /** Body_submit_queue_review_review__question_id__post */
-        Body_submit_queue_review_review__question_id__post: {
-            /** Decision */
-            decision: string;
-            /**
-             * Comment
-             * @default
-             */
-            comment: string;
-            /** Reasons */
-            reasons?: string[] | null;
-            /**
-             * Prompt
-             * @default
-             */
-            prompt: string;
-            /**
-             * Reference Solution
-             * @default
-             */
-            reference_solution: string;
-            /**
-             * Tests
-             * @default
-             */
-            tests: string;
-            /**
-             * Mode
-             * @default all
-             */
-            mode: string;
-        };
-        /** Body_submit_training_answer_page_training__training_session_id__answer_post */
-        Body_submit_training_answer_page_training__training_session_id__answer_post: {
-            /** Attempt Id */
-            attempt_id: number;
-            /**
-             * Answer
-             * @default
-             */
-            answer: string;
-        };
-        /** Body_upload_book_books_upload_post */
-        Body_upload_book_books_upload_post: {
-            /** File */
-            file: string;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-        };
-        /** Body_upload_taxonomy_curriculum_upload_post */
-        Body_upload_taxonomy_curriculum_upload_post: {
-            /** File */
-            file: string;
+        /**
+         * BookDeletion
+         * @description What a completed delete removed, and what it cost.
+         */
+        BookDeletion: {
+            /** Deleted Book Id */
+            deleted_book_id: number;
+            /** Stranded Question Count */
+            stranded_question_count: number;
         };
         /**
          * BookDetail
@@ -1880,6 +1441,37 @@ export interface components {
             chapters: components["schemas"]["ChapterOut"][];
             /** Warnings */
             warnings: components["schemas"]["ExtractionWarning"][];
+            /**
+             * Grounded Question Count
+             * @default 0
+             */
+            grounded_question_count: number;
+        };
+        /**
+         * BookDocumentGuide
+         * @description Everything a professor needs to obtain a valid book document.
+         *
+         *     The prompt and the example are rendered from the ingestion contract itself,
+         *     so a client that shows them cannot describe a document the validator would
+         *     refuse.
+         */
+        BookDocumentGuide: {
+            /** Schema Version */
+            schema_version: string;
+            /** Supported Extensions */
+            supported_extensions: string[];
+            /** Max Upload Mb */
+            max_upload_mb: number;
+            /** Prompt */
+            prompt: string;
+            /** Example Json */
+            example_json: string;
+            /** Structure Sources */
+            structure_sources: components["schemas"]["VocabularyTermOut"][];
+            /** Warning Codes */
+            warning_codes: components["schemas"]["VocabularyTermOut"][];
+            /** Warning Severities */
+            warning_severities: components["schemas"]["VocabularyTermOut"][];
         };
         /** BookListResponse */
         BookListResponse: {
@@ -1887,6 +1479,22 @@ export interface components {
             books: components["schemas"]["BookSummary"][];
             /** Total */
             total: number;
+        };
+        /**
+         * BookMetadataUpdate
+         * @description A professor's edit to a book's labels.
+         *
+         *     Structure is declared by the imported document and is never edited here, so
+         *     this carries only what the row is labelled with. An omitted field is left
+         *     alone; an empty string clears ``author`` or ``notes``.
+         */
+        BookMetadataUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Author */
+            author?: string | null;
+            /** Notes */
+            notes?: string | null;
         };
         /**
          * BookStatus
@@ -2052,6 +1660,36 @@ export interface components {
             sections: components["schemas"]["SectionSummary"][];
         };
         /**
+         * ChunkGenerationSpec
+         * @description One chunk's instruction on the spec sheet (ADR-044).
+         *
+         *     ``easy`` / ``medium`` / ``hard`` are how many questions this chunk should
+         *     produce at each difficulty. ``question_types`` is the set they are drawn from,
+         *     not one question per format: two medium questions with three formats chosen is
+         *     still two questions.
+         */
+        ChunkGenerationSpec: {
+            /** Section Id */
+            section_id: number;
+            /**
+             * Easy
+             * @default 0
+             */
+            easy: number;
+            /**
+             * Medium
+             * @default 0
+             */
+            medium: number;
+            /**
+             * Hard
+             * @default 0
+             */
+            hard: number;
+            /** Question Types */
+            question_types?: components["schemas"]["QuestionType"][];
+        };
+        /**
          * ClaimViolation
          * @description Why a generator's taxonomy claim was refused (ADR-032).
          *
@@ -2110,6 +1748,8 @@ export interface components {
             review_decisions: components["schemas"]["EnumOption"][];
             /** Rejection Reasons */
             rejection_reasons: components["schemas"]["EnumOption"][];
+            /** Judge Calls Per Question */
+            judge_calls_per_question: number;
         };
         /**
          * CountsResponse
@@ -2216,6 +1856,20 @@ export interface components {
             display_name: string;
         };
         /**
+         * CurriculumItemLabelUpdate
+         * @description A professor's edit to one topic's or subtopic's display name.
+         *
+         *     Only the two label fields exist here, so moving a subtopic between topics,
+         *     reordering, or rewriting a stable id is not refused -- it is inexpressible.
+         *     An omitted field is left alone; an empty description clears it.
+         */
+        CurriculumItemLabelUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /**
          * CurriculumItemStatus
          * @description A professor's verdict on one proposed topic or subtopic.
          *
@@ -2246,6 +1900,19 @@ export interface components {
          */
         CurriculumStatus: "proposed" | "under_review" | "approved" | "superseded";
         /**
+         * CurriculumVersionDeletion
+         * @description What a completed delete removed, and what it cost.
+         */
+        CurriculumVersionDeletion: {
+            /** Deleted Version Id */
+            deleted_version_id: number;
+            /** Deleted Topic Count */
+            deleted_topic_count: number;
+            /** Deleted Subtopic Count */
+            deleted_subtopic_count: number;
+            stranded: components["schemas"]["CurriculumVersionUsage"];
+        };
+        /**
          * CurriculumVersionDetail
          * @description One curriculum version with its Topic -> Subtopic hierarchy.
          */
@@ -2262,6 +1929,19 @@ export interface components {
             extraction_metadata: components["schemas"]["DisplayExtractionMetadata"] | null;
             /** Warnings */
             warnings: components["schemas"]["DisplayProposalWarning"][];
+            usage: components["schemas"]["CurriculumVersionUsage"];
+        };
+        /**
+         * CurriculumVersionLabelUpdate
+         * @description A professor's edit to a curriculum version's label.
+         *
+         *     The tree is declared by the uploaded document and is never edited here, and
+         *     neither is the version's status: which taxonomy the product is grounded in
+         *     changes by uploading one, not by editing a row (ADR-021).
+         */
+        CurriculumVersionLabelUpdate: {
+            /** Label */
+            label: string;
         };
         /**
          * CurriculumVersionSummary
@@ -2284,6 +1964,28 @@ export interface components {
             created_at: string;
             /** Approved At */
             approved_at: string | null;
+            /** Topic Count */
+            topic_count: number;
+            /** Subtopic Count */
+            subtopic_count: number;
+        };
+        /**
+         * CurriculumVersionUsage
+         * @description What still points at a curriculum version, and how much is unrepairable.
+         */
+        CurriculumVersionUsage: {
+            /** Question Count */
+            question_count: number;
+            /** Question Subtopic Link Count */
+            question_subtopic_link_count: number;
+            /** Question Set Count */
+            question_set_count: number;
+            /** Student Count */
+            student_count: number;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Is Approved */
+            is_approved: boolean;
         };
         /**
          * Difficulty
@@ -2359,6 +2061,13 @@ export interface components {
             value: string;
             /** Label */
             label: string;
+        };
+        /** ErrorModel */
+        ErrorModel: {
+            /** Detail */
+            detail: string | {
+                [key: string]: string;
+            };
         };
         /**
          * EvaluationHistoryEntry
@@ -2449,6 +2158,27 @@ export interface components {
          */
         ExtractionWarningCode: "no_page_numbers" | "producer_inferred_structure" | "missing_heading" | "source_text_unreadable" | "section_text_truncated" | "metadata_unavailable" | "other";
         /**
+         * FieldLimitOut
+         * @description One field of the taxonomy contract, and the bounds the validator enforces.
+         *
+         *     Published structurally as well as inside the prompt, so a form can bind its
+         *     input limits to the contract rather than hard-coding them.
+         */
+        FieldLimitOut: {
+            /** Path */
+            path: string;
+            /** Required */
+            required: boolean;
+            /** Kind */
+            kind: string;
+            /** Min Length */
+            min_length: number | null;
+            /** Max Length */
+            max_length: number | null;
+            /** Meaning */
+            meaning: string;
+        };
+        /**
          * FillGapsRequest
          * @description The gaps a professor selected on the coverage page.
          *
@@ -2459,6 +2189,35 @@ export interface components {
         FillGapsRequest: {
             /** Targets */
             targets: components["schemas"]["CoverageTargetRef"][];
+        };
+        /**
+         * GenerateBatchRequest
+         * @description A per-chunk generation run: many chunks, each with its own instruction.
+         */
+        GenerateBatchRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id?: number | null;
+            /** Chunks */
+            chunks: components["schemas"]["ChunkGenerationSpec"][];
+            /** Seed */
+            seed?: string | null;
+        };
+        /**
+         * GenerateBatchResponse
+         * @description What a per-chunk run produced, and what it had planned to produce.
+         *
+         *     ``created`` may be short of ``planned`` when the provider failed part-way: each
+         *     question commits on its own, so a partial batch is a real outcome (ADR-032).
+         */
+        GenerateBatchResponse: {
+            /** Created */
+            created: number;
+            /** Question Ids */
+            question_ids: number[];
+            /** Questions */
+            questions: components["schemas"]["QuestionSummary"][];
+            /** Planned */
+            planned: components["schemas"]["PlannedQuestionOut"][];
         };
         /**
          * GenerateQuestionsRequest
@@ -2851,13 +2610,15 @@ export interface components {
         MetricStatus: "completed" | "error";
         /**
          * ParsonsBlockOut
-         * @description One draggable block. Its stored ``indent`` is deliberately not published.
+         * @description One draggable block, including the indentation it should display with.
          */
         ParsonsBlockOut: {
             /** Id */
             id: string;
             /** Text */
             text: string;
+            /** Indent */
+            indent: number;
         };
         /**
          * PedagogicalEvalStatus
@@ -2902,6 +2663,16 @@ export interface components {
             review_ids: number[];
             /** Profile Version */
             profile_version?: string | null;
+        };
+        /**
+         * PlannedQuestionOut
+         * @description One question a compiled run will ask for, in the order it will be asked.
+         */
+        PlannedQuestionOut: {
+            /** Section Id */
+            section_id: number;
+            difficulty: components["schemas"]["Difficulty"];
+            question_type: components["schemas"]["QuestionType"];
         };
         /**
          * PollBatchRunResponse
@@ -3047,9 +2818,15 @@ export interface components {
             status_counts: {
                 [key: string]: number;
             };
+            /** Curriculum Version Counts */
+            curriculum_version_counts: {
+                [key: string]: number;
+            };
             /** Total */
             total: number;
             status?: components["schemas"]["QuestionStatus"] | null;
+            /** Curriculum Version Id */
+            curriculum_version_id?: number | null;
         };
         /** QuestionSetListResponse */
         QuestionSetListResponse: {
@@ -3662,6 +3439,33 @@ export interface components {
             observations: number;
         };
         /**
+         * TaxonomyDocumentGuide
+         * @description Everything a professor needs to obtain a valid taxonomy document.
+         *
+         *     The prompt, the example and the field reference are rendered from the
+         *     taxonomy contract itself, so a client that shows them cannot describe a
+         *     document the validator would refuse.
+         */
+        TaxonomyDocumentGuide: {
+            /** Schema Version */
+            schema_version: string;
+            /** Supported Extensions */
+            supported_extensions: string[];
+            /** Max Upload Mb */
+            max_upload_mb: number;
+            /** Prompt */
+            prompt: string;
+            /** Example Json */
+            example_json: string;
+            /** Fields */
+            fields: components["schemas"]["FieldLimitOut"][];
+            /**
+             * Retains Upload
+             * @default false
+             */
+            retains_upload: boolean;
+        };
+        /**
          * TopicCoverage
          * @description One topic's rows, and what a professor would have to do about it.
          *
@@ -3855,6 +3659,16 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VocabularyTermOut
+         * @description One closed-vocabulary value, and what it means to a professor.
+         */
+        VocabularyTermOut: {
+            /** Value */
+            value: string;
+            /** Meaning */
+            meaning: string;
+        };
+        /**
          * WarningSeverity
          * @description Whether a warning describes a defect or merely states a fact.
          *
@@ -3873,1007 +3687,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    dashboard__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    books_books_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    upload_book_books_upload_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_book_books_upload_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    book_detail_books__book_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                book_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    book_section_books__book_id__sections__section_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                book_id: number;
-                section_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    curriculum_curriculum_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    upload_taxonomy_curriculum_upload_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_taxonomy_curriculum_upload_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    curriculum_version_curriculum_versions__version_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    curriculum_subtopic_curriculum_subtopics__subtopic_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                subtopic_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    questions_questions_get: {
-        parameters: {
-            query?: {
-                book_id?: number | null;
-                section_ids?: number[] | null;
-                chapter_id?: number | null;
-                difficulty?: string | null;
-                question_type?: string | null;
-                created?: number | null;
-                ids?: string | null;
-                judge_notice?: string | null;
-                show_failed?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    submit_judge_run_page_questions_judge_runs_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    poll_judge_run_page_questions_judge_runs__run_id__poll_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_questions_questions_generate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_generate_questions_questions_generate_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    question_detail_questions__question_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                question_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    review_question_questions__question_id__review_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                question_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_review_question_questions__question_id__review_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    review_queue_review_get: {
-        parameters: {
-            query?: {
-                after?: number | null;
-                mode?: string;
-                outcome?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    submit_queue_review_review__question_id__post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                question_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_submit_queue_review_review__question_id__post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    instructions_instructions_get: {
-        parameters: {
-            query?: {
-                refreshed?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_instruction_page_instructions__question_type__refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                question_type: components["schemas"]["QuestionType"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    judges_judges_get: {
-        parameters: {
-            query?: {
-                saved?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    save_judge_prompt_page_judges__metric__post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                metric: components["schemas"]["JudgeMetricId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_save_judge_prompt_page_judges__metric__post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_judge_page_judges__metric__refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                metric: components["schemas"]["JudgeMetricId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    feedback_feedback_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    coverage_coverage_get: {
-        parameters: {
-            query?: {
-                set_version_id?: number | null;
-                created?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_question_set_page_coverage_sets_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_create_question_set_page_coverage_sets_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    fill_coverage_gaps_page_coverage_gaps_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_fill_coverage_gaps_page_coverage_gaps_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    students_students_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-        };
-    };
-    create_student_page_students_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_create_student_page_students_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    student_detail_students__student_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                student_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    start_training_session_page_students__student_id__sessions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                student_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_start_training_session_page_students__student_id__sessions_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    training_training__training_session_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                training_session_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    submit_training_answer_page_training__training_session_id__answer_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                training_session_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_submit_training_answer_page_training__training_session_id__answer_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    end_training_session_page_training__training_session_id__end_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                training_session_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -4930,6 +3743,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CountsResponse"];
+                };
+            };
+        };
+    };
+    auth_cookie_login_api_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_auth_cookie_login_api_auth_login_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auth_cookie_logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing token or inactive user. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    read_current_user_api_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
         };
@@ -4999,6 +3917,26 @@ export interface operations {
             };
         };
     };
+    document_guide_api_books_document_guide_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookDocumentGuide"];
+                };
+            };
+        };
+    };
     get_book_api_books__book_id__get: {
         parameters: {
             query?: never;
@@ -5017,6 +3955,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BookDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_book_api_books__book_id__delete: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookDeletion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_book_api_books__book_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookMetadataUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookSummary"];
                 };
             };
             /** @description Validation Error */
@@ -5157,6 +4163,26 @@ export interface operations {
             };
         };
     };
+    document_guide_api_curriculum_document_guide_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyDocumentGuide"];
+                };
+            };
+        };
+    };
     get_approved_api_curriculum_approved_get: {
         parameters: {
             query?: never;
@@ -5208,6 +4234,140 @@ export interface operations {
             };
         };
     };
+    delete_version_api_curriculum_versions__version_id__delete: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDeletion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_version_api_curriculum_versions__version_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurriculumVersionLabelUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_version_api_curriculum_versions__version_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_topic_api_curriculum_topics__topic_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                topic_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurriculumItemLabelUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_subtopic_api_curriculum_subtopics__subtopic_id__get: {
         parameters: {
             query?: never;
@@ -5239,11 +4399,47 @@ export interface operations {
             };
         };
     };
+    update_subtopic_api_curriculum_subtopics__subtopic_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subtopic_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurriculumItemLabelUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubtopicSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_questions_api_questions_get: {
         parameters: {
             query?: {
                 limit?: number;
                 status?: components["schemas"]["QuestionStatus"] | null;
+                curriculum_version_id?: number | null;
             };
             header?: never;
             path?: never;
@@ -5291,6 +4487,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenerateQuestionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_plan_api_questions_batch_plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_batch_api_questions_generate_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateBatchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5502,6 +4764,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TypeInstructionListResponse"];
+                };
+            };
+        };
+    };
+    delete_instruction_api_instructions__question_type__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_type: components["schemas"]["QuestionType"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TypeInstructionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_rule_api_instructions__question_type__rules__rule_index__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_type: components["schemas"]["QuestionType"];
+                rule_index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TypeInstructionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

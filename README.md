@@ -31,8 +31,8 @@ rules tuned on one textbook silently mis-segment the next, and the output still 
 structure, so the mistake goes unnoticed (`docs/DECISIONS.md` ADR-015). Producing the document is
 deliberately somebody else's job, because any converter is book-specific in practice (ADR-016).
 
-`docs/book_document_example.json` is a complete, valid example, and the Books page shows the shape
-inline. In brief:
+`docs/book_document_example.json` is a complete, valid example, and the Books
+screen plus `GET /api/books/document-guide` expose the same shape. In brief:
 
 ```json
 {
@@ -59,8 +59,9 @@ Topic → Subtopic hierarchy. Supply a valid document on `/curriculum` and it is
 strictly, then stored as an **approved** curriculum version. The application does **not** derive
 curriculum from books or through an LLM (`docs/DECISIONS.md` ADR-021).
 
-`docs/taxonomy_document_example.json` is a complete, valid example, and the Curriculum page shows
-the required shape inline. In brief:
+`docs/taxonomy_document_example.json` is a complete, valid example, and the
+Curriculum screen plus `GET /api/curriculum/document-guide` expose the required
+shape inline. In brief:
 
 ```json
 {
@@ -106,6 +107,18 @@ Configuration is optional — the app runs with defaults and no credentials. To 
 Copy-Item .env.example .env
 ```
 
+### Development login
+
+When `ENVIRONMENT=development`, the app seeds one local professor account with these defaults:
+
+```dotenv
+DEV_USER_EMAIL=dev@local.test
+DEV_USER_PASSWORD=devpassword123
+```
+
+These are development-only credentials for local use. Do not reuse them in staging or production,
+and do not keep the default `AUTH_SECRET_KEY` outside local development.
+
 ### LLM provider
 
 Question generation (when implemented) needs a provider. Curriculum upload does not. Set these
@@ -129,16 +142,23 @@ Every OpenRouter request asks upstream providers not to retain prompts for train
 `deepseek/deepseek-r1` spends part of `LLM_MAX_OUTPUT_TOKENS` on hidden reasoning tokens, so raise
 that budget before using one.
 
-With no key set, the app still starts and every page still renders — the dashboard reports the LLM
-as unavailable rather than crashing (ADR-010).
+With no key set, the app still starts and the professor console still loads —
+the dashboard reports the LLM as unavailable rather than crashing (ADR-010).
 
 ## Run
 
 ```powershell
+# terminal 1: backend API
 .\.venv\Scripts\python.exe -m app
+
+# terminal 2: React professor console
+cd frontend
+pnpm install
+pnpm run dev
 ```
 
-Then open <http://127.0.0.1:8000/>.
+Then open <http://localhost:3000/> for the professor console. The FastAPI API
+stays on <http://127.0.0.1:8000/>.
 
 Equivalent, if you prefer driving uvicorn directly:
 
@@ -146,18 +166,18 @@ Equivalent, if you prefer driving uvicorn directly:
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## Sections
+## Routes
 
-| Page                                                     | Purpose                                          |
-| -------------------------------------------------------- | ------------------------------------------------ |
-| [/](http://127.0.0.1:8000/)                              | Dashboard: counts, environment, LLM status       |
-| [/books](http://127.0.0.1:8000/books)                    | Import book JSON; browse chapters and sections   |
-| [/curriculum](http://127.0.0.1:8000/curriculum)          | Upload taxonomy JSON; browse approved versions   |
-| [/questions](http://127.0.0.1:8000/questions)            | Generated question bank                          |
-| [/feedback](http://127.0.0.1:8000/feedback)              | Professor approve / reject / edit history         |
-| [/students](http://127.0.0.1:8000/students)              | Adaptive training (fixed mechanism, not built)   |
-| [/api/health](http://127.0.0.1:8000/api/health)          | JSON health check                                |
-| [/docs](http://127.0.0.1:8000/docs)                      | OpenAPI docs                                     |
+| Route                                             | Purpose                                                     |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| [http://localhost:3000/](http://localhost:3000/)  | React professor console                                     |
+| [http://localhost:3000/books](http://localhost:3000/books) | Import book JSON; browse chapters and sections     |
+| [http://localhost:3000/curriculum](http://localhost:3000/curriculum) | Upload taxonomy JSON; browse versions |
+| [http://localhost:3000/questions](http://localhost:3000/questions) | Generated question bank and question detail     |
+| [http://localhost:3000/review](http://localhost:3000/review) | Review queue                                         |
+| [http://localhost:3000/students](http://localhost:3000/students) | Student enrolment and adaptive progress            |
+| [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health) | JSON health check                         |
+| [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) | OpenAPI docs                                        |
 
 ## Checks
 
@@ -169,6 +189,8 @@ Equivalent, if you prefer driving uvicorn directly:
 
 ## Documentation
 
+- `docs/ADAPTIVE_TUNING_README.md` - simulator-based tuning method and the current adaptive
+  defaults chosen on August 18, 2026.
 - `CLAUDE.md` — product objective, the fixed adaptive-training decisions, coding conventions and
   working agreements. Read this before changing the architecture.
 - `docs/DECISIONS.md` — the architectural decision log.

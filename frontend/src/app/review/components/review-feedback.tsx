@@ -1,20 +1,14 @@
 "use client";
 
-import { useState } from "react";
 import { AlertCircle, CheckCircle2, ChevronDown, CircleSlash } from "lucide-react";
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MetricResult, QuestionDetail, ReviewOut } from "../review-types";
 import { METRIC_LABEL } from "../review-types";
 import { labelize } from "../review-utils";
 import { ReviewChip, statusTone } from "./review-primitives";
 
-function ExpandableText({
-  text,
-  preview = 96,
-}: {
-  text: string;
-  preview?: number;
-}) {
+function ExpandableText({ text, preview = 96 }: { text: string; preview?: number }) {
   const [expanded, setExpanded] = useState(false);
   if (text.length <= preview) {
     return <p className="mt-1 text-[13px] text-[var(--review-foreground-2)] leading-6">{text}</p>;
@@ -167,7 +161,8 @@ export function JudgeRail({ detail }: { detail: QuestionDetail }) {
             </>
           ) : (
             <>
-              {" "}Secondary on purpose; the professor review remains the authority.{" "}
+              {" "}
+              Secondary on purpose; the professor review remains the authority.{" "}
               <button
                 type="button"
                 className="text-[var(--review-accent)] underline-offset-2 hover:underline"
@@ -180,7 +175,9 @@ export function JudgeRail({ detail }: { detail: QuestionDetail }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {evaluation?.gate ? <ReviewChip tone={gateTone}>judges: {labelize(evaluation.gate)}</ReviewChip> : null}
+        {evaluation?.gate ? (
+          <ReviewChip tone={gateTone}>judges: {labelize(evaluation.gate)}</ReviewChip>
+        ) : null}
         {metrics.length === 0 ? (
           <p className="text-[var(--review-muted)] text-sm">
             Nothing was measured{evaluation?.skip_reason ? ` - ${evaluation.skip_reason}` : ""}.

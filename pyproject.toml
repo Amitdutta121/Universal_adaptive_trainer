@@ -6,11 +6,16 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "jinja2>=3.1",
     "python-multipart>=0.0.12",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0.36",
+    # Cookie-session auth for the professor console (app/auth/). Database
+    # strategy: logout revokes server-side rather than only clearing the cookie.
+    "fastapi-users[sqlalchemy]>=14.0",
+    # fastapi-users' SQLAlchemy adapter requires an async session; this is the
+    # only place an async SQLite driver is needed (app/persistence/async_database.py).
+    "aiosqlite>=0.20",
     # Structured LLM calls via Instructor over OpenRouter (app/llm/client.py).
     # See docs/DECISIONS.md ADR-020.
     "instructor>=1.15",
@@ -35,9 +40,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
-
-[tool.setuptools.package-data]
-app = ["web/templates/*.html", "web/static/css/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

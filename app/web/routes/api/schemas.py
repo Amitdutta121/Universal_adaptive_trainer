@@ -12,10 +12,11 @@ Enum-valued fields serialise as their string value because every enum in
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.calibration import (
     MIN_PANEL_SAMPLE,
@@ -31,6 +32,13 @@ from app.calibration import (
     TypeCalibration,
 )
 from app.coverage import CoverageReport, SubtopicCoverage, TopicCoverage
+from app.curriculum import (
+    DESCRIPTION_MAX_LENGTH,
+    LABEL_MAX_LENGTH,
+    NAME_MAX_LENGTH,
+    CurriculumUsage,
+    FieldLimit,
+)
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
 from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
 from app.domain.enums import (
@@ -56,6 +64,8 @@ from app.domain.enums import (
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
+from app.generation import ChunkQuestionRequest, PlannedQuestion
+from app.ingestion import VocabularyTerm
 from app.persistence.models import (
     BookRow,
     CurriculumVersionRow,
@@ -124,6 +134,10 @@ class ConfigResponse(BaseModel):
     question_statuses: list[EnumOption]
     review_decisions: list[EnumOption]
     rejection_reasons: list[EnumOption]
+    #: How many judge calls one generated question costs. A client pricing a
+    #: generation run needs this; deriving it from a hard-coded four in the UI
+    #: would silently go wrong the day a fifth metric is added (ADR-031).
+    judge_calls_per_question: int
 
     @classmethod
     def build(
@@ -158,6 +172,7 @@ class ConfigResponse(BaseModel):
             question_statuses=_options(QuestionStatus),
             review_decisions=_options(ReviewDecision),
             rejection_reasons=_options(RejectionReason, REJECTION_REASON_LABELS),
+            judge_calls_per_question=len(JudgeMetricId),
         )
 
 
@@ -298,11 +313,68 @@ class BookDetail(BaseModel):
     section_count: int
     chapters: list[ChapterOut]
     warnings: list[ExtractionWarning]
+    #: Questions generated from this book's sections. Deleting the book would
+    #: strand their grounding citation, so the count is shown before it happens.
+    grounded_question_count: int = 0
 
 
 class BookListResponse(BaseModel):
     books: list[BookSummary]
     total: int
+
+
+class BookMetadataUpdate(BaseModel):
+    """A professor's edit to a book's labels.
+
+    Structure is declared by the imported document and is never edited here, so
+    this carries only what the row is labelled with. An omitted field is left
+    alone; an empty string clears ``author`` or ``notes``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=500)
+    author: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=5000)
+
+
+class BookDeletion(BaseModel):
+    """What a completed delete removed, and what it cost."""
+
+    deleted_book_id: int
+    #: Questions whose stored grounding now cites sections that no longer exist.
+    stranded_question_count: int
+
+
+class VocabularyTermOut(BaseModel):
+    """One closed-vocabulary value, and what it means to a professor."""
+
+    value: str
+    meaning: str
+
+    @classmethod
+    def from_terms(cls, terms: Iterable[VocabularyTerm]) -> list[VocabularyTermOut]:
+        return [cls(value=str(term.value), meaning=term.meaning) for term in terms]
+
+
+class BookDocumentGuide(BaseModel):
+    """Everything a professor needs to obtain a valid book document.
+
+    The prompt and the example are rendered from the ingestion contract itself,
+    so a client that shows them cannot describe a document the validator would
+    refuse.
+    """
+
+    schema_version: str
+    supported_extensions: list[str]
+    max_upload_mb: int
+    #: The copy-and-paste instruction for an assistant. Advisory: it grants
+    #: nothing, and the upload is still validated in full.
+    prompt: str
+    example_json: str
+    structure_sources: list[VocabularyTermOut]
+    warning_codes: list[VocabularyTermOut]
+    warning_severities: list[VocabularyTermOut]
 
 
 class SectionDetail(BaseModel):
@@ -383,9 +455,16 @@ class CurriculumVersionSummary(BaseModel):
     source_book_ids: list[int]
     created_at: datetime
     approved_at: datetime | None
+    #: Free: every caller eager-loads topics already.
+    topic_count: int
+    #: Cannot be derived from the row, so it is a required keyword rather than a
+    #: defaulted one -- a default of zero would render a populated version as empty.
+    subtopic_count: int
 
     @classmethod
-    def from_row(cls, row: CurriculumVersionRow) -> CurriculumVersionSummary:
+    def from_row(
+        cls, row: CurriculumVersionRow, *, subtopic_count: int
+    ) -> CurriculumVersionSummary:
         return cls(
             id=row.id,
             label=row.label,
@@ -394,6 +473,8 @@ class CurriculumVersionSummary(BaseModel):
             source_book_ids=list(row.source_book_ids or []),
             created_at=row.created_at,
             approved_at=row.approved_at,
+            topic_count=len(row.topics),
+            subtopic_count=subtopic_count,
         )
 
 
@@ -407,6 +488,9 @@ class CurriculumVersionDetail(BaseModel):
     books: list[BookSummary]
     extraction_metadata: DisplayExtractionMetadata | None
     warnings: list[DisplayProposalWarning]
+    #: What deleting this version would strand. On the page that offers the
+    #: delete, because the count is only useful before the decision (ADR-045).
+    usage: CurriculumVersionUsage
 
 
 class CurriculumListResponse(BaseModel):
@@ -452,6 +536,122 @@ class SubtopicDetail(BaseModel):
     confidence: ConceptConfidence | None
     evidence: list[SubtopicEvidenceOut]
     book_count: int
+
+
+class FieldLimitOut(BaseModel):
+    """One field of the taxonomy contract, and the bounds the validator enforces.
+
+    Published structurally as well as inside the prompt, so a form can bind its
+    input limits to the contract rather than hard-coding them.
+    """
+
+    path: str
+    required: bool
+    kind: str
+    min_length: int | None
+    max_length: int | None
+    meaning: str
+
+    @classmethod
+    def from_limits(cls, limits: Iterable[FieldLimit]) -> list[FieldLimitOut]:
+        return [
+            cls(
+                path=limit.path,
+                required=limit.required,
+                kind=limit.kind,
+                min_length=limit.min_length,
+                max_length=limit.max_length,
+                meaning=limit.meaning,
+            )
+            for limit in limits
+        ]
+
+
+class TaxonomyDocumentGuide(BaseModel):
+    """Everything a professor needs to obtain a valid taxonomy document.
+
+    The prompt, the example and the field reference are rendered from the
+    taxonomy contract itself, so a client that shows them cannot describe a
+    document the validator would refuse.
+    """
+
+    schema_version: str
+    supported_extensions: list[str]
+    max_upload_mb: int
+    #: The copy-and-paste instruction for an assistant. Advisory: it grants
+    #: nothing, and the upload is still validated in full.
+    prompt: str
+    example_json: str
+    fields: list[FieldLimitOut]
+    #: A book's uploaded document is retained; a taxonomy's is not, so the
+    #: professor's copy is the only copy and a client must not offer a download.
+    retains_upload: bool = False
+
+
+class CurriculumVersionLabelUpdate(BaseModel):
+    """A professor's edit to a curriculum version's label.
+
+    The tree is declared by the uploaded document and is never edited here, and
+    neither is the version's status: which taxonomy the product is grounded in
+    changes by uploading one, not by editing a row (ADR-021).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(max_length=LABEL_MAX_LENGTH)
+
+
+class CurriculumItemLabelUpdate(BaseModel):
+    """A professor's edit to one topic's or subtopic's display name.
+
+    Only the two label fields exist here, so moving a subtopic between topics,
+    reordering, or rewriting a stable id is not refused -- it is inexpressible.
+    An omitted field is left alone; an empty description clears it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LENGTH)
+
+
+class CurriculumVersionUsage(BaseModel):
+    """What still points at a curriculum version, and how much is unrepairable."""
+
+    question_count: int
+    #: Question-to-subtopic taggings. What coverage counts and what the adaptive
+    #: engine draws from, so a stranded one silently unservables its question.
+    question_subtopic_link_count: int
+    #: Frozen sets built against this version (ADR-036). Deleting is refused
+    #: outright while this is non-zero -- ``force`` does not apply.
+    question_set_count: int
+    #: Students whose measured mastery or weakness names its topics or subtopics.
+    student_count: int
+    attempt_count: int
+    #: Whether ``GET /api/curriculum/approved`` currently returns this version.
+    is_approved: bool
+
+    @classmethod
+    def from_usage(cls, usage: CurriculumUsage) -> CurriculumVersionUsage:
+        return cls(
+            question_count=usage.question_count,
+            question_subtopic_link_count=usage.question_subtopic_link_count,
+            question_set_count=usage.question_set_count,
+            student_count=usage.student_count,
+            attempt_count=usage.attempt_count,
+            is_approved=usage.is_approved,
+        )
+
+
+class CurriculumVersionDeletion(BaseModel):
+    """What a completed delete removed, and what it cost."""
+
+    deleted_version_id: int
+    deleted_topic_count: int
+    deleted_subtopic_count: int
+    #: The counts as they stood at deletion. Every one of them now names rows
+    #: that no longer exist.
+    stranded: CurriculumVersionUsage
 
 
 class SubtopicParent(BaseModel):
@@ -607,10 +807,14 @@ class QuestionListResponse(BaseModel):
     questions: list[QuestionSummary]
     #: Always the whole bank, so a filtered listing still reports what it omitted.
     status_counts: dict[str, int]
+    #: Whole bank too, keyed by curriculum version id as a string; a question
+    #: generated before that column existed is counted under ``"none"``.
+    curriculum_version_counts: dict[str, int]
     total: int
     #: The status filter that produced ``questions``, echoed back so a client can
     #: tell a narrowed listing from a bank that happens to hold only these rows.
     status: QuestionStatus | None = None
+    curriculum_version_id: int | None = None
 
 
 #: Which unreviewed questions the review queue offers. ``scoreable`` restricts
@@ -658,6 +862,95 @@ class GenerateQuestionsResponse(BaseModel):
     created: int
     question_ids: list[int]
     questions: list[QuestionSummary]
+
+
+class ChunkGenerationSpec(BaseModel):
+    """One chunk's instruction on the spec sheet (ADR-044).
+
+    ``easy`` / ``medium`` / ``hard`` are how many questions this chunk should
+    produce at each difficulty. ``question_types`` is the set they are drawn from,
+    not one question per format: two medium questions with three formats chosen is
+    still two questions.
+    """
+
+    section_id: int
+    easy: int = Field(default=0, ge=0, le=20)
+    medium: int = Field(default=0, ge=0, le=20)
+    hard: int = Field(default=0, ge=0, le=20)
+    question_types: list[QuestionType] = Field(default_factory=list)
+
+    def to_request(self) -> ChunkQuestionRequest:
+        return ChunkQuestionRequest(
+            section_id=self.section_id,
+            counts={
+                Difficulty.EASY: self.easy,
+                Difficulty.MEDIUM: self.medium,
+                Difficulty.HARD: self.hard,
+            },
+            question_types=tuple(self.question_types),
+        )
+
+
+class GenerateBatchRequest(BaseModel):
+    """A per-chunk generation run: many chunks, each with its own instruction."""
+
+    curriculum_version_id: int | None = None
+    chunks: list[ChunkGenerationSpec] = Field(min_length=1)
+    seed: str | None = None
+
+
+class PlannedQuestionOut(BaseModel):
+    """One question a compiled run will ask for, in the order it will be asked."""
+
+    section_id: int
+    difficulty: Difficulty
+    question_type: QuestionType
+
+    @classmethod
+    def from_planned(cls, planned: PlannedQuestion) -> PlannedQuestionOut:
+        return cls(
+            section_id=planned.section_id,
+            difficulty=planned.difficulty,
+            question_type=planned.question_type,
+        )
+
+
+class BatchPlanTotals(BaseModel):
+    """What a compiled spec sheet costs, before any model call is made."""
+
+    chunks_specified: int
+    questions_to_create: int
+    generation_calls: int
+    #: ``questions_to_create`` times the number of advisory metrics, because the
+    #: judge makes one call per metric per question (ADR-031).
+    judge_calls: int
+    easy: int
+    medium: int
+    hard: int
+    #: Planned questions that repeat a (chunk, difficulty, format) already planned.
+    #: Nothing currently makes a repeat differ from the question it repeats, so the
+    #: count is reported rather than refused.
+    identical_repeats: int
+
+
+class BatchPlanResponse(BaseModel):
+    """The compiled plan for a spec sheet. Read-only: no question is generated."""
+
+    planned: list[PlannedQuestionOut]
+    totals: BatchPlanTotals
+
+
+class GenerateBatchResponse(BaseModel):
+    """What a per-chunk run produced, and what it had planned to produce.
+
+    ``created`` may be short of ``planned`` when the provider failed part-way: each
+    question commits on its own, so a partial batch is a real outcome (ADR-032).
+    """
+
+    created: int
+    question_ids: list[int]
+    questions: list[QuestionSummary]
+    planned: list[PlannedQuestionOut]
 
 
 class GenerationPlanSection(BaseModel):
@@ -1520,10 +1813,11 @@ class StartTrainingSessionRequest(BaseModel):
 
 
 class ParsonsBlockOut(BaseModel):
-    """One draggable block. Its stored ``indent`` is deliberately not published."""
+    """One draggable block, including the indentation it should display with."""
 
     id: str
     text: str
+    indent: int = Field(ge=0)
 
 
 class ServedQuestionOut(BaseModel):
@@ -1617,9 +1911,13 @@ def _presentable_blocks(
     if not isinstance(blocks, list):
         return None
     presentable = [
-        ParsonsBlockOut(id=str(block.get("id")), text=str(block.get("text")))
+        ParsonsBlockOut(
+            id=str(block.get("id")),
+            text=str(block.get("text")),
+            indent=block.get("indent", 0) if isinstance(block.get("indent", 0), int) else 0,
+        )
         for block in blocks
-        if isinstance(block, dict) and block.get("id") is not None
+        if isinstance(block, dict) and block.get("id") is not None and block.get("text") is not None
     ]
     random.Random(seed).shuffle(presentable)
     return presentable

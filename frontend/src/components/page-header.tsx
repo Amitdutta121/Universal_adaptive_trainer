@@ -4,6 +4,11 @@ import { TaxonomySelector } from "@/components/taxonomy-selector";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
+// Both toggles default to on because every professor-console page wants
+// them: the sidebar trigger to open/close the app nav, the taxonomy
+// selector to switch the curriculum version generation targets. Neither
+// belongs on a page a student can reach, so the student join screen is the
+// one caller that turns both off.
 export function PageHeader({
   title,
   summary,

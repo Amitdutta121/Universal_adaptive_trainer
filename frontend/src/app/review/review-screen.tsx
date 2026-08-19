@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
@@ -20,11 +20,13 @@ import { useReviewQueue, useSubmitReview } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 import { ReviewActionBar } from "./components/review-action-bar";
 import { JudgeRail, ValidationSummary } from "./components/review-feedback";
+import { ReviewQuestionContent, ReviewQuestionSurface } from "./components/review-question-content";
 import {
-  ReviewQuestionContent,
-  ReviewQuestionSurface,
-} from "./components/review-question-content";
-import { REVIEW_MODES, REVIEW_THEMES, type ReviewQueueMode, type ReviewTheme } from "./review-types";
+  REVIEW_MODES,
+  REVIEW_THEMES,
+  type ReviewQueueMode,
+  type ReviewTheme,
+} from "./review-types";
 import { useReviewForm } from "./use-review-form";
 
 export function ReviewScreen() {
@@ -106,8 +108,8 @@ export function ReviewScreen() {
     <div data-review-theme={theme} className="review-theme-root flex min-w-0 flex-col gap-6">
       <div className="review-header-sticky sticky top-0 z-30 -mx-6 px-6 pt-1 pb-4">
         <PageHeader
-          title="Review"
-          summary="One question per screen. Review the student-facing surface first, then decide."
+          title="Review Queue"
+          summary="Professor feedback lives here now. Review the student-facing surface first, then decide."
           actions={
             <>
               <Select
@@ -122,10 +124,7 @@ export function ReviewScreen() {
                   <SelectItem value="scoreable">Judged only</SelectItem>
                 </SelectContent>
               </Select>
-              <Select
-                value={theme}
-                onValueChange={(value) => void setTheme(value as ReviewTheme)}
-              >
+              <Select value={theme} onValueChange={(value) => void setTheme(value as ReviewTheme)}>
                 <SelectTrigger className="review-select-trigger w-36" size="sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -143,10 +142,10 @@ export function ReviewScreen() {
       {isPending ? <TableSkeleton rows={6} /> : null}
 
       {data ? (
-        <Card className="review-panel border">
-          <CardHeader>
-            <div className="review-eyebrow">Queue</div>
-            <CardTitle>Progress through the bank</CardTitle>
+          <Card className="review-panel border">
+            <CardHeader>
+              <div className="review-eyebrow">Queue</div>
+              <CardTitle>Professor feedback progress</CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-2">
               <span>
                 <strong>{data.reviewed}</strong> of {data.total} reviewed

@@ -2,8 +2,13 @@
 
 /** The persistent professor navigation, driven entirely by `lib/navigation.ts`. */
 
+import { LogOut, Moon, Sparkles, Sun, SunMoon } from "lucide-react";
+import type { Route } from "next";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
+import { Fragment, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -15,18 +20,130 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarSeparator,
 } from "@/components/ui/sidebar";
-import { useHealth } from "@/lib/api/queries";
-import { NAV_SECTIONS } from "@/lib/navigation";
+import { useCurrentUser, useHealth, useLogout } from "@/lib/api/queries";
+import { NAV_SECTIONS, type NavSection } from "@/lib/navigation";
+
+type AppTheme = "light" | "dark" | "system";
+
+/** Presentational grouping only — every key still comes from the single `NAV_SECTIONS` source of truth. */
+const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
+  { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "generate", "review"] },
+  { label: "Calibration", keys: ["instructions", "judges", "coverage"] },
+  { label: "Adaptive Training", keys: ["students"] },
+];
+
+function sectionsFor(keys: readonly string[]): NavSection[] {
+  return keys
+    .map((key) => NAV_SECTIONS.find((section) => section.key === key))
+    .filter((section): section is NavSection => Boolean(section));
+}
 
 function LlmStatus() {
   const { data, isPending, isError } = useHealth();
-  if (isPending) return <span className="app-sidebar-status">checking...</span>;
-  if (isError) return <span className="app-sidebar-status">API unreachable</span>;
+
+  if (isPending) {
+    return (
+      <span className="app-sidebar-status" data-tone="idle">
+        <span className="app-sidebar-status-dot" />
+        Checking API…
+      </span>
+    );
+  }
+  if (isError) {
+    return (
+      <span className="app-sidebar-status" data-tone="critical">
+        <span className="app-sidebar-status-dot" />
+        API unreachable
+      </span>
+    );
+  }
   return (
-    <span className="app-sidebar-status" title={data.llm_status}>
+    <span
+      className="app-sidebar-status"
+      data-tone={data.llm_configured ? "ok" : "warn"}
+      title={data.llm_status}
+    >
+      <span className="app-sidebar-status-dot" />
       {data.llm_configured ? "LLM ready" : "LLM not configured"}
     </span>
+  );
+}
+
+function ThemeSwitcher() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const activeTheme = (mounted ? (theme ?? "system") : "system") as AppTheme;
+
+  const options: Array<{ value: AppTheme; label: string; icon: typeof Sun }> = [
+    { value: "light", label: "Light", icon: Sun },
+    { value: "dark", label: "Dark", icon: Moon },
+    { value: "system", label: "System", icon: SunMoon },
+  ];
+
+  return (
+    <div className="app-sidebar-theme">
+      {options.map((option) => {
+        const Icon = option.icon;
+        const selected = option.value === activeTheme;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            title={option.label}
+            className="app-sidebar-theme-option"
+            data-selected={selected}
+            onClick={() => setTheme(option.value)}
+          >
+            <Icon className="size-3.5" />
+            <span className="sr-only">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AccountFooter() {
+  const router = useRouter();
+  const currentUser = useCurrentUser();
+  const logout = useLogout();
+
+  const signOut = async () => {
+    await logout.mutateAsync();
+    router.push("/login" as Route);
+  };
+
+  const email = currentUser.data?.email ?? "";
+  const initial = email.trim().charAt(0).toUpperCase() || "?";
+
+  return (
+    <div className="app-sidebar-account">
+      <span className="app-sidebar-account-avatar" aria-hidden>
+        {initial}
+      </span>
+      <span className="app-sidebar-account-email" title={email}>
+        {email}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="app-sidebar-account-signout"
+        disabled={logout.isPending}
+        onClick={() => void signOut()}
+        title="Sign out"
+      >
+        <LogOut className="size-3.5" />
+        <span className="sr-only">Sign out</span>
+      </Button>
+    </div>
   );
 }
 
@@ -36,45 +153,65 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="app-sidebar">
       <SidebarHeader>
-        <div className="flex flex-col gap-0.5 px-2 py-1.5 group-data-[collapsible=icon]:hidden">
-          <span className="font-semibold text-[13.5px] tracking-[-0.01em]">Adaptive Trainer</span>
-          <span className="text-[11.5px] text-muted-foreground">Professor console</span>
-        </div>
+        <Link href="/" className="app-sidebar-brand group-data-[collapsible=icon]:justify-center">
+          <span className="app-sidebar-brand-mark">
+            <Sparkles className="size-4" />
+          </span>
+          <span className="app-sidebar-brand-copy group-data-[collapsible=icon]:hidden">
+            <span className="app-sidebar-brand-title">Adaptive Trainer</span>
+            <span className="app-sidebar-brand-subtitle">Professor console</span>
+          </span>
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Sections</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV_SECTIONS.map((section) => {
-                const Icon = section.icon;
-                const isActive =
-                  pathname === section.path || pathname.startsWith(`${section.path}/`);
-                return (
-                  <SidebarMenuItem key={section.key}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive}
-                      tooltip={section.label}
-                      className="text-[13px]"
-                    >
-                      <Link href={section.path}>
-                        <Icon />
-                        <span>{section.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {NAV_GROUPS.map((group, index) => {
+          const sections = sectionsFor(group.keys);
+          if (sections.length === 0) return null;
+          return (
+            <Fragment key={group.label}>
+              {index > 0 ? <SidebarSeparator /> : null}
+              <SidebarGroup>
+                <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {sections.map((section) => {
+                      const Icon = section.icon;
+                      const isActive =
+                        pathname === section.path || pathname.startsWith(`${section.path}/`);
+                      return (
+                        <SidebarMenuItem key={section.key}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isActive}
+                            tooltip={section.label}
+                            className="text-[13px]"
+                          >
+                            <Link href={section.path}>
+                              <Icon />
+                              <span>{section.label}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </Fragment>
+          );
+        })}
       </SidebarContent>
 
       <SidebarFooter>
-        <div className="px-2 pb-1 group-data-[collapsible=icon]:hidden">
+        <div className="app-sidebar-footer-stack group-data-[collapsible=icon]:hidden">
+          <div className="app-sidebar-footer-row">
+            <span className="app-sidebar-footer-label">Theme</span>
+            <ThemeSwitcher />
+          </div>
           <LlmStatus />
+          <SidebarSeparator className="my-0" />
+          <AccountFooter />
         </div>
       </SidebarFooter>
     </Sidebar>

@@ -29,4 +29,6 @@ desktop.ini
 
 # Source textbooks (PDFs). Out of scope per ADR-012..016: the app imports
 # structured book JSON, never a PDF. Kept locally, never committed.
-books/
+# Anchored to the repository root: unanchored, this also swallowed the console's
+# /books route, which then went untracked and unscanned by Tailwind.
+/books/

@@ -1,6 +1,6 @@
-"""UI / API boundary.
+"""HTTP boundary.
 
-Server-rendered Jinja2 pages for the professor plus a small JSON API. Routes are
-thin: they resolve a session, call a repository or service, and render. Business
-rules belong in the subsystem packages, not here.
+This package now contains the FastAPI JSON API only. Routes stay thin: they
+resolve a session, call a repository or service, and serialize the result.
+Business rules belong in the subsystem packages, not here.
 """

@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.domain.enums import CurriculumStatus, JudgeMetricId, QuestionType, ReviewDecision
-from app.persistence.repositories import BookRepository, CurriculumRepository
+from app.generation.prompts import base_type_instruction
+from app.persistence.repositories import BookRepository, CurriculumRepository, TypeInstructionRepository
 
 VALID_TAXONOMY = (
     b'{"schema_version":"1","label":"Uploaded","topics":['
@@ -200,6 +201,91 @@ def test_approved_curriculum_matches_the_uploaded_version(client: TestClient) ->
     assert client.get("/api/curriculum/approved").json()["version"]["id"] == created
 
 
+def test_an_older_approved_curriculum_can_be_made_active_again(client: TestClient) -> None:
+    old = _import_taxonomy(client)["version"]["id"]
+    _import_taxonomy(client)
+
+    response = client.post(f"/api/curriculum/versions/{old}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["version"]["id"] == old
+    assert client.get("/api/curriculum/approved").json()["version"]["id"] == old
+
+
+def test_single_generation_uses_the_active_curriculum_version(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.web.routes.api import questions as api_questions
+
+    old = _import_taxonomy(client)["version"]["id"]
+    _import_taxonomy(client)
+    activate = client.post(f"/api/curriculum/versions/{old}/activate")
+    assert activate.status_code == 200
+
+    seen: dict[str, int] = {}
+
+    class FakeGenerationService:
+        def __init__(self, request_session) -> None:
+            self._session = request_session
+
+        def generate_for_sections(self, **kwargs: object) -> list[object]:
+            seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
+            return []
+
+    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
+
+    response = client.post(
+        "/api/questions/generate",
+        json={
+            "question_type": "debugging",
+            "difficulty": "medium",
+            "section_ids": [1],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert seen["curriculum_version_id"] == old
+
+
+def test_batch_generation_uses_the_active_curriculum_version(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.web.routes.api import questions as api_questions
+
+    old = _import_taxonomy(client)["version"]["id"]
+    _import_taxonomy(client)
+    activate = client.post(f"/api/curriculum/versions/{old}/activate")
+    assert activate.status_code == 200
+
+    seen: dict[str, int] = {}
+
+    class FakeGenerationService:
+        def __init__(self, request_session) -> None:
+            self._session = request_session
+
+        def generate_batch(self, **kwargs: object) -> list[object]:
+            seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
+            return []
+
+    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
+
+    response = client.post(
+        "/api/questions/generate-batch",
+        json={
+            "chunks": [
+                {
+                    "section_id": 1,
+                    "easy": 1,
+                    "question_types": ["debugging"],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert seen["curriculum_version_id"] == old
+
+
 def test_subtopic_detail_reports_a_taxonomy_upload_has_no_evidence(client: TestClient) -> None:
     version = _import_taxonomy(client)
     subtopic_id = version["topics"][0]["subtopics"][0]["id"]
@@ -235,9 +321,37 @@ def test_question_list_is_empty_before_any_generation(client: TestClient) -> Non
     assert client.get("/api/questions").json() == {
         "questions": [],
         "status_counts": {},
+        "curriculum_version_counts": {},
         "total": 0,
         "status": None,
+        "curriculum_version_id": None,
     }
+
+
+def test_question_list_filters_by_curriculum_version_across_the_whole_bank(
+    client: TestClient, session: Session
+) -> None:
+    """The filter is applied before ``limit``, not to whatever page ``limit``
+    already loaded -- otherwise an older match could fall off the page before
+    the filter ever saw it.
+    """
+    from app.persistence.models import QuestionRow
+
+    old_v1_question = QuestionRow(prompt="From version 1.", curriculum_version_id=1)
+    session.add(old_v1_question)
+    session.flush()
+    for i in range(3):
+        session.add(QuestionRow(prompt=f"From version 2, #{i}.", curriculum_version_id=2))
+    session.commit()
+
+    response = client.get("/api/questions", params={"curriculum_version_id": 1, "limit": 2})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [q["id"] for q in payload["questions"]] == [old_v1_question.id]
+    assert payload["curriculum_version_id"] == 1
+    assert payload["total"] == 4
+    assert payload["curriculum_version_counts"] == {"1": 1, "2": 3}
 
 
 def test_generation_without_an_approved_curriculum_is_refused(client: TestClient) -> None:
@@ -514,6 +628,86 @@ def test_refreshing_an_unknown_type_is_a_json_422(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "invalid_request"
 
 
+def test_deleting_a_learned_instruction_reverts_to_the_shipped_default(
+    client: TestClient, session: Session
+) -> None:
+    TypeInstructionRepository(session).upsert(
+        QuestionType.MULTIPLE_CHOICE,
+        instruction="Use shorter distractors.",
+        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
+        review_count=1,
+    )
+    session.commit()
+
+    response = client.delete("/api/instructions/multiple_choice")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["question_type"] == QuestionType.MULTIPLE_CHOICE.value
+    assert payload["learned"] is False
+    assert payload["rules"] == []
+    assert payload["review_count"] == 0
+    assert payload["available_reviews"] == 0
+    assert payload["instruction"] == base_type_instruction(QuestionType.MULTIPLE_CHOICE)
+    assert TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE) is None
+
+
+def test_deleting_a_missing_instruction_is_a_json_404(client: TestClient) -> None:
+    response = client.delete("/api/instructions/multiple_choice")
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["error"]["code"] == "not_found"
+    assert "shipped instruction" in payload["error"]["message"]
+
+
+def test_deleting_one_learned_rule_keeps_the_other_rules(
+    client: TestClient, session: Session
+) -> None:
+    TypeInstructionRepository(session).upsert(
+        QuestionType.MULTIPLE_CHOICE,
+        instruction="ignored here",
+        rules=[
+            {"rule": "Keep options short.", "review_ids": [1]},
+            {"rule": "Make exactly one option correct.", "review_ids": [2]},
+        ],
+        review_count=2,
+    )
+    session.commit()
+
+    response = client.delete("/api/instructions/multiple_choice/rules/0")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["learned"] is True
+    assert payload["review_count"] == 2
+    assert payload["rules"] == ["Make exactly one option correct."]
+    assert "Keep options short." not in payload["instruction"]
+    assert "Make exactly one option correct." in payload["instruction"]
+
+
+def test_deleting_the_last_learned_rule_reverts_to_the_shipped_default(
+    client: TestClient, session: Session
+) -> None:
+    TypeInstructionRepository(session).upsert(
+        QuestionType.MULTIPLE_CHOICE,
+        instruction="ignored here",
+        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
+        review_count=1,
+    )
+    session.commit()
+
+    response = client.delete("/api/instructions/multiple_choice/rules/0")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["learned"] is False
+    assert payload["rules"] == []
+    assert payload["review_count"] == 0
+    assert payload["instruction"] == base_type_instruction(QuestionType.MULTIPLE_CHOICE)
+    assert TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE) is None
+
+
 # ------------------------------------------------------------------------- schema
 
 
@@ -524,7 +718,9 @@ def test_refreshing_an_unknown_type_is_a_json_422(client: TestClient) -> None:
         "/api/config",
         "/api/counts",
         "/api/books",
+        "/api/books/document-guide",
         "/api/curriculum/versions",
+        "/api/curriculum/document-guide",
         "/api/questions",
         "/api/reviews",
         "/api/reviews/stats",
@@ -556,7 +752,10 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/books/{book_id}/sections/{section_id}",
         "/api/curriculum/versions",
         "/api/curriculum/approved",
+        "/api/curriculum/document-guide",
         "/api/curriculum/versions/{version_id}",
+        "/api/curriculum/versions/{version_id}/activate",
+        "/api/curriculum/topics/{topic_id}",
         "/api/curriculum/subtopics/{subtopic_id}",
         "/api/questions",
         "/api/questions/generate",
@@ -565,6 +764,8 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/reviews",
         "/api/reviews/stats",
         "/api/instructions",
+        "/api/instructions/{question_type}",
+        "/api/instructions/{question_type}/rules/{rule_index}",
         "/api/instructions/{question_type}/refresh",
         "/api/calibration/results",
         "/api/calibration/pairs",

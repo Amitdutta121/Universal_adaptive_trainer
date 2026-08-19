@@ -70,6 +70,18 @@ A student answers questions at `/training/{session_id}`, having been enrolled an
 - Stable ids are assigned at import and survive later display-name edits.
 - Taxonomy uploads do not claim textbook evidence, candidate labels, grouping rationales or model
   metadata that the input did not provide.
+- After upload a version's **display names** may be edited - its label, and each topic's and
+  subtopic's name and description (ADR-046). Structure may not: which topics exist, and which
+  subtopics hang off which topic, is what the document declared. A rename never recomputes
+  `stable_id`, so measured weakness stays attached; the id then stops matching a hash of the
+  current name, and that is the design, not a bug.
+- Deleting a version **refuses outright** while a frozen question set names it, or while it is the
+  approved one - `force` does not apply to either, because neither leaves a professor anything to
+  decide. Otherwise it refuses by default, names what would be stranded, and proceeds on `force`.
+  Nothing is repaired: questions and student state keep integers naming rows that are gone.
+- The **instruction a professor hands an assistant** to produce a taxonomy is generated from the
+  contract and served at `GET /api/curriculum/document-guide`. It is advisory: the upload is still
+  validated in full.
 
 The two loops are **separate**: student adaptation reacts to student scores, professor content
 optimization reacts to professor reviews. Neither may feed the other beyond the shared question
@@ -82,6 +94,9 @@ ADR-039 for what a submitted review then does.**
 
 - The professor selects a **chunk, a difficulty and a question type**. The **generator** chooses the
   topic and subtopics, from the whole approved taxonomy, and its claim is validated after the call.
+- A run may instead carry **a spec per chunk** — counts for easy, medium and hard, plus the formats
+  they are drawn from (ADR-044). The compiler that turns those counts into questions belongs to the
+  API, and is exposed for pricing at `POST /api/questions/batch-plan` before anything is spent.
 - A question claims **one topic and up to three of its subtopics**, stored in `question_subtopics`.
   Subtopics from two different topics are refused.
 - A defective question is **retried with the defect stated**, at most three generation calls per
@@ -165,6 +180,12 @@ ADR-039 for what a submitted review then does.**
 - Every section is traceable to book → chapter → section → pages. `SectionSource.citation()` is
   the sanctioned way to cite one.
 - The uploaded document is always retained, so an import is reproducible from its exact input.
+- After import a book's **labels** may be edited; its structure may not (ADR-045). Deleting a book
+  is refused while questions cite it, names the count, and proceeds only with an explicit override —
+  their grounding is a frozen spec, not a foreign key, so nothing would repair the citation.
+- The **instruction a professor hands an assistant** to produce a document is generated from the
+  contract and served at `GET /api/books/document-guide`. It is advisory: the upload is still
+  validated in full.
 
 ## Working agreements
 
@@ -231,6 +252,8 @@ app/
     types.py          Column types that decode themselves (JSON, Pydantic, enums). ADR-026.
   ingestion/          Book JSON import                          (IMPLEMENTED)
     schema.py         The book JSON contract, and its validation
+    authoring.py      The copy-and-paste instruction that produces a document. ADR-045.
+    library.py        Editing a book's labels, and deleting one. ADR-045.
     storage.py        Upload validation and retention of the document
     service.py        The workflow: validate, store, persist
     retrieval.py      Reading sections back out, with citations
@@ -238,9 +261,12 @@ app/
     taxonomy_schema.py  The strict taxonomy JSON contract
     taxonomy_ids.py     Stable identity assigned during import
     taxonomy_import.py  The workflow: validate and persist approved versions
+    authoring.py        The copy-and-paste instruction that produces a document. ADR-046.
+    library.py          Editing display names, and deleting a version. ADR-046.
     display.py          Safe display decoding for current and legacy rows
   generation/         Section-first base question generation    (IMPLEMENTED)
     spec.py           The request, and validation of the taxonomy the model claims. ADR-031.
+    batch.py          A spec per chunk, compiled into the questions to generate. ADR-044.
   validation/         Automatic question validation             (IMPLEMENTED)
     runner.py         The isolated subprocess test runner. ADR-023.
     type_checks.py    The deterministic per-type checks.

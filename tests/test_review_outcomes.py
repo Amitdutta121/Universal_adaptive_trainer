@@ -421,31 +421,3 @@ def test_a_failed_refresh_keeps_the_review_and_reports_it(
     assert stored.instruction_refreshed is False
     assert stored.refresh_error
 
-
-def test_the_review_page_reports_where_the_verdict_landed(
-    client: TestClient, session: Session, rewriter: Rewriter
-) -> None:
-    question = _question(session, evaluation=_evaluation(JudgeGate.APPROVED))
-
-    response = client.post(
-        f"/review/{question.id}",
-        data={"decision": "reject", "reasons": ["too_easy"]},
-        follow_redirects=True,
-    )
-
-    assert response.status_code == 200
-    assert "missed" in response.text
-    assert "difficulty" in response.text
-
-
-def test_the_page_says_so_when_there_was_nothing_to_measure(
-    client: TestClient, session: Session
-) -> None:
-    question = _question(session, evaluation=None)
-
-    response = client.post(
-        f"/review/{question.id}", data={"decision": "approve"}, follow_redirects=True
-    )
-
-    assert response.status_code == 200
-    assert "nothing was measured" in response.text.lower()

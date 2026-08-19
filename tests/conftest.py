@@ -12,6 +12,7 @@ precedence over a developer's ``.env``, which keeps results machine-independent.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -21,8 +22,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from app.auth.backend import current_active_user
 from app.config import Settings, get_settings
-from app.persistence import database
+from app.persistence import async_database, database
+from app.persistence.models import UserRow
 
 TEST_ENV: dict[str, str] = {
     "ENVIRONMENT": "test",
@@ -59,19 +62,36 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
 
     get_settings.cache_clear()
     database.reset_engine_for_testing()
+    async_database.reset_async_engine_for_testing()
     try:
         yield get_settings()
     finally:
         get_settings.cache_clear()
         database.reset_engine_for_testing()
+        async_database.reset_async_engine_for_testing()
+
+
+#: A fixed identity every test runs as, so existing tests exercise business
+#: logic without each needing to log in. ``tests/test_auth.py`` builds its own
+#: app *without* this override to test the real login/protect/logout flow.
+_TEST_USER = UserRow(
+    id=uuid.uuid4(),
+    email="test-professor@example.com",
+    hashed_password="not-a-real-hash",
+    is_active=True,
+    is_superuser=False,
+    is_verified=True,
+)
 
 
 @pytest.fixture
 def configured_app(settings: Settings) -> FastAPI:
-    """A FastAPI app wired to the test settings."""
+    """A FastAPI app wired to the test settings, pre-authenticated as one professor."""
     from app.main import create_app
 
-    return create_app(settings)
+    app = create_app(settings)
+    app.dependency_overrides[current_active_user] = lambda: _TEST_USER
+    return app
 
 
 @pytest.fixture

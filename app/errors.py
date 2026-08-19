@@ -1,9 +1,8 @@
-"""Application error types and the FastAPI handlers that render them.
+"""Application error types and the FastAPI handlers that serialize them.
 
 Every expected failure should be raised as an :class:`AdaptiveTrainerError`
 subclass. Handlers registered by :func:`register_error_handlers` translate them
-into JSON for ``/api/*`` requests and into an HTML error page everywhere else,
-so the professor UI never shows a raw traceback.
+into JSON responses so browser and server clients see the same error contract.
 """
 
 from __future__ import annotations
@@ -16,8 +15,6 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger(__name__)
-
-API_PREFIX = "/api"
 
 
 class AdaptiveTrainerError(Exception):
@@ -162,27 +159,43 @@ class NoQuestionAvailableError(AdaptiveTrainerError):
     code = "no_question_available"
 
 
-def _wants_json(request: Request) -> bool:
-    if request.url.path.startswith(API_PREFIX):
-        return True
-    return "application/json" in request.headers.get("accept", "")
+class ResourceInUseError(AdaptiveTrainerError):
+    """Deleting this row would strand something that still points at it.
+
+    Raised instead of deleting silently, so the professor sees what depends on
+    the row before deciding. The caller may then repeat the request with an
+    explicit override: refusing is the default, not the only answer.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "resource_in_use"
+
+
+class UnoverridableConflictError(ResourceInUseError):
+    """Deleting this row is refused, and no override exists.
+
+    The distinction from its parent is the whole point. A plain
+    :class:`ResourceInUseError` names a cost and invites the caller to repeat the
+    request with ``force``; this one says there is nothing left to decide,
+    because what depends on the row cannot be rebuilt or removed either. It
+    carries its own code so a client can tell the two apart without reading the
+    prose -- offering a "delete anyway" button that is guaranteed to fail is a
+    worse answer than not offering one.
+
+    A subclass so that ``except ResourceInUseError`` keeps catching both.
+    """
+
+    code = "conflict_not_overridable"
 
 
 def register_error_handlers(app: FastAPI) -> None:
     """Attach the application's exception handlers to ``app``."""
-    # Imported here to keep this module free of template/presentation concerns
-    # at import time.
-    from app.web.templating import render_error_page
 
-    def _respond(
-        request: Request, *, status_code: int, code: str, message: str, detail: str | None
-    ) -> Response:
-        if _wants_json(request):
-            body: dict[str, object] = {"error": {"code": code, "message": message}}
-            if detail:
-                body["error"]["detail"] = detail  # type: ignore[index]
-            return JSONResponse(status_code=status_code, content=body)
-        return render_error_page(request, status_code=status_code, message=message, detail=detail)
+    def _respond(*, status_code: int, code: str, message: str, detail: str | None) -> Response:
+        body: dict[str, object] = {"error": {"code": code, "message": message}}
+        if detail:
+            body["error"]["detail"] = detail  # type: ignore[index]
+        return JSONResponse(status_code=status_code, content=body)
 
     @app.exception_handler(AdaptiveTrainerError)
     async def _handle_app_error(request: Request, exc: AdaptiveTrainerError) -> Response:
@@ -190,7 +203,6 @@ def register_error_handlers(app: FastAPI) -> None:
             "%s on %s %s: %s", type(exc).__name__, request.method, request.url.path, exc.message
         )
         return _respond(
-            request,
             status_code=exc.status_code,
             code=exc.code,
             message=exc.message,
@@ -205,7 +217,6 @@ def register_error_handlers(app: FastAPI) -> None:
         else:
             logger.info("HTTP %s on %s %s", exc.status_code, request.method, request.url.path)
         return _respond(
-            request,
             status_code=exc.status_code,
             code=f"http_{exc.status_code}",
             message=message,
@@ -216,7 +227,6 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _handle_validation_error(request: Request, exc: RequestValidationError) -> Response:
         logger.info("Invalid request on %s %s: %s", request.method, request.url.path, exc.errors())
         return _respond(
-            request,
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             code="invalid_request",
             message="The submitted data was not valid.",
@@ -227,7 +237,6 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _handle_unexpected(request: Request, exc: Exception) -> Response:
         logger.exception("Unhandled error on %s %s", request.method, request.url.path)
         return _respond(
-            request,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             code="internal_error",
             message="Something went wrong. Check the server log for details.",

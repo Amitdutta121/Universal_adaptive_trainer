@@ -1,4 +1,4 @@
-"""The student-facing API and pages (ADR-041).
+"""The student-facing API (ADR-041).
 
 The rule most easily broken here is that a served question must not carry its own
 answer: the stored ``content`` holds ``correct_answer``, ``expected_output``,
@@ -49,6 +49,12 @@ def _bank(session: Session, *, question_type: QuestionType = QuestionType.TRUE_F
     elif question_type is QuestionType.OUTPUT_PREDICTION:
         content["code"] = "print(41 + 1)"
         content["expected_output"] = "42"
+    elif question_type is QuestionType.PARSONS:
+        content["blocks"] = [
+            {"id": "head", "text": "for value in items:", "indent": 0},
+            {"id": "body", "text": "print(value)", "indent": 1},
+        ]
+        content["correct_order"] = ["head", "body"]
 
     question = QuestionRow(
         prompt="Lists are mutable.",
@@ -219,133 +225,17 @@ class TestTheAnswerIsNeverPublished:
         assert "42" not in str(body["prompt"]) + str(body.get("options"))
         assert "expected_output" not in body
 
-    def test_the_training_page_does_not_render_the_answer(
+    def test_parsons_publishes_display_indent_but_not_the_solution_order(
         self, client: TestClient, session: Session
     ) -> None:
-        set_id = _bank(session, question_type=QuestionType.OUTPUT_PREDICTION)
+        set_id = _bank(session, question_type=QuestionType.PARSONS)
         run_id = _start(client, _enrol(client), set_id)
 
-        page = client.get(f"/training/{run_id}")
-        assert page.status_code == 200
-        assert "print(41 + 1)" in page.text
-        assert "Yes, they are" not in page.text
-        assert "expected_output" not in page.text
+        body = client.get(f"/api/training-sessions/{run_id}/next").json()
+        assert body["question_type"] == "parsons"
+        assert sorted(body["blocks"], key=lambda block: block["id"]) == [
+            {"id": "body", "text": "print(value)", "indent": 1},
+            {"id": "head", "text": "for value in items:", "indent": 0},
+        ]
+        assert "correct_order" not in body
 
-
-class TestStudentPages:
-    def test_the_students_page_lists_and_offers_enrolment(self, client: TestClient) -> None:
-        response = client.get("/students")
-        assert response.status_code == 200
-        assert "No students are enrolled yet." in response.text
-        assert 'name="display_name"' in response.text
-
-    def test_enrolling_through_the_page_redirects_back(self, client: TestClient) -> None:
-        response = client.post("/students", data={"display_name": "Grace"}, follow_redirects=False)
-        assert response.status_code == 303
-        assert response.headers["location"] == "/students"
-        assert "Grace" in client.get("/students").text
-
-    def test_a_duplicate_name_is_shown_as_a_banner(self, client: TestClient) -> None:
-        client.post("/students", data={"display_name": "Grace"})
-        response = client.post("/students", data={"display_name": "Grace"})
-        assert response.status_code == 422
-        assert "already exists" in response.text
-
-    def test_the_progress_page_says_when_nothing_is_measured(self, client: TestClient) -> None:
-        student_id = _enrol(client)
-        response = client.get(f"/students/{student_id}")
-        assert response.status_code == 200
-        assert "Nothing measured yet." in response.text
-
-    def test_starting_a_run_redirects_into_it(self, client: TestClient, session: Session) -> None:
-        set_id = _bank(session)
-        student_id = _enrol(client)
-
-        response = client.post(
-            f"/students/{student_id}/sessions",
-            data={"set_version_id": set_id},
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
-        assert response.headers["location"].startswith("/training/")
-
-    def test_the_training_page_shows_a_question_and_a_form(
-        self, client: TestClient, session: Session
-    ) -> None:
-        set_id = _bank(session)
-        run_id = _start(client, _enrol(client), set_id)
-
-        response = client.get(f"/training/{run_id}")
-        assert response.status_code == 200
-        assert "Lists are mutable." in response.text
-        assert 'name="attempt_id"' in response.text
-        assert 'value="true"' in response.text
-
-    def test_submitting_an_answer_shows_the_score_and_the_explanation(
-        self, client: TestClient, session: Session
-    ) -> None:
-        set_id = _bank(session)
-        run_id = _start(client, _enrol(client), set_id)
-        attempt_id = client.get(f"/api/training-sessions/{run_id}/next").json()["attempt_id"]
-
-        response = client.post(
-            f"/training/{run_id}/answer",
-            data={"attempt_id": attempt_id, "answer": "true"},
-        )
-        assert response.status_code == 200
-        assert "100 / 100" in response.text
-        assert "Yes, they are." in response.text
-        assert "Next question" in response.text
-
-    def test_a_wrong_answer_is_reported_as_incorrect(
-        self, client: TestClient, session: Session
-    ) -> None:
-        set_id = _bank(session)
-        run_id = _start(client, _enrol(client), set_id)
-        attempt_id = client.get(f"/api/training-sessions/{run_id}/next").json()["attempt_id"]
-
-        response = client.post(
-            f"/training/{run_id}/answer", data={"attempt_id": attempt_id, "answer": "false"}
-        )
-        assert response.status_code == 200
-        assert "incorrect" in response.text
-        assert "0 / 100" in response.text
-
-    def test_resubmitting_shows_a_banner_rather_than_a_crash(
-        self, client: TestClient, session: Session
-    ) -> None:
-        set_id = _bank(session)
-        run_id = _start(client, _enrol(client), set_id)
-        attempt_id = client.get(f"/api/training-sessions/{run_id}/next").json()["attempt_id"]
-        client.post(f"/training/{run_id}/answer", data={"attempt_id": attempt_id, "answer": "true"})
-
-        again = client.post(
-            f"/training/{run_id}/answer", data={"attempt_id": attempt_id, "answer": "true"}
-        )
-        assert again.status_code == 422
-        assert "already been answered" in again.text
-
-    def test_a_gap_in_the_set_is_explained_not_raised(
-        self, client: TestClient, session: Session
-    ) -> None:
-        frozen = QuestionSetRepository(session).create(
-            label="Empty", question_ids=[], curriculum_version_id=None
-        )
-        session.commit()
-        run_id = _start(client, _enrol(client), frozen.id)
-
-        response = client.get(f"/training/{run_id}")
-        assert response.status_code == 200
-        assert "Nothing to serve" in response.text
-        assert "coverage grid" in response.text
-
-    def test_ending_a_run_returns_to_the_progress_page(
-        self, client: TestClient, session: Session
-    ) -> None:
-        set_id = _bank(session)
-        student_id = _enrol(client)
-        run_id = _start(client, student_id, set_id)
-
-        response = client.post(f"/training/{run_id}/end", follow_redirects=False)
-        assert response.status_code == 303
-        assert response.headers["location"] == f"/students/{student_id}"

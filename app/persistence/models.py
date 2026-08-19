@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
+from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -934,3 +936,21 @@ class StudentAttemptRow(TimestampMixin, Base):
 
     session: Mapped[TrainingSessionRow] = relationship(back_populates="attempts")
     question: Mapped[QuestionRow] = relationship()
+
+
+class UserRow(SQLAlchemyBaseUserTableUUID, Base):
+    """The professor console's one identity kind (see ``app/auth/``).
+
+    Fields beyond ``id``/``email``/``hashed_password``/``is_active`` come from
+    ``fastapi_users_db_sqlalchemy``. There is no role column: only professors
+    log in here, and students never do (ADR-041's join-by-link flow stays
+    anonymous).
+    """
+
+
+class AccessTokenRow(SQLAlchemyBaseAccessTokenTableUUID, Base):
+    """A live login session (the database auth strategy in ``app/auth/``).
+
+    Deleting a row is what makes logout revoke immediately, unlike a bare JWT
+    which would stay valid until it expired.
+    """

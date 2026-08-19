@@ -78,11 +78,6 @@ def list_question_sets(session: DbSession) -> QuestionSetListResponse:
     )
 
 
-@router.get("/question-sets/{set_version_id}", response_model=QuestionSetOut)
-def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
-    return QuestionSetOut.from_row(QuestionSetRepository(session).get(set_version_id))
-
-
 @router.post(
     "/question-sets",
     response_model=QuestionSetOut,

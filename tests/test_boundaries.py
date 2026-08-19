@@ -131,14 +131,35 @@ def test_no_pdf_parser_is_installed_for_the_application() -> None:
 
 
 def test_curriculum_boundary_only_exports_taxonomy_import_and_display_helpers() -> None:
+    """The boundary imports, authors, edits and deletes -- it never proposes.
+
+    An exact list rather than a subset check: every addition to this boundary has
+    to be looked at, because the one thing that must never come back is a way to
+    derive curriculum instead of receiving it (ADR-021). Authoring and library
+    (ADR-046) act on documents a professor wrote and rows an import already made.
+    """
     import app.curriculum as curriculum
 
     assert curriculum.__all__ == [
+        "ALL_FIELDS",
+        "DESCRIPTION_MAX_LENGTH",
+        "DOCUMENT_FIELDS",
+        "EXAMPLE_DOCUMENT",
+        "LABEL_MAX_LENGTH",
+        "NAME_MAX_LENGTH",
         "SCHEMA_VERSION",
+        "SUBTOPIC_FIELDS",
+        "SUPPORTED_EXTENSIONS",
+        "TOPIC_FIELDS",
+        "CurriculumLibraryService",
+        "CurriculumUsage",
+        "FieldLimit",
         "TaxonomyImportService",
+        "example_json",
         "extraction_metadata",
         "parse_taxonomy_document",
         "proposal_warnings",
+        "taxonomy_authoring_prompt",
     ]
     assert not hasattr(curriculum, "CurriculumProposalService")
     assert not hasattr(curriculum, "get_curriculum_proposer")

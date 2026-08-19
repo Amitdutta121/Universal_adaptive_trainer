@@ -13,6 +13,14 @@ import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ApiError, api, unwrap } from "@/lib/api/client";
 import type { QuestionDetail } from "@/lib/api/types";
 
@@ -22,6 +30,13 @@ const GATE_VARIANT = {
   approved: "default",
   needs_review: "secondary",
   reject: "destructive",
+} as const;
+
+const METRIC_LABELS = {
+  issues: "Issues",
+  subtopic: "Subtopic",
+  difficulty: "Difficulty",
+  generatability: "Generatability",
 } as const;
 
 function CodeBlock({ children }: { children: string }) {
@@ -61,7 +76,7 @@ export default async function QuestionDetailPage(props: PageProps<"/questions/[q
     <>
       <PageHeader
         title={`Question ${question.id}`}
-        summary={`${taxonomy.topic} · ${taxonomy.subtopics.join(", ") || "no subtopics"}`}
+        summary={`${taxonomy.topic} - ${taxonomy.subtopics.join(", ") || "no subtopics"}`}
         actions={
           <>
             <Badge variant="outline">{question.difficulty}</Badge>
@@ -77,7 +92,7 @@ export default async function QuestionDetailPage(props: PageProps<"/questions/[q
         <CardHeader>
           <CardTitle className="text-base">Prompt</CardTitle>
           <CardDescription>
-            {question.question_type ?? "unclassified"} · {question.kind}
+            {question.question_type ?? "unclassified"} - {question.kind}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -108,23 +123,34 @@ export default async function QuestionDetailPage(props: PageProps<"/questions/[q
               These decide whether the question reaches the review queue at all.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent>
             {validation_checks.length === 0 ? (
               <p className="text-muted-foreground text-sm">No checks were recorded.</p>
             ) : (
-              validation_checks.map((check) => (
-                <div key={check.name} className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-mono text-xs">{check.name}</p>
-                    {check.detail ? (
-                      <p className="text-muted-foreground text-xs">{check.detail}</p>
-                    ) : null}
-                  </div>
-                  <Badge variant={check.passed ? "secondary" : "destructive"}>
-                    {check.passed ? "passed" : "failed"}
-                  </Badge>
-                </div>
-              ))
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Check</TableHead>
+                    <TableHead>Detail</TableHead>
+                    <TableHead className="w-28">Result</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {validation_checks.map((check) => (
+                    <TableRow key={check.name}>
+                      <TableCell className="font-mono text-xs">{check.name}</TableCell>
+                      <TableCell className="max-w-80 whitespace-normal text-muted-foreground text-xs">
+                        {check.detail ?? "-"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={check.passed ? "secondary" : "destructive"}>
+                          {check.passed ? "passed" : "failed"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
@@ -136,45 +162,67 @@ export default async function QuestionDetailPage(props: PageProps<"/questions/[q
               Four metrics, each compared with what the generator claimed. Advisory only.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             {metrics.length === 0 ? (
               // Never render this as "all clear": an absent judge is an absent
               // measurement, not a passing verdict.
               <p className="text-muted-foreground text-sm">
                 Nothing was measured{" "}
-                {pedagogical_eval?.skip_reason ? `— ${pedagogical_eval.skip_reason}` : ""}.
+                {pedagogical_eval?.skip_reason ? `- ${pedagogical_eval.skip_reason}` : ""}.
               </p>
             ) : (
-              metrics.map((metric) => (
-                <div key={metric.metric} className="space-y-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-mono text-xs">{metric.metric}</p>
-                    <Badge
-                      variant={
-                        metric.passed === null
-                          ? "outline"
-                          : metric.passed
-                            ? "secondary"
-                            : "destructive"
-                      }
-                    >
-                      {metric.passed === null ? "not measured" : metric.passed ? "pass" : "fail"}
-                    </Badge>
-                  </div>
-                  {metric.rationale ? (
-                    <p className="text-muted-foreground text-xs">{metric.rationale}</p>
-                  ) : null}
-                  {(metric.issue_codes ?? []).length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {(metric.issue_codes ?? []).map((code) => (
-                        <Badge key={code} variant="outline" className="text-[10px]">
-                          {code}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Metric</TableHead>
+                    <TableHead className="w-28">Result</TableHead>
+                    <TableHead>Rationale</TableHead>
+                    <TableHead>Issue codes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {metrics.map((metric) => (
+                    <TableRow key={metric.metric}>
+                      <TableCell className="font-mono text-xs">
+                        {METRIC_LABELS[metric.metric]}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            metric.passed === null
+                              ? "outline"
+                              : metric.passed
+                                ? "secondary"
+                                : "destructive"
+                          }
+                        >
+                          {metric.passed === null
+                            ? "not measured"
+                            : metric.passed
+                              ? "pass"
+                              : "fail"}
                         </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ))
+                      </TableCell>
+                      <TableCell className="max-w-80 whitespace-normal text-muted-foreground text-xs">
+                        {metric.rationale ?? metric.error_detail ?? "-"}
+                      </TableCell>
+                      <TableCell className="max-w-64 whitespace-normal">
+                        {(metric.issue_codes ?? []).length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {(metric.issue_codes ?? []).map((code) => (
+                              <Badge key={code} variant="outline" className="text-[10px]">
+                                {code}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">-</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.adaptive.service import AdaptiveTrainingEngine
 from app.adaptive.state import MIN_SUBTOPIC_WEAKNESS
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionStatus, QuestionType
-from app.domain.mastery import INITIAL_SUBTOPIC_WEAKNESS
+from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.domain.questions import DEFAULT_PRIORITY, LOWEST_PRIORITY
 from app.errors import DomainRuleError, NoQuestionAvailableError, NotFoundError
 from app.persistence.models import (
@@ -171,7 +171,7 @@ class TestServing:
     def test_serving_records_the_mastery_it_decided_from(self, session: Session) -> None:
         bank = _bank(session)
         served = AdaptiveTrainingEngine(session).serve_next(bank.run.id)
-        assert served.attempt.mastery_before == pytest.approx(0.2)
+        assert served.attempt.mastery_before == pytest.approx(DEFAULT_BKT_PARAMETERS.p_init)
 
     def test_asking_again_returns_the_open_question(self, session: Session) -> None:
         """Reloading must not abandon the attempt and let a student skip it."""

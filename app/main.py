@@ -13,16 +13,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app import __version__
+from app.auth.seed import seed_dev_user
 from app.config import Settings, get_settings
 from app.errors import register_error_handlers
 from app.logging_config import configure_logging
 from app.persistence.database import init_db
 from app.web.middleware import RequestLoggingMiddleware
-from app.web.routes import api_router, pages_router
-from app.web.templating import STATIC_DIR
+from app.web.routes import api_router
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Prepare storage and report configuration on startup."""
     settings: Settings = app.state.settings
     init_db()
+    await seed_dev_user(settings)
     logger.info(
         "%s v%s ready (environment=%s, llm=%s)",
         settings.app_name,
@@ -72,9 +72,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-    app.include_router(pages_router)
     app.include_router(api_router)
 
     register_error_handlers(app)
