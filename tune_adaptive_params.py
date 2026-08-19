@@ -10,10 +10,13 @@ This script is intentionally standalone and in-memory:
 It simulates a few student archetypes against the same core mechanics the
 adaptive engine uses:
 
-- weakness-weighted roulette over subtopics;
+- sequential topic progression (ADR-047): topics are attempted in order, a
+  topic retires once its own BKT mastery reaches ``medium_mastery_ceiling``,
+  and a session ends early once every topic has retired;
+- weakness-weighted roulette over the *current* topic's subtopics only;
 - mastery-banded difficulty selection;
 - candidate ranking with reuse allowed;
-- BKT-like mastery updates;
+- BKT-like mastery updates, tracked per topic;
 - moving-average weakness updates.
 
 Edit `SEARCH_SPACE` and `ARCHETYPES` below, then run:
@@ -54,12 +57,28 @@ from app.domain.mastery import (
 from app.domain.questions import DEFAULT_PRIORITY, LOWEST_PRIORITY
 
 TARGET_CORRECT_PROBABILITY = 0.70
-SUBTOPICS = 3
+TOPICS = 2
+SUBTOPICS_PER_TOPIC = 3
+TOTAL_SUBTOPICS = TOPICS * SUBTOPICS_PER_TOPIC
+
+
+def topic_of(subtopic_id: int) -> int:
+    """Which topic (1-indexed, position order) a synthetic subtopic belongs to."""
+    return (subtopic_id - 1) // SUBTOPICS_PER_TOPIC + 1
 
 
 @dataclass(frozen=True)
 class TuningParameters:
-    """Adaptive parameters under search."""
+    """Adaptive parameters under search.
+
+    ``medium_mastery_ceiling`` and ``topic_advance_ceiling`` are deliberately
+    separate (ADR-047): the first is the HIGH-band boundary that requests a
+    ``HARD`` question; the second is when sequential progression retires a
+    topic and advances to the next. They happen to share one value in
+    production today, but tying them together in the search would hide
+    whichever pressure -- difficulty banding or topic pacing -- actually wants
+    a different number.
+    """
 
     p_init: float
     p_learn: float
@@ -67,6 +86,7 @@ class TuningParameters:
     p_slip: float
     low_mastery_ceiling: float
     medium_mastery_ceiling: float
+    topic_advance_ceiling: float
     weakness_learning_rate: float
     min_subtopic_weakness: float
 
@@ -75,6 +95,7 @@ class TuningParameters:
             f"p_init={self.p_init:.2f}, p_learn={self.p_learn:.2f}, "
             f"p_guess={self.p_guess:.2f}, p_slip={self.p_slip:.2f}, "
             f"bands=({self.low_mastery_ceiling:.2f}, {self.medium_mastery_ceiling:.2f}), "
+            f"topic_advance={self.topic_advance_ceiling:.2f}, "
             f"weak_rate={self.weakness_learning_rate:.2f}, "
             f"weak_floor={self.min_subtopic_weakness:.2f}"
         )
@@ -87,6 +108,9 @@ CURRENT_DEFAULTS = TuningParameters(
     p_slip=DEFAULT_BKT_PARAMETERS.p_slip,
     low_mastery_ceiling=LOW_MASTERY_CEILING,
     medium_mastery_ceiling=MEDIUM_MASTERY_CEILING,
+    # Today's code advances a topic at the same threshold that requests HARD
+    # (MEDIUM_MASTERY_CEILING); this is the pre-split baseline for comparison.
+    topic_advance_ceiling=MEDIUM_MASTERY_CEILING,
     weakness_learning_rate=WEAKNESS_LEARNING_RATE,
     min_subtopic_weakness=MIN_SUBTOPIC_WEAKNESS,
 )
@@ -99,7 +123,9 @@ SEARCH_SPACE: dict[str, list[float]] = {
     "p_guess": [CURRENT_DEFAULTS.p_guess],
     "p_slip": [CURRENT_DEFAULTS.p_slip],
     "low_mastery_ceiling": [0.35, 0.45],
-    "medium_mastery_ceiling": [0.70, 0.80],
+    # Fixed: this pass is about topic-advance pacing, not difficulty banding.
+    "medium_mastery_ceiling": [CURRENT_DEFAULTS.medium_mastery_ceiling],
+    "topic_advance_ceiling": [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, CURRENT_DEFAULTS.topic_advance_ceiling],
     "weakness_learning_rate": [0.15, 0.25, CURRENT_DEFAULTS.weakness_learning_rate],
     "min_subtopic_weakness": [0.03, CURRENT_DEFAULTS.min_subtopic_weakness, 0.08],
 }
@@ -117,13 +143,45 @@ class Archetype:
     fatigue_per_question: float = 0.0
 
 
+# Skills are (topic 1 subtopics..., topic 2 subtopics...) -- ``TOTAL_SUBTOPICS``
+# values each, so every archetype exercises sequential progression across both
+# topics, not just weakness targeting within one.
 ARCHETYPES: tuple[Archetype, ...] = (
-    Archetype("beginner", (0.20, 0.25, 0.22), guess=0.18, slip=0.08, learn_rate=0.05),
-    Archetype("advanced", (0.85, 0.88, 0.82), guess=0.08, slip=0.04, learn_rate=0.02),
-    Archetype("uneven", (0.20, 0.82, 0.78), guess=0.15, slip=0.08, learn_rate=0.06),
-    Archetype("careless", (0.78, 0.80, 0.76), guess=0.08, slip=0.20, learn_rate=0.03),
-    Archetype("guesser", (0.20, 0.25, 0.18), guess=0.30, slip=0.08, learn_rate=0.03),
-    Archetype("fast_learner", (0.40, 0.45, 0.35), guess=0.15, slip=0.07, learn_rate=0.10),
+    Archetype(
+        "beginner", (0.20, 0.25, 0.22, 0.20, 0.22, 0.24), guess=0.18, slip=0.08, learn_rate=0.05
+    ),
+    Archetype(
+        "advanced", (0.85, 0.88, 0.82, 0.86, 0.84, 0.87), guess=0.08, slip=0.04, learn_rate=0.02
+    ),
+    Archetype(
+        # Weak in topic 1, already strong in topic 2 -- must still be held in
+        # topic 1 by its own (mixed) BKT mastery, not released early because a
+        # later topic's skill happens to be high.
+        "uneven",
+        (0.20, 0.82, 0.78, 0.80, 0.84, 0.79),
+        guess=0.15,
+        slip=0.08,
+        learn_rate=0.06,
+    ),
+    Archetype(
+        "careless", (0.78, 0.80, 0.76, 0.79, 0.77, 0.81), guess=0.08, slip=0.20, learn_rate=0.03
+    ),
+    Archetype(
+        # Low real skill but a high guess rate: BKT mastery can be fooled into
+        # advancing this student past a topic they have not actually learned.
+        "guesser",
+        (0.20, 0.25, 0.18, 0.22, 0.19, 0.24),
+        guess=0.30,
+        slip=0.08,
+        learn_rate=0.03,
+    ),
+    Archetype(
+        "fast_learner",
+        (0.40, 0.45, 0.35, 0.42, 0.38, 0.44),
+        guess=0.15,
+        slip=0.07,
+        learn_rate=0.10,
+    ),
 )
 
 
@@ -132,6 +190,7 @@ class SyntheticQuestion:
     """One synthetic question in the in-memory bank."""
 
     question_id: int
+    topic_id: int
     subtopic_id: int
     difficulty: Difficulty
     priority: int = DEFAULT_PRIORITY
@@ -188,7 +247,9 @@ class SessionResult:
     targeting: float
     progress: float
     repeat_score: float
+    completion: float
     observed_accuracy: float
+    questions_used: int
     overall: float
 
 
@@ -205,6 +266,7 @@ class EvaluationResult:
     targeting: float
     progress: float
     repeat_score: float
+    completion: float
     observed_accuracy: float
     archetype_scores: dict[str, float]
 
@@ -249,15 +311,16 @@ def update_weakness(weakness: float, score: float, params: TuningParameters) -> 
     return clamp(moved, params.min_subtopic_weakness, INITIAL_SUBTOPIC_WEAKNESS)
 
 
-def build_bank(*, subtopics: int, questions_per_cell: int) -> list[SyntheticQuestion]:
+def build_bank(*, topics: int, subtopics_per_topic: int, questions_per_cell: int) -> list[SyntheticQuestion]:
     question_id = 1
     bank: list[SyntheticQuestion] = []
-    for subtopic_id in range(1, subtopics + 1):
+    for subtopic_id in range(1, topics * subtopics_per_topic + 1):
         for difficulty in Difficulty:
             for _ in range(questions_per_cell):
                 bank.append(
                     SyntheticQuestion(
                         question_id=question_id,
+                        topic_id=topic_of(subtopic_id),
                         subtopic_id=subtopic_id,
                         difficulty=difficulty,
                     )
@@ -266,17 +329,17 @@ def build_bank(*, subtopics: int, questions_per_cell: int) -> list[SyntheticQues
     return bank
 
 
-def serve_question(
+def _pick_from_pool(
     *,
     bank: list[SyntheticQuestion],
     answered_question_ids: set[int],
-    weaknesses: dict[int, float],
+    live_weights: dict[int, float],
     mastery: float,
     params: TuningParameters,
     rng: random.Random,
-) -> tuple[SyntheticQuestion, int, Difficulty, Difficulty]:
-    """Mirror the real selection loop in memory."""
-    live_weights = dict(weaknesses)
+) -> tuple[SyntheticQuestion, int, Difficulty, Difficulty] | None:
+    """One roulette-and-pick pass over an already topic-scoped pool of weights."""
+    live_weights = dict(live_weights)
     while live_weights:
         subtopic_id = choose_subtopic(live_weights, rng)
         requested = mastery_to_difficulty(mastery, params)
@@ -305,7 +368,44 @@ def serve_question(
             chosen.times_used += 1
             return chosen, subtopic_id, requested, difficulty
         live_weights.pop(subtopic_id)
-    raise RuntimeError("No synthetic question could be served.")
+    return None
+
+
+def serve_question_sequential(
+    *,
+    bank: list[SyntheticQuestion],
+    answered_question_ids: set[int],
+    weaknesses: dict[int, float],
+    topic_mastery: dict[int, float],
+    params: TuningParameters,
+    rng: random.Random,
+) -> tuple[SyntheticQuestion, int, Difficulty, Difficulty] | None:
+    """Mirror ADR-047: walk topics in order, pool only the current one.
+
+    Returns ``None`` once every topic has retired -- the synthetic curriculum
+    is complete and the session ends early, exactly like
+    ``CurriculumCompletedError`` in the real engine.
+    """
+    for topic_id in range(1, TOPICS + 1):
+        if topic_mastery[topic_id] >= params.topic_advance_ceiling:
+            continue
+        topic_subtopic_ids = [
+            subtopic_id
+            for subtopic_id in range(1, TOTAL_SUBTOPICS + 1)
+            if topic_of(subtopic_id) == topic_id
+        ]
+        live_weights = {sid: weaknesses[sid] for sid in topic_subtopic_ids}
+        picked = _pick_from_pool(
+            bank=bank,
+            answered_question_ids=answered_question_ids,
+            live_weights=live_weights,
+            mastery=topic_mastery[topic_id],
+            params=params,
+            rng=rng,
+        )
+        if picked is not None:
+            return picked
+    return None
 
 
 def challenge_score(probability_correct: float) -> float:
@@ -314,10 +414,14 @@ def challenge_score(probability_correct: float) -> float:
     return clamp(1.0 - distance / 0.35, 0.0, 1.0)
 
 
-def targeting_score(skills: list[float], served_subtopic_id: int) -> float:
-    """Whether the algorithm favoured currently weaker subtopics."""
-    needs = [1.0 - skill for skill in skills]
-    served_need = needs[served_subtopic_id - 1]
+def targeting_score(topic_skills: list[float], served_subtopic_index: int) -> float:
+    """Whether the algorithm favoured the weaker subtopics *within reach*.
+
+    Scoped to the current topic's subtopics, not the whole curriculum: a
+    locked topic's skill is not something the engine could have targeted yet.
+    """
+    needs = [1.0 - skill for skill in topic_skills]
+    served_need = needs[served_subtopic_index]
     uniform_need = fmean(needs)
     max_need = max(needs)
     if max_need <= uniform_need + 1e-9:
@@ -351,28 +455,42 @@ def run_session(
     questions_per_cell: int,
     seed: int,
 ) -> SessionResult:
+    if len(archetype.skills) != TOTAL_SUBTOPICS:
+        raise ValueError(f"{archetype.name} must define {TOTAL_SUBTOPICS} subtopic skills.")
+
     student = instantiate(archetype)
     initial_skills = list(student.skills)
-    bank = build_bank(subtopics=len(student.skills), questions_per_cell=questions_per_cell)
+    bank = build_bank(
+        topics=TOPICS, subtopics_per_topic=SUBTOPICS_PER_TOPIC, questions_per_cell=questions_per_cell
+    )
     answered_question_ids: set[int] = set()
-    weaknesses = dict.fromkeys(range(1, len(student.skills) + 1), INITIAL_SUBTOPIC_WEAKNESS)
-    mastery = params.p_init
+    weaknesses = dict.fromkeys(range(1, TOTAL_SUBTOPICS + 1), INITIAL_SUBTOPIC_WEAKNESS)
+    topic_mastery = dict.fromkeys(range(1, TOPICS + 1), params.p_init)
     rng = random.Random(seed)
 
     challenge_scores: list[float] = []
     targeting_scores: list[float] = []
     observed_scores: list[float] = []
     repeats = 0
+    questions_used = 0
 
     for question_index in range(questions_per_session):
-        question, subtopic_id, _requested, served = serve_question(
+        picked = serve_question_sequential(
             bank=bank,
             answered_question_ids=answered_question_ids,
             weaknesses=weaknesses,
-            mastery=mastery,
+            topic_mastery=topic_mastery,
             params=params,
             rng=rng,
         )
+        if picked is None:
+            # Every topic retired -- the synthetic curriculum is finished, so
+            # the session ends early exactly as CurriculumCompletedError ends
+            # a real one, and the unused budget is simply never spent.
+            break
+        question, subtopic_id, _requested, served = picked
+        questions_used += 1
+        topic_id = question.topic_id
         if question.question_id in answered_question_ids:
             repeats += 1
 
@@ -382,35 +500,46 @@ def run_session(
             question_index=question_index,
         )
         challenge_scores.append(challenge_score(probability))
-        targeting_scores.append(targeting_score(student.skills, subtopic_id))
+        topic_skill_slice = student.skills[
+            (topic_id - 1) * SUBTOPICS_PER_TOPIC : topic_id * SUBTOPICS_PER_TOPIC
+        ]
+        served_index_in_topic = (subtopic_id - 1) % SUBTOPICS_PER_TOPIC
+        targeting_scores.append(targeting_score(topic_skill_slice, served_index_in_topic))
 
         correct = rng.random() < probability
         score = 100.0 if correct else 0.0
         observed_scores.append(score / 100.0)
 
-        mastery = update_mastery(mastery, score, params)
+        topic_mastery[topic_id] = update_mastery(topic_mastery[topic_id], score, params)
         weaknesses[subtopic_id] = update_weakness(weaknesses[subtopic_id], score, params)
         answered_question_ids.add(question.question_id)
         student.learn(subtopic_id=subtopic_id, difficulty=served, correct=correct)
 
-    repeat_component = 1.0 - repeats / questions_per_session
+    topics_retired = sum(
+        1 for mastery in topic_mastery.values() if mastery >= params.topic_advance_ceiling
+    )
+    completion_component = topics_retired / TOPICS
+    repeat_component = 1.0 - repeats / max(questions_used, 1)
     progress_component = progress_score(initial_skills, student.skills)
-    challenge_component = fmean(challenge_scores)
-    targeting_component = fmean(targeting_scores)
-    observed_accuracy = fmean(observed_scores)
+    challenge_component = fmean(challenge_scores) if challenge_scores else 0.0
+    targeting_component = fmean(targeting_scores) if targeting_scores else 0.0
+    observed_accuracy = fmean(observed_scores) if observed_scores else 0.0
 
     overall = (
-        0.50 * challenge_component
-        + 0.30 * targeting_component
+        0.45 * challenge_component
+        + 0.25 * targeting_component
         + 0.15 * progress_component
         + 0.05 * repeat_component
+        + 0.10 * completion_component
     )
     return SessionResult(
         challenge=challenge_component,
         targeting=targeting_component,
         progress=progress_component,
         repeat_score=repeat_component,
+        completion=completion_component,
         observed_accuracy=observed_accuracy,
+        questions_used=questions_used,
         overall=overall,
     )
 
@@ -429,6 +558,7 @@ def evaluate_parameter_set(
     targeting_scores: list[float] = []
     progress_scores: list[float] = []
     repeat_scores: list[float] = []
+    completion_scores: list[float] = []
     observed_accuracies: list[float] = []
 
     for archetype_index, archetype in enumerate(archetypes):
@@ -449,6 +579,7 @@ def evaluate_parameter_set(
         targeting_scores.extend(run.targeting for run in runs)
         progress_scores.extend(run.progress for run in runs)
         repeat_scores.extend(run.repeat_score for run in runs)
+        completion_scores.extend(run.completion for run in runs)
         observed_accuracies.extend(run.observed_accuracy for run in runs)
 
     mean_score = fmean(archetype_scores.values())
@@ -466,6 +597,7 @@ def evaluate_parameter_set(
         targeting=fmean(targeting_scores),
         progress=fmean(progress_scores),
         repeat_score=fmean(repeat_scores),
+        completion=fmean(completion_scores),
         observed_accuracy=fmean(observed_accuracies),
         archetype_scores=archetype_scores,
     )
@@ -478,6 +610,10 @@ def parameter_grid() -> list[TuningParameters]:
         params = TuningParameters(**dict(zip(keys, values, strict=True)))
         if params.low_mastery_ceiling >= params.medium_mastery_ceiling:
             continue
+        # A topic should not be able to retire before it has even left the
+        # LOW band -- that would mean "advance" and "still struggling" at once.
+        if params.topic_advance_ceiling <= params.low_mastery_ceiling:
+            continue
         candidates.add(params)
     return sorted(
         candidates,
@@ -488,6 +624,7 @@ def parameter_grid() -> list[TuningParameters]:
             item.p_slip,
             item.low_mastery_ceiling,
             item.medium_mastery_ceiling,
+            item.topic_advance_ceiling,
             item.weakness_learning_rate,
             item.min_subtopic_weakness,
         ),
@@ -497,7 +634,7 @@ def parameter_grid() -> list[TuningParameters]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--trials-per-archetype", type=int, default=12)
-    parser.add_argument("--questions-per-session", type=int, default=15)
+    parser.add_argument("--questions-per-session", type=int, default=24)
     parser.add_argument("--questions-per-cell", type=int, default=3)
     parser.add_argument("--top", type=int, default=8)
     parser.add_argument("--seed", type=int, default=2026)
@@ -513,15 +650,15 @@ def print_result(label: str, result: EvaluationResult) -> None:
     print(
         f"  challenge={result.challenge:.3f}  targeting={result.targeting:.3f}  "
         f"progress={result.progress:.3f}  repeat={result.repeat_score:.3f}  "
-        f"accuracy={result.observed_accuracy:.3f}"
+        f"completion={result.completion:.3f}  accuracy={result.observed_accuracy:.3f}"
     )
     print(f"  {result.params.summary()}")
 
 
 def main() -> int:
     args = parse_args()
-    if any(len(archetype.skills) != SUBTOPICS for archetype in ARCHETYPES):
-        raise ValueError(f"Every archetype must define exactly {SUBTOPICS} subtopic skills.")
+    if any(len(archetype.skills) != TOTAL_SUBTOPICS for archetype in ARCHETYPES):
+        raise ValueError(f"Every archetype must define exactly {TOTAL_SUBTOPICS} subtopic skills.")
 
     candidates = parameter_grid()
     print(f"Evaluating {len(candidates)} parameter sets...")
