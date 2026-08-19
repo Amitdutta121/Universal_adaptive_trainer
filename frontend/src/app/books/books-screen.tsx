@@ -25,8 +25,8 @@ import {
 } from "@/components/ui/select";
 import { useBookDocumentGuide, useBooks } from "@/lib/api/queries";
 import type { BookSummary } from "@/lib/api/types";
-import { SECTIONS_BY_KEY } from "@/lib/navigation";
 import { pluralise } from "@/lib/display";
+import { SECTIONS_BY_KEY } from "@/lib/navigation";
 import { BookDeleteDialog } from "./components/book-delete-dialog";
 import { BookEditDialog } from "./components/book-edit-dialog";
 import { BookUploadCard } from "./components/book-upload-card";

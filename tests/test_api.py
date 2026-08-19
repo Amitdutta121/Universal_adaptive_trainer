@@ -15,7 +15,11 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.domain.enums import CurriculumStatus, JudgeMetricId, QuestionType, ReviewDecision
 from app.generation.prompts import base_type_instruction
-from app.persistence.repositories import BookRepository, CurriculumRepository, TypeInstructionRepository
+from app.persistence.repositories import (
+    BookRepository,
+    CurriculumRepository,
+    TypeInstructionRepository,
+)
 
 VALID_TAXONOMY = (
     b'{"schema_version":"1","label":"Uploaded","topics":['

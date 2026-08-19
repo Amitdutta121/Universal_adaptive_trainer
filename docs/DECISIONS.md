@@ -1354,7 +1354,7 @@ with three states per cell: `EMPTY` (no question), `THIN` (fewer than `MIN_QUEST
 bank under a name, and are never edited afterwards.
 
 **Why coverage is not derivable from the questions:** the adaptive engine selects a **subtopic**
-first and a **difficulty** second (`CLAUDE.md`, fixed decisions). A bank in which every question is
+first and a **difficulty** second (fixed adaptive decisions). A bank in which every question is
 excellent is still unusable if one subtopic has no hard question, because that is a request the
 engine can make and cannot satisfy. Quality is a property of a question; coverage is a property of
 a set, and nothing in the review pipeline measures it.
@@ -1398,10 +1398,11 @@ the smallest number that avoids that; the professor may demand more.
 
 **Status:** accepted
 
-`CLAUDE.md` fixes the adaptive mechanism — BKT per topic, weakness per subtopic, weakness-weighted
-roulette, mastery-banded difficulty, priority-ordered selection, 0-100 scores. It leaves four rules
-undefined that no engine can run without. This entry decides them. Nothing here redesigns the fixed
-mechanism; each item fills a hole inside it.
+The adaptive design fixes the mechanism — BKT per topic, weakness per subtopic,
+weakness-weighted roulette, mastery-banded difficulty, priority-ordered
+selection, 0-100 scores. It leaves four rules undefined that no engine can run
+without. This entry decides them. Nothing here redesigns the fixed mechanism;
+each item fills a hole inside it.
 
 **1. A partial score is a partial observation.**
 
@@ -1576,8 +1577,8 @@ raises `FeatureNotAvailableError` (501). This is deliberate, and it is the hones
   is the missing piece, not the button.
 - The alternative was to omit the control entirely. Rejected: the page would then show the
   professor exactly what is missing and no way to say so, and the missing capability would be
-  invisible instead of named. The endpoint states which step does not exist, which is what
-  `CLAUDE.md` requires of a placeholder.
+  invisible instead of named. The endpoint states which step does not exist,
+  which is what an honest placeholder should do.
 
 **Implementation status:** the grouping, the per-topic counts, the gap selection and the refusal are
 complete and tested (`tests/test_coverage.py`). Chunk ranking by subtopic is not started. Until it
@@ -1586,8 +1587,8 @@ claim afterwards, exactly as before — the coverage page now tells them which c
 
 ## ADR-043 — The professor console is a Next.js client of the JSON API, beside the Jinja UI
 
-**Status:** accepted. Amends the stack table in `CLAUDE.md`, which said "no JS build step, no SPA
-framework". Supersedes nothing: the server-rendered Jinja UI keeps working and keeps its routes.
+**Status:** accepted. Supersedes nothing: the server-rendered Jinja UI keeps
+working and keeps its routes.
 
 **Context.** ADR-027 already settled that `routes/api/` is the single implementation of every
 professor capability and that `routes/pages.py` is *one of its clients*. The API is complete in that
@@ -1620,10 +1621,10 @@ beside a diff. Two spikes in `spikes/` were attempts to get there with more CSS.
   refused — an invalid document, a question with no verdict, an unreachable provider — and that
   sentence is the useful one.
 - **Both UIs stay.** The Jinja templates are not deleted, not frozen and not reimplemented ahead of
-  need. A section moves when its Next.js screen is actually built; until then the console links to
-  the section and says the screen does not exist yet. A stub that renders an empty table would read
-  as "there is nothing here", which is the same failure `CLAUDE.md` forbids of a placeholder
-  service.
+  need. A section moves when its Next.js screen is actually built; until then
+  the console links to the section and says the screen does not exist yet. A
+  stub that renders an empty table would read as "there is nothing here",
+  which would be a misleading placeholder.
 
 **Alternatives rejected.** Replacing the Jinja UI wholesale: it works, it is tested, and a rewrite
 would trade working screens for unwritten ones with no capability gained. Adding client-side

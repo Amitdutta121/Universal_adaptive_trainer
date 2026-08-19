@@ -47,7 +47,7 @@ export function ReviewActionBar({
   onSkip,
 }: ReviewActionBarProps) {
   return (
-    <div className="rounded-[1rem] border px-5 py-4 review-sticky">
+    <div className="review-sticky rounded-[1rem] border px-5 py-4">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           {DECISIONS.map((value) => {

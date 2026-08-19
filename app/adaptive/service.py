@@ -3,7 +3,7 @@
 Responsibility
     Assemble the pure pieces (:mod:`app.adaptive.selection`,
     :mod:`app.adaptive.state`, :mod:`app.adaptive.scoring`) and the repositories
-    into the loop described in ``CLAUDE.md``:
+    into the adaptive loop:
 
     1. weakness-weighted roulette picks a subtopic;
     2. that subtopic's topic mastery picks a difficulty;

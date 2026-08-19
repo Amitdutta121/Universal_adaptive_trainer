@@ -37,7 +37,8 @@ def _out(
 ) -> TypeInstructionOut:
     return TypeInstructionOut(
         question_type=question_type,
-        instruction=instruction_text or (row.instruction if row else base_type_instruction(question_type)),
+        instruction=instruction_text
+        or (row.instruction if row else base_type_instruction(question_type)),
         rules=[str(rule.get("rule", "")) for rule in (row.rules if row else [])],
         learned=row is not None,
         review_count=row.review_count if row else 0,

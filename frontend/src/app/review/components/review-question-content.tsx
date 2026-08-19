@@ -199,6 +199,8 @@ function computeAddedLines(stub: string, reference: string) {
 
 function CodeCompletionDiff({ stub, reference }: { stub: string; reference: string }) {
   const { stubLines, referenceLines, addedCount, added } = computeAddedLines(stub, reference);
+  const stubKeys = occurrenceKeys(stubLines, (line) => line);
+  const referenceKeys = occurrenceKeys(referenceLines, (line) => line);
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -213,7 +215,7 @@ function CodeCompletionDiff({ stub, reference }: { stub: string; reference: stri
           <div className="review-diff-shell">
             <pre className="review-diff-code">
               {stubLines.map((line, index) => (
-                <div key={`stub-${index}`} className="review-diff-line">
+                <div key={`stub-${stubKeys[index]}`} className="review-diff-line">
                   {line || " "}
                 </div>
               ))}
@@ -239,7 +241,7 @@ function CodeCompletionDiff({ stub, reference }: { stub: string; reference: stri
             <pre className="review-diff-code">
               {referenceLines.map((line, index) => (
                 <div
-                  key={`ref-${index}`}
+                  key={`ref-${referenceKeys[index]}`}
                   className={
                     added.has(index)
                       ? "review-diff-line review-diff-line-added"

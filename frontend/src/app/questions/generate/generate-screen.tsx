@@ -102,15 +102,15 @@ export function GenerateScreen() {
         <div className="rounded-[1.4rem] border border-border/70 bg-[linear-gradient(135deg,rgba(243,248,246,0.96),rgba(255,255,255,0.88))] p-5 shadow-[0_16px_38px_-32px_rgba(19,26,28,0.55)] dark:bg-[linear-gradient(135deg,rgba(20,30,28,0.96),rgba(16,22,24,0.88))]">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="space-y-1.5">
-              <p className="font-mono text-[0.67rem] uppercase tracking-[0.16em] text-muted-foreground">
+              <p className="font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
                 Generation taxonomy
               </p>
               {approvedCurriculum.data ? (
                 <>
-                  <p className="font-heading text-xl tracking-[-0.025em] text-foreground">
+                  <p className="font-heading text-foreground text-xl tracking-[-0.025em]">
                     {approvedCurriculum.data.version.label}
                   </p>
-                  <p className="text-sm leading-6 text-muted-foreground">
+                  <p className="text-muted-foreground text-sm leading-6">
                     Every generated question is grounded in approved curriculum version{" "}
                     <span className="font-mono text-foreground">
                       {approvedCurriculum.data.version.id}
@@ -118,13 +118,13 @@ export function GenerateScreen() {
                     . Change the active taxonomy from the header selector above; this screen then
                     generates against that active taxonomy.
                   </p>
-                  <p className="text-sm leading-6 text-muted-foreground">
+                  <p className="text-muted-foreground text-sm leading-6">
                     Topic and subtopics are inferred from the source chunk during generation, then
                     checked against this taxonomy.
                   </p>
                 </>
               ) : (
-                <p className="text-sm leading-6 text-muted-foreground">
+                <p className="text-muted-foreground text-sm leading-6">
                   No approved taxonomy is available yet. Upload and approve one before generating
                   questions.
                 </p>

@@ -132,4 +132,3 @@ class TestDocumentGuideEndpoint:
         """`/books/document-guide` must not be read as a book id."""
         assert client.get("/api/books/document-guide").status_code == 200
         assert client.get("/api/books/999999").status_code == 404
-

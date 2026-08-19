@@ -507,4 +507,3 @@ def test_the_api_counts_what_is_available_to_learn_from(
 
     assert by_metric[DIFFICULTY.value]["available_disagreements"] == 1
     assert by_metric[JudgeMetricId.ISSUES.value]["available_disagreements"] == 0
-

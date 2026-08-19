@@ -20,10 +20,10 @@ import {
   CURRICULUM_STATUS_VARIANT,
   generatedByLabel,
   isTaxonomyUpload,
-  stableIdMeaning,
   STANDING_LABEL,
   STANDING_MEANING,
   STANDING_VARIANT,
+  stableIdMeaning,
   TAXONOMY_UPLOAD_GENERATOR,
   versionStanding,
 } from "./curriculum-display";

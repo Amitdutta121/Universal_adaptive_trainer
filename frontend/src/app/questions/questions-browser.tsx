@@ -146,7 +146,7 @@ function SortableHeader({
     <Button
       variant="ghost"
       size="sm"
-      className="-ml-3 text-[0.72rem] font-medium uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground"
+      className="-ml-3 font-medium text-[0.72rem] text-muted-foreground uppercase tracking-[0.14em] hover:text-foreground"
       onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
     >
       {label} <ArrowUpDown className="size-3" />
@@ -174,7 +174,7 @@ function textOrDash(value: string | number | null | undefined) {
 
 function FilterLabel({ children }: { children: string }) {
   return (
-    <span className="font-mono text-[0.67rem] uppercase tracking-[0.16em] text-muted-foreground">
+    <span className="font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
       {children}
     </span>
   );
@@ -199,10 +199,10 @@ function StatCard({
           {icon}
         </span>
       </div>
-      <div className="font-heading text-2xl leading-none tracking-[-0.03em] text-foreground">
+      <div className="font-heading text-2xl text-foreground leading-none tracking-[-0.03em]">
         {value}
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">{hint}</p>
+      <p className="mt-2 text-muted-foreground text-sm">{hint}</p>
     </div>
   );
 }
@@ -220,9 +220,9 @@ function ActiveFilterChip({
     <button
       type="button"
       onClick={onClear}
-      className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-background/80 px-3 py-1.5 text-sm text-foreground shadow-[0_1px_0_rgba(255,255,255,0.45)_inset] transition-colors hover:bg-accent/70"
+      className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-background/80 px-3 py-1.5 text-foreground text-sm shadow-[0_1px_0_rgba(255,255,255,0.45)_inset] transition-colors hover:bg-accent/70"
     >
-      <span className="font-mono text-[0.66rem] uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="font-mono text-[0.66rem] text-muted-foreground uppercase tracking-[0.14em]">
         {label}
       </span>
       <span>{value}</span>
@@ -238,7 +238,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
     cell: ({ row }) => (
       <Link
         href={`/questions/${row.original.id}`}
-        className="font-mono text-xs font-semibold underline-offset-4 hover:text-primary hover:underline"
+        className="font-mono font-semibold text-xs underline-offset-4 hover:text-primary hover:underline"
       >
         {row.original.id}
       </Link>
@@ -250,7 +250,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
     enableSorting: false,
     cell: ({ row }) => (
       <div className="min-w-72 max-w-lg whitespace-normal">
-        <p className="line-clamp-3 text-sm leading-6 text-foreground">{row.original.prompt}</p>
+        <p className="line-clamp-3 text-foreground text-sm leading-6">{row.original.prompt}</p>
       </div>
     ),
   },
@@ -258,7 +258,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
     accessorKey: "question_type",
     header: ({ column }) => <SortableHeader column={column} label="Type" />,
     cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-muted-foreground text-xs">
         {row.original.question_type?.replace(/_/g, " ") ?? "-"}
       </span>
     ),
@@ -267,7 +267,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
     accessorKey: "kind",
     header: ({ column }) => <SortableHeader column={column} label="Kind" />,
     cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">{row.original.kind.replace(/_/g, " ")}</span>
+      <span className="text-muted-foreground text-xs">{row.original.kind.replace(/_/g, " ")}</span>
     ),
   },
   {
@@ -329,7 +329,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
     header: "Subtopics",
     enableSorting: false,
     cell: ({ row }) => (
-      <div className="max-w-48 whitespace-normal text-xs text-muted-foreground">
+      <div className="max-w-48 whitespace-normal text-muted-foreground text-xs">
         {row.original.subtopic_ids.length > 0 ? row.original.subtopic_ids.join(", ") : "-"}
       </div>
     ),
@@ -366,7 +366,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
           {row.original.instruction.source}
         </Badge>
       ) : (
-        <span className="text-xs text-muted-foreground">-</span>
+        <span className="text-muted-foreground text-xs">-</span>
       ),
   },
   {
@@ -395,14 +395,14 @@ const columns: ColumnDef<QuestionSummary>[] = [
     accessorKey: "created_at",
     header: ({ column }) => <SortableHeader column={column} label="Created" />,
     cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">{formatDate(row.original.created_at)}</span>
+      <span className="text-muted-foreground text-xs">{formatDate(row.original.created_at)}</span>
     ),
   },
   {
     accessorKey: "updated_at",
     header: ({ column }) => <SortableHeader column={column} label="Updated" />,
     cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">{formatDate(row.original.updated_at)}</span>
+      <span className="text-muted-foreground text-xs">{formatDate(row.original.updated_at)}</span>
     ),
   },
 ];
@@ -619,7 +619,7 @@ export function QuestionsBrowser() {
         </div>
 
         <div className="overflow-hidden rounded-[1.4rem] border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.78),rgba(255,255,255,0.56))] shadow-[0_20px_45px_-32px_rgba(19,26,28,0.55)] backdrop-blur dark:bg-[linear-gradient(180deg,rgba(21,28,30,0.94),rgba(21,28,30,0.76))]">
-          <div className="border-b border-border/70 bg-[radial-gradient(circle_at_top_left,rgba(46,111,106,0.14),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.6),transparent)] px-5 py-4 dark:bg-[radial-gradient(circle_at_top_left,rgba(102,184,176,0.16),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)]">
+          <div className="border-border/70 border-b bg-[radial-gradient(circle_at_top_left,rgba(46,111,106,0.14),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.6),transparent)] px-5 py-4 dark:bg-[radial-gradient(circle_at_top_left,rgba(102,184,176,0.16),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)]">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-muted-foreground">
@@ -627,10 +627,10 @@ export function QuestionsBrowser() {
                   <FilterLabel>Workbench</FilterLabel>
                 </div>
                 <div>
-                  <p className="font-heading text-lg tracking-[-0.025em] text-foreground">
+                  <p className="font-heading text-foreground text-lg tracking-[-0.025em]">
                     Scan faster, filter harder, keep context while scrolling.
                   </p>
-                  <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                  <p className="max-w-3xl text-muted-foreground text-sm leading-6">
                     Inspired by current data-table patterns that emphasize sticky headers, visible
                     filter state, and low-noise row scanning.
                   </p>
@@ -688,7 +688,7 @@ export function QuestionsBrowser() {
             </div>
           </div>
 
-          <div className="grid gap-3 border-b border-border/70 bg-background/55 p-5 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 border-border/70 border-b bg-background/55 p-5 md:grid-cols-2 xl:grid-cols-5">
             <div className="space-y-2 md:col-span-2">
               <FilterLabel>Search</FilterLabel>
               <div className="relative">
@@ -954,7 +954,7 @@ export function QuestionsBrowser() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-b border-border/70 bg-muted/20 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-border/70 border-b bg-muted/20 px-5 py-3">
             <FilterLabel>Active view</FilterLabel>
             {activeFilters.length > 0 ? (
               activeFilters.map((filter) => (
@@ -966,7 +966,7 @@ export function QuestionsBrowser() {
                 />
               ))
             ) : (
-              <span className="text-sm text-muted-foreground">
+              <span className="text-muted-foreground text-sm">
                 No filters applied. You are looking at the default view.
               </span>
             )}
@@ -999,7 +999,7 @@ export function QuestionsBrowser() {
                               <TableHead
                                 key={header.id}
                                 className={[
-                                  "sticky top-0 z-10 border-b border-border/80 bg-[color-mix(in_oklch,var(--background),white_55%)] py-3 text-[0.72rem] uppercase tracking-[0.14em] text-muted-foreground backdrop-blur",
+                                  "sticky top-0 z-10 border-border/80 border-b bg-[color-mix(in_oklch,var(--background),white_55%)] py-3 text-[0.72rem] text-muted-foreground uppercase tracking-[0.14em] backdrop-blur",
                                   numeric ? "text-right" : "",
                                   stickyLeft ? "left-0 z-20 shadow-[1px_0_0_var(--border)]" : "",
                                 ].join(" ")}
@@ -1017,7 +1017,7 @@ export function QuestionsBrowser() {
                       {table.getRowModel().rows.map((row) => (
                         <TableRow
                           key={row.id}
-                          className="border-b border-border/60 odd:bg-background even:bg-muted/18 hover:!bg-accent/28"
+                          className="hover:!bg-accent/28 border-border/60 border-b odd:bg-background even:bg-muted/18"
                         >
                           {row.getVisibleCells().map((cell) => {
                             const stickyLeft = cell.column.id === "id";
@@ -1029,9 +1029,9 @@ export function QuestionsBrowser() {
                                 className={[
                                   "align-top",
                                   compact ? "py-3 text-sm" : "py-4",
-                                  numeric ? "font-mono tabular-nums text-right" : "",
+                                  numeric ? "text-right font-mono tabular-nums" : "",
                                   stickyLeft
-                                    ? "sticky left-0 z-10 border-r border-border/70 bg-inherit shadow-[1px_0_0_var(--border)]"
+                                    ? "sticky left-0 z-10 border-border/70 border-r bg-inherit shadow-[1px_0_0_var(--border)]"
                                     : "",
                                 ].join(" ")}
                               >
@@ -1045,7 +1045,7 @@ export function QuestionsBrowser() {
                   </Table>
                 </div>
 
-                <div className="flex flex-col gap-2 border-t border-border/70 bg-muted/18 px-5 py-4 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-col gap-2 border-border/70 border-t bg-muted/18 px-5 py-4 text-muted-foreground text-sm md:flex-row md:items-center md:justify-between">
                   <p>
                     Showing{" "}
                     <span className="font-semibold text-foreground">

@@ -3,8 +3,8 @@
 There is no public registration route (``app/web/routes/api/auth.py``), so
 this is the only way a professor identity comes to exist outside a
 production deployment, which must set its own credentials and never runs
-this. See ``CLAUDE.md`` / ``docs/DECISIONS.md`` for why: a hardcoded
-credential must not ship live by accident.
+this. See ``docs/DECISIONS.md`` for why: a hardcoded credential must not ship
+live by accident.
 """
 
 from __future__ import annotations

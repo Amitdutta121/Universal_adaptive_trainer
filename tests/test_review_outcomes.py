@@ -420,4 +420,3 @@ def test_a_failed_refresh_keeps_the_review_and_reports_it(
     assert stored is not None
     assert stored.instruction_refreshed is False
     assert stored.refresh_error
-

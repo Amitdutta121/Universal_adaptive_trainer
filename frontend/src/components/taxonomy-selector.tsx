@@ -38,7 +38,8 @@ export function TaxonomySelector() {
       const activated = await activateVersion.mutateAsync(versionId);
       toast.success(`Active taxonomy is now "${activated.version.label}"`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not change the active taxonomy.";
+      const message =
+        error instanceof Error ? error.message : "Could not change the active taxonomy.";
       toast.error("Could not change the active taxonomy", { description: message });
     }
   }
@@ -47,7 +48,7 @@ export function TaxonomySelector() {
     <div className="flex min-w-[18rem] items-center gap-3 rounded-2xl border border-border/70 bg-background/78 px-3 py-2 shadow-[0_10px_28px_-24px_rgba(19,26,28,0.55)] backdrop-blur">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-muted-foreground">
+          <span className="font-mono text-[0.62rem] text-muted-foreground uppercase tracking-[0.16em]">
             Active taxonomy
           </span>
           {activeVersionId ? (
@@ -78,8 +79,12 @@ export function TaxonomySelector() {
             </SelectContent>
           </Select>
         ) : (
-          <p className="mt-1 text-sm text-muted-foreground">
-            No approved taxonomy yet. <Link href="/curriculum" className="underline underline-offset-4">Upload one</Link>.
+          <p className="mt-1 text-muted-foreground text-sm">
+            No approved taxonomy yet.{" "}
+            <Link href="/curriculum" className="underline underline-offset-4">
+              Upload one
+            </Link>
+            .
           </p>
         )}
       </div>

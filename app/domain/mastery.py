@@ -1,11 +1,11 @@
 """Shared mastery, weakness and scoring value objects.
 
-These encode the *fixed* adaptive-training decisions (see ``CLAUDE.md``) that both
-the professor content pipeline and the student engine must agree on. The engine
-itself -- roulette selection, BKT updates, weakness updates -- lives behind
-``app.adaptive`` and is deliberately not implemented in this task.
+These encode the fixed adaptive-training decisions that both the professor
+content pipeline and the student engine must agree on. The engine itself --
+roulette selection, BKT updates, weakness updates -- lives behind
+``app.adaptive``.
 
-Do not redesign the values or mappings here without an explicit instruction.
+Changes here affect both workflows and should be made deliberately.
 """
 
 from __future__ import annotations

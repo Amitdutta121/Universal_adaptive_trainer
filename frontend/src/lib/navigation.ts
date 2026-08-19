@@ -65,7 +65,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "review",
     label: "Review Queue",
     path: "/review",
-    summary: "Professor feedback now lives here: review, approve, reject, or edit queued questions.",
+    summary:
+      "Professor feedback now lives here: review, approve, reject, or edit queued questions.",
     icon: ClipboardCheck,
   },
   {

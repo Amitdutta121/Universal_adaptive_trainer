@@ -13,12 +13,12 @@
  * like any other.
  */
 
+import { CollapsiblePanel } from "@/components/collapsible-panel";
 import { CopyButton } from "@/components/copy-button";
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { BookDocumentGuide } from "@/lib/api/types";
-import { CollapsiblePanel } from "@/components/collapsible-panel";
 
 function Vocabulary({
   title,

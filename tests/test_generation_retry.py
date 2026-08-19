@@ -395,8 +395,6 @@ def test_a_failed_question_is_listed_only_when_asked_for(
     assert filtered["status"] == "validation_passed"
 
 
-
-
 # --- a provider failure mid-batch ----------------------------------------
 
 

@@ -78,8 +78,8 @@ export function NotBuiltYet({ endpoints }: { endpoints: readonly string[] }) {
       <AlertTitle>This screen has not been built yet</AlertTitle>
       <AlertDescription>
         <p>
-          The shell, typed client and query layer are in place. This screen does
-          not have a UI yet, but its API is already generated and typed:
+          The shell, typed client and query layer are in place. This screen does not have a UI yet,
+          but its API is already generated and typed:
         </p>
         <ul className="mt-2 space-y-0.5 font-mono text-xs">
           {endpoints.map((endpoint) => (

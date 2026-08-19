@@ -2,7 +2,7 @@
 
 Responsibility
     One function per assessment format, implementing the fixed scoring rule from
-    ``CLAUDE.md``: a testable programming question scores
+    the adaptive design: a testable programming question scores
     ``passed_tests / total_tests * 100``, and a naturally discrete question
     scores 0 or 100.
 

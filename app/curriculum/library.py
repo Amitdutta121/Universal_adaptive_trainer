@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -190,7 +190,17 @@ class CurriculumLibraryService:
         current = self._curriculum.get_approved()
         if current is not None and current.id == version_id:
             return version
-        version.approved_at = datetime.now(UTC)
+        candidate = _sqlite_orderable_utc(datetime.now(UTC))
+        current_approved_at = (
+            _sqlite_orderable_utc(current.approved_at)
+            if current is not None and current.approved_at is not None
+            else None
+        )
+        if current is not None and current_approved_at is not None:
+            current.approved_at = current_approved_at
+        if current_approved_at is not None and candidate <= current_approved_at:
+            candidate = current_approved_at + timedelta(microseconds=1)
+        version.approved_at = candidate
         self._session.flush()
         logger.info("Activated curriculum version %s", version_id)
         return version
@@ -324,6 +334,13 @@ def _required_label(value: str, what: str, field: str) -> str:
             detail=f"Leave the {field} unchanged, or give it a new one.",
         )
     return cleaned
+
+
+def _sqlite_orderable_utc(value: datetime) -> datetime:
+    """Normalize a datetime to naive UTC, which is how SQLite returns it here."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def _refuse_duplicate(name: str, siblings: list[str], what: str, where: str) -> None:

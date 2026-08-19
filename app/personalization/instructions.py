@@ -23,9 +23,9 @@ import logging
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.errors import NotFoundError
 from app.domain.enums import QuestionType, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS, professor_edits
+from app.errors import NotFoundError
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import ProfessorReviewRow, TypeInstructionRow
 from app.persistence.repositories import ProfessorReviewRepository, TypeInstructionRepository

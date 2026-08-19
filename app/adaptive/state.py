@@ -6,10 +6,11 @@ Responsibility
     :mod:`app.adaptive.service` supplies the stored values and writes the
     results back.
 
-The mechanism is fixed by ``CLAUDE.md``. The two constants it leaves open --
-how fast weakness moves, and how far down it may go -- are decided in ADR-041
-and live here rather than in :mod:`app.domain.mastery`, which owns the values
-both loops share and says that the updates themselves belong to this package.
+The mechanism is fixed by the adaptive design. The two constants it leaves open
+-- how fast weakness moves, and how far down it may go -- are decided in
+ADR-041 and live here rather than in :mod:`app.domain.mastery`, which owns the
+values both loops share and says that the updates themselves belong to this
+package.
 
 Argument violations raise :class:`ValueError`, matching
 :func:`app.domain.mastery.score_from_tests` next door. Translating those into an

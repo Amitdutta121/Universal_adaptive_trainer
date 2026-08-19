@@ -210,5 +210,3 @@ def test_all_mode_offers_questions_the_judge_never_scored(
     unjudged = _question(session)
 
     assert _queue(client, mode="all")["question"]["question"]["id"] == unjudged.id
-
-

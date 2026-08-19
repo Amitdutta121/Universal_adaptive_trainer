@@ -26,10 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurriculumSubtopic } from "@/lib/api/queries";
 import { pluralise } from "@/lib/display";
-import {
-  ItemRenameDialog,
-  type RenameTarget,
-} from "../../components/item-rename-dialog";
+import { ItemRenameDialog, type RenameTarget } from "../../components/item-rename-dialog";
 import {
   CONFIDENCE_VARIANT,
   CURRICULUM_ITEM_STATUS_LABEL,
@@ -175,9 +172,7 @@ export function SubtopicDetailScreen({ subtopicId }: { subtopicId: number }) {
             ) : (
               <p className="text-muted-foreground text-sm">No candidate labels were recorded.</p>
             )}
-            <p className="text-sm">
-              {grouping_reason || "No grouping rationale was recorded."}
-            </p>
+            <p className="text-sm">{grouping_reason || "No grouping rationale was recorded."}</p>
           </CardContent>
         </Card>
       ) : null}

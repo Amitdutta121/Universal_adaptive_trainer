@@ -1,6 +1,6 @@
 """Scoring a student's submitted answer, one case per assessment format.
 
-The fixed rule from ``CLAUDE.md``: a testable programming question scores
+The fixed rule: a testable programming question scores
 ``passed_tests / total_tests * 100``, a discrete one scores 0 or 100. The rule
 most easily lost is that a *malformed* answer is wrong rather than an error.
 """

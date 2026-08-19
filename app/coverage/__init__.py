@@ -4,7 +4,7 @@ Responsibility
     Answer one question the question bank cannot answer about itself. Every
     question in a set can be good while the set is still unusable, because the
     adaptive engine selects a **subtopic** first and a **difficulty** second
-    (see ``CLAUDE.md``). A subtopic with no hard question is a request the
+    (see ADR-041). A subtopic with no hard question is a request the
     engine cannot satisfy, however good the questions beside it are.
 
 Status

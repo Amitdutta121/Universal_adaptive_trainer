@@ -110,7 +110,7 @@ function MetricCard({ metric }: { metric: MetricResult }) {
     <div className="review-judge-row" data-status={statusTone(metric.passed)}>
       <div className="min-w-0 grow">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-medium">{METRIC_LABEL[metric.metric] ?? metric.metric}</p>
+          <p className="font-medium text-sm">{METRIC_LABEL[metric.metric] ?? metric.metric}</p>
           <ReviewChip tone={statusTone(metric.passed)}>
             {metric.passed === null ? "not measured" : metric.passed ? "pass" : "fail"}
           </ReviewChip>

@@ -24,11 +24,11 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SubtopicSummary, TopicOut } from "@/lib/api/types";
 import { pluralise } from "@/lib/display";
+import type { RenameTarget } from "../../../components/item-rename-dialog";
 import {
   CURRICULUM_ITEM_STATUS_LABEL,
   CURRICULUM_ITEM_STATUS_VARIANT,
 } from "../../../curriculum-display";
-import type { RenameTarget } from "../../../components/item-rename-dialog";
 
 function StableId({ id }: { id: string | null }) {
   // A legacy row may carry none. Never render the string "null".
@@ -64,10 +64,7 @@ function SubtopicRow({
   return (
     <li className="border-t py-2 text-sm first:border-t-0">
       <div className="flex flex-wrap items-center gap-2">
-        <Link
-          href={`/curriculum/subtopics/${subtopic.id}`}
-          className="font-medium hover:underline"
-        >
+        <Link href={`/curriculum/subtopics/${subtopic.id}`} className="font-medium hover:underline">
           {subtopic.name}
         </Link>
         <StableId id={subtopic.stable_id} />

@@ -14,8 +14,8 @@
  * professor cannot guess.
  */
 
-import { CopyButton } from "@/components/copy-button";
 import { CollapsiblePanel } from "@/components/collapsible-panel";
+import { CopyButton } from "@/components/copy-button";
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -115,8 +115,8 @@ export function TaxonomyGuideCard({
           <FieldReference fields={guide.fields} />
           <p className="text-muted-foreground text-sm">
             Topic names must be unique, and subtopic names unique within their topic. Names are
-            compared ignoring case, spacing and punctuation, so two spellings of one name count as
-            a duplicate and the document is refused.
+            compared ignoring case, spacing and punctuation, so two spellings of one name count as a
+            duplicate and the document is refused.
           </p>
         </div>
       </CollapsiblePanel>

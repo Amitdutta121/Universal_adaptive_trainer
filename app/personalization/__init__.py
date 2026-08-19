@@ -32,18 +32,18 @@ Allowed dependencies
 from __future__ import annotations
 
 from app.personalization.instructions import (
-    delete_type_instruction_rule,
     LearnedRule,
     LearnedRules,
+    delete_type_instruction_rule,
     refresh_type_instruction,
     render_instruction,
     reviews_for_type,
 )
 
 __all__ = [
-    "delete_type_instruction_rule",
     "LearnedRule",
     "LearnedRules",
+    "delete_type_instruction_rule",
     "refresh_type_instruction",
     "render_instruction",
     "reviews_for_type",

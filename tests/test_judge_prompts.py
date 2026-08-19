@@ -237,4 +237,3 @@ def test_saving_does_not_rewrite_stored_verdicts(client: TestClient, session: Se
     session.expire_all()
     stored = QuestionRepository(session).get(question.id)
     assert stored.pedagogical_eval["rubric_version"] == RUBRIC_VERSION
-

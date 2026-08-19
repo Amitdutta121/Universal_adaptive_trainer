@@ -142,10 +142,10 @@ export function ReviewScreen() {
       {isPending ? <TableSkeleton rows={6} /> : null}
 
       {data ? (
-          <Card className="review-panel border">
-            <CardHeader>
-              <div className="review-eyebrow">Queue</div>
-              <CardTitle>Professor feedback progress</CardTitle>
+        <Card className="review-panel border">
+          <CardHeader>
+            <div className="review-eyebrow">Queue</div>
+            <CardTitle>Professor feedback progress</CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-2">
               <span>
                 <strong>{data.reviewed}</strong> of {data.total} reviewed

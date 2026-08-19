@@ -145,4 +145,3 @@ class TestDocumentGuideEndpoint:
 
     def test_the_route_is_not_shadowed_by_the_version_lookup(self, client: TestClient) -> None:
         assert client.get("/api/curriculum/document-guide").status_code == 200
-

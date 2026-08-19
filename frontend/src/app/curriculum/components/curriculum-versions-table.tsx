@@ -74,59 +74,59 @@ export function CurriculumVersionsTable({
           const canActivate = standing === "replaced";
           const isActivating = activatingVersionId === version.id;
           return (
-          <TableRow key={version.id}>
-            <TableCell className="text-muted-foreground tabular-nums">{version.id}</TableCell>
-            <TableCell className="font-medium">
-              <Link href={`/curriculum/versions/${version.id}`} className="hover:underline">
-                {version.label}
-              </Link>
-            </TableCell>
-            <TableCell>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge variant={STANDING_VARIANT[standing]}>{STANDING_LABEL[standing]}</Badge>
-                </TooltipTrigger>
-                <TooltipContent>{STANDING_MEANING[standing]}</TooltipContent>
-              </Tooltip>
-            </TableCell>
-            <TableCell className="text-right tabular-nums">{version.topic_count}</TableCell>
-            <TableCell className="text-right tabular-nums">{version.subtopic_count}</TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {generatedByLabel(version)}
-            </TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {formatTimestamp(version.created_at)}
-            </TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {version.approved_at ? formatTimestamp(version.approved_at) : "—"}
-            </TableCell>
-            <TableCell>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label={`Actions for ${version.label}`}>
-                    <MoreHorizontal />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    disabled={!canActivate || isActivating}
-                    onSelect={() => canActivate && onActivate(version)}
-                  >
-                    <CheckCircle2 />
-                    {isActivating ? "Making active..." : "Make active"}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onEdit(version)}>
-                    <Pencil />
-                    Rename
-                  </DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" onSelect={() => onDelete(version)}>
-                    <Trash2 />
-                    Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </TableCell>
-          </TableRow>
+            <TableRow key={version.id}>
+              <TableCell className="text-muted-foreground tabular-nums">{version.id}</TableCell>
+              <TableCell className="font-medium">
+                <Link href={`/curriculum/versions/${version.id}`} className="hover:underline">
+                  {version.label}
+                </Link>
+              </TableCell>
+              <TableCell>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant={STANDING_VARIANT[standing]}>{STANDING_LABEL[standing]}</Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>{STANDING_MEANING[standing]}</TooltipContent>
+                </Tooltip>
+              </TableCell>
+              <TableCell className="text-right tabular-nums">{version.topic_count}</TableCell>
+              <TableCell className="text-right tabular-nums">{version.subtopic_count}</TableCell>
+              <TableCell className="text-muted-foreground text-sm">
+                {generatedByLabel(version)}
+              </TableCell>
+              <TableCell className="text-muted-foreground text-sm">
+                {formatTimestamp(version.created_at)}
+              </TableCell>
+              <TableCell className="text-muted-foreground text-sm">
+                {version.approved_at ? formatTimestamp(version.approved_at) : "—"}
+              </TableCell>
+              <TableCell>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label={`Actions for ${version.label}`}>
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      disabled={!canActivate || isActivating}
+                      onSelect={() => canActivate && onActivate(version)}
+                    >
+                      <CheckCircle2 />
+                      {isActivating ? "Making active..." : "Make active"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onEdit(version)}>
+                      <Pencil />
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onSelect={() => onDelete(version)}>
+                      <Trash2 />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableCell>
+            </TableRow>
           );
         })}
       </TableBody>

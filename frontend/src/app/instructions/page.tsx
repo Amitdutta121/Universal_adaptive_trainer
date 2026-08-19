@@ -15,6 +15,15 @@ import {
 } from "@/lib/api/queries";
 import type { TypeInstruction } from "@/lib/api/types";
 
+function occurrenceKeys(values: readonly string[]) {
+  const seen = new Map<string, number>();
+  return values.map((value) => {
+    const next = (seen.get(value) ?? 0) + 1;
+    seen.set(value, next);
+    return `${value}::${next}`;
+  });
+}
+
 function formatQuestionType(questionType: string) {
   return questionType
     .split("_")
@@ -97,6 +106,7 @@ function InstructionCard({
 }) {
   const canRefresh = instruction.available_reviews > 0;
   const isDeletingRule = deletingRuleIndex !== null;
+  const ruleKeys = occurrenceKeys(instruction.rules);
 
   return (
     <Card className="review-panel h-full">
@@ -140,7 +150,7 @@ function InstructionCard({
             <ul className="space-y-2">
               {instruction.rules.map((rule, ruleIndex) => (
                 <li
-                  key={`${instruction.question_type}-${ruleIndex}-${rule}`}
+                  key={`${instruction.question_type}-${ruleKeys[ruleIndex]}`}
                   className="flex items-start justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm"
                 >
                   <span className="flex-1">{rule}</span>

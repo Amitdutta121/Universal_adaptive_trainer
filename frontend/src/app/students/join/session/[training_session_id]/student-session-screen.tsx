@@ -240,7 +240,7 @@ function MultipleChoiceReview({
             <span>
               {String.fromCharCode(65 + index)}. {option}
             </span>
-            <span className="flex shrink-0 items-center gap-1 text-xs font-medium">
+            <span className="flex shrink-0 items-center gap-1 font-medium text-xs">
               {isCorrect ? (
                 <>
                   <CheckCircle2 className="size-3.5" /> Correct answer
@@ -299,19 +299,19 @@ function OutputPredictionReview({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="space-y-1">
-        <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.14em]">
           Expected output
         </div>
-        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-6 text-foreground">
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-foreground text-xs leading-6">
           {expected}
         </pre>
       </div>
       {submittedAnswer !== undefined ? (
         <div className="space-y-1">
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.14em]">
             Your output
           </div>
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-6 text-foreground">
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-foreground text-xs leading-6">
             {submittedAnswer.trim() === "" ? "(nothing submitted)" : submittedAnswer}
           </pre>
         </div>
@@ -328,10 +328,10 @@ function ParsonsReview({ content }: { content: Record<string, unknown> }) {
 
   return (
     <div className="space-y-1">
-      <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.14em]">
         Correct order
       </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-xs leading-6 text-foreground">
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/20 p-3 font-mono text-foreground text-xs leading-6">
         {renderParsonsPreview(blocks)}
       </pre>
     </div>
@@ -346,8 +346,8 @@ function ReferenceSolutionBlock({ detail }: { detail: QuestionDetail }) {
     <>
       {detail.reference_solution ? (
         <div className="space-y-2">
-          <div className="font-medium text-sm text-foreground">Reference solution</div>
-          <pre className="overflow-x-auto rounded-[1rem] border border-border/70 bg-slate-950 p-4 font-mono text-[13px] leading-6 text-slate-50">
+          <div className="font-medium text-foreground text-sm">Reference solution</div>
+          <pre className="overflow-x-auto rounded-[1rem] border border-border/70 bg-slate-950 p-4 font-mono text-[13px] text-slate-50 leading-6">
             {detail.reference_solution}
           </pre>
         </div>
@@ -355,8 +355,8 @@ function ReferenceSolutionBlock({ detail }: { detail: QuestionDetail }) {
 
       {detail.tests ? (
         <div className="space-y-2">
-          <div className="font-medium text-sm text-foreground">Tests</div>
-          <pre className="overflow-x-auto rounded-[1rem] border border-border/70 bg-muted/20 p-4 font-mono text-[13px] leading-6 text-foreground">
+          <div className="font-medium text-foreground text-sm">Tests</div>
+          <pre className="overflow-x-auto rounded-[1rem] border border-border/70 bg-muted/20 p-4 font-mono text-[13px] text-foreground leading-6">
             {detail.tests}
           </pre>
         </div>
@@ -427,9 +427,9 @@ function PastQuestionSheet({
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full max-w-2xl overflow-y-auto border-l border-border bg-background p-0 sm:max-w-2xl"
+        className="w-full max-w-2xl overflow-y-auto border-border border-l bg-background p-0 sm:max-w-2xl"
       >
-        <SheetHeader className="border-b border-border/70 px-5 py-4">
+        <SheetHeader className="border-border/70 border-b px-5 py-4">
           <SheetTitle>{attempt ? `Question ${attempt.ordinal}` : "Past question"}</SheetTitle>
           <SheetDescription>
             Review a past question, then close this panel to continue the current session.
@@ -465,19 +465,19 @@ function PastQuestionSheet({
           {detail ? (
             <>
               <div className="space-y-2">
-                <div className="font-medium text-sm text-foreground">
+                <div className="font-medium text-foreground text-sm">
                   {detail.taxonomy.topic}
                   {detail.taxonomy.subtopics.length > 0
                     ? ` - ${detail.taxonomy.subtopics.join(", ")}`
                     : ""}
                 </div>
-                <div className="whitespace-pre-wrap rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-sm leading-7 text-foreground">
+                <div className="whitespace-pre-wrap rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-foreground text-sm leading-7">
                   {detail.question.prompt}
                 </div>
               </div>
 
               {!isAnsweredAttempt ? (
-                <div className="rounded-[1rem] border border-amber-500/25 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="rounded-[1rem] border border-amber-500/25 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
                   This question is still active in the session, so its solution details are hidden.
                 </div>
               ) : (
@@ -618,7 +618,7 @@ function SortableParsonsBlock({
               className="overflow-x-auto rounded-[0.8rem] border border-border bg-muted/40 px-2.5 py-2"
               style={parsonsIndentStyle(block.indent)}
             >
-              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-5 text-foreground">
+              <pre className="whitespace-pre-wrap font-mono text-[12px] text-foreground leading-5">
                 {block.text}
               </pre>
             </div>
@@ -708,7 +708,7 @@ function ParsonsComposer({
           carries a "Parsons" type badge and the Prompt block above already
           states the task, so giving this its own bordered/shadowed card made
           it read as a second, competing question. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
         <p>Drag blocks up or down to reorder, then use the indent controls to adjust nesting.</p>
         <Button type="button" variant="ghost" size="sm" onClick={resetOrder}>
           Reset order
@@ -719,8 +719,8 @@ function ParsonsComposer({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 rounded-[1.15rem] border border-border bg-card/75 px-4 py-3">
             <div>
-              <h4 className="font-medium text-sm text-foreground">Workspace</h4>
-              <p className="text-xs text-muted-foreground">
+              <h4 className="font-medium text-foreground text-sm">Workspace</h4>
+              <p className="text-muted-foreground text-xs">
                 Arrange blocks from first line to last line.
               </p>
             </div>
@@ -754,8 +754,8 @@ function ParsonsComposer({
           <div className="rounded-[1.2rem] border border-border bg-card/80 p-4 shadow-[0_16px_32px_-28px_rgb(19_26_28_/_0.28)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h4 className="font-medium text-sm text-foreground">Answer order</h4>
-                <p className="text-xs text-muted-foreground">
+                <h4 className="font-medium text-foreground text-sm">Answer order</h4>
+                <p className="text-muted-foreground text-xs">
                   Submitted automatically from the workspace.
                 </p>
               </div>
@@ -766,19 +766,19 @@ function ParsonsComposer({
                 ids
               </Badge>
             </div>
-            <div className="mt-3 rounded-[0.95rem] border border-border bg-muted/40 p-3 font-mono text-[12px] leading-6 text-foreground">
+            <div className="mt-3 rounded-[0.95rem] border border-border bg-muted/40 p-3 font-mono text-[12px] text-foreground leading-6">
               {assembledAnswer}
             </div>
           </div>
 
           <div className="rounded-[1.2rem] border border-border bg-card/80 p-4 shadow-[0_16px_32px_-28px_rgb(19_26_28_/_0.28)]">
             <div className="space-y-2">
-              <h4 className="font-medium text-sm text-foreground">Code preview</h4>
-              <p className="text-xs text-muted-foreground">
+              <h4 className="font-medium text-foreground text-sm">Code preview</h4>
+              <p className="text-muted-foreground text-xs">
                 A quick read of the program you are assembling.
               </p>
             </div>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-[0.95rem] border border-border bg-muted/40 p-4 font-mono text-[13px] leading-6 text-foreground">
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-[0.95rem] border border-border bg-muted/40 p-4 font-mono text-[13px] text-foreground leading-6">
               {renderParsonsPreview(orderedBlocks)}
             </pre>
           </div>
@@ -810,7 +810,7 @@ function AnswerForm({
     <div className="space-y-5">
       {question.question_type === "multiple_choice" && question.options ? (
         <fieldset className="space-y-3">
-          <legend className="font-medium text-sm text-foreground">Choose one answer</legend>
+          <legend className="font-medium text-foreground text-sm">Choose one answer</legend>
           {question.options.map((option, index) => (
             <label
               key={`${question.attempt_id}-${option}`}
@@ -830,7 +830,7 @@ function AnswerForm({
                 className="mt-1 accent-[var(--accent-solid)]"
               />
               <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                <span className="text-sm leading-7 text-foreground">{option}</span>
+                <span className="text-foreground text-sm leading-7">{option}</span>
                 <span
                   className={cn(
                     "rounded-full px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors",
@@ -847,7 +847,7 @@ function AnswerForm({
         </fieldset>
       ) : question.question_type === "true_false" ? (
         <fieldset className="space-y-3">
-          <legend className="font-medium text-sm text-foreground">True or false</legend>
+          <legend className="font-medium text-foreground text-sm">True or false</legend>
           {[
             ["true", "True"],
             ["false", "False"],
@@ -869,7 +869,7 @@ function AnswerForm({
                 onChange={(event) => onAnswerChange(event.target.value)}
                 className="accent-[var(--accent-solid)]"
               />
-              <span className="text-sm font-medium text-foreground">{label}</span>
+              <span className="font-medium text-foreground text-sm">{label}</span>
             </label>
           ))}
         </fieldset>
@@ -878,7 +878,7 @@ function AnswerForm({
       ) : (
         <div className="space-y-2">
           <label
-            className="font-medium text-sm text-foreground"
+            className="font-medium text-foreground text-sm"
             htmlFor={`answer-${question.attempt_id}`}
           >
             {question.question_type === "output_prediction" ? "Your answer" : "Your Python"}
@@ -901,7 +901,7 @@ function AnswerForm({
                 : "Write your answer here"
             }
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">
             Tip: press Ctrl+Enter (⌘+Enter on Mac) to submit without leaving the keyboard.
           </p>
         </div>
@@ -909,8 +909,8 @@ function AnswerForm({
 
       <div className="flex flex-col gap-3 rounded-[1.35rem] border border-border/70 bg-white/70 p-4 shadow-[0_18px_38px_-30px_rgb(19_26_28_/_0.26)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
-          <div className="font-medium text-sm text-foreground">Ready to submit?</div>
-          <p className="text-sm text-muted-foreground">
+          <div className="font-medium text-foreground text-sm">Ready to submit?</div>
+          <p className="text-muted-foreground text-sm">
             Give it one last look — once submitted, this answer is scored and locked in.
           </p>
         </div>
@@ -974,9 +974,9 @@ function ResultCard({
               </Badge>
             </div>
             <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-              <div className="font-heading text-4xl font-semibold tracking-[-0.03em] text-foreground">
+              <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
                 {result.score.toFixed(0)}
-                <span className="ml-2 font-sans text-base font-medium text-muted-foreground">
+                <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
                   / 100
                 </span>
               </div>
@@ -997,7 +997,7 @@ function ResultCard({
         {result.detail ? (
           <div className="space-y-1.5">
             <div className="font-medium text-foreground text-sm">Feedback</div>
-            <pre className="overflow-x-auto whitespace-pre-wrap text-sm leading-7 text-foreground">
+            <pre className="overflow-x-auto whitespace-pre-wrap text-foreground text-sm leading-7">
               {result.detail}
             </pre>
           </div>
@@ -1019,7 +1019,7 @@ function ResultCard({
           </div>
         ) : null}
 
-        <div className="space-y-3 border-t border-border/60 pt-4">
+        <div className="space-y-3 border-border/60 border-t pt-4">
           <div className="flex items-center gap-2 font-medium text-foreground text-sm">
             <Lightbulb className="size-4 text-primary" />
             What was correct
@@ -1027,7 +1027,7 @@ function ResultCard({
           {detail ? (
             <AnswerReview detail={detail} submittedAnswer={submittedAnswer} />
           ) : (
-            <p className="text-sm text-muted-foreground">Loading the correct answer…</p>
+            <p className="text-muted-foreground text-sm">Loading the correct answer…</p>
           )}
         </div>
       </CardContent>
@@ -1111,14 +1111,14 @@ function ProgressSidebar({ progress }: { progress: StudentProgressOut }) {
         <div className="flex items-center gap-6 py-4 first:pt-5">
           <div>
             <div className="text-muted-foreground text-xs">Answered</div>
-            <div className="font-heading text-2xl font-semibold text-foreground">
+            <div className="font-heading font-semibold text-2xl text-foreground">
               {progress.answered}
             </div>
           </div>
           {progress.average_score !== null ? (
             <div>
               <div className="text-muted-foreground text-xs">Average score</div>
-              <div className="font-heading text-2xl font-semibold text-foreground">
+              <div className="font-heading font-semibold text-2xl text-foreground">
                 {progress.average_score.toFixed(0)}
                 <span className="ml-1 font-sans text-muted-foreground text-sm">/100</span>
               </div>
@@ -1333,9 +1333,9 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                           ? `${session.data.student_name} — progress`
                           : "Session progress"}
                       </div>
-                      <div className="font-heading text-4xl font-semibold tracking-[-0.03em] text-foreground">
+                      <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
                         {session.data.answered_count}
-                        <span className="ml-2 font-sans text-base font-medium text-muted-foreground">
+                        <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
                           solved
                         </span>
                       </div>
@@ -1353,7 +1353,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                             : ", no pending question"}
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
                         <span>{session.data.served_count} served total</span>
                         <span>{session.data.answered_count} solved</span>
                         {pendingCount > 0 ? <span>{pendingCount} pending</span> : null}
@@ -1416,7 +1416,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
 
             {currentQuestion.data && result === null ? (
               <Card className="overflow-hidden rounded-[2rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,250,249,0.92))] shadow-[0_30px_80px_-48px_rgb(19_26_28_/_0.45)]">
-                <CardHeader className="gap-4 border-b border-border/60 px-6 py-6 sm:px-7">
+                <CardHeader className="gap-4 border-border/60 border-b px-6 py-6 sm:px-7">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <CardTitle className="text-[1.9rem] leading-none tracking-[-0.03em]">
                       Question {currentQuestion.data.ordinal}
@@ -1442,7 +1442,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                     ) : null}
                   </div>
                   {currentQuestion.data.subtopic_name ? (
-                    <div className="text-sm font-medium text-muted-foreground">
+                    <div className="font-medium text-muted-foreground text-sm">
                       {currentQuestion.data.subtopic_name}
                     </div>
                   ) : null}
@@ -1453,20 +1453,20 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                   <div className="space-y-4">
                     <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
                       <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                        <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.18em]">
                           Prompt
                         </div>
                         <ArrowUpRight className="size-4 text-muted-foreground" />
                       </div>
-                      <div className="whitespace-pre-wrap text-[0.98rem] leading-8 text-foreground">
+                      <div className="whitespace-pre-wrap text-[0.98rem] text-foreground leading-8">
                         {currentQuestion.data.prompt}
                       </div>
                     </div>
 
                     {currentQuestion.data.code ? (
                       <div className="overflow-hidden rounded-[1.5rem] border border-slate-900/85 bg-slate-950 shadow-[0_28px_60px_-36px_rgb(2_6_23_/_0.9)]">
-                        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-                          <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+                        <div className="flex items-center justify-between border-slate-800 border-b px-4 py-3">
+                          <div className="font-medium text-[11px] text-slate-400 uppercase tracking-[0.18em]">
                             Reference code
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -1475,7 +1475,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                             <span className="size-2 rounded-full bg-emerald-400" />
                           </div>
                         </div>
-                        <pre className="overflow-x-auto p-4 font-mono text-sm leading-7 text-slate-50">
+                        <pre className="overflow-x-auto p-4 font-mono text-slate-50 text-sm leading-7">
                           {currentQuestion.data.code}
                         </pre>
                       </div>

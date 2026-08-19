@@ -238,4 +238,3 @@ class TestTheAnswerIsNeverPublished:
             {"id": "head", "text": "for value in items:", "indent": 0},
         ]
         assert "correct_order" not in body
-

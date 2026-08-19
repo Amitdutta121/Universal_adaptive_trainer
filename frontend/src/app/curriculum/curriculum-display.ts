@@ -38,8 +38,7 @@ export const CURRICULUM_STATUS_VARIANT: Record<CurriculumStatus, "secondary" | "
 
 export const CURRICULUM_STATUS_MEANING: Record<CurriculumStatus, string> = {
   approved: "Question generation is grounded in this version.",
-  superseded:
-    "A later upload replaced it. Questions generated from it keep their taxonomy claim.",
+  superseded: "A later upload replaced it. Questions generated from it keep their taxonomy claim.",
   proposed: "A legacy proposal that was never approved. Nothing generates from it.",
   under_review: "A legacy proposal part-way through review. Nothing generates from it.",
 };
@@ -123,9 +122,7 @@ export function isTaxonomyUpload(version: Pick<CurriculumVersionSummary, "genera
 }
 
 /** How a version was produced, in words — never the string "null". */
-export function generatedByLabel(
-  version: Pick<CurriculumVersionSummary, "generated_by">,
-): string {
+export function generatedByLabel(version: Pick<CurriculumVersionSummary, "generated_by">): string {
   if (isTaxonomyUpload(version)) return "Uploaded taxonomy";
   return version.generated_by?.trim() || "—";
 }

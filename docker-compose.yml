@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: development
+      HOST: 0.0.0.0
+      PORT: 8000
+      DATABASE_URL: sqlite:///./data/adaptive_trainer.db
+      BOOK_UPLOAD_DIR: ./data/books
+      CORS_ALLOW_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_ORIGIN: http://backend:8000
+    environment:
+      API_ORIGIN: http://backend:8000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  backend-data:

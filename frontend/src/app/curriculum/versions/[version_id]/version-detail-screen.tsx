@@ -22,10 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurriculumVersion, useCurriculumVersions } from "@/lib/api/queries";
 import { formatTimestamp, pluralise } from "@/lib/display";
-import {
-  ItemRenameDialog,
-  type RenameTarget,
-} from "../../components/item-rename-dialog";
+import { ItemRenameDialog, type RenameTarget } from "../../components/item-rename-dialog";
 import { VersionDeleteDialog } from "../../components/version-delete-dialog";
 import { VersionEditDialog } from "../../components/version-edit-dialog";
 import {

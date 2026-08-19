@@ -1,4 +1,4 @@
-﻿"""Judge calibration: label mapping, pairing, metrics and the endpoint.
+"""Judge calibration: label mapping, pairing, metrics and the endpoint.
 
 Guards ADR-029. The rule most easily lost in a later change is that the *first*
 professor review is the one compared, so it is asserted through the real review
@@ -842,5 +842,3 @@ def test_openapi_documents_the_calibration_endpoint(client: TestClient) -> None:
         "unattributable_metrics",
         "held_out_divisor",
     }
-
-

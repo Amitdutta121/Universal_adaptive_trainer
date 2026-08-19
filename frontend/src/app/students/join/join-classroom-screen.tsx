@@ -126,11 +126,11 @@ export function JoinClassroomScreen() {
                 so everyone joining later is still training against the same set.
               </p>
 
-              {/* Short, plain-language restatement of the fixed adaptive-training
-                  rules in CLAUDE.md (weakness-weighted roulette, BKT-driven
-                  difficulty, low-priority reuse) so a student knows what to
-                  expect before their first question. */}
-              <div className="space-y-3 border-t border-border/60 pt-4">
+              {/* Short, plain-language restatement of the adaptive rules
+                  (weakness-weighted roulette, BKT-driven difficulty,
+                  low-priority reuse) so a student knows what to expect before
+                  their first question. */}
+              <div className="space-y-3 border-border/60 border-t pt-4">
                 <div className="font-medium text-foreground text-sm">
                   How this training adapts to you
                 </div>
