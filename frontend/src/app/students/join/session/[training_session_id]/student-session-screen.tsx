@@ -1209,12 +1209,14 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     enabled: result !== null,
   });
 
-  // A 404-shaped "nothing left to serve" is a state to render, not a
+  // A 404-shaped "nothing left to serve" -- a bank gap, or the student
+  // finishing every topic in the curriculum -- is a state to render, not a
   // request failure -- every other query error still falls through to
   // QueryError below.
   const unavailable =
     currentQuestion.error instanceof ApiError &&
-    currentQuestion.error.code === "no_question_available"
+    (currentQuestion.error.code === "no_question_available" ||
+      currentQuestion.error.code === "curriculum_completed")
       ? currentQuestion.error
       : null;
   // Recent attempts scoped to this run, oldest first, capped to the last 10

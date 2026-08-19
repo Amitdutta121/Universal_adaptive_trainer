@@ -32,9 +32,11 @@ from app.domain.mastery import (
 )
 
 #: How far a single score moves a subtopic's weakness toward what it implies.
-#: 0.15 keeps the focus responsive without letting one answer swing the roulette
-#: too abruptly.
-WEAKNESS_LEARNING_RATE = 0.15
+#: Re-tuned to 0.25 for sequential topic progression (ADR-047): with the
+#: roulette now scoped to one topic at a time, a slower rate left the pool's
+#: few live subtopics too slow to reflect a recent run of right or wrong
+#: answers (docs/ADAPTIVE_TUNING_README.md).
+WEAKNESS_LEARNING_RATE = 0.25
 
 #: Weakness is the roulette weight, so zero would remove a subtopic from
 #: selection permanently. The floor keeps a mastered subtopic reachable while

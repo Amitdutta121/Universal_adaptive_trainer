@@ -1874,3 +1874,77 @@ artifact a professor may need to disambiguate at upload, whereas a taxonomy's la
 invented in the document they are uploading — so a wrong label is a wrong document, and with `PATCH`
 in place the override buys nothing a rename cannot do one request later while adding a second source
 for one field.
+
+---
+
+## ADR-047 — The roulette pool is scoped to one curriculum topic at a time
+
+**Status:** accepted. Narrows the roulette-pool half of ADR-041; changes none of its other rules
+(partial-credit BKT, the weakness floor, priority/reuse ordering within a cell, the difficulty
+fallback order all stand as written).
+
+**Context.** ADR-041 pools every servable subtopic across every topic in the question set and draws
+one weakness-weighted roulette over the whole pool. `TopicRow.position` is stored and used to order
+topics for display (the curriculum tree, coverage reports) but has never constrained what the engine
+serves: a student's very first question could come from any topic, and a struggling student could be
+served topic 3, then topic 1, then topic 3 again, in any order. The product decision is that BKT
+mastery should progress through the curriculum topic by topic: a topic's subtopics only enter the
+roulette once every topic before it (in position order) is done, and the roulette and priority pick
+inside that topic are unchanged.
+
+**Decisions.**
+
+- **A topic is done at its own `TOPIC_ADVANCE_CEILING`, a threshold separate from difficulty
+  banding.** The first pass reused `MEDIUM_MASTERY_CEILING` (0.85) — the same threshold that maps to
+  `Difficulty.HARD` — to retire a topic, on the theory that the mastery band the engine already
+  computes was one fewer constant to carry. Re-running `tune_adaptive_params.py` against a simulator
+  extended to model sequential progression showed that was wrong: with a fixed question budget,
+  retiring a topic at 0.85 leaves too few questions to reach later topics, and the search
+  consistently preferred a materially lower topic-advance threshold (~0.60) than the difficulty-band
+  boundary it had been sharing. `TOPIC_ADVANCE_CEILING = 0.60` (`app/domain/mastery.py`) is now its
+  own constant; `MEDIUM_MASTERY_CEILING` stays at 0.85, unchanged, for difficulty banding. One
+  consequence of the two thresholds not lining up: a `HARD` question is rarely requested directly any
+  more, since a topic typically advances (0.60) before its mastery would reach the HIGH band (0.85);
+  `HARD` mostly surfaces through the ADR-041 difficulty fallback (an `EASY`/`MEDIUM` cell that is
+  empty) instead of as a topic's own requested difficulty.
+- **Revisiting is strict, not cumulative.** Once a topic is retired for a student, its subtopics never
+  re-enter that student's roulette pool, even if a later answer would have raised its weakness. The
+  pool is always exactly one topic's servable subtopics, not "every topic unlocked so far."
+- **An empty topic is skipped, not raised on.** If the current topic has no servable subtopic (a bank
+  gap under it specifically), the engine advances to the next topic in position order rather than
+  stalling the session. A gap early in the curriculum must not block a student who is otherwise ready
+  to move on.
+- **A gap the walk cannot get past is still reported as a gap.** If skipping empty topics runs out of
+  curriculum without ever finding a servable topic, and at least one topic was skipped for being empty
+  rather than for being mastered, the engine raises `NoQuestionAvailableError` — the existing
+  bank-gap error, unchanged in meaning. Only when *every* skip along the way was a mastery skip does
+  the engine treat the walk running out as genuine completion.
+- **Finishing every topic ends the session.** When every topic is at or past
+  `TOPIC_ADVANCE_CEILING`, the engine calls `TrainingSessionRepository.end` and raises the new
+  `CurriculumCompletedError` (409,
+  `curriculum_completed`) rather than falling back to ADR-041's whole-set pooling. A finished
+  curriculum is a state to render on the student's screen, not a bank problem to fix — distinct from
+  `NoQuestionAvailableError` for exactly that reason, even though both currently render the same way
+  client-side.
+- **A set with no curriculum link keeps the old pooled behavior.** `QuestionSetVersionRow
+  .curriculum_version_id` is nullable (`ON DELETE SET NULL`, ADR-046) — a set can lose its curriculum
+  after the version it was frozen against is deleted. With nothing left to sequence against, the
+  engine falls back to pooling every servable subtopic, exactly as ADR-041 describes. Sequential
+  progression is additive to sets that carry a curriculum link, not a replacement for sets that don't.
+- **The walk is a plain position-ordered query, not the eager `CurriculumVersion` tree.**
+  `CurriculumRepository.topics_with_subtopics_in_order` returns `(topic_id, [subtopic_id, ...])` pairs
+  ordered by `TopicRow.position` then `SubtopicRow.position`, mirroring the existing light lookups
+  (`topic_ids_for`, `topic_ids_in`) rather than hydrating `get_with_tree`'s full pydantic tree for
+  what the engine needs once per draw.
+
+**Alternatives rejected.** *Cumulative pooling (current topic plus every topic already advanced
+past):* it reads as review mode, which is a real feature but a different one than "progress through
+the curriculum sequentially" as asked; strict pooling is the literal request and the simpler
+mechanism. *Sharing `MEDIUM_MASTERY_CEILING` between difficulty banding and topic advancement:* the
+initial approach, on the theory that one fewer constant was simpler and that the mastery band the
+engine already computes was reason enough to reuse it. The re-tuned simulator showed the two wanted
+different values, so keeping them shared would have forced session length and difficulty banding to
+fight over one number for no reason that survived contact with actual tuning data. *Treating any
+exhausted walk as curriculum completion, including one that ran into a bank gap:* would silently
+misreport a professor's unwritten questions as a student's finished curriculum — the opposite of
+ADR-041's "surfaced rather than hidden" treatment of bank gaps.

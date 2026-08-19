@@ -114,6 +114,32 @@ def test_curriculum_tree_is_persisted(session: Session) -> None:
     assert [s.name for s in loaded[0].topics[0].subtopics] == ["if / elif / else", "while loops"]
 
 
+def test_topics_with_subtopics_in_order_walks_position_order(session: Session) -> None:
+    repo = CurriculumRepository(session)
+    version = CurriculumVersionRow(label="Intro Python v1")
+    version.topics.append(
+        TopicRow(
+            name="Loops",
+            position=1,
+            subtopics=[SubtopicRow(name="for", position=1), SubtopicRow(name="while", position=0)],
+        )
+    )
+    version.topics.append(TopicRow(name="Functions", position=0, subtopics=[]))
+    repo.add(version)
+    session.commit()
+
+    ordered = repo.topics_with_subtopics_in_order(version.id)
+    functions_topic = next(t for t in version.topics if t.name == "Functions")
+    loops_topic = next(t for t in version.topics if t.name == "Loops")
+    while_subtopic = next(s for s in loops_topic.subtopics if s.name == "while")
+    for_subtopic = next(s for s in loops_topic.subtopics if s.name == "for")
+
+    assert ordered == [
+        (functions_topic.id, []),
+        (loops_topic.id, [while_subtopic.id, for_subtopic.id]),
+    ]
+
+
 def test_get_approved_returns_none_until_a_version_is_approved(session: Session) -> None:
     repo = CurriculumRepository(session)
     repo.add(CurriculumVersionRow(label="proposal", status=CurriculumStatus.PROPOSED))

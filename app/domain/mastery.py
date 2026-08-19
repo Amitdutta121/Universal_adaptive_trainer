@@ -25,6 +25,13 @@ INITIAL_SUBTOPIC_WEAKNESS = 1.0
 LOW_MASTERY_CEILING = 0.45
 MEDIUM_MASTERY_CEILING = 0.85
 
+#: Sequential topic progression (ADR-047): a topic retires once its mastery
+#: reaches this, and the next topic in curriculum position order becomes
+#: current. Deliberately separate from MEDIUM_MASTERY_CEILING even though an
+#: earlier pass shared one constant for both -- tuning showed topic pacing and
+#: HARD-difficulty banding want different thresholds (docs/ADAPTIVE_TUNING_README.md).
+TOPIC_ADVANCE_CEILING = 0.60
+
 
 class BKTParameters(BaseModel):
     """Bayesian Knowledge Tracing parameters for one topic."""

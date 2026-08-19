@@ -421,6 +421,29 @@ class CurriculumRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def topics_with_subtopics_in_order(
+        self, curriculum_version_id: int
+    ) -> list[tuple[int, list[int]]]:
+        """Every topic in this version, position-ordered, with its subtopic ids.
+
+        Powers sequential topic progression in the adaptive engine: it walks
+        this list in order rather than pooling every topic's subtopics
+        together. A topic with no subtopics still appears, with an empty list,
+        so the engine can skip it rather than stall.
+        """
+        stmt = (
+            select(TopicRow.id, SubtopicRow.id)
+            .outerjoin(SubtopicRow, SubtopicRow.topic_id == TopicRow.id)
+            .where(TopicRow.curriculum_version_id == curriculum_version_id)
+            .order_by(TopicRow.position, TopicRow.id, SubtopicRow.position, SubtopicRow.id)
+        )
+        ordered: dict[int, list[int]] = {}
+        for topic_id, subtopic_id in self._session.execute(stmt).all():
+            ordered.setdefault(topic_id, [])
+            if subtopic_id is not None:
+                ordered[topic_id].append(subtopic_id)
+        return list(ordered.items())
+
     def delete(self, version: CurriculumVersionRow) -> None:
         """Remove a version, and with it its topics, subtopics and evidence.
 

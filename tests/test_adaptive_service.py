@@ -17,7 +17,12 @@ from app.adaptive.state import MIN_SUBTOPIC_WEAKNESS
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionStatus, QuestionType
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.domain.questions import DEFAULT_PRIORITY, LOWEST_PRIORITY
-from app.errors import DomainRuleError, NoQuestionAvailableError, NotFoundError
+from app.errors import (
+    CurriculumCompletedError,
+    DomainRuleError,
+    NoQuestionAvailableError,
+    NotFoundError,
+)
 from app.persistence.models import (
     CurriculumVersionRow,
     QuestionRow,
@@ -142,6 +147,144 @@ def _bank(
         set_id=frozen.id,
         run=run,
     )
+
+
+@dataclass
+class SequentialBank:
+    """A multi-topic curriculum, a student and a frozen set spanning it."""
+
+    version: CurriculumVersionRow
+    topic_ids: list[int]
+    subtopics_by_topic: dict[int, list[int]]
+    student_id: int
+    set_id: int
+    run: TrainingSessionRow
+
+
+def _sequential_taxonomy(
+    session: Session, *, topics: int, subtopics_per_topic: int = 1
+) -> tuple[CurriculumVersionRow, list[int], dict[int, list[int]]]:
+    """``topics`` topics in position order, each with its own subtopics."""
+    version = CurriculumVersionRow(
+        label="Intro Python v1",
+        status=CurriculumStatus.APPROVED,
+        approved_at=datetime.now(UTC),
+    )
+    session.add(version)
+    session.flush()
+    topic_ids: list[int] = []
+    subtopics_by_topic: dict[int, list[int]] = {}
+    for topic_index in range(topics):
+        topic = TopicRow(
+            curriculum_version_id=version.id, name=f"Topic {topic_index}", position=topic_index
+        )
+        session.add(topic)
+        session.flush()
+        topic_ids.append(topic.id)
+        ids = []
+        for sub_index in range(subtopics_per_topic):
+            subtopic = SubtopicRow(
+                topic_id=topic.id, name=f"Topic {topic_index} Subtopic {sub_index}", position=sub_index
+            )
+            session.add(subtopic)
+            session.flush()
+            ids.append(subtopic.id)
+        subtopics_by_topic[topic.id] = ids
+    session.commit()
+    return version, topic_ids, subtopics_by_topic
+
+
+def _sequential_bank(
+    session: Session, *, topics: int = 2, subtopics_per_topic: int = 1, seed: int = 7, name: str = "Ada"
+) -> SequentialBank:
+    """Every topic gets one approved question tagged to all of its subtopics."""
+    version, topic_ids, subtopics_by_topic = _sequential_taxonomy(
+        session, topics=topics, subtopics_per_topic=subtopics_per_topic
+    )
+    question_ids = [
+        _true_false(
+            session, version=version, topic_id=topic_id, subtopic_ids=subtopics_by_topic[topic_id]
+        ).id
+        for topic_id in topic_ids
+    ]
+    student = StudentRepository(session).add(name)
+    frozen = QuestionSetRepository(session).create(
+        label="Week 1", question_ids=question_ids, curriculum_version_id=version.id
+    )
+    run = TrainingSessionRepository(session).create(
+        student_id=student.id, set_version_id=frozen.id, rng_seed=seed
+    )
+    session.commit()
+    return SequentialBank(
+        version=version,
+        topic_ids=topic_ids,
+        subtopics_by_topic=subtopics_by_topic,
+        student_id=student.id,
+        set_id=frozen.id,
+        run=run,
+    )
+
+
+class TestSequentialProgression:
+    """The roulette pool is scoped to one curriculum topic at a time."""
+
+    def test_the_first_question_comes_from_the_first_topic_only(self, session: Session) -> None:
+        bank = _sequential_bank(session, topics=3, subtopics_per_topic=2)
+        served = AdaptiveTrainingEngine(session).serve_next(bank.run.id)
+
+        assert served.attempt.subtopic_id in bank.subtopics_by_topic[bank.topic_ids[0]]
+
+    def test_mastering_a_topic_advances_to_the_next_one(self, session: Session) -> None:
+        bank = _sequential_bank(session, topics=2)
+        StudentStateRepository(session).record_mastery(bank.student_id, bank.topic_ids[0], 0.9)
+        session.commit()
+
+        served = AdaptiveTrainingEngine(session).serve_next(bank.run.id)
+        assert served.attempt.subtopic_id in bank.subtopics_by_topic[bank.topic_ids[1]]
+
+    def test_a_topic_with_nothing_servable_is_skipped(self, session: Session) -> None:
+        version, topic_ids, subtopics_by_topic = _sequential_taxonomy(session, topics=2)
+        # Only the second topic gets an approved question; the first is a bank
+        # gap the engine must not stall on.
+        question = _true_false(
+            session,
+            version=version,
+            topic_id=topic_ids[1],
+            subtopic_ids=subtopics_by_topic[topic_ids[1]],
+        )
+        student = StudentRepository(session).add("Ada")
+        frozen = QuestionSetRepository(session).create(
+            label="Week 1", question_ids=[question.id], curriculum_version_id=version.id
+        )
+        run = TrainingSessionRepository(session).create(
+            student_id=student.id, set_version_id=frozen.id, rng_seed=1
+        )
+        session.commit()
+
+        served = AdaptiveTrainingEngine(session).serve_next(run.id)
+        assert served.attempt.subtopic_id in subtopics_by_topic[topic_ids[1]]
+
+    def test_finishing_every_topic_ends_the_session(self, session: Session) -> None:
+        bank = _sequential_bank(session, topics=2)
+        state = StudentStateRepository(session)
+        state.record_mastery(bank.student_id, bank.topic_ids[0], 0.9)
+        state.record_mastery(bank.student_id, bank.topic_ids[1], 0.9)
+        session.commit()
+
+        with pytest.raises(CurriculumCompletedError):
+            AdaptiveTrainingEngine(session).serve_next(bank.run.id)
+        session.commit()
+        assert bank.run.ended_at is not None
+
+    def test_a_set_with_no_curriculum_link_pools_every_topic(self, session: Session) -> None:
+        """A set whose curriculum was later deleted keeps the old pooled behavior."""
+        bank = _bank(session, difficulty=Difficulty.HARD)
+        StudentStateRepository(session).record_mastery(bank.student_id, bank.topic_id, 0.9)
+        QuestionSetRepository(session).get(bank.set_id).curriculum_version_id = None
+        session.commit()
+
+        served = AdaptiveTrainingEngine(session).serve_next(bank.run.id)
+        assert served.attempt.served_difficulty is Difficulty.HARD
 
 
 class TestServing:
@@ -287,15 +430,20 @@ class TestDifficulty:
         assert served.attempt.served_difficulty is Difficulty.EASY
         assert served.fallback_used is False
 
-    def test_high_mastery_is_served_a_hard_question(self, session: Session) -> None:
+    def test_high_mastery_ends_a_single_topic_curriculum_instead_of_escalating(
+        self, session: Session
+    ) -> None:
+        """0.9 mastery would request HARD, but it is also past
+        TOPIC_ADVANCE_CEILING, so sequential progression retires the topic
+        first -- with only one topic, that ends the run instead (see
+        TestSequentialProgression for the multi-topic case).
+        """
         bank = _bank(session, difficulty=Difficulty.HARD)
         StudentStateRepository(session).record_mastery(bank.student_id, bank.topic_id, 0.9)
         session.commit()
 
-        served = AdaptiveTrainingEngine(session).serve_next(bank.run.id)
-        assert served.attempt.requested_difficulty is Difficulty.HARD
-        assert served.attempt.served_difficulty is Difficulty.HARD
-        assert served.fallback_used is False
+        with pytest.raises(CurriculumCompletedError):
+            AdaptiveTrainingEngine(session).serve_next(bank.run.id)
 
     def test_an_empty_cell_relaxes_difficulty_and_says_so(self, session: Session) -> None:
         """A bank with gaps must not read as a bank that chose these on purpose."""
@@ -421,6 +569,11 @@ class TestScoring:
 
     def test_repeated_success_drives_the_subtopic_to_the_floor(self, session: Session) -> None:
         bank = _bank(session, questions=1)
+        # Repeated correct answers cross the sequential-advance mastery
+        # threshold within a handful of iterations; unlinking the curriculum
+        # keeps this test about the weakness floor, not topic progression.
+        QuestionSetRepository(session).get(bank.set_id).curriculum_version_id = None
+        session.commit()
         engine = AdaptiveTrainingEngine(session)
         for _ in range(30):
             served = engine.serve_next(bank.run.id)

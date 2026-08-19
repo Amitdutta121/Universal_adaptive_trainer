@@ -34,9 +34,9 @@ from app.adaptive.selection import (
 )
 from app.adaptive.state import update_mastery, update_weakness
 from app.domain.enums import Difficulty
-from app.domain.mastery import difficulty_for_mastery
+from app.domain.mastery import TOPIC_ADVANCE_CEILING, difficulty_for_mastery
 from app.domain.questions import LOWEST_PRIORITY, Question
-from app.errors import DomainRuleError, NoQuestionAvailableError
+from app.errors import CurriculumCompletedError, DomainRuleError, NoQuestionAvailableError
 from app.persistence.models import QuestionRow, StudentAttemptRow, TrainingSessionRow
 from app.persistence.repositories import (
     CurriculumRepository,
@@ -145,13 +145,31 @@ class AdaptiveTrainingEngine:
                 ),
             )
 
+        curriculum_version_id = self._sets.get(set_version_id).curriculum_version_id
+        if curriculum_version_id is None:
+            # The curriculum this set was frozen against was later deleted.
+            # There is nothing left to sequence against, so fall back to
+            # pooling every servable subtopic as before.
+            pool = servable
+        else:
+            pool = self._current_topic_pool(run, curriculum_version_id, servable)
+            if pool is None:
+                self._runs.end(run)
+                raise CurriculumCompletedError(
+                    "This student has completed every topic in this curriculum.",
+                    detail=(
+                        f"Session {run.id} reached the end of curriculum "
+                        f"{curriculum_version_id}; the session has been ended."
+                    ),
+                )
+
         ordinal = self._attempts.next_ordinal(run.id)
         # Seeded from the session and the position, so a run replays exactly
         # without any generator state being carried between requests.
         rng = random.Random(f"{run.rng_seed}:{ordinal}")
 
-        weights = self._state.weaknesses_for(run.student_id, servable)
-        topic_of = self._curriculum.topic_ids_for(servable)
+        weights = self._state.weaknesses_for(run.student_id, pool)
+        topic_of = self._curriculum.topic_ids_for(pool)
         answered = self._attempts.answered_question_ids(run.student_id)
 
         fallback_used = False
@@ -208,6 +226,48 @@ class AdaptiveTrainingEngine:
                 "The coverage page names the gaps."
             ),
         )
+
+    def _current_topic_pool(
+        self, run: TrainingSessionRow, curriculum_version_id: int, servable: set[int]
+    ) -> set[int] | None:
+        """The subtopics of whichever topic this student is currently on.
+
+        Walks the curriculum in position order. A topic already past
+        ``TOPIC_ADVANCE_CEILING`` is skipped: the student has moved past it.
+        A topic with nothing servable under it is also skipped so a bank gap
+        early in the curriculum cannot stall a student who is otherwise ready
+        to advance -- but if that gap is what stops the walk from finding
+        anything to serve, it is reported as the bank problem it is rather
+        than read as the student having finished. ``None`` means every topic
+        was past the ceiling with no gap in between: the curriculum is
+        genuinely done.
+
+        Raises:
+            NoQuestionAvailableError: if the walk ends without a servable
+                topic and at least one topic along the way was skipped for
+                having nothing servable rather than for being mastered.
+        """
+        saw_gap = False
+        for topic_id, subtopic_ids in self._curriculum.topics_with_subtopics_in_order(
+            curriculum_version_id
+        ):
+            mastery = self._state.mastery_for(run.student_id, topic_id)
+            if mastery >= TOPIC_ADVANCE_CEILING:
+                continue
+            pool = servable.intersection(subtopic_ids)
+            if not pool:
+                saw_gap = True
+                continue
+            return pool
+        if saw_gap:
+            raise NoQuestionAvailableError(
+                "No topic at this student's current position has a servable question.",
+                detail=(
+                    f"Curriculum {curriculum_version_id} has a gap at or after this student's "
+                    "current topic. Approve questions for it, then freeze a new set."
+                ),
+            )
+        return None
 
     def _pick_in_subtopic(
         self,

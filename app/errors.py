@@ -159,6 +159,20 @@ class NoQuestionAvailableError(AdaptiveTrainerError):
     code = "no_question_available"
 
 
+class CurriculumCompletedError(AdaptiveTrainerError):
+    """Sequential topic progression reached the end of the curriculum.
+
+    Every topic passed ``TOPIC_ADVANCE_CEILING``, so there is nothing left for
+    this session to ask. Distinct from :class:`NoQuestionAvailableError`,
+    which the engine raises instead whenever a bank gap -- not mastery -- is
+    what actually stopped a topic from being servable. The session is ended
+    alongside this error rather than left open with no way to serve again.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "curriculum_completed"
+
+
 class ResourceInUseError(AdaptiveTrainerError):
     """Deleting this row would strand something that still points at it.
 
