@@ -13,7 +13,7 @@ function ProfessorChrome({ children }: { children: React.ReactNode }) {
     <AuthGate>
       <SidebarProvider>
         <AppSidebar />
-        <SidebarInset className="app-inset">
+        <SidebarInset className="app-inset min-w-0">
           {/* `min-w-0`: without it this flex child refuses to shrink below the
               width of its widest content, and a long code listing would push
               the whole page into horizontal scroll instead of scrolling itself. */}
