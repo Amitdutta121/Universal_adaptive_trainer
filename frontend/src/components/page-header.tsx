@@ -24,7 +24,7 @@ export function PageHeader({
 }) {
   return (
     <header className="app-page-header">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {showSidebarTrigger ? (
           <>
             <SidebarTrigger className="-ml-1 text-muted-foreground" />
@@ -32,9 +32,9 @@ export function PageHeader({
           </>
         ) : null}
         <h1>{title}</h1>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {showTaxonomySelector ? <TaxonomySelector /> : null}
-          {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
       </div>
       {summary ? <p className="app-page-summary">{summary}</p> : null}
