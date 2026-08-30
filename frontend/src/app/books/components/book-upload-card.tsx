@@ -52,7 +52,7 @@ export function BookUploadCard({ guide }: { guide: BookDocumentGuide | undefined
   function documentToSend(): File | null {
     if (source === "file") {
       if (!file) {
-        setLocalProblem("Choose a .json file, or switch to Paste JSON.");
+        setLocalProblem("Choose a file, or switch to Paste JSON.");
         return null;
       }
       if (maxUploadMb !== undefined && exceedsUploadLimit(file.size, maxUploadMb)) {
@@ -104,8 +104,10 @@ export function BookUploadCard({ guide }: { guide: BookDocumentGuide | undefined
           Import a book document
         </CardTitle>
         <CardDescription>
-          Structured book JSON only{maxUploadMb ? `, up to ${maxUploadMb} MB` : ""}. An invalid
-          document is refused in full — nothing is stored, and you can correct it and try again.
+          A structured book JSON document, or a raw PDF
+          {maxUploadMb ? ` (up to ${maxUploadMb} MB)` : ""}. A PDF's chapters and sections are read
+          automatically from its table of contents where one exists. An invalid document is refused
+          in full — nothing is stored, and you can correct it and try again.
         </CardDescription>
       </CardHeader>
 
@@ -118,7 +120,7 @@ export function BookUploadCard({ guide }: { guide: BookDocumentGuide | undefined
             </TabsList>
 
             <TabsContent value="file" className="mt-3 space-y-2">
-              <Label htmlFor={fileFieldId}>Book JSON document</Label>
+              <Label htmlFor={fileFieldId}>Book document</Label>
               <Input
                 id={fileFieldId}
                 type="file"
@@ -131,8 +133,10 @@ export function BookUploadCard({ guide }: { guide: BookDocumentGuide | undefined
               />
               <p className="text-muted-foreground text-xs">
                 Accepted: {accept}
-                {guide ? ` (schema version ${guide.schema_version})` : ""}. A PDF or EPUB cannot be
-                imported — convert it to a document first.
+                {guide ? ` (JSON schema version ${guide.schema_version})` : ""}. A PDF with no table
+                of contents still imports, marked partial, with its chapters guessed. Other formats
+                (EPUB, Markdown, plain text, HTML) cannot be imported — convert one of those to a
+                document first.
               </p>
             </TabsContent>
 

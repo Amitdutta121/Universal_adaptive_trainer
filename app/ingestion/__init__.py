@@ -1,33 +1,27 @@
 """Source / book ingestion.
 
 Responsibility
-    Import professor-supplied **structured book JSON documents**, retain the
-    uploaded file, and store the chapters, sections, section text and page ranges
-    that curriculum extraction and question generation will ground themselves in.
+    Import a professor-supplied **structured book JSON document**, or a raw
+    **PDF**, retain the uploaded file, and store the chapters, sections,
+    section text and page ranges that curriculum extraction and question
+    generation will ground themselves in.
 
 What this package does not do
-    It performs **no extraction**: no heading regular expressions, no font-size
-    heuristics, no text segmentation, and no PDF parsing. A book's structure is
-    declared by its document. Heuristic extraction was removed because it is not
-    deterministic across books -- rules tuned on one textbook silently mis-segment
-    the next, and the output still looks plausible, so the failure goes unnoticed.
-    See ``docs/DECISIONS.md`` ADR-015 and ADR-016.
-
-    Producing a book JSON document from a raw PDF, EPUB or HTML is out of scope
-    for this application. The professor supplies a valid document; this package's
-    job is to be uncompromising about validating it.
-
-The section is the unit
-    A section is a whole instructional section, never a fixed-size chunk. The
-    schema requires non-empty section text and forbids unknown fields, so a
-    malformed document is rejected rather than silently reshaped.
+    Outside :mod:`app.ingestion.pdf`, it performs **no extraction**: no heading
+    regular expressions, no font-size heuristics, no text segmentation, and no
+    PDF parsing. A book's structure is declared by its document -- a PDF's own
+    embedded outline counts as such a declaration (ADR-048), which is why
+    reading it is a narrow, confined exception rather than a return to
+    heuristic extraction generally. Reading an EPUB or HTML file remains out of
+    scope entirely. See ``docs/DECISIONS.md`` ADR-015, ADR-016 and ADR-048.
 
 Module layout
-    ``schema``     the book JSON contract, and its validation
-    ``authoring``  the copy-and-paste instruction that produces a document
+    ``schema``     the book document contract, and its validation
+    ``pdf``        turns a raw PDF into that same contract shape (ADR-048)
+    ``authoring``  the copy-and-paste instruction that produces a JSON document
     ``library``    rename and delete an imported book
     ``storage``    upload validation and retention of the uploaded document
-    ``service``    the workflow: validate, store, persist
+    ``service``    the workflow: validate (or extract, then validate), store, persist
     ``retrieval``  reading sections back out with citations
 
 Allowed dependencies
@@ -45,6 +39,7 @@ from app.ingestion.authoring import (
     example_json,
 )
 from app.ingestion.library import BookLibraryService
+from app.ingestion.pdf import extract_book_document
 from app.ingestion.retrieval import SourceRetrieval, chapter_from_row, section_from_row
 from app.ingestion.schema import (
     SCHEMA_VERSION,
@@ -81,6 +76,7 @@ __all__ = [
     "book_authoring_prompt",
     "chapter_from_row",
     "example_json",
+    "extract_book_document",
     "format_for_filename",
     "parse_book_document",
     "section_from_row",

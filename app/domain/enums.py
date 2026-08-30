@@ -26,11 +26,13 @@ class BookStatus(StrEnum):
 class SourceFormat(StrEnum):
     """Accepted upload formats.
 
-    Structured book JSON is the only input the application accepts. Producing that
-    JSON from a raw book is out of scope for this application entirely.
+    Structured book JSON is declared directly. A PDF is turned into that same
+    declared shape by ``app.ingestion.pdf`` before validation -- its own
+    embedded outline stands in for a hand-authored declaration (ADR-048).
     """
 
     BOOK_JSON = "book_json"
+    BOOK_PDF = "book_pdf"
 
 
 class StructureSource(StrEnum):
