@@ -197,6 +197,7 @@ type QuestionListParams = {
   limit?: number;
   status?: QuestionStatus;
   curriculum_version_id?: number;
+  section_id?: number;
 };
 
 export const questionsQuery = (params: QuestionListParams) =>
@@ -206,6 +207,13 @@ export const questionsQuery = (params: QuestionListParams) =>
   });
 
 export const useQuestions = (params: QuestionListParams) => useQuery(questionsQuery(params));
+
+/** Every question already generated from one chunk, newest first. */
+export const useQuestionsForSection = (sectionId: number | null) =>
+  useQuery({
+    ...questionsQuery({ section_id: sectionId ?? 0, limit: 50 }),
+    enabled: sectionId !== null,
+  });
 
 export const useQuestion = (id: number | null, { enabled = true } = {}) =>
   useQuery({
@@ -339,6 +347,25 @@ export function useGenerateBatch() {
   return useMutation({
     mutationFn: (body: Schemas["GenerateBatchRequest"]) =>
       unwrap(api.POST("/api/questions/generate-batch", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questions.all });
+      client.invalidateQueries({ queryKey: qk.system.counts() });
+    },
+  });
+}
+
+/**
+ * Generate from one chunk, one type, one difficulty at a time.
+ *
+ * The same endpoint the bulk sheet's per-format rows resolve to underneath —
+ * given a single section id it creates exactly one question, so the
+ * single-chunk generator needs no endpoint of its own.
+ */
+export function useGenerateQuestions() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["GenerateQuestionsRequest"]) =>
+      unwrap(api.POST("/api/questions/generate", { body })),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });

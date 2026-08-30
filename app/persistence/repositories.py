@@ -560,6 +560,7 @@ class QuestionRepository:
         *,
         statuses: Collection[QuestionStatus] | None = None,
         curriculum_version_id: int | None = None,
+        section_id: int | None = None,
     ) -> list[QuestionRow]:
         """The newest questions, optionally narrowed to particular statuses.
 
@@ -568,12 +569,27 @@ class QuestionRepository:
         rather than "no filter". ``curriculum_version_id`` narrows the same way,
         so a taxonomy filter applies to the whole bank rather than only to
         whatever page ``limit`` happened to load.
+
+        ``section_id`` narrows to questions grounded in that one section. Like
+        :meth:`count_grounded_in_sections`, this reads the frozen spec rather than
+        a foreign key, so it is applied by scanning candidates in Python after the
+        other filters and before ``limit`` is taken -- a section rarely produces
+        more than a handful of questions, so this stays cheap in practice.
         """
         stmt = select(QuestionRow).order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
         if statuses is not None:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        if section_id is not None:
+            rows = []
+            for row in self._session.scalars(stmt):
+                if section_id not in _spec_sections(row.spec):
+                    continue
+                rows.append(row)
+                if len(rows) >= limit:
+                    break
+            return rows
         return list(self._session.scalars(stmt.limit(limit)))
 
     def count_by_curriculum_version(self) -> dict[str, int]:

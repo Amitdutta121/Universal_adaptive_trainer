@@ -358,6 +358,33 @@ def test_question_list_filters_by_curriculum_version_across_the_whole_bank(
     assert payload["curriculum_version_counts"] == {"1": 1, "2": 3}
 
 
+def test_question_list_filters_by_section_across_the_whole_bank(
+    client: TestClient, session: Session
+) -> None:
+    """``section_id`` narrows to questions grounded in that one section.
+
+    Grounding is read from the frozen spec (ADR-044), not a foreign key, so this
+    exercises the same scan :meth:`count_grounded_in_sections` already relies on.
+    """
+    from app.persistence.models import QuestionRow
+
+    wanted = QuestionRow(
+        prompt="From section 7.",
+        spec={"source_section_ids": [7]},
+    )
+    session.add(wanted)
+    session.add(QuestionRow(prompt="From section 9.", spec={"source_section_ids": [9]}))
+    session.add(QuestionRow(prompt="No spec at all."))
+    session.commit()
+
+    response = client.get("/api/questions", params={"section_id": 7})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [q["id"] for q in payload["questions"]] == [wanted.id]
+    assert payload["total"] == 3
+
+
 def test_generation_without_an_approved_curriculum_is_refused(client: TestClient) -> None:
     book_id = _import_book(client)["id"]
     section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]

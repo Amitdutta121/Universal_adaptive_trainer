@@ -417,12 +417,12 @@ export interface paths {
          * List Questions
          * @description The question bank, newest first, with counts by lifecycle status.
          *
-         *     ``status`` and ``curriculum_version_id`` narrow the listing; without them
-         *     nothing is hidden. The API does not filter by default even though the page
-         *     does, because a caller reading the bank over JSON has no way to discover rows
-         *     an unrequested default removed. ``status_counts``, ``curriculum_version_counts``
-         *     and ``total`` always describe the whole bank, so a filtered listing still says
-         *     how much it is showing of what.
+         *     ``status``, ``curriculum_version_id`` and ``section_id`` narrow the listing;
+         *     without them nothing is hidden. The API does not filter by default even
+         *     though the page does, because a caller reading the bank over JSON has no way
+         *     to discover rows an unrequested default removed. ``status_counts``,
+         *     ``curriculum_version_counts`` and ``total`` always describe the whole bank,
+         *     so a filtered listing still says how much it is showing of what.
          */
         get: operations["list_questions_api_questions_get"];
         put?: never;
@@ -4440,6 +4440,7 @@ export interface operations {
                 limit?: number;
                 status?: components["schemas"]["QuestionStatus"] | null;
                 curriculum_version_id?: number | null;
+                section_id?: number | null;
             };
             header?: never;
             path?: never;

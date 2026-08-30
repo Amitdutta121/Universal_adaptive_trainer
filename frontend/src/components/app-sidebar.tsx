@@ -2,13 +2,14 @@
 
 /** The persistent professor navigation, driven entirely by `lib/navigation.ts`. */
 
-import { LogOut, Moon, Sparkles, Sun, SunMoon } from "lucide-react";
+import { ChevronRight, LogOut, Moon, Sparkles, Sun, SunMoon } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +21,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { useCurrentUser, useHealth, useLogout } from "@/lib/api/queries";
@@ -179,6 +183,45 @@ export function AppSidebar() {
                       const Icon = section.icon;
                       const isActive =
                         pathname === section.path || pathname.startsWith(`${section.path}/`);
+
+                      if (section.children?.length) {
+                        return (
+                          <Collapsible
+                            key={section.key}
+                            defaultOpen={isActive}
+                            className="group/collapsible"
+                          >
+                            <SidebarMenuItem>
+                              <CollapsibleTrigger asChild>
+                                <SidebarMenuButton
+                                  isActive={isActive}
+                                  tooltip={section.label}
+                                  className="text-[13px]"
+                                >
+                                  <Icon />
+                                  <span>{section.label}</span>
+                                  <ChevronRight className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                                </SidebarMenuButton>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <SidebarMenuSub>
+                                  {section.children.map((child) => {
+                                    const childActive = pathname === child.path;
+                                    return (
+                                      <SidebarMenuSubItem key={child.key}>
+                                        <SidebarMenuSubButton asChild isActive={childActive}>
+                                          <Link href={child.path}>{child.label}</Link>
+                                        </SidebarMenuSubButton>
+                                      </SidebarMenuSubItem>
+                                    );
+                                  })}
+                                </SidebarMenuSub>
+                              </CollapsibleContent>
+                            </SidebarMenuItem>
+                          </Collapsible>
+                        );
+                      }
+
                       return (
                         <SidebarMenuItem key={section.key}>
                           <SidebarMenuButton
