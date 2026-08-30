@@ -198,6 +198,34 @@ export interface paths {
         patch: operations["update_book_api_books__book_id__patch"];
         trace?: never;
     };
+    "/api/books/{book_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Book Source
+         * @description The original PDF as uploaded, for in-browser rendering.
+         *
+         *     Only a book imported from a PDF (``SourceFormat.BOOK_PDF``) has a source
+         *     file worth serving back -- a book declared directly as structured JSON has
+         *     no PDF to render, even though it also retains its uploaded file.
+         *
+         *     Not a download: no ``filename`` is passed to ``FileResponse``, so no
+         *     ``Content-Disposition: attachment`` header is sent, and a PDF-rendering
+         *     client can fetch it inline.
+         */
+        get: operations["get_book_source_api_books__book_id__source_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/sections": {
         parameters: {
             query?: never;
@@ -4024,6 +4052,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BookSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_book_source_api_books__book_id__source_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

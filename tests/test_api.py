@@ -8,6 +8,7 @@ back as JSON under ``/api``, and an invalid upload changes nothing.
 from __future__ import annotations
 
 import book_documents as docs
+import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -33,6 +34,24 @@ def _import_book(client: TestClient) -> dict:
         files={
             "file": ("think_python.json", docs.to_bytes(docs.think_python()), "application/json")
         },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
+    """A tiny, real PDF, for exercising the source-file route."""
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), text, fontsize=11)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def _import_pdf_book(client: TestClient) -> dict:
+    response = client.post(
+        "/api/books",
+        files={"file": ("textbook.pdf", _one_page_pdf(), "application/pdf")},
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -135,6 +154,32 @@ def test_section_under_the_wrong_book_is_a_404(client: TestClient) -> None:
     section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
 
     response = client.get(f"/api/books/{book_id + 999}/sections/{section_id}")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_book_source_streams_the_retained_pdf(client: TestClient) -> None:
+    book_id = _import_pdf_book(client)["id"]
+
+    response = client.get(f"/api/books/{book_id}/source")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+
+def test_book_source_for_a_json_imported_book_is_a_404(client: TestClient) -> None:
+    book_id = _import_book(client)["id"]
+
+    response = client.get(f"/api/books/{book_id}/source")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_book_source_for_an_unknown_book_is_a_404(client: TestClient) -> None:
+    response = client.get("/api/books/999999/source")
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
