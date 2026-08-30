@@ -46,12 +46,25 @@ function buildAnchors(rows: readonly SheetRow[]): PageAnchor[] {
     .sort((a, b) => a.startPage - b.startPage);
 }
 
-/** Which row's range the given page falls into: the last anchor at or before it. */
+/**
+ * Which row's range the given page falls into.
+ *
+ * When two chunks start on the same page (a short section sharing a page with
+ * the one after it, which real books do), the first of them in reading order
+ * wins — `anchors` is sorted by `startPage` and a stable sort keeps same-page
+ * anchors in that original order, so taking the first anchor at the highest
+ * startPage `<= page` picks the chunk whose heading actually opens the page,
+ * not whichever happened to sort last.
+ */
 function sectionForPage(anchors: readonly PageAnchor[], page: number): number | null {
   let found: number | null = null;
+  let bestStartPage = Number.NEGATIVE_INFINITY;
   for (const anchor of anchors) {
     if (anchor.startPage > page) break;
-    found = anchor.sectionId;
+    if (anchor.startPage > bestStartPage) {
+      bestStartPage = anchor.startPage;
+      found = anchor.sectionId;
+    }
   }
   return found ?? anchors[0]?.sectionId ?? null;
 }
@@ -149,10 +162,13 @@ export function PdfPageViewer({
   // passes, fighting this same effect). selectedRow is derived from
   // selectedSectionId — re-running because selectedRow's identity changed (e.g.
   // rows reloaded) would re-jump the scroll with nothing the user did.
+  // `numPages` is a real dependency, not an incidental one: this effect runs on
+  // mount before the document has loaded, when no slot refs exist yet and the
+  // jump would silently no-op, so it must run again once slots exist.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
     if (selectedRow?.startPage) scrollToPage(selectedRow.startPage, "auto");
-  }, [selectedSectionId]);
+  }, [selectedSectionId, numPages]);
 
   const slots = numPages ? Array.from({ length: numPages }, (_, index) => index + 1) : [];
   const estimatedHeight = pageHeight ?? pageWidth * FALLBACK_ASPECT;
@@ -219,7 +235,13 @@ export function PdfPageViewer({
                       ? "ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                       : ""
                   }`}
-                  style={inWindow ? undefined : { height: estimatedHeight, width: pageWidth }}
+                  // A minHeight (not a conditional height) even for an in-window,
+                  // real `<Page>`: react-pdf's canvas has no size until it finishes
+                  // loading, and without a floor here the slot would momentarily
+                  // collapse the instant a placeholder becomes a real page — shrinking
+                  // total scroll height under a fixed scrollTop and silently landing
+                  // the viewport on a different page than the one just jumped to.
+                  style={{ minHeight: estimatedHeight, width: pageWidth }}
                 >
                   {inWindow ? (
                     <Page
