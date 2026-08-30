@@ -3215,11 +3215,12 @@ export interface components {
          * SourceFormat
          * @description Accepted upload formats.
          *
-         *     Structured book JSON is the only input the application accepts. Producing that
-         *     JSON from a raw book is out of scope for this application entirely.
+         *     Structured book JSON is declared directly. A PDF is turned into that same
+         *     declared shape by ``app.ingestion.pdf`` before validation -- its own
+         *     embedded outline stands in for a hand-authored declaration (ADR-048).
          * @enum {string}
          */
-        SourceFormat: "book_json";
+        SourceFormat: "book_json" | "book_pdf";
         /** StartTrainingSessionRequest */
         StartTrainingSessionRequest: {
             /** Student Id */

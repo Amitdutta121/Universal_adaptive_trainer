@@ -23,6 +23,11 @@ dependencies = [
     # Asynchronous judge batch jobs (app/llm/batch.py). Instructor cannot wrap a
     # job that is submitted now and collected later. See docs/DECISIONS.md ADR-030.
     "httpx>=0.27",
+    # Reads a PDF's own outline and page text; confined to app/ingestion/pdf/.
+    # AGPL-3.0/commercial licensed -- a deliberate tradeoff. See docs/DECISIONS.md
+    # ADR-048.
+    "pymupdf>=1.28",
+    "pymupdf4llm>=1.28",
 ]
 
 [project.optional-dependencies]

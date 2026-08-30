@@ -60,7 +60,7 @@ def test_health_reports_a_real_database_probe(client: TestClient) -> None:
 def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient) -> None:
     payload = client.get("/api/config").json()
 
-    assert payload["supported_book_extensions"] == [".json"]
+    assert payload["supported_book_extensions"] == [".json", ".pdf"]
     assert [option["value"] for option in payload["difficulties"]] == ["easy", "medium", "hard"]
     assert {option["value"] for option in payload["question_types"]} == {
         "multiple_choice",
@@ -155,11 +155,20 @@ def test_invalid_book_document_is_rejected_and_stores_nothing(
 
 def test_unsupported_book_extension_is_rejected(client: TestClient) -> None:
     response = client.post(
-        "/api/books", files={"file": ("book.pdf", b"%PDF-1.4", "application/pdf")}
+        "/api/books", files={"file": ("book.docx", b"whatever", "application/octet-stream")}
     )
 
     assert response.status_code == 415
     assert response.json()["error"]["code"] == "unsupported_file"
+
+
+def test_an_unreadable_pdf_upload_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/books", files={"file": ("book.pdf", b"%PDF-1.4\nnot a real pdf", "application/pdf")}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_book_document"
 
 
 # --------------------------------------------------------------------- curriculum

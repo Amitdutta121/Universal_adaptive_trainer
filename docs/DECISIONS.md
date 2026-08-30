@@ -1948,3 +1948,56 @@ fight over one number for no reason that survived contact with actual tuning dat
 exhausted walk as curriculum completion, including one that ran into a bank gap:* would silently
 misreport a professor's unwritten questions as a student's finished curriculum — the opposite of
 ADR-041's "surfaced rather than hidden" treatment of bank gaps.
+
+---
+
+## ADR-048 — PDF import is supported via automated structural inference
+
+**Status:** accepted (narrows ADR-015 and ADR-016; ADR-012's original reasoning about heuristic risk
+is unchanged, not disputed)
+
+A `.pdf` upload is now accepted, alongside structured book JSON. `app/ingestion/pdf/` turns the PDF
+into the same declared-document shape `app/ingestion/schema.py` already validates, via PyMuPDF
+(`pymupdf`) and `pymupdf4llm`:
+
+- When the PDF's own outline (`get_toc()`) is present, chapters and sections, and their page ranges,
+  are read directly from it and marked `structure_source: "pdf_outline"` (HIGH confidence, per the
+  existing `CONFIDENCE_BY_SOURCE` mapping — no schema or enum change was needed for this).
+- When no outline exists, a narrow regex-only fallback looks for `Chapter N` / `N.N Heading`-shaped
+  lines; if that finds nothing either, the book is split into arbitrary fixed-size page blocks purely
+  so there is something to select. Either way, every unit produced here is unconditionally
+  `structure_source: "producer_inferred"` (LOW), with a document-level `defect` warning, which makes
+  the book `PARTIAL` via the existing `BookDocument.is_partial()`.
+- Section text comes from `pymupdf4llm.to_markdown()` per page range, lightly cleaned (excess blank
+  lines collapsed) but not reflowed, summarized or corrected.
+
+**Why:** ADR-015's objection to heuristic extraction was that rules tuned on one textbook silently
+mis-segment the next, with a failure invisible because the output still looks like a real structure.
+A PDF's own embedded outline is not this application guessing — it is the publisher's own table of
+contents, exactly the kind of declared structure ADR-015 asked for, just arriving as a PDF instead of
+hand-typed JSON. That argument does not extend to the fallback tier, so the fallback is never treated
+as though it were declared: it is unconditionally low-confidence and visibly partial, never presented
+as a clean import. The professor's own stated need — selecting chapters/subchapters, with a later LLM
+generating questions from whatever text comes out — does not require pristine extraction, only a
+plausible boundary and readable-enough text, which is the bar this ADR holds to instead of ADR-016's
+"no conversion code at all."
+
+**Implications:**
+
+- `app/ingestion/pdf/` is the only place in `app/` allowed to import `pymupdf`/`pymupdf4llm`;
+  `tests/test_boundaries.py` enforces this by excluding that package from its grep-ban and by
+  asserting no other PDF library (`pypdf`, `pdfplumber`, `pdfminer`) is installed or declared.
+- `pymupdf`/`pymupdf4llm` are real, declared dependencies of `pyproject.toml` now, not merely
+  installed. `pymupdf` is AGPL-3.0 (or commercially licensed) — a deliberate, recorded tradeoff for a
+  library that is not redistributed, only run as part of this application.
+- `SourceFormat.BOOK_PDF` is a new enum value; `app.ingestion.storage.FORMAT_BY_EXTENSION` and
+  `_RAW_BOOK_EXTENSIONS` route `.pdf` to extraction instead of rejecting it. EPUB, Markdown, plain
+  text and HTML remain rejected exactly as before — this ADR is scoped to PDF only.
+  `app.ingestion.schema.parse_book_document`'s tail (version check, `BookDocument.model_validate`,
+  error wrapping) is now `validate_payload`, shared by the JSON-transport path and the PDF path, so
+  there remains exactly one place that decides whether a document is accepted.
+- The chapter/section selection UI (`/questions/generate`, the book structure viewer) needed no
+  changes: both already read persisted `Book`/`BookChapter`/`BookSection` rows, which carry the same
+  `structure_source`/`structure_confidence`/warnings fields regardless of which producer wrote them.
+- The original uploaded PDF is retained exactly like a retained JSON document today (ADR-013), so a
+  correction is re-running extraction against the same source, not asking the professor to re-upload.
