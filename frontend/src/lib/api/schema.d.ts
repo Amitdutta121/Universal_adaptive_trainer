@@ -484,6 +484,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/questions/{question_id}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Question
+         * @description Generate a new question from an existing one, with instructor feedback.
+         *
+         *     The source question is never modified: this returns a fresh row, grounded in
+         *     the same section, type and difficulty, with the feedback threaded into the
+         *     generation prompt. It writes no review and triggers no instruction relearn --
+         *     that is the review endpoint's job, not this one.
+         */
+        post: operations["regenerate_question_api_questions__question_id__regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/questions/batch-plan": {
         parameters: {
             query?: never;
@@ -987,6 +1012,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/question-sets/prod/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Prod Set
+         * @description Freeze the approved bank now and repoint the stable prod classroom link.
+         */
+        post: operations["sync_prod_set_api_question_sets_prod_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets/prod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Prod Classroom
+         * @description The current production classroom snapshot behind the stable join link.
+         */
+        get: operations["get_prod_classroom_api_question_sets_prod_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/question-sets/{set_version_id}": {
         parameters: {
             query?: never;
@@ -1014,18 +1079,83 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Students */
+        /**
+         * List Students
+         * @description One page of the roster, filtered server-side (ADR-041 keeps it read-only).
+         *
+         *     The score, answered and activity filters run off one grouped pass over the
+         *     attempt table -- :meth:`StudentAttemptRepository.stats_by_student` -- rather
+         *     than a progress fetch per learner, so the cost no longer grows with the
+         *     cohort. ``total`` is the count *after* filtering, so the client can size its
+         *     page controls.
+         */
         get: operations["list_students_api_students_get"];
         put?: never;
         /**
          * Create Student
          * @description Enrol a learner.
          *
-         *     Names are unique because the picker is by name, so a duplicate would attach
-         *     one learner's mastery to another. That is reported as a rule violation rather
-         *     than left to surface as a database error.
+         *     Takes a name and a contact email. Names are unique because the picker is by
+         *     name, so a duplicate would attach one learner's mastery to another. That is
+         *     reported as a rule violation rather than left to surface as a database error.
+         *     The email is validated for shape only and not required to be distinct.
+         *
+         *     The response carries the learner's ``resume_token``: the browser that
+         *     enrolled them stores it and presents it to ``POST /students/resume`` to come
+         *     back as the same learner instead of colliding on the unique name.
          */
         post: operations["create_student_api_students_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/students/class-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Class Summary
+         * @description Cohort-wide figures for the roster's aggregate cards.
+         *
+         *     Independent of which roster page is open: the class trend graph and the
+         *     weakness heatmap are about the whole class, so they get their own request
+         *     instead of being rebuilt from whatever page of learners happens to be loaded.
+         */
+        get: operations["class_summary_api_students_class_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/students/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Student
+         * @description Recognise a returning browser by its stored token (ADR-041).
+         *
+         *     Public, like enrolment: students have no login. An unknown token is a 404 so
+         *     the caller can drop its stale copy and fall back to enrolling; a known token
+         *     returns the learner, plus their one unfinished run if there is one -- against
+         *     *any* classroom set, not only this link's, because a student runs a single
+         *     session at a time (see :func:`start_training_session`) and the join screen has
+         *     to be able to send them back to it whichever link they arrive on.
+         */
+        post: operations["resume_student_api_students_resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1089,6 +1219,13 @@ export interface paths {
          *
          *     The seed is generated here and stored, which is what makes the run
          *     replayable: every roulette draw derives from it and the question's position.
+         *
+         *     A learner may hold only one unfinished session at a time. A second is
+         *     refused with :class:`ActiveSessionExistsError` rather than created, because
+         *     two attempt streams folding scores into the same per-student BKT state
+         *     corrupt the mastery estimate (ADR-041) -- and an accidental double-join (a
+         *     second tab, a re-followed link) is a routine event, not an edge case. The
+         *     client recovers by resuming the session the error names.
          */
         post: operations["start_training_session_api_training_sessions_post"];
         delete?: never;
@@ -1362,6 +1499,8 @@ export interface components {
             passed_tests: number | null;
             /** Total Tests */
             total_tests: number | null;
+            /** Answer */
+            answer: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1728,6 +1867,68 @@ export interface components {
          */
         ClaimViolation: "unknown_topic" | "unknown_subtopics" | "no_subtopic" | "too_many_subtopics" | "foreign_subtopics";
         /**
+         * ClassSummaryOut
+         * @description Cohort-wide numbers the roster's aggregate cards need, computed over every
+         *     learner regardless of which roster page is open.
+         */
+        ClassSummaryOut: {
+            /** Student Count */
+            student_count: number;
+            /** Measured Students */
+            measured_students: number;
+            /** Average Score */
+            average_score?: number | null;
+            /** Scored Attempts */
+            scored_attempts?: components["schemas"]["ClassTrendAttemptOut"][];
+            /** Weakness Cells */
+            weakness_cells?: components["schemas"]["ClassWeaknessCellOut"][];
+        };
+        /**
+         * ClassTrendAttemptOut
+         * @description One scored answer, cohort-wide, for the class trend graph.
+         */
+        ClassTrendAttemptOut: {
+            /** Student Id */
+            student_id: number;
+            /** Score */
+            score: number;
+            /** Answered At */
+            answered_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Ordinal */
+            ordinal: number;
+        };
+        /** ClassWeaknessCellOut */
+        ClassWeaknessCellOut: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Subtopic Name */
+            subtopic_name: string;
+            /** Topic Name */
+            topic_name: string;
+            /** Average Weakness */
+            average_weakness: number;
+            /** Student Count */
+            student_count: number;
+            /** Affected */
+            affected?: components["schemas"]["ClassWeaknessStudentOut"][];
+        };
+        /** ClassWeaknessStudentOut */
+        ClassWeaknessStudentOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Weakness */
+            weakness: number;
+            /** Answered */
+            answered: number;
+        };
+        /**
          * ConceptConfidence
          * @description How sure the analysis is about a proposed concept or grouping.
          *
@@ -1882,6 +2083,11 @@ export interface components {
         CreateStudentRequest: {
             /** Display Name */
             display_name: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /**
          * CurriculumItemLabelUpdate
@@ -2892,6 +3098,11 @@ export interface components {
             created_at: string;
             /** Question Ids */
             question_ids: number[];
+            /**
+             * Is Prod
+             * @default false
+             */
+            is_prod: boolean;
         };
         /**
          * QuestionStatus
@@ -2934,6 +3145,8 @@ export interface components {
             times_used: number;
             /** Is Edited */
             is_edited: boolean;
+            /** Regenerated From Question Id */
+            regenerated_from_question_id: number | null;
             /**
              * Created At
              * Format: date-time
@@ -2969,11 +3182,42 @@ export interface components {
             count: number;
         };
         /**
+         * RegenerateQuestionRequest
+         * @description Regenerate one existing question with instructor feedback.
+         *
+         *     The feedback is threaded into the generation prompt. The source question is
+         *     never modified -- a new question is produced (ADR-002).
+         */
+        RegenerateQuestionRequest: {
+            /** Feedback */
+            feedback: string;
+            /** Professor Id */
+            professor_id?: number | null;
+        };
+        /** RegenerateQuestionResponse */
+        RegenerateQuestionResponse: {
+            /** Question Id */
+            question_id: number;
+            /** Regenerated From Question Id */
+            regenerated_from_question_id: number;
+            question: components["schemas"]["QuestionSummary"];
+        };
+        /**
          * RejectionReason
          * @description Structured professor rationale for reject or edit decisions.
          * @enum {string}
          */
         RejectionReason: "technically_incorrect" | "incorrect_answer" | "incorrect_tests" | "not_grounded_in_source" | "wrong_topic_subtopic" | "too_easy" | "too_difficult" | "ambiguous" | "poor_wording" | "poor_distractors" | "poor_tests" | "not_pedagogically_useful" | "too_similar_repetitive" | "other";
+        /**
+         * ResumeStudentRequest
+         * @description A returning browser identifying itself against one classroom link.
+         */
+        ResumeStudentRequest: {
+            /** Resume Token */
+            resume_token: string;
+            /** Set Version Id */
+            set_version_id: number;
+        };
         /**
          * ReviewDecision
          * @description A professor's verdict on a generated question.
@@ -3275,12 +3519,49 @@ export interface components {
          * @enum {string}
          */
         StructureSource: "pdf_outline" | "markdown_heading" | "manual" | "structured_json" | "producer_inferred";
-        /** StudentListResponse */
+        /**
+         * StudentIdentityOut
+         * @description A learner plus the token their browser keeps to come back as them.
+         *
+         *     Returned only from enrolment and resume -- the two calls a student's own
+         *     browser makes. The professor-facing :class:`StudentOut` never carries the
+         *     token.
+         */
+        StudentIdentityOut: {
+            /** Id */
+            id: number;
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resume Token */
+            resume_token: string;
+        };
+        /**
+         * StudentListResponse
+         * @description A page of the roster. ``total`` counts the learners matching the filters,
+         *     not the page, so the client can render page controls.
+         */
         StudentListResponse: {
             /** Students */
-            students: components["schemas"]["StudentOut"][];
+            students: components["schemas"]["StudentRosterRowOut"][];
             /** Total */
             total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 20
+             */
+            page_size: number;
         };
         /**
          * StudentOut
@@ -3291,6 +3572,8 @@ export interface components {
             id: number;
             /** Display Name */
             display_name: string;
+            /** Email */
+            email: string;
             /**
              * Created At
              * Format: date-time
@@ -3324,6 +3607,46 @@ export interface components {
             recent_attempts: components["schemas"]["AttemptOut"][];
             /** Sessions */
             sessions: components["schemas"]["TrainingSessionOut"][];
+        };
+        /**
+         * StudentResumeOut
+         * @description Who a resume token belongs to, and the run to drop them back into if any.
+         */
+        StudentResumeOut: {
+            student: components["schemas"]["StudentIdentityOut"];
+            active_session: components["schemas"]["TrainingSessionOut"] | null;
+        };
+        /**
+         * StudentRosterRowOut
+         * @description One learner as the roster table shows them.
+         *
+         *     Carries the attempt aggregates the roster used to derive on the client from
+         *     a per-student progress fetch: the average, the answered count, when they were
+         *     last active, and the running-average series the row sparkline draws.
+         */
+        StudentRosterRowOut: {
+            /** Id */
+            id: number;
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Answered Count
+             * @default 0
+             */
+            answered_count: number;
+            /** Average Score */
+            average_score?: number | null;
+            /** Last Activity At */
+            last_activity_at?: string | null;
+            /** Score Series */
+            score_series?: number[];
         };
         /**
          * SubmitBatchRunRequest
@@ -4561,6 +4884,41 @@ export interface operations {
             };
         };
     };
+    regenerate_question_api_questions__question_id__regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegenerateQuestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegenerateQuestionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     batch_plan_api_questions_batch_plan_post: {
         parameters: {
             query?: never;
@@ -5248,6 +5606,46 @@ export interface operations {
             };
         };
     };
+    sync_prod_set_api_question_sets_prod_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+        };
+    };
+    get_prod_classroom_api_question_sets_prod_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+        };
+    };
     get_question_set_api_question_sets__set_version_id__get: {
         parameters: {
             query?: never;
@@ -5281,7 +5679,14 @@ export interface operations {
     };
     list_students_api_students_get: {
         parameters: {
-            query?: never;
+            query?: {
+                search?: string;
+                score?: string;
+                answered?: string;
+                activity?: string;
+                page?: number;
+                page_size?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5295,6 +5700,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StudentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5318,7 +5732,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StudentOut"];
+                    "application/json": components["schemas"]["StudentIdentityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    class_summary_api_students_class_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassSummaryOut"];
+                };
+            };
+        };
+    };
+    resume_student_api_students_resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeStudentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentResumeOut"];
                 };
             };
             /** @description Validation Error */

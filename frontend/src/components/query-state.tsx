@@ -11,10 +11,10 @@
 import { AlertCircle, Inbox } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError } from "@/lib/api/client";
+import { readApiError } from "@/lib/api/client";
 
 export function QueryError({ error }: { error: unknown }) {
-  const apiError = error instanceof ApiError ? error : null;
+  const apiError = readApiError(error);
   const title = apiError
     ? apiError.isUpstream
       ? "The model provider could not be reached"
@@ -36,7 +36,7 @@ export function QueryError({ error }: { error: unknown }) {
             </p>
           </div>
         ) : (
-          <p>Check that the FastAPI application is running on {"http://127.0.0.1:8000"}.</p>
+          <p>Check that the backend is running and reachable.</p>
         )}
       </AlertDescription>
     </Alert>

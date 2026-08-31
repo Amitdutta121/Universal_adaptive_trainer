@@ -9,6 +9,7 @@ needs them.
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
@@ -63,6 +64,18 @@ from app.persistence.types import (
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _new_resume_token() -> str:
+    """An unguessable handle a student's browser keeps to prove who it is.
+
+    43 URL-safe characters (32 bytes of ``secrets``). It is the only credential
+    in the student half of the application (ADR-041): the professor picker is by
+    name and the join link is anonymous, so a returning learner is recognised by
+    this token alone rather than by re-typing a name that the uniqueness rule
+    would then reject.
+    """
+    return secrets.token_urlsafe(32)
 
 
 class TimestampMixin:
@@ -385,6 +398,16 @@ class QuestionRow(TimestampMixin, Base):
     original_reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     original_tests: Mapped[str | None] = mapped_column(Text, default=None)
 
+    #: The question this one was regenerated from, when an instructor asked for a
+    #: new version with feedback. ``NULL`` for every question generated directly.
+    #: A separate row, not an edit: the source question is never mutated.
+    regenerated_from_question_id: Mapped[int | None] = mapped_column(
+        ForeignKey("questions.id", ondelete="SET NULL"), default=None, index=True
+    )
+    #: The instructor feedback threaded into the generation prompt for a
+    #: regenerated question. ``NULL`` unless ``regenerated_from_question_id`` is set.
+    regeneration_feedback: Mapped[str | None] = mapped_column(Text, default=None)
+
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
     )
@@ -596,6 +619,10 @@ class QuestionSetVersionRow(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="QuestionSetMemberRow.question_id",
     )
+    aliases: Mapped[list[QuestionSetAliasRow]] = relationship(
+        back_populates="set_version",
+        cascade="save-update, merge",
+    )
 
 
 class QuestionSetMemberRow(Base):
@@ -621,6 +648,26 @@ class QuestionSetMemberRow(Base):
     )
 
     set_version: Mapped[QuestionSetVersionRow] = relationship(back_populates="members")
+
+
+class QuestionSetAliasRow(TimestampMixin, Base):
+    """A stable classroom name that points at one frozen snapshot.
+
+    The alias may move to a newer snapshot over time, but the snapshots
+    themselves remain immutable. This lets one user-facing classroom link track
+    "the current prod bank" without rewriting history for sessions already
+    pinned to an earlier set id.
+    """
+
+    __tablename__ = "question_set_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alias: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    set_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_set_versions.id", ondelete="SET NULL"), default=None, index=True
+    )
+
+    set_version: Mapped[QuestionSetVersionRow | None] = relationship(back_populates="aliases")
 
 
 class TypeInstructionRow(TimestampMixin, Base):
@@ -772,12 +819,26 @@ class StudentRow(TimestampMixin, Base):
     that list is the only way to tell two students apart; a cohort containing two
     identical names has to distinguish them, since an ambiguous picker would
     attach one learner's mastery to the other.
+
+    ``resume_token`` is minted once, here, and handed to the browser that
+    enrolled the learner. It is what lets that browser come back to the join link
+    and land in its existing training session instead of colliding on the unique
+    name. It is never rotated and never shown on a professor-facing view.
+
+    ``email`` is collected at enrolment so the professor has a way to reach a
+    learner. It is required at the API boundary (a validated address on
+    ``CreateStudentRequest``), like the non-blank ``display_name`` rule, and left
+    with an empty default here so internal callers and older rows stay valid.
     """
 
     __tablename__ = "students"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     display_name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(320), default="")
+    resume_token: Mapped[str] = mapped_column(
+        String(43), unique=True, index=True, default=_new_resume_token
+    )
 
 
 class StudentTopicMasteryRow(Base):
@@ -939,7 +1000,7 @@ class StudentAttemptRow(TimestampMixin, Base):
 
 
 class UserRow(SQLAlchemyBaseUserTableUUID, Base):
-    """The professor console's one identity kind (see ``app/auth/``).
+    """The Instructor Studio's one identity kind (see ``app/auth/``).
 
     Fields beyond ``id``/``email``/``hashed_password``/``is_active`` come from
     ``fastapi_users_db_sqlalchemy``. There is no role column: only professors

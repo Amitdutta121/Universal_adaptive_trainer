@@ -1,4 +1,4 @@
-"""Login/logout for the professor console, and a "who am I" check.
+"""Login/logout for the Instructor Studio, and a "who am I" check.
 
 No registration route is mounted here: this application has one identity
 kind, seeded on startup (``app/auth/seed.py``), not created through signup.

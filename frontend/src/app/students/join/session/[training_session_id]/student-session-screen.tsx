@@ -173,6 +173,15 @@ function answerKeyContent(detail: QuestionDetail): Record<string, unknown> {
   return (detail.content ?? {}) as Record<string, unknown>;
 }
 
+// The author's explanation for a discrete question -- the same string the
+// scorer hands back as `detail` at answer time (see `_explanation` in
+// app/adaptive/scoring.py). Executable types have no stored explanation;
+// their feedback was live test evidence and is not retained per attempt.
+function explanationText(content: Record<string, unknown>): string | null {
+  const text = content.explanation;
+  return typeof text === "string" && text.trim() !== "" ? text : null;
+}
+
 // Rebuilds the correctly-ordered block list from the raw answer-key content
 // (`content.blocks` for text/indent, `content.correct_order` for sequence),
 // so it can be fed straight into `renderParsonsPreview`.
@@ -415,13 +424,22 @@ function PastQuestionSheet({
   detail,
   isOpen,
   onOpenChange,
+  onPrev,
+  onNext,
+  hasPrev,
+  hasNext,
 }: {
   attempt: AttemptOut | null;
   detail: QuestionDetail | null;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  hasPrev: boolean;
+  hasNext: boolean;
 }) {
   const isAnsweredAttempt = attempt?.score !== null;
+  const feedbackText = detail ? explanationText(answerKeyContent(detail)) : null;
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
@@ -434,6 +452,30 @@ function PastQuestionSheet({
           <SheetDescription>
             Review a past question, then close this panel to continue the current session.
           </SheetDescription>
+          {/* Step through this run's earlier questions without closing the panel;
+              order matches the "Recent questions" list (oldest to newest). */}
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onPrev}
+              disabled={!hasPrev}
+            >
+              <ArrowLeft />
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onNext}
+              disabled={!hasNext}
+            >
+              Next
+              <ArrowRight />
+            </Button>
+          </div>
         </SheetHeader>
 
         <div className="space-y-5 px-5 py-5">
@@ -481,7 +523,20 @@ function PastQuestionSheet({
                   This question is still active in the session, so its solution details are hidden.
                 </div>
               ) : (
-                <AnswerReview detail={detail} />
+                <>
+                  {feedbackText ? (
+                    <div className="space-y-1.5">
+                      <div className="font-medium text-foreground text-sm">Feedback</div>
+                      <pre className="overflow-x-auto whitespace-pre-wrap text-foreground text-sm leading-7">
+                        {feedbackText}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {/* Same review as the in-flow result card, and passing the
+                      stored submission marks the learner's own choice beside
+                      the correct one. */}
+                  <AnswerReview detail={detail} submittedAnswer={attempt?.answer ?? undefined} />
+                </>
               )}
             </>
           ) : (
@@ -1236,6 +1291,18 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     [sessionAttempts],
   );
   const pendingCount = sessionAttempts.filter((attempt) => attempt.score === null).length;
+  // Position of the open past-question sheet within this run's attempt list,
+  // so its Previous/Next buttons can step through the same ordering the
+  // "Recent questions" panel shows.
+  const selectedPastIndex = useMemo(
+    () => sessionAttempts.findIndex((attempt) => attempt.id === selectedPastAttempt?.id),
+    [sessionAttempts, selectedPastAttempt],
+  );
+  const stepPastAttempt = (offset: number) => {
+    if (selectedPastIndex < 0) return;
+    const target = sessionAttempts[selectedPastIndex + offset];
+    if (target) setSelectedPastAttempt(target);
+  };
   // Consecutive strong answers (>=80) counting back from the most recent,
   // stopping at the first miss -- a running streak, not a lifetime best.
   const currentStreak = useMemo(() => {
@@ -1306,6 +1373,10 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                 setSelectedPastAttempt(null);
               }
             }}
+            onPrev={() => stepPastAttempt(-1)}
+            onNext={() => stepPastAttempt(1)}
+            hasPrev={selectedPastIndex > 0}
+            hasNext={selectedPastIndex >= 0 && selectedPastIndex < sessionAttempts.length - 1}
           />
 
           {/* Main column: run header, alerts, result, then the live question. */}

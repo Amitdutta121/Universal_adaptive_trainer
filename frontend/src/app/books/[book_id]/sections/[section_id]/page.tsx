@@ -14,7 +14,8 @@ import { PageHeader } from "@/components/page-header";
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ApiError, api, unwrap } from "@/lib/api/client";
+import { ApiError, api, readApiError, unwrap } from "@/lib/api/client";
+import { forwardedCookieHeader } from "@/lib/api/server-request";
 import type { Schemas } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ export default async function SectionPage(
     detail = await unwrap(
       api.GET("/api/books/{book_id}/sections/{section_id}", {
         params: { path: { book_id: bookId, section_id: sectionId } },
+        headers: await forwardedCookieHeader(),
       }),
     );
   } catch (error) {
@@ -39,7 +41,7 @@ export default async function SectionPage(
     return (
       <>
         <PageHeader title="Section" />
-        <QueryError error={error} />
+        <QueryError error={readApiError(error)} />
       </>
     );
   }

@@ -12,7 +12,7 @@
  */
 
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import {
@@ -52,6 +52,42 @@ export function GenerateSingleScreen() {
   const [search, setSearch] = useState("");
   const [produced, setProduced] = useState<SheetFilters["produced"]>("any");
   const [questionId, setQuestionId] = useState<number | null>(null);
+
+  // The PDF pane's height is drag-resizable via the handle below it. `null`
+  // means "fill the column" (the default flex behaviour); a number pins it and
+  // lets the source-text / questions panels below claim the rest.
+  const [pdfHeight, setPdfHeight] = useState<number | null>(null);
+  const pdfPaneRef = useRef<HTMLDivElement>(null);
+
+  const startPdfResize = (clientY: number) => {
+    const startY = clientY;
+    const startHeight = pdfPaneRef.current?.getBoundingClientRect().height ?? 480;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ns-resize";
+    const onMove = (event: PointerEvent) => {
+      const next = startHeight + (event.clientY - startY);
+      setPdfHeight(Math.max(320, Math.min(next, window.innerHeight - 140)));
+    };
+    const onUp = () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const pdfResizeBounds = () => ({
+    min: 320,
+    max: typeof window === "undefined" ? 1200 : window.innerHeight - 140,
+  });
+
+  const nudgePdfHeight = (delta: number) => {
+    const current = pdfHeight ?? pdfPaneRef.current?.getBoundingClientRect().height ?? 480;
+    const { min, max } = pdfResizeBounds();
+    setPdfHeight(Math.max(min, Math.min(current + delta, max)));
+  };
 
   const filters: SheetFilters = useMemo(
     () => ({ bookId, chapterId: null, produced, search }),
@@ -112,7 +148,7 @@ export function GenerateSingleScreen() {
   };
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <PageHeader
         title="Generate questions"
         summary="One chunk, one question at a time — pick a section, choose a type and difficulty, review, and give feedback right here."
@@ -147,8 +183,8 @@ export function GenerateSingleScreen() {
       ) : null}
 
       {!sheet.isPending && bookId !== null ? (
-        <div className="grid min-w-0 gap-4 xl:h-[calc(100dvh-9rem)] xl:grid-cols-[19rem_minmax(0,1fr)_22rem]">
-          <div className="min-w-0 xl:min-h-0">
+        <div className="grid min-h-0 min-w-0 gap-4 overflow-hidden xl:flex-1 xl:grid-cols-[19rem_minmax(0,1fr)_22rem]">
+          <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
             <OutlinePanel
               chapters={sheet.chapters}
               rows={sheet.rows}
@@ -161,14 +197,51 @@ export function GenerateSingleScreen() {
             />
           </div>
 
-          <div className="flex min-w-0 flex-col gap-4 xl:min-h-0">
-            <div className="min-h-[560px] flex-1 xl:min-h-0">
+          <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden">
+            <div
+              ref={pdfPaneRef}
+              className={pdfHeight === null ? "min-h-[560px] flex-1 xl:min-h-0" : "shrink-0"}
+              style={pdfHeight === null ? undefined : { height: pdfHeight }}
+            >
               <PdfPageViewer
                 bookId={bookId}
                 rows={sheet.allRows}
                 selectedSectionId={sectionId}
                 onVisibleSectionChange={selectSection}
               />
+            </div>
+            {/* biome-ignore lint/a11y/useSemanticElements: an interactive splitter, not a static <hr> divider */}
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize the PDF pane"
+              aria-valuenow={Math.round(
+                pdfHeight ?? pdfPaneRef.current?.getBoundingClientRect().height ?? 480,
+              )}
+              aria-valuemin={pdfResizeBounds().min}
+              aria-valuemax={pdfResizeBounds().max}
+              tabIndex={0}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                startPdfResize(event.clientY);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  nudgePdfHeight(-24);
+                } else if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  nudgePdfHeight(24);
+                } else if (event.key === "Home") {
+                  event.preventDefault();
+                  setPdfHeight(null);
+                }
+              }}
+              onDoubleClick={() => setPdfHeight(null)}
+              className="group -my-1.5 flex shrink-0 cursor-ns-resize items-center justify-center py-1.5"
+              title="Drag to resize · arrow keys to adjust · double-click to reset"
+            >
+              <div className="h-1 w-12 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
             </div>
             {selectedRow && sectionDetail.data ? (
               <details className="shrink-0 rounded-[1rem] border p-3">
@@ -231,10 +304,15 @@ export function GenerateSingleScreen() {
             </DialogDescription>
           </DialogHeader>
           {questionId !== null ? (
-            <QuestionReview questionId={questionId} onGenerateAnother={runGenerate} />
+            <QuestionReview
+              key={questionId}
+              questionId={questionId}
+              onGenerateAnother={runGenerate}
+              onRegenerated={(id) => setQuestionId(id)}
+            />
           ) : null}
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

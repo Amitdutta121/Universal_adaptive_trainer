@@ -40,7 +40,7 @@ def _import_book(client: TestClient) -> dict:
 
 
 def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
-    """A tiny, real PDF, for exercising the source-file route."""
+    """A tiny, real PDF, for exercising the PDF import and source-file routes."""
     doc = pymupdf.open()
     doc.new_page().insert_text((72, 72), text, fontsize=11)
     data = doc.tobytes()
@@ -342,6 +342,72 @@ def test_batch_generation_uses_the_active_curriculum_version(
 
     assert response.status_code == 201, response.text
     assert seen["curriculum_version_id"] == old
+
+
+def test_regenerate_threads_feedback_and_returns_both_ids(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.persistence.models import QuestionRow
+    from app.web.routes.api import questions as api_questions
+
+    _import_taxonomy(client)
+    seen: dict[str, object] = {}
+
+    class FakeGenerationService:
+        def __init__(self, request_session) -> None:
+            self._session = request_session
+
+        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
+            seen["question_id"] = question_id
+            seen["feedback"] = feedback
+            row = QuestionRow(
+                prompt="a regenerated question", original_prompt="a regenerated question"
+            )
+            self._session.add(row)
+            self._session.flush()
+            return row
+
+    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
+
+    response = client.post(
+        "/api/questions/77/regenerate",
+        json={"feedback": "Make the distractors subtler."},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["regenerated_from_question_id"] == 77
+    assert body["question_id"] == body["question"]["id"]
+    assert seen == {"question_id": 77, "feedback": "Make the distractors subtler."}
+
+
+def test_regenerate_surfaces_an_unknown_question_as_a_json_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.errors import NotFoundError
+    from app.web.routes.api import questions as api_questions
+
+    _import_taxonomy(client)
+
+    class FakeGenerationService:
+        def __init__(self, request_session) -> None:
+            self._session = request_session
+
+        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
+            raise NotFoundError(f"Question {question_id} does not exist.")
+
+    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
+
+    response = client.post("/api/questions/424242/regenerate", json={"feedback": "anything"})
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_regenerate_requires_feedback(client: TestClient) -> None:
+    response = client.post("/api/questions/1/regenerate", json={"feedback": ""})
+
+    assert response.status_code == 422
 
 
 def test_subtopic_detail_reports_a_taxonomy_upload_has_no_evidence(client: TestClient) -> None:
@@ -845,6 +911,7 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/questions",
         "/api/questions/generate",
         "/api/questions/{question_id}",
+        "/api/questions/{question_id}/regenerate",
         "/api/questions/{question_id}/review",
         "/api/reviews",
         "/api/reviews/stats",

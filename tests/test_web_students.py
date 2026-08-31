@@ -77,10 +77,22 @@ def _bank(session: Session, *, question_type: QuestionType = QuestionType.TRUE_F
     return frozen.id
 
 
+def _enrol_payload(name: str) -> dict[str, str]:
+    slug = name.strip().lower().replace(" ", ".") or "learner"
+    return {"display_name": name, "email": f"{slug}@example.edu"}
+
+
 def _enrol(client: TestClient, name: str = "Ada") -> int:
-    response = client.post("/api/students", json={"display_name": name})
+    response = client.post("/api/students", json=_enrol_payload(name))
     assert response.status_code == 201, response.text
     return response.json()["id"]
+
+
+def _enrol_with_token(client: TestClient, name: str = "Ada") -> tuple[int, str]:
+    response = client.post("/api/students", json=_enrol_payload(name))
+    assert response.status_code == 201, response.text
+    body = response.json()
+    return body["id"], body["resume_token"]
 
 
 def _start(client: TestClient, student_id: int, set_id: int) -> int:
@@ -92,6 +104,20 @@ def _start(client: TestClient, student_id: int, set_id: int) -> int:
 
 
 class TestStudentsApi:
+    def test_the_current_prod_classroom_is_public(self, settings, session: Session) -> None:
+        set_id = _bank(session)
+        QuestionSetRepository(session).point_alias("prod", set_version_id=set_id)
+        session.commit()
+
+        from app.main import create_app
+
+        with TestClient(create_app(settings)) as public_client:
+            response = public_client.get("/api/question-sets/prod")
+
+        assert response.status_code == 200
+        assert response.json()["id"] == set_id
+        assert response.json()["is_prod"] is True
+
     def test_a_student_can_be_enrolled_and_listed(self, client: TestClient) -> None:
         student_id = _enrol(client)
 
@@ -102,12 +128,26 @@ class TestStudentsApi:
 
     def test_a_duplicate_name_is_refused_with_a_reason(self, client: TestClient) -> None:
         _enrol(client, "Ada")
-        response = client.post("/api/students", json={"display_name": "Ada"})
+        response = client.post("/api/students", json=_enrol_payload("Ada"))
         assert response.status_code == 422
         assert "already exists" in response.json()["error"]["message"]
 
     def test_a_blank_name_is_refused(self, client: TestClient) -> None:
-        assert client.post("/api/students", json={"display_name": "   "}).status_code == 422
+        payload = _enrol_payload("Ada") | {"display_name": "   "}
+        assert client.post("/api/students", json=payload).status_code == 422
+
+    def test_an_email_is_required(self, client: TestClient) -> None:
+        assert client.post("/api/students", json={"display_name": "Ada"}).status_code == 422
+
+    def test_a_malformed_email_is_refused(self, client: TestClient) -> None:
+        payload = {"display_name": "Ada", "email": "ada-at-example"}
+        assert client.post("/api/students", json=payload).status_code == 422
+
+    def test_the_roster_and_enrolment_carry_the_email(self, client: TestClient) -> None:
+        created = client.post("/api/students", json=_enrol_payload("Ada")).json()
+        assert created["email"] == "ada@example.edu"
+        row = client.get("/api/students").json()["students"][0]
+        assert row["email"] == "ada@example.edu"
 
     def test_the_dashboard_count_reflects_enrolment(self, client: TestClient) -> None:
         assert client.get("/api/counts").json()["students"] == 0
@@ -116,6 +156,209 @@ class TestStudentsApi:
 
     def test_an_unknown_student_is_not_found(self, client: TestClient) -> None:
         assert client.get("/api/students/404/progress").status_code == 404
+
+    def test_enrolment_hands_back_a_resume_token(self, client: TestClient) -> None:
+        body = client.post("/api/students", json=_enrol_payload("Ada")).json()
+        assert body["resume_token"]
+        assert isinstance(body["resume_token"], str)
+
+    def test_the_professor_roster_never_carries_a_resume_token(self, client: TestClient) -> None:
+        _enrol(client)
+        row = client.get("/api/students").json()["students"][0]
+        assert "resume_token" not in row
+
+
+def _answer_one(client: TestClient, set_id: int, name: str) -> int:
+    """Enrol ``name``, run one true/false question, answer it correctly."""
+    student_id = _enrol(client, name)
+    run_id = _start(client, student_id, set_id)
+    attempt_id = client.get(f"/api/training-sessions/{run_id}/next").json()["attempt_id"]
+    client.post(f"/api/attempts/{attempt_id}/answer", json={"answer": "true"})
+    return student_id
+
+
+class TestRosterPagination:
+    def test_a_page_carries_its_slice_and_the_filtered_total(self, client: TestClient) -> None:
+        for name in ("Ada", "Bea", "Cy"):
+            _enrol(client, name)
+
+        first = client.get("/api/students", params={"page": 1, "page_size": 2}).json()
+        assert [row["display_name"] for row in first["students"]] == ["Ada", "Bea"]
+        assert (first["total"], first["page"], first["page_size"]) == (3, 1, 2)
+
+        second = client.get("/api/students", params={"page": 2, "page_size": 2}).json()
+        assert [row["display_name"] for row in second["students"]] == ["Cy"]
+        assert second["total"] == 3
+
+    def test_search_matches_name_or_email(self, client: TestClient) -> None:
+        _enrol(client, "Ada")
+        _enrol(client, "Grace")
+
+        hit = client.get("/api/students", params={"search": "grac"}).json()
+        assert [row["display_name"] for row in hit["students"]] == ["Grace"]
+        assert hit["total"] == 1
+
+    def test_rows_carry_attempt_aggregates(self, client: TestClient, session: Session) -> None:
+        set_id = _bank(session)
+        _answer_one(client, set_id, "Ada")
+
+        row = client.get("/api/students").json()["students"][0]
+        assert row["answered_count"] == 1
+        assert row["average_score"] == 100.0
+        assert row["score_series"] == [100.0]
+        assert row["last_activity_at"] is not None
+
+    def test_the_answered_filter_selects_by_count(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        _answer_one(client, set_id, "Answered")
+        _enrol(client, "Untouched")
+
+        unanswered = client.get("/api/students", params={"answered": "0"}).json()
+        assert [row["display_name"] for row in unanswered["students"]] == ["Untouched"]
+
+    def test_class_summary_aggregates_every_learner(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        student_id = _answer_one(client, set_id, "Ada")
+
+        summary = client.get("/api/students/class-summary").json()
+        assert summary["student_count"] == 1
+        assert summary["measured_students"] == 1
+        assert summary["average_score"] == 100.0
+        assert len(summary["scored_attempts"]) == 1
+        assert summary["scored_attempts"][0]["student_id"] == student_id
+        assert summary["weakness_cells"], "a scored answer records subtopic weakness"
+        assert summary["weakness_cells"][0]["affected"][0]["name"] == "Ada"
+
+
+class TestStudentResume:
+    """A returning browser is recognised by its token, not by re-typing a name."""
+
+    def test_a_stored_token_resumes_into_the_open_session(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        student_id, token = _enrol_with_token(client)
+        run_id = _start(client, student_id, set_id)
+
+        response = client.post(
+            "/api/students/resume", json={"resume_token": token, "set_version_id": set_id}
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["student"]["id"] == student_id
+        assert body["active_session"]["id"] == run_id
+
+    def test_a_returning_learner_with_no_open_run_still_resolves(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        student_id, token = _enrol_with_token(client)
+
+        body = client.post(
+            "/api/students/resume", json={"resume_token": token, "set_version_id": set_id}
+        ).json()
+        assert body["student"]["id"] == student_id
+        assert body["student"]["resume_token"] == token
+        assert body["active_session"] is None
+
+    def test_an_open_run_on_another_set_is_still_surfaced(
+        self, client: TestClient, session: Session
+    ) -> None:
+        """One session at a time: a learner cannot be sent past their open run by
+        arriving on a different classroom link."""
+        set_a = _bank(session)
+        set_b = QuestionSetRepository(session).create(
+            label="Week 2", question_ids=[], curriculum_version_id=None
+        )
+        session.commit()
+        student_id, token = _enrol_with_token(client)
+        run_id = _start(client, student_id, set_a)
+
+        body = client.post(
+            "/api/students/resume", json={"resume_token": token, "set_version_id": set_b.id}
+        ).json()
+        assert body["student"]["id"] == student_id
+        assert body["active_session"]["id"] == run_id
+        assert body["active_session"]["set_version_id"] == set_a
+
+    def test_an_ended_session_is_not_offered(self, client: TestClient, session: Session) -> None:
+        set_id = _bank(session)
+        student_id, token = _enrol_with_token(client)
+        run_id = _start(client, student_id, set_id)
+        assert client.post(f"/api/training-sessions/{run_id}/end").status_code == 200
+
+        body = client.post(
+            "/api/students/resume", json={"resume_token": token, "set_version_id": set_id}
+        ).json()
+        assert body["active_session"] is None
+
+    def test_an_unknown_token_is_not_found(self, client: TestClient, session: Session) -> None:
+        set_id = _bank(session)
+        response = client.post(
+            "/api/students/resume",
+            json={"resume_token": "not-a-real-token", "set_version_id": set_id},
+        )
+        assert response.status_code == 404
+
+
+class TestOneActiveSessionGuard:
+    """A learner runs exactly one unfinished session, so two attempt streams
+    cannot both fold scores into the same per-student BKT state (ADR-041)."""
+
+    def test_a_second_session_is_refused_while_one_is_open(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        student_id = _enrol(client)
+        first = _start(client, student_id, set_id)
+
+        response = client.post(
+            "/api/training-sessions", json={"student_id": student_id, "set_version_id": set_id}
+        )
+        assert response.status_code == 409, response.text
+        error = response.json()["error"]
+        assert error["code"] == "active_session_exists"
+        assert str(first) in error["detail"]
+
+    def test_the_refusal_holds_across_a_different_set(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_a = _bank(session)
+        set_b = QuestionSetRepository(session).create(
+            label="Week 2", question_ids=[], curriculum_version_id=None
+        )
+        session.commit()
+        student_id = _enrol(client)
+        _start(client, student_id, set_a)
+
+        response = client.post(
+            "/api/training-sessions", json={"student_id": student_id, "set_version_id": set_b.id}
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "active_session_exists"
+
+    def test_a_new_session_is_allowed_once_the_first_ends(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        student_id = _enrol(client)
+        first = _start(client, student_id, set_id)
+        assert client.post(f"/api/training-sessions/{first}/end").status_code == 200
+
+        second = _start(client, student_id, set_id)
+        assert second != first
+
+    def test_two_learners_each_get_their_own_session(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        ada = _start(client, _enrol(client, "Ada"), set_id)
+        grace = _start(client, _enrol(client, "Grace"), set_id)
+        assert ada != grace
 
 
 class TestTrainingApi:

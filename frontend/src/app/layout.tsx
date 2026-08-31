@@ -24,7 +24,7 @@ const headingSans = Archivo({
 });
 
 export const metadata: Metadata = {
-  title: "Adaptive Trainer — Professor console",
+  title: "Adaptive Trainer — Instructor Studio",
   description:
     "Generate, validate and review Python assessment questions, and follow adaptive student training.",
 };

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Adaptive Engine Architecture</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f2f4f7;
+    --surface: #ffffff;
+    --surface-muted: #e8ebf0;
+    --ink: #1a2130;
+    --muted: #5b6472;
+    --border: #d5dae2;
+    --accent: #a8681a;
+    --accent-soft: #f3e6d2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c;
+      --surface: #1b2029;
+      --surface-muted: #232a36;
+      --ink: #e7e9ee;
+      --muted: #9aa3b2;
+      --border: #2e3543;
+      --accent: #e0a94a;
+      --accent-soft: #3a2e1a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    line-height: 1.55;
+  }
+  main {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 56px 24px 72px;
+  }
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(1.7rem, 2.6vw, 2.15rem);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 8px;
+  }
+  .lede {
+    color: var(--muted);
+    max-width: 62ch;
+    font-size: 1.02rem;
+    margin: 0 0 40px;
+  }
+  .lede code { color: var(--ink); }
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  figure { margin: 0; }
+  .diagram-frame {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    overflow-x: auto;
+  }
+  svg { display: block; width: 100%; height: auto; color: var(--ink); }
+  figcaption {
+    margin-top: 14px;
+    color: var(--muted);
+    font-size: 0.92rem;
+    max-width: 68ch;
+  }
+  figcaption code { color: var(--ink); font-size: 0.87em; }
+
+  section.thresholds {
+    margin-top: 52px;
+  }
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    margin: 0 0 4px;
+  }
+  section.thresholds > p {
+    color: var(--muted);
+    font-size: 0.92rem;
+    margin: 0 0 18px;
+    max-width: 68ch;
+  }
+  dl.constants {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 22px;
+    row-gap: 10px;
+    font-size: 0.9rem;
+    margin: 0;
+  }
+  dl.constants dt {
+    font-family: "IBM Plex Mono", monospace;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  dl.constants dd {
+    margin: 0;
+    color: var(--muted);
+  }
+  dl.constants dd .val {
+    color: var(--accent);
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+  }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  footer code { color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Adaptive Engine Architecture</h1>
+  <p class="lede">
+    How the engine picks the next question for one student and folds their answer back in —
+    one curriculum topic at a time, per <code>ADR-041</code> and <code>ADR-047</code>.
+  </p>
+
+  <figure>
+    <div class="diagram-frame">
+<svg viewBox="0 0 1000 800" role="img" aria-label="The adaptive engine walks curriculum topics in order; within the current topic it draws a subtopic by weakness-weighted roulette, derives a difficulty from the topic's BKT mastery, picks the highest-priority unseen question in that cell, serves it, scores the answer, and feeds the score back into both the topic's mastery — which gates advancement to the next topic — and the subtopic's weakness.">
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0,0 8,4 0,8" fill="currentColor"></polygon>
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <polygon points="0,0 8,4 0,8" fill="var(--accent)"></polygon>
+    </marker>
+  </defs>
+
+  <!-- ===== Timeline: curriculum topics in position order ===== -->
+  <g font-family="IBM Plex Sans">
+    <rect x="80" y="60" width="150" height="56" rx="3" fill="var(--surface-muted)" stroke="var(--border)"></rect>
+    <text x="155" y="84" text-anchor="middle" font-size="13" font-weight="500">Topic 1</text>
+    <text x="155" y="101" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Mono">Loops</text>
+
+    <rect x="270" y="60" width="150" height="56" rx="3" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"></rect>
+    <text x="345" y="84" text-anchor="middle" font-size="13" font-weight="500">Topic 2</text>
+    <text x="345" y="101" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Mono">Functions</text>
+
+    <rect x="460" y="60" width="150" height="56" rx="3" fill="var(--surface-muted)" stroke="var(--border)" opacity="0.6"></rect>
+    <text x="535" y="84" text-anchor="middle" font-size="13" font-weight="500" opacity="0.6">Topic 3</text>
+    <text x="535" y="101" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Mono" opacity="0.6">Recursion</text>
+
+    <rect x="650" y="60" width="150" height="56" rx="3" fill="var(--surface-muted)" stroke="var(--border)" opacity="0.6"></rect>
+    <text x="725" y="84" text-anchor="middle" font-size="13" font-weight="500" opacity="0.6">Topic 4</text>
+    <text x="725" y="101" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Mono" opacity="0.6">Classes</text>
+
+    <line x1="230" y1="88" x2="266" y2="88" stroke="currentColor" marker-end="url(#arrow)"></line>
+    <line x1="420" y1="88" x2="456" y2="88" stroke="currentColor" opacity="0.6" marker-end="url(#arrow)"></line>
+    <line x1="610" y1="88" x2="646" y2="88" stroke="currentColor" opacity="0.6" marker-end="url(#arrow)"></line>
+
+    <text x="155" y="132" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-style="italic">mastered</text>
+    <text x="345" y="132" text-anchor="middle" font-size="11" fill="var(--accent)" font-weight="500">current</text>
+    <text x="535" y="132" text-anchor="middle" font-size="10.5" fill="var(--muted)" opacity="0.7">locked</text>
+    <text x="725" y="132" text-anchor="middle" font-size="10.5" fill="var(--muted)" opacity="0.7">locked</text>
+  </g>
+
+  <!-- T2 -> subtopics -->
+  <line x1="345" y1="148" x2="345" y2="186" stroke="currentColor" marker-end="url(#arrow)"></line>
+  <text x="358" y="171" font-size="10.5" fill="var(--muted)">current topic only</text>
+
+  <!-- T2 -> difficulty band (topic mastery feeds both) -->
+  <path d="M 420 116 L 420 150 L 760 150 L 760 186" fill="none" stroke="currentColor"></path>
+  <polygon points="756,186 764,186 760,194" fill="currentColor"></polygon>
+  <text x="500" y="146" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Mono">p_known</text>
+
+  <!-- ===== Subtopics of the current topic ===== -->
+  <g font-family="IBM Plex Sans">
+    <rect x="105" y="190" width="140" height="56" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+    <text x="175" y="214" text-anchor="middle" font-size="12.5" font-weight="500">Subtopic A</text>
+    <text x="175" y="231" text-anchor="middle" font-size="10" fill="var(--muted)">closures</text>
+
+    <rect x="275" y="190" width="140" height="56" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+    <text x="345" y="214" text-anchor="middle" font-size="12.5" font-weight="500">Subtopic B</text>
+    <text x="345" y="231" text-anchor="middle" font-size="10" fill="var(--muted)">default args</text>
+
+    <rect x="445" y="190" width="140" height="56" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+    <text x="515" y="214" text-anchor="middle" font-size="12.5" font-weight="500">Subtopic C</text>
+    <text x="515" y="231" text-anchor="middle" font-size="10" fill="var(--muted)">*args/**kwargs</text>
+  </g>
+
+  <!-- weakness bars -->
+  <g>
+    <rect x="105" y="252" width="140" height="6" fill="var(--surface-muted)"></rect>
+    <rect x="105" y="252" width="112" height="6" fill="var(--muted)"></rect>
+    <text x="175" y="272" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="IBM Plex Mono">weakness 0.80</text>
+
+    <rect x="275" y="252" width="140" height="6" fill="var(--surface-muted)"></rect>
+    <rect x="275" y="252" width="49" height="6" fill="var(--muted)"></rect>
+    <text x="345" y="272" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="IBM Plex Mono">weakness 0.35</text>
+
+    <rect x="445" y="252" width="140" height="6" fill="var(--surface-muted)"></rect>
+    <rect x="445" y="252" width="140" height="6" fill="var(--muted)"></rect>
+    <text x="515" y="272" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="IBM Plex Mono">weakness 1.00</text>
+  </g>
+
+  <!-- fan-in to roulette -->
+  <line x1="175" y1="246" x2="300" y2="292" stroke="currentColor" opacity="0.75"></line>
+  <line x1="345" y1="246" x2="345" y2="292" stroke="currentColor" opacity="0.75" marker-end="url(#arrow)"></line>
+  <line x1="515" y1="246" x2="390" y2="292" stroke="currentColor" opacity="0.75"></line>
+
+  <!-- roulette -->
+  <rect x="270" y="296" width="150" height="48" rx="24" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.4"></rect>
+  <text x="345" y="316" text-anchor="middle" font-size="12" font-weight="500">roulette</text>
+  <text x="345" y="331" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="IBM Plex Mono">weighted by weakness</text>
+
+  <!-- difficulty band -->
+  <rect x="650" y="190" width="220" height="56" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+  <text x="760" y="212" text-anchor="middle" font-size="12.5" font-weight="500">difficulty band</text>
+  <text x="760" y="229" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="IBM Plex Mono">low·med·high → easy·med·hard</text>
+
+  <!-- roulette -> bank cell -->
+  <line x1="345" y1="344" x2="345" y2="416" stroke="currentColor" marker-end="url(#arrow)"></line>
+  <text x="358" y="382" font-size="10.5" fill="var(--muted)">chosen subtopic</text>
+
+  <!-- difficulty -> bank cell -->
+  <path d="M 760 246 L 760 400 L 349 400" fill="none" stroke="currentColor"></path>
+  <polygon points="349,396 349,404 341,400" fill="currentColor"></polygon>
+  <text x="560" y="392" text-anchor="middle" font-size="10.5" fill="var(--muted)">difficulty</text>
+
+  <!-- bank cell -->
+  <rect x="175" y="420" width="340" height="56" rx="3" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.2"></rect>
+  <text x="345" y="444" text-anchor="middle" font-size="12.5" font-weight="500">(subtopic, difficulty) cell</text>
+  <text x="345" y="461" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="IBM Plex Mono">approved questions only</text>
+
+  <line x1="345" y1="476" x2="345" y2="496" stroke="currentColor" marker-end="url(#arrow)"></line>
+
+  <!-- priority pick -->
+  <rect x="145" y="500" width="400" height="56" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+  <text x="345" y="522" text-anchor="middle" font-size="12.5" font-weight="500">priority-ranked pick</text>
+  <text x="345" y="539" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="IBM Plex Mono">unseen → priority → least-used → id</text>
+
+  <line x1="345" y1="556" x2="345" y2="576" stroke="currentColor" marker-end="url(#arrow)"></line>
+
+  <!-- served -->
+  <rect x="245" y="580" width="200" height="50" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+  <text x="345" y="601" text-anchor="middle" font-size="12.5" font-weight="500">question served</text>
+  <text x="345" y="617" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="IBM Plex Mono">priority ↓ · times_used +1</text>
+
+  <line x1="345" y1="630" x2="345" y2="650" stroke="currentColor" marker-end="url(#arrow)"></line>
+
+  <!-- answers -->
+  <rect x="245" y="654" width="200" height="50" rx="3" fill="var(--surface)" stroke="var(--border)"></rect>
+  <text x="345" y="683" text-anchor="middle" font-size="12.5" font-weight="500">student answers</text>
+
+  <line x1="345" y1="704" x2="345" y2="724" stroke="currentColor" marker-end="url(#arrow)"></line>
+
+  <!-- score -->
+  <rect x="265" y="728" width="160" height="44" rx="3" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.4"></rect>
+  <text x="345" y="755" text-anchor="middle" font-size="13" font-weight="500" font-family="IBM Plex Mono">score 0–100</text>
+
+  <!-- feedback: weakness (structural) -->
+  <path d="M 265 750 L 50 750 L 50 218 L 101 218" fill="none" stroke="currentColor" stroke-dasharray="3 3"></path>
+  <polygon points="101,214 101,222 109,218" fill="currentColor"></polygon>
+  <text x="38" y="484" font-size="10.5" fill="var(--muted)" transform="rotate(-90 38 484)" text-anchor="middle">update_weakness</text>
+
+  <!-- feedback: mastery (accent, gates advancement) -->
+  <path d="M 425 750 L 950 750 L 950 20 L 349 20 L 349 56" fill="none" stroke="var(--accent)" stroke-dasharray="3 3"></path>
+  <polygon points="345,52 353,52 349,60" fill="var(--accent)"></polygon>
+  <text x="938" y="385" font-size="10.5" fill="var(--accent)" font-weight="500" transform="rotate(-90 938 385)" text-anchor="middle">update_mastery</text>
+</svg>
+    </div>
+    <figcaption>
+      The roulette pool is scoped to <strong>one</strong> topic at a time. <code>update_mastery</code>
+      feeds the topic's BKT state, which both bands the next difficulty and — once it crosses
+      <code>TOPIC_ADVANCE_CEILING</code> — retires the topic and hands the pool to the next one in
+      curriculum order. <code>update_weakness</code> feeds every subtopic the question was tagged
+      with, not only the one drawn. A topic with nothing servable is skipped rather than raised on;
+      a gap that stops the walk entirely still surfaces as a bank problem, not a finished curriculum.
+    </figcaption>
+  </figure>
+
+  <section class="thresholds">
+    <h2>Fixed thresholds</h2>
+    <p>The mechanism is fixed by ADR-041 and ADR-047 — these are the tunable numbers inside it, re-tuned against simulated students in <code>tune_adaptive_params.py</code>.</p>
+    <dl class="constants">
+      <dt>p_init</dt><dd><span class="val">0.10</span> — starting BKT mastery for a topic no attempt has touched yet</dd>
+      <dt>LOW_MASTERY_CEILING</dt><dd><span class="val">0.45</span> — below this, difficulty is easy</dd>
+      <dt>MEDIUM_MASTERY_CEILING</dt><dd><span class="val">0.85</span> — above this, difficulty is hard</dd>
+      <dt>TOPIC_ADVANCE_CEILING</dt><dd><span class="val">0.60</span> — above this, the topic retires and the next one becomes current</dd>
+      <dt>WEAKNESS_LEARNING_RATE</dt><dd><span class="val">0.25</span> — how far one score moves a subtopic's weakness</dd>
+      <dt>MIN_SUBTOPIC_WEAKNESS</dt><dd><span class="val">0.05</span> — weakness floor, so a mastered subtopic stays reachable</dd>
+    </dl>
+  </section>
+
+  <footer>
+    Source: <code>app/adaptive/service.py</code> (<code>_draw</code>, <code>_current_topic_pool</code>),
+    <code>app/adaptive/selection.py</code>, <code>app/adaptive/state.py</code>,
+    <code>app/domain/mastery.py</code> — decisions recorded as ADR-041 and ADR-047 in
+    <code>docs/DECISIONS.md</code>.
+  </footer>
+</main>
+</body>
+</html>

@@ -27,7 +27,9 @@ function ProfessorChrome({
               as a multi-column workspace rather than a document, so they use
               the full window on a wide monitor instead of leaving it blank. */}
           <div
-            className={`app-shell mx-auto flex w-full min-w-0 flex-col gap-6 p-6 ${isWideRoute ? "" : "max-w-7xl"}`}
+            className={`app-shell mx-auto flex w-full min-w-0 flex-col gap-6 p-6 ${
+              isWideRoute ? "h-[100dvh] overflow-hidden" : "max-w-7xl"
+            }`}
           >
             {children}
           </div>
@@ -53,7 +55,7 @@ function StudentChrome({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
           <Link href="/" className="student-shell__console-link">
-            Professor console
+            Instructor Studio
           </Link>
         </header>
         <div className="student-shell__content">{children}</div>
@@ -71,8 +73,12 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   // A multi-column workspace, not a document — capping it to reading width
   // wastes a wide monitor instead of giving the PDF pane the room it needs.
   const isWideRoute = pathname.startsWith("/questions/generate/single");
+  // Standalone design prototypes under /experiments bring their own full-page
+  // shell and never call the API, so they skip both the console chrome and the
+  // auth gate — the same treatment the login route gets.
+  const isExperimentRoute = pathname.startsWith("/experiments");
 
-  if (isLoginRoute) return <>{children}</>;
+  if (isLoginRoute || isExperimentRoute) return <>{children}</>;
   return isStudentRoute ? (
     <StudentChrome>{children}</StudentChrome>
   ) : (

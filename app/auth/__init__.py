@@ -1,4 +1,4 @@
-"""Cookie-session auth for the professor console.
+"""Cookie-session auth for the Instructor Studio.
 
 There is one identity kind (a professor); students never log in and reach
 their sessions anonymously by link (ADR-041). Built on ``fastapi-users`` with

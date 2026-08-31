@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Keeps the professor console behind a login, without any Next.js middleware.
+ * Keeps the Instructor Studio behind a login, without any Next.js middleware.
  *
  * Middleware can't do this job here: the session cookie is httpOnly and only
  * meaningful to FastAPI, so the only way to know it's valid is to ask the

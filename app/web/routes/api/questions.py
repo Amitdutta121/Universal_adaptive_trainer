@@ -56,6 +56,8 @@ from app.web.routes.api.schemas import (
     QuestionListResponse,
     QuestionSummary,
     QuestionTaxonomy,
+    RegenerateQuestionRequest,
+    RegenerateQuestionResponse,
     ReviewOut,
     ReviewQueueMode,
     ReviewQueueResponse,
@@ -143,6 +145,38 @@ def generate_questions(
         created=len(generated),
         question_ids=[row.id for row in generated],
         questions=[QuestionSummary.from_row(row) for row in generated],
+    )
+
+
+@router.post(
+    "/{question_id}/regenerate",
+    response_model=RegenerateQuestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def regenerate_question(
+    session: DbSession, question_id: int, payload: RegenerateQuestionRequest
+) -> RegenerateQuestionResponse:
+    """Generate a new question from an existing one, with instructor feedback.
+
+    The source question is never modified: this returns a fresh row, grounded in
+    the same section, type and difficulty, with the feedback threaded into the
+    generation prompt. It writes no review and triggers no instruction relearn --
+    that is the review endpoint's job, not this one.
+    """
+    try:
+        new_row = GenerationService(session).regenerate_from_question(
+            question_id,
+            feedback=payload.feedback,
+            professor_id=payload.professor_id,
+        )
+    except Exception:
+        session.rollback()
+        raise
+
+    return RegenerateQuestionResponse(
+        question_id=new_row.id,
+        regenerated_from_question_id=question_id,
+        question=QuestionSummary.from_row(new_row),
     )
 
 

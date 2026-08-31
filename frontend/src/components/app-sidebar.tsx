@@ -35,13 +35,32 @@ type AppTheme = "light" | "dark" | "system";
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
   { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "generate", "review"] },
   { label: "Calibration", keys: ["instructions", "judges", "coverage"] },
-  { label: "Adaptive Training", keys: ["students"] },
+  { label: "Adaptive Training", keys: ["classrooms", "roster"] },
 ];
 
 function sectionsFor(keys: readonly string[]): NavSection[] {
   return keys
     .map((key) => NAV_SECTIONS.find((section) => section.key === key))
     .filter((section): section is NavSection => Boolean(section));
+}
+
+/** `true` when the current path is `section.path` or a child of it. */
+function pathMatchesSection(pathname: string, path: string): boolean {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+/**
+ * Highlight the most specific section only. `/students` is a prefix of
+ * `/students/roster`, so without this the Classrooms item lights up while the
+ * learner is on Roster.
+ */
+function isSectionActive(pathname: string, section: NavSection): boolean {
+  if (!pathMatchesSection(pathname, section.path)) return false;
+  return !NAV_SECTIONS.some(
+    (other) =>
+      other.path.length > section.path.length &&
+      pathMatchesSection(pathname, other.path),
+  );
 }
 
 function LlmStatus() {
@@ -163,7 +182,7 @@ export function AppSidebar() {
           </span>
           <span className="app-sidebar-brand-copy group-data-[collapsible=icon]:hidden">
             <span className="app-sidebar-brand-title">Adaptive Trainer</span>
-            <span className="app-sidebar-brand-subtitle">Professor console</span>
+            <span className="app-sidebar-brand-subtitle">Instructor Studio</span>
           </span>
         </Link>
       </SidebarHeader>
@@ -181,8 +200,7 @@ export function AppSidebar() {
                   <SidebarMenu>
                     {sections.map((section) => {
                       const Icon = section.icon;
-                      const isActive =
-                        pathname === section.path || pathname.startsWith(`${section.path}/`);
+                      const isActive = isSectionActive(pathname, section);
 
                       if (section.children?.length) {
                         return (

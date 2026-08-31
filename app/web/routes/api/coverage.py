@@ -12,7 +12,7 @@ from typing import NoReturn
 
 from fastapi import APIRouter, status
 
-from app.coverage import build_coverage_report, create_question_set
+from app.coverage import build_coverage_report, create_question_set, sync_prod_question_set
 from app.errors import FeatureNotAvailableError
 from app.persistence.repositories import QuestionSetRepository
 from app.web.routes.api.deps import DbSession
@@ -73,7 +73,13 @@ def start_generation_run(payload: FillGapsRequest) -> NoReturn:
 def list_question_sets(session: DbSession) -> QuestionSetListResponse:
     rows = QuestionSetRepository(session).list_versions()
     return QuestionSetListResponse(
-        sets=[QuestionSetOut.from_row(row) for row in rows],
+        sets=[
+            QuestionSetOut.from_row(
+                row,
+                is_prod=any(alias.alias == "prod" for alias in row.aliases),
+            )
+            for row in rows
+        ],
         total=len(rows),
     )
 
@@ -87,3 +93,13 @@ def create_set(session: DbSession, payload: CreateQuestionSetRequest) -> Questio
     """Freeze every approved question of the approved curriculum under a name."""
     row = create_question_set(session, label=payload.label, notes=payload.notes)
     return QuestionSetOut.from_row(row)
+
+@router.post(
+    "/question-sets/prod/sync",
+    response_model=QuestionSetOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def sync_prod_set(session: DbSession) -> QuestionSetOut:
+    """Freeze the approved bank now and repoint the stable prod classroom link."""
+    row = sync_prod_question_set(session)
+    return QuestionSetOut.from_row(row, is_prod=True)

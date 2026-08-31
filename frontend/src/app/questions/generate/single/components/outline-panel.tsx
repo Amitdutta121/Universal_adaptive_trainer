@@ -43,7 +43,9 @@ export function OutlinePanel({
   produced: SheetFilters["produced"];
   onProducedChange: (value: SheetFilters["produced"]) => void;
 }) {
-  const [collapsedChapters, setCollapsedChapters] = useState<ReadonlySet<number>>(new Set());
+  // Single-open accordion: the outline starts fully collapsed, and only one
+  // chapter — the one holding the current chunk — is ever open at a time.
+  const [expandedChapters, setExpandedChapters] = useState<ReadonlySet<number>>(new Set());
   const rowRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   const rowsByChapter = useMemo(() => {
@@ -57,36 +59,28 @@ export function OutlinePanel({
   }, [rows]);
 
   const toggleChapter = (chapterId: number) => {
-    setCollapsedChapters((prev) => {
-      const next = new Set(prev);
-      if (next.has(chapterId)) next.delete(chapterId);
-      else next.add(chapterId);
-      return next;
-    });
+    setExpandedChapters((prev) => (prev.has(chapterId) ? new Set() : new Set([chapterId])));
   };
 
   const isSearching = search.trim().length > 0;
 
-  // A selection driven by scrolling the PDF (not a click here) may land on a
-  // chunk whose chapter is collapsed — reveal it rather than highlighting a
-  // row the outline is hiding. `rows` is read, not watched — re-expanding on
-  // every rows reload (e.g. a refetch) would fight a chapter the professor
-  // just collapsed by hand.
+  // Whichever chunk is current — brought into view by scrolling the PDF or
+  // picked with a click here — is the only chapter left open; every other
+  // chapter collapses. `rows` is read, not watched: re-running on every rows
+  // reload (e.g. a refetch) would fight a chapter the professor just opened by
+  // hand.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
     if (selectedSectionId === null) return;
     const row = rows.find((candidate) => candidate.sectionId === selectedSectionId);
     if (!row) return;
-    setCollapsedChapters((prev) => {
-      if (!prev.has(row.chapterId)) return prev;
-      const next = new Set(prev);
-      next.delete(row.chapterId);
-      return next;
-    });
+    setExpandedChapters((prev) =>
+      prev.size === 1 && prev.has(row.chapterId) ? prev : new Set([row.chapterId]),
+    );
   }, [selectedSectionId]);
 
   // Keep the highlighted row in view, however it became selected. Re-checked
-  // after `collapsedChapters` changes too, even though it's not read here: an
+  // after `expandedChapters` changes too, even though it's not read here: an
   // auto-expand from the effect above mounts the row a render later than this.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
@@ -94,7 +88,7 @@ export function OutlinePanel({
     rowRefs.current
       .get(selectedSectionId)
       ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [selectedSectionId, collapsedChapters]);
+  }, [selectedSectionId, expandedChapters]);
 
   return (
     <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-[1rem] border">
@@ -145,7 +139,7 @@ export function OutlinePanel({
           chapters.map((chapter) => {
             const sections = rowsByChapter.get(chapter.id) ?? [];
             if (sections.length === 0) return null;
-            const expanded = isSearching || !collapsedChapters.has(chapter.id);
+            const expanded = isSearching || expandedChapters.has(chapter.id);
 
             return (
               <div key={chapter.id}>

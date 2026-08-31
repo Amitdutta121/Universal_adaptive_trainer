@@ -11,6 +11,7 @@ import {
   explanation,
   occurrenceKeys,
   presentBlocks,
+  presentBlocksShuffled,
   presentStringArray,
   presentTests,
   presentText,
@@ -551,6 +552,7 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
 
   if (questionType === "parsons") {
     const blocks = presentBlocks(content.blocks);
+    const shuffledBlocks = presentBlocksShuffled(content.blocks, detail.question.id);
     const order = presentStringArray(content.correct_order) ?? [];
     const compiled = checkByName(checks, "parsons_reference_compiles");
     const assembled =
@@ -570,8 +572,8 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
               <CardDescription>The student sees these shuffled.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              {blocks ? (
-                blocks.map((block) => (
+              {shuffledBlocks ? (
+                shuffledBlocks.map((block) => (
                   <div
                     key={block.id}
                     className="review-panel-muted whitespace-pre-wrap rounded-[0.7rem] border px-3 py-2 font-mono text-xs"
