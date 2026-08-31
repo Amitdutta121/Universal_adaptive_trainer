@@ -83,6 +83,8 @@ export interface SheetRow {
   title: string;
   locationLabel: string | null;
   charCount: number;
+  startPage: number | null;
+  endPage: number | null;
   existingQuestionCount: number;
   /** False for a chunk with no text: the generator would receive nothing. */
   selectable: boolean;

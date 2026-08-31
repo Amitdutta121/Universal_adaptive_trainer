@@ -56,6 +56,8 @@ from app.web.routes.api.schemas import (
     QuestionListResponse,
     QuestionSummary,
     QuestionTaxonomy,
+    RegenerateQuestionRequest,
+    RegenerateQuestionResponse,
     ReviewOut,
     ReviewQueueMode,
     ReviewQueueResponse,
@@ -73,21 +75,23 @@ def list_questions(
     limit: int = 50,
     status: QuestionStatus | None = None,
     curriculum_version_id: int | None = None,
+    section_id: int | None = None,
 ) -> QuestionListResponse:
     """The question bank, newest first, with counts by lifecycle status.
 
-    ``status`` and ``curriculum_version_id`` narrow the listing; without them
-    nothing is hidden. The API does not filter by default even though the page
-    does, because a caller reading the bank over JSON has no way to discover rows
-    an unrequested default removed. ``status_counts``, ``curriculum_version_counts``
-    and ``total`` always describe the whole bank, so a filtered listing still says
-    how much it is showing of what.
+    ``status``, ``curriculum_version_id`` and ``section_id`` narrow the listing;
+    without them nothing is hidden. The API does not filter by default even
+    though the page does, because a caller reading the bank over JSON has no way
+    to discover rows an unrequested default removed. ``status_counts``,
+    ``curriculum_version_counts`` and ``total`` always describe the whole bank,
+    so a filtered listing still says how much it is showing of what.
     """
     repo = QuestionRepository(session)
     rows = repo.list_recent(
         limit=limit,
         statuses=None if status is None else [status],
         curriculum_version_id=curriculum_version_id,
+        section_id=section_id,
     )
     return QuestionListResponse(
         questions=[QuestionSummary.from_row(row) for row in rows],
@@ -141,6 +145,38 @@ def generate_questions(
         created=len(generated),
         question_ids=[row.id for row in generated],
         questions=[QuestionSummary.from_row(row) for row in generated],
+    )
+
+
+@router.post(
+    "/{question_id}/regenerate",
+    response_model=RegenerateQuestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def regenerate_question(
+    session: DbSession, question_id: int, payload: RegenerateQuestionRequest
+) -> RegenerateQuestionResponse:
+    """Generate a new question from an existing one, with instructor feedback.
+
+    The source question is never modified: this returns a fresh row, grounded in
+    the same section, type and difficulty, with the feedback threaded into the
+    generation prompt. It writes no review and triggers no instruction relearn --
+    that is the review endpoint's job, not this one.
+    """
+    try:
+        new_row = GenerationService(session).regenerate_from_question(
+            question_id,
+            feedback=payload.feedback,
+            professor_id=payload.professor_id,
+        )
+    except Exception:
+        session.rollback()
+        raise
+
+    return RegenerateQuestionResponse(
+        question_id=new_row.id,
+        regenerated_from_question_id=question_id,
+        question=QuestionSummary.from_row(new_row),
     )
 
 

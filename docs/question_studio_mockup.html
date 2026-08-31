@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Question Studio — single-chunk generation mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f4f6f6; --surface:#ffffff; --surface-2:#ecefef; --surface-3:#e4e9e8;
+    --ink:#131a1c; --ink-2:#3d4a4d; --muted-ink:#6b797c;
+    --hairline:#dbe0e0; --hairline-2:#c7cfcf;
+    --accent-solid:#2e6f6a; --accent-text:#1d4a47; --accent-wash:#dceae8;
+    --ok-solid:#2f7d57; --ok-wash:#d9ede3;
+    --warn-solid:#b06b14; --warn-wash:#f5e8d1;
+    --critical-solid:#b4531f; --critical-wash:#f6e1d5;
+    --radius:0.85rem; --radius-sm:0.5rem; --radius-lg:1.1rem;
+    --shadow-soft:0 1px 2px rgba(19,26,28,0.06), 0 6px 16px rgba(19,26,28,0.05);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:14px; line-height:1.5;
+  }
+  h1,h2,h3{font-family:"Archivo", ui-sans-serif, system-ui, sans-serif; text-wrap:balance; margin:0;}
+  .mono{font-family:"IBM Plex Mono", ui-monospace, monospace;}
+  .eyebrow{
+    font-family:"IBM Plex Mono", ui-monospace, monospace;
+    font-size:0.66rem; text-transform:uppercase; letter-spacing:0.16em;
+    color:var(--muted-ink); font-weight:500;
+  }
+  button{font-family:inherit; cursor:pointer;}
+  textarea{font-family:inherit;}
+  :focus-visible{outline:2px solid var(--accent-solid); outline-offset:2px;}
+
+  /* ---- shell ---- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:1rem;
+    padding:0.85rem 1.5rem; background:var(--surface); border-bottom:1px solid var(--hairline);
+    position:sticky; top:0; z-index:20;
+  }
+  .topbar-left{display:flex; align-items:baseline; gap:0.75rem;}
+  .topbar-left h1{font-size:1.05rem; font-weight:700; color:var(--ink);}
+  .book-pill{
+    display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.7rem;
+    background:var(--surface-2); border:1px solid var(--hairline); border-radius:999px;
+    font-size:0.78rem; color:var(--ink-2);
+  }
+  .book-pill svg{width:14px; height:14px; flex:none; color:var(--muted-ink);}
+  .topbar-stats{display:flex; gap:1.25rem;}
+  .stat{text-align:right;}
+  .stat .num{font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums; font-size:0.95rem; font-weight:600; color:var(--ink);}
+  .stat .lbl{font-size:0.68rem; color:var(--muted-ink); text-transform:uppercase; letter-spacing:0.08em;}
+
+  .layout{
+    display:grid; grid-template-columns:minmax(0,1.3fr) minmax(380px,0.9fr);
+    gap:1.25rem; max-width:1520px; margin:0 auto; padding:1.25rem 1.5rem 3rem;
+    align-items:start;
+  }
+  @media (max-width:980px){ .layout{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius);
+    box-shadow:var(--shadow-soft); padding:1.1rem 1.2rem;
+  }
+  .card + .card{margin-top:1rem;}
+  .card-head{display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin-bottom:0.85rem;}
+  .card-head h2{font-size:0.92rem; font-weight:700;}
+
+  /* ---- left column: unified PDF viewer (outline sidebar + page) ---- */
+  .card.viewer-shell{display:flex; align-items:stretch; padding:0; height:600px; overflow:hidden;}
+
+  .toc-pane{
+    flex:none; width:296px; display:flex; flex-direction:column;
+    border-right:1px solid var(--hairline); background:var(--surface); overflow:hidden;
+    transition:width 0.15s ease;
+  }
+  .toc-pane.collapsed{width:44px;}
+  .toc-pane.collapsed .toc-title, .toc-pane.collapsed .toc-body{display:none;}
+  .toc-pane.collapsed .toc-header{justify-content:center; padding:0.65rem 0;}
+
+  .toc-header{
+    display:flex; align-items:center; gap:0.55rem; padding:0.65rem 0.7rem;
+    border-bottom:1px solid var(--hairline); flex:none;
+  }
+  .toc-header .toc-title{font-size:0.66rem;}
+  .toc-header .toc-title.count{margin-left:auto; color:var(--muted-ink);}
+
+  .toc-body{display:flex; flex-direction:column; flex:1; min-height:0;}
+  .toc-search-wrap{padding:0.65rem 0.7rem 0.55rem; flex:none;}
+  .toc-tree{flex:1; overflow-y:auto;}
+
+  .selector-toolbar{display:flex; gap:0.4rem; margin-top:0.5rem; flex-wrap:wrap;}
+  .search-box{
+    display:flex; align-items:center; gap:0.4rem;
+    border:1px solid var(--hairline); border-radius:var(--radius-sm); padding:0.4rem 0.6rem; background:var(--surface-2);
+  }
+  .search-box svg{width:14px; height:14px; color:var(--muted-ink); flex:none;}
+  .search-box input{border:none; outline:none; font-size:0.8rem; width:100%; background:transparent; color:var(--ink);}
+  .filter-chip{
+    padding:0.3rem 0.6rem; border-radius:999px; border:1px solid var(--hairline); background:var(--surface);
+    font-size:0.7rem; color:var(--ink-2); white-space:nowrap;
+  }
+  .filter-chip.active{background:var(--accent-solid); border-color:var(--accent-solid); color:#fff;}
+  .filter-chip .count{opacity:0.7; margin-left:0.3em;}
+
+  .toc-chapter{
+    display:flex; align-items:center; gap:0.4rem; width:100%; padding:0.5rem 0.7rem;
+    background:var(--surface); border:none; border-top:1px solid var(--hairline); text-align:left;
+    font-size:0.75rem; font-weight:600; color:var(--ink-2);
+  }
+  .chapter-group:first-child .toc-chapter{border-top:none;}
+  .toc-chapter:hover{background:var(--surface-2);}
+  .toc-chapter .chev{width:11px; height:11px; flex:none; color:var(--muted-ink); transition:transform 0.15s ease;}
+  .toc-chapter.expanded .chev{transform:rotate(90deg);}
+  .toc-chapter .chnum{font-family:"IBM Plex Mono", monospace; color:var(--muted-ink); font-weight:500;}
+  .toc-chapter .chcount{margin-left:auto; font-size:0.66rem; font-weight:400; color:var(--muted-ink);}
+
+  .toc-sections.collapsed{display:none;}
+  .chunk-row{
+    display:flex; align-items:center; gap:0.6rem; width:100%; padding:0.42rem 0.7rem 0.42rem 1.55rem;
+    background:var(--surface); border:none; border-left:3px solid transparent; text-align:left;
+  }
+  .chunk-row:hover{background:var(--surface-2);}
+  .chunk-row.selected{background:var(--accent-wash); border-left-color:var(--accent-solid);}
+  .chunk-num{font-family:"IBM Plex Mono", monospace; font-size:0.72rem; color:var(--muted-ink); width:2.4em; flex:none;}
+  .chunk-main{flex:1; min-width:0; display:flex; flex-direction:column;}
+  .chunk-title{display:block; font-size:0.79rem; color:var(--ink); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .chunk-meta{display:block; font-size:0.67rem; color:var(--muted-ink); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .chunk-badges{display:flex; gap:0.3rem; flex:none;}
+  .badge{
+    font-family:"IBM Plex Mono", monospace; font-size:0.63rem; padding:0.12rem 0.35rem; border-radius:5px;
+    background:var(--surface-2); color:var(--muted-ink); white-space:nowrap;
+  }
+  .badge.has-q{background:var(--accent-wash); color:var(--accent-text);}
+  .badge.low-conf{background:var(--warn-wash); color:var(--warn-solid);}
+
+  .viewer-pane{
+    flex:1; min-width:0; display:flex; flex-direction:column;
+    background:var(--surface-3); padding:0.9rem 1.1rem; overflow-y:auto;
+  }
+  .pdf-toolbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem; flex:none;}
+  .pdf-nav{display:flex; align-items:center; gap:0.4rem;}
+  .icon-btn{
+    display:flex; align-items:center; justify-content:center; width:28px; height:28px; flex:none;
+    border-radius:var(--radius-sm); border:1px solid var(--hairline); background:var(--surface);
+    color:var(--ink-2);
+  }
+  .icon-btn:hover{background:var(--surface-2);}
+  .icon-btn:disabled{opacity:0.35; cursor:not-allowed;}
+  .icon-btn svg{width:14px; height:14px;}
+  .page-readout{font-family:"IBM Plex Mono", monospace; font-size:0.78rem; color:var(--ink-2); font-variant-numeric:tabular-nums;}
+  .confidence-chip{
+    font-size:0.68rem; padding:0.2rem 0.55rem; border-radius:999px; font-family:"IBM Plex Mono", monospace;
+    text-transform:uppercase; letter-spacing:0.06em;
+  }
+  .confidence-high{background:var(--ok-wash); color:var(--ok-solid);}
+  .confidence-medium{background:var(--warn-wash); color:var(--warn-solid);}
+  .confidence-low{background:var(--critical-wash); color:var(--critical-solid);}
+
+  .page-frame-wrap{flex:1; display:flex; justify-content:center; align-items:flex-start;}
+  .page-frame{
+    position:relative; background:#fdfdfc; border:1px solid var(--hairline-2); border-radius:var(--radius-sm);
+    width:100%; max-width:400px; aspect-ratio:8.5/10.2; padding:2.2rem 2.4rem; overflow:hidden;
+    box-shadow:0 1px 3px rgba(19,26,28,0.08), 0 8px 20px rgba(19,26,28,0.08);
+  }
+  .page-frame .ln{height:8px; border-radius:2px; background:#e6e6e2; margin-bottom:10px;}
+  .page-frame .ln.h{height:13px; width:55%; background:#d8d8d2; margin-bottom:14px;}
+  .page-frame .ln.short{width:70%;}
+  .page-frame .ln.shorter{width:45%;}
+  .selection-box{
+    position:absolute; border:1.5px dashed var(--accent-solid); background:rgba(46,111,106,0.09);
+    border-radius:4px; transition:top 0.25s ease, height 0.25s ease;
+  }
+  .selection-tag{
+    position:absolute; top:-11px; left:8px; background:var(--accent-solid); color:#fff;
+    font-family:"IBM Plex Mono", monospace; font-size:0.63rem; padding:1px 6px; border-radius:3px;
+    letter-spacing:0.03em;
+  }
+  .page-caption{margin-top:0.6rem; font-size:0.74rem; color:var(--muted-ink); display:flex; justify-content:space-between; flex:none;}
+
+  .preview-toggle{
+    margin-top:0.75rem; display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+    font-size:0.78rem; color:var(--accent-text); background:none; border:none; padding:0.2rem 0; width:100%;
+  }
+  .preview-toggle svg{width:14px; height:14px; transition:transform 0.15s ease;}
+  .preview-toggle.open svg{transform:rotate(90deg);}
+  .preview-text{
+    display:none; margin-top:0.5rem; padding:0.75rem 0.85rem; background:var(--surface-2);
+    border:1px solid var(--hairline); border-radius:var(--radius-sm); font-family:"IBM Plex Mono", monospace;
+    font-size:0.76rem; line-height:1.6; color:var(--ink-2); max-height:180px; overflow-y:auto; white-space:pre-wrap;
+  }
+  .preview-text.open{display:block;}
+
+  /* ---- right column ---- */
+  .selected-chip{
+    display:flex; align-items:center; justify-content:space-between; gap:0.75rem;
+    padding:0.7rem 0.85rem; background:var(--accent-wash); border:1px solid var(--accent-solid);
+    border-radius:var(--radius-sm); margin-bottom:1rem;
+  }
+  .selected-chip .lbl{font-size:0.66rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--accent-text); font-family:"IBM Plex Mono", monospace;}
+  .selected-chip .name{font-weight:600; color:var(--ink); font-size:0.9rem;}
+
+  .option-group{margin-bottom:0.95rem;}
+  .option-group > .eyebrow{display:block; margin-bottom:0.5rem;}
+  .pill-row{display:flex; flex-wrap:wrap; gap:0.4rem;}
+  .pill{
+    padding:0.42rem 0.75rem; border-radius:999px; border:1px solid var(--hairline); background:var(--surface);
+    font-size:0.79rem; color:var(--ink-2); display:flex; align-items:center; gap:0.4rem;
+  }
+  .pill:hover{border-color:var(--hairline-2);}
+  .pill.active{background:var(--accent-solid); border-color:var(--accent-solid); color:#fff;}
+  .pill .kind-hint{font-size:0.64rem; opacity:0.75;}
+  .pill.diff-easy.active{background:var(--ok-solid); border-color:var(--ok-solid);}
+  .pill.diff-medium.active{background:var(--warn-solid); border-color:var(--warn-solid);}
+  .pill.diff-hard.active{background:var(--critical-solid); border-color:var(--critical-solid);}
+
+  .kind-readout{
+    margin-top:0.55rem; font-size:0.74rem; color:var(--muted-ink); display:flex; align-items:center; gap:0.4rem;
+  }
+  .kind-readout .mono{color:var(--ink-2); background:var(--surface-2); padding:0.08rem 0.4rem; border-radius:4px;}
+
+  .btn{
+    font-size:0.85rem; font-weight:600; padding:0.6rem 1rem; border-radius:var(--radius-sm); border:1px solid transparent;
+    display:inline-flex; align-items:center; justify-content:center; gap:0.45rem;
+  }
+  .btn-primary{background:var(--accent-solid); color:#fff;}
+  .btn-primary:hover{background:var(--accent-text);}
+  .btn-ghost{background:var(--surface); border-color:var(--hairline); color:var(--ink-2);}
+  .btn-ghost:hover{background:var(--surface-2);}
+  .btn-block{width:100%;}
+  .btn:disabled{opacity:0.45; cursor:not-allowed;}
+
+  /* generated question card */
+  .gen-empty{
+    text-align:center; padding:2rem 1rem; color:var(--muted-ink); font-size:0.85rem;
+    border:1px dashed var(--hairline-2); border-radius:var(--radius-sm);
+  }
+  .status-row{display:flex; align-items:center; justify-content:space-between; margin-bottom:0.9rem; flex-wrap:wrap; gap:0.5rem;}
+  .status-badge{
+    font-family:"IBM Plex Mono", monospace; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em;
+    padding:0.28rem 0.6rem; border-radius:999px; font-weight:600;
+  }
+  .status-validation_passed{background:var(--ok-wash); color:var(--ok-solid);}
+  .status-validation_failed{background:var(--critical-wash); color:var(--critical-solid);}
+  .status-generated{background:var(--surface-3); color:var(--ink-2);}
+
+  .judge-row{display:flex; gap:0.6rem; flex-wrap:wrap;}
+  .judge-chip{display:flex; align-items:center; gap:0.4rem; padding:0.3rem 0.55rem; background:var(--surface-2); border-radius:var(--radius-sm); border:1px solid var(--hairline);}
+  .judge-ring{width:28px; height:28px; flex:none;}
+  .judge-label{font-size:0.68rem; color:var(--muted-ink); line-height:1.15;}
+  .judge-label b{display:block; font-size:0.78rem; color:var(--ink); font-family:"IBM Plex Mono",monospace;}
+
+  .q-topic{font-size:0.73rem; color:var(--muted-ink); margin:0.9rem 0 0.4rem;}
+  .q-stem{font-size:0.92rem; color:var(--ink); margin-bottom:0.75rem; line-height:1.55;}
+  .choice{
+    display:flex; align-items:flex-start; gap:0.55rem; padding:0.55rem 0.7rem; border:1px solid var(--hairline);
+    border-radius:var(--radius-sm); margin-bottom:0.4rem; font-size:0.84rem;
+  }
+  .choice.correct{border-color:var(--ok-solid); background:var(--ok-wash); color:var(--ok-solid);}
+  .choice .letter{font-family:"IBM Plex Mono", monospace; font-weight:600; flex:none;}
+  .tf-row{display:flex; gap:0.5rem; margin-bottom:0.6rem;}
+  .tf-opt{flex:1; text-align:center; padding:0.6rem; border:1px solid var(--hairline); border-radius:var(--radius-sm); font-weight:600; font-size:0.84rem; color:var(--ink-2);}
+  .tf-opt.correct{border-color:var(--ok-solid); background:var(--ok-wash); color:var(--ok-solid);}
+  .explain{font-size:0.79rem; color:var(--muted-ink); background:var(--surface-2); padding:0.6rem 0.7rem; border-radius:var(--radius-sm); margin-top:0.5rem;}
+
+  .code-block{
+    background:#12181a; color:#dfe7e6; font-family:"IBM Plex Mono", monospace; font-size:0.79rem; line-height:1.65;
+    padding:0.85rem 1rem; border-radius:var(--radius-sm); overflow-x:auto; white-space:pre; margin-bottom:0.55rem;
+  }
+  .code-block .blank{color:#f5c26b; background:rgba(245,194,107,0.12); padding:0 3px; border-radius:3px;}
+  .code-block .bug{text-decoration:wavy underline var(--critical-solid); text-decoration-thickness:1px;}
+  .answer-box{font-size:0.8rem; background:var(--surface-2); border-radius:var(--radius-sm); padding:0.6rem 0.7rem; margin-top:0.4rem;}
+  .answer-box .k{color:var(--muted-ink); font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; display:block; margin-bottom:0.2rem;}
+
+  .parsons-line{
+    display:flex; align-items:center; gap:0.5rem; background:var(--surface-2); border:1px solid var(--hairline);
+    border-radius:var(--radius-sm); padding:0.4rem 0.6rem; margin-bottom:0.35rem; font-family:"IBM Plex Mono", monospace;
+    font-size:0.78rem; white-space:pre; overflow-x:auto;
+  }
+  .parsons-line .handle{color:var(--muted-ink); flex:none;}
+
+  .test-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:0.3rem;}
+  .test-list li{font-family:"IBM Plex Mono", monospace; font-size:0.76rem; background:var(--surface-2); padding:0.4rem 0.6rem; border-radius:var(--radius-sm);}
+
+  .action-row{display:flex; gap:0.5rem; margin-top:1rem;}
+
+  /* feedback card */
+  .decision-row{display:flex; gap:0.5rem; margin-bottom:0.85rem;}
+  .decision-btn{
+    flex:1; padding:0.55rem 0.4rem; border-radius:var(--radius-sm); border:1px solid var(--hairline); background:var(--surface);
+    font-size:0.82rem; font-weight:600; color:var(--ink-2); display:flex; align-items:center; justify-content:center; gap:0.4rem;
+  }
+  .decision-btn svg{width:15px; height:15px;}
+  .decision-btn.approve.active{background:var(--ok-wash); border-color:var(--ok-solid); color:var(--ok-solid);}
+  .decision-btn.reject.active{background:var(--critical-wash); border-color:var(--critical-solid); color:var(--critical-solid);}
+  .decision-btn.edit.active{background:var(--accent-wash); border-color:var(--accent-solid); color:var(--accent-text);}
+
+  .reason-panel, .edit-panel{display:none; margin-bottom:0.85rem;}
+  .reason-panel.open, .edit-panel.open{display:block;}
+  .reason-grid{display:flex; flex-wrap:wrap; gap:0.4rem;}
+  .reason-chip{
+    padding:0.32rem 0.6rem; border-radius:999px; border:1px solid var(--hairline); background:var(--surface);
+    font-size:0.73rem; color:var(--ink-2);
+  }
+  .reason-chip.active{background:var(--critical-solid); border-color:var(--critical-solid); color:#fff;}
+  .reason-hint{font-size:0.72rem; color:var(--critical-solid); margin-top:0.4rem; display:none;}
+  .reason-hint.show{display:block;}
+
+  .field-label{font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted-ink); font-family:"IBM Plex Mono", monospace; display:block; margin-bottom:0.3rem;}
+  .edit-field{margin-bottom:0.65rem;}
+  textarea.edit-input{
+    width:100%; border:1px solid var(--hairline); border-radius:var(--radius-sm); padding:0.55rem 0.65rem;
+    font-size:0.81rem; color:var(--ink); resize:vertical; background:var(--surface);
+  }
+  textarea.edit-input.code{font-family:"IBM Plex Mono", monospace; background:#12181a; color:#dfe7e6; border-color:#12181a;}
+
+  .comment-box{width:100%; border:1px solid var(--hairline); border-radius:var(--radius-sm); padding:0.55rem 0.65rem; font-size:0.82rem; resize:vertical; min-height:60px; background:var(--surface); color:var(--ink);}
+
+  .save-toast{
+    display:none; align-items:center; gap:0.4rem; margin-top:0.7rem; padding:0.5rem 0.7rem;
+    background:var(--ok-wash); color:var(--ok-solid); border-radius:var(--radius-sm); font-size:0.79rem;
+  }
+  .save-toast.show{display:flex;}
+  .save-toast svg{width:14px; height:14px; flex:none;}
+
+  .history{margin-top:1rem; border-top:1px solid var(--hairline); padding-top:0.8rem;}
+  .history-item{display:flex; gap:0.6rem; padding:0.5rem 0; border-bottom:1px solid var(--hairline); font-size:0.79rem;}
+  .history-item:last-child{border-bottom:none;}
+  .history-dot{width:8px; height:8px; border-radius:50%; margin-top:5px; flex:none;}
+  .history-dot.approve{background:var(--ok-solid);}
+  .history-dot.reject{background:var(--critical-solid);}
+  .history-dot.edit{background:var(--accent-solid);}
+  .history-body b{color:var(--ink);}
+  .history-body .when{color:var(--muted-ink); font-size:0.71rem;}
+  .history-empty{font-size:0.78rem; color:var(--muted-ink); font-style:italic;}
+  .append-note{font-size:0.71rem; color:var(--muted-ink); margin-top:0.5rem; display:flex; gap:0.35rem;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <h1>Question Studio</h1>
+    <div class="book-pill">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 4.5v15"/></svg>
+      Data Structures &amp; Algorithms in Python — 3rd Ed.
+    </div>
+  </div>
+  <div class="topbar-stats">
+    <div class="stat"><div class="num">12</div><div class="lbl">chunks</div></div>
+    <div class="stat"><div class="num">27</div><div class="lbl">questions so far</div></div>
+    <div class="stat"><div class="num">4 / 12</div><div class="lbl">chunks untouched</div></div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- LEFT: unified PDF viewer — outline sidebar + page, standard reader layout -->
+  <div>
+    <div class="card viewer-shell">
+      <div class="toc-pane" id="tocPane">
+        <div class="toc-header">
+          <button class="icon-btn" id="tocCollapseBtn" aria-label="Toggle outline panel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1.2"/><path d="M13.5 4h7v16h-7z" opacity="0.4"/></svg>
+          </button>
+          <span class="toc-title eyebrow">Outline</span>
+          <span class="toc-title eyebrow count" id="chunkCountReadout">12 chunks</span>
+        </div>
+        <div class="toc-body">
+          <div class="toc-search-wrap">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="text" id="chunkSearch" placeholder="Search section…">
+            </label>
+            <div class="selector-toolbar" id="filterChips"></div>
+          </div>
+          <div class="toc-tree" id="chunkList"></div>
+        </div>
+      </div>
+      <div class="viewer-pane">
+        <div class="pdf-toolbar">
+          <div class="pdf-nav">
+            <button class="icon-btn" id="pdfPrev" aria-label="Previous page">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span class="page-readout" id="pageReadout">Page 87 of 412</span>
+            <button class="icon-btn" id="pdfNext" aria-label="Next page">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+          <span class="confidence-chip confidence-high" id="confChip">outline confidence: high</span>
+        </div>
+        <div class="page-frame-wrap">
+          <div class="page-frame" id="pageFrame">
+            <div class="ln h"></div>
+            <div class="ln"></div><div class="ln"></div><div class="ln short"></div>
+            <div class="ln"></div><div class="ln"></div><div class="ln shorter"></div>
+            <div class="ln"></div><div class="ln"></div><div class="ln short"></div>
+            <div class="ln"></div><div class="ln"></div><div class="ln"></div><div class="ln shorter"></div>
+            <div class="ln"></div><div class="ln short"></div>
+            <div class="selection-box" id="selectionBox" style="top:38%; height:22%; left:0; right:0;">
+              <span class="selection-tag" id="selectionTag">§4.3 selected</span>
+            </div>
+          </div>
+        </div>
+        <div class="page-caption">
+          <span>Highlighted region marks the selected chunk's source text on this page.</span>
+          <span id="pageSpanReadout" class="mono">pp. 86–88</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: generate + review -->
+  <div>
+    <div class="selected-chip">
+      <div>
+        <span class="lbl">Working on</span><br>
+        <span class="name" id="selectedChunkName">§4.3 Tree Traversals</span>
+      </div>
+      <button class="preview-toggle" id="previewToggleBtn" style="width:auto; color:var(--accent-text);">
+        Source text
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
+    <div class="preview-text" id="previewText"></div>
+
+    <div class="card">
+      <div class="card-head"><h2>Generate</h2></div>
+
+      <div class="option-group">
+        <span class="eyebrow">Question type</span>
+        <div class="pill-row" id="typeRow"></div>
+        <div class="kind-readout">
+          Question kind <span class="mono" id="kindReadout">discrete</span>
+          <span style="color:var(--muted-ink);">— set automatically from the type, matching how the grader executes it.</span>
+        </div>
+      </div>
+
+      <div class="option-group">
+        <span class="eyebrow">Difficulty</span>
+        <div class="pill-row" id="difficultyRow"></div>
+      </div>
+
+      <button class="btn btn-primary btn-block" id="generateBtn">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.5-6.5-2 2M8.5 15.5l-2 2m9-2 2 2m-11-9-2-2"/></svg>
+        Generate one question
+      </button>
+    </div>
+
+    <div class="card" id="genCard">
+      <div class="card-head"><h2>Generated question</h2></div>
+      <div class="gen-empty" id="genEmpty">Pick a type and difficulty, then generate — the question will appear here for review.</div>
+      <div id="genBody" style="display:none;"></div>
+    </div>
+
+    <div class="card" id="feedbackCard" style="display:none;">
+      <div class="card-head"><h2>Your review</h2></div>
+      <div class="decision-row">
+        <button class="decision-btn approve" data-decision="approve">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg> Approve
+        </button>
+        <button class="decision-btn reject" data-decision="reject">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg> Reject
+        </button>
+        <button class="decision-btn edit" data-decision="edit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Edit
+        </button>
+      </div>
+
+      <div class="reason-panel" id="reasonPanel">
+        <span class="field-label">Rejection reasons (pick at least one)</span>
+        <div class="reason-grid" id="reasonGrid"></div>
+        <div class="reason-hint" id="reasonHint">Select at least one reason before saving a rejection.</div>
+      </div>
+
+      <div class="edit-panel" id="editPanel">
+        <div class="edit-field">
+          <span class="field-label">Prompt</span>
+          <textarea class="edit-input" id="editPrompt" rows="3"></textarea>
+        </div>
+        <div class="edit-field">
+          <span class="field-label" id="editAnswerLabel">Reference answer</span>
+          <textarea class="edit-input code" id="editAnswer" rows="3"></textarea>
+        </div>
+        <div class="edit-field" id="editTestsField" style="display:none;">
+          <span class="field-label">Tests</span>
+          <textarea class="edit-input code" id="editTests" rows="3"></textarea>
+        </div>
+      </div>
+
+      <div class="edit-field">
+        <span class="field-label">Comment (optional)</span>
+        <textarea class="comment-box" id="reviewComment" placeholder="Anything the next reviewer — or the generator — should know…"></textarea>
+      </div>
+
+      <button class="btn btn-primary btn-block" id="submitReviewBtn" disabled>Save review</button>
+      <div class="save-toast" id="saveToast">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        Saved as a new review record — nothing is overwritten, history below.
+      </div>
+
+      <div class="history">
+        <span class="field-label">Review history for this question</span>
+        <div id="historyList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const QUESTION_TYPES = [
+  {id:'multiple_choice', label:'Multiple choice', kind:'discrete'},
+  {id:'true_false', label:'True / false', kind:'discrete'},
+  {id:'output_prediction', label:'Output prediction', kind:'testable_program'},
+  {id:'code_completion', label:'Code completion', kind:'testable_program'},
+  {id:'debugging', label:'Debugging', kind:'testable_program'},
+  {id:'parsons', label:'Parsons problem', kind:'testable_program'},
+  {id:'coding', label:'Coding', kind:'testable_program'},
+];
+const DIFFICULTIES = ['easy','medium','hard'];
+const REJECTION_REASONS = [
+  'technically_incorrect','incorrect_answer','incorrect_tests','not_grounded_in_source',
+  'wrong_topic_subtopic','too_easy','too_difficult','ambiguous','poor_wording',
+  'poor_distractors','poor_tests','not_pedagogically_useful','too_similar_repetitive','other'
+];
+
+const CHAPTERS = [
+  {num:4, title:'Trees', family:'tree', sections:[
+    {num:'4.1', title:'Tree Terminology', startPage:79, endPage:81, chars:2140, existingQ:2, confidence:'high'},
+    {num:'4.2', title:'Binary Trees', startPage:82, endPage:85, chars:3320, existingQ:3, confidence:'high'},
+    {num:'4.3', title:'Tree Traversals', startPage:86, endPage:88, chars:2870, existingQ:1, confidence:'high'},
+    {num:'4.4', title:'Binary Search Trees', startPage:89, endPage:94, chars:4510, existingQ:0, confidence:'medium'},
+  ]},
+  {num:5, title:'Hash Tables', family:'hash', sections:[
+    {num:'5.1', title:'Hash Functions', startPage:121, endPage:123, chars:2005, existingQ:4, confidence:'high'},
+    {num:'5.2', title:'Collision Resolution', startPage:124, endPage:128, chars:3760, existingQ:2, confidence:'high'},
+    {num:'5.3', title:'Load Factor & Rehashing', startPage:129, endPage:131, chars:1980, existingQ:0, confidence:'low'},
+  ]},
+  {num:6, title:'Sorting Algorithms', family:'sort', sections:[
+    {num:'6.1', title:'Comparison Sorts', startPage:150, endPage:152, chars:2210, existingQ:5, confidence:'high'},
+    {num:'6.2', title:'Quicksort', startPage:153, endPage:157, chars:3990, existingQ:3, confidence:'high'},
+    {num:'6.3', title:'Mergesort', startPage:158, endPage:161, chars:3125, existingQ:2, confidence:'medium'},
+    {num:'6.4', title:'Sorting Lower Bounds', startPage:162, endPage:164, chars:1640, existingQ:0, confidence:'low'},
+    {num:'6.5', title:'Radix & Bucket Sort', startPage:165, endPage:169, chars:3480, existingQ:1, confidence:'medium'},
+  ]},
+];
+
+const CHUNK_TEXT = {
+  '4.3': "A traversal visits every node in a tree exactly once, but the order in which nodes are visited depends on when a node is processed relative to its children. In a pre-order traversal, the node is processed before its subtrees are visited; in-order processes the left subtree, then the node, then the right subtree; post-order processes both subtrees before the node itself. For a binary search tree, in-order traversal has a special property: it always yields the keys in ascending sorted order, since every node in the left subtree is smaller and every node in the right subtree is larger than the node itself. Level-order (breadth-first) traversal visits nodes by depth, using a queue rather than the recursive call stack that the other three traversals rely on implicitly.",
+  '5.2': "When two distinct keys hash to the same bucket, a collision occurs. Separate chaining resolves this by storing a small linked list (or dynamic array) at each bucket, so colliding keys simply accumulate at that index. Open addressing instead searches for an alternate empty slot within the table itself — linear probing checks the next slot in sequence, quadratic probing spaces successive probes further apart to reduce clustering, and double hashing uses a second hash function to compute the probe interval. As the load factor climbs, chained lists get longer and open-addressing probe sequences get longer too, which is why both strategies are usually paired with a rehashing policy.",
+  '6.2': "Quicksort partitions the array around a pivot element: everything smaller than the pivot moves to its left, everything larger moves to its right, and the pivot lands in its final sorted position. The algorithm then recurses on the two partitions independently. Average-case performance is O(n log n), but a poor pivot choice — such as always picking the first element on an already-sorted array — degrades performance to O(n^2), which is why practical implementations randomize the pivot or use median-of-three selection.",
+};
+function textFor(section){
+  return CHUNK_TEXT[section.num] || `Source text for §${section.num} ${section.title} would be shown here verbatim, exactly as extracted from the PDF, including any code listings or figures referenced in the surrounding prose.`;
+}
+
+const CODE = {
+  tree: {
+    topic:'Trees', subtopic:'Tree Traversals',
+    output_prediction:{
+      code:`class Node:
+    def __init__(self, value, left=None, right=None):
+        self.value = value
+        self.left = left
+        self.right = right
+
+def traverse(node):
+    if node is None:
+        return
+    traverse(node.left)
+    print(node.value, end=" ")
+    traverse(node.right)
+
+root = Node(1, Node(2, Node(4), Node(5)), Node(3))
+traverse(root)`,
+      prompt:'What does this program print?',
+      answer:'4 2 5 1 3'
+    },
+    code_completion:{
+      code:`def traverse(node):
+    if node is None:
+        return
+    «blank1»
+    print(node.value, end=" ")
+    «blank2»`,
+      instructions:'Fill in the two missing recursive calls so that traverse() performs an in-order traversal.',
+      blanks:['traverse(node.left)','traverse(node.right)']
+    },
+    debugging:{
+      code:`def traverse(node):
+    print(node.value, end=" ")
+    «bug»traverse(node.left)«/bug»
+    traverse(node.right)
+
+traverse(None)`,
+      prompt:'Running traverse(None) raises an exception. Identify the bug and describe the fix.',
+      bugExplanation:"The function never checks for the None base case, so calling traverse(None) immediately fails on node.value with AttributeError: 'NoneType' object has no attribute 'value'.",
+      fix:'Add `if node is None: return` as the first line of the function, before any attribute access.'
+    },
+    parsons:{
+      instructions:'Reorder these lines into a correct pre-order traversal (indentation shown as given).',
+      lines:['def traverse(node):','    print(node.value, end=" ")','    if node is None:','        return','    traverse(node.left)','    traverse(node.right)'],
+      correctOrderNote:'Correct order requires the base-case check before any recursive call — several shuffled orders look plausible but crash on a leaf node.'
+    },
+    coding:{
+      problem:'Implement level_order(root) that returns a list of node values in breadth-first (level-order) order, using an explicit queue rather than recursion.',
+      starterCode:`from collections import deque
+
+def level_order(root):
+    # TODO: return a list of values, level by level
+    pass`,
+      tests:['level_order(None) == []','level_order(Node(1)) == [1]','level_order(Node(1, Node(2), Node(3))) == [1, 2, 3]','level_order(Node(1, Node(2, Node(4)), Node(3))) == [1, 2, 3, 4]']
+    },
+    mcq:{stem:'Which traversal visits a node only after both of its children have already been visited?', choices:['Pre-order','In-order','Post-order','Level-order'], correctIndex:2, explanation:'Post-order processes both subtrees before the node itself, which is why it is used to safely delete or free a tree bottom-up.'},
+    tf:{statement:'In a binary search tree, an in-order traversal always visits nodes in ascending sorted order.', answer:true, explanation:'This follows directly from the BST invariant: every left descendant is smaller and every right descendant is larger than a node.'}
+  },
+  hash: {
+    topic:'Hash Tables', subtopic:'Collision Resolution',
+    output_prediction:{
+      code:`table = [None] * 5
+
+def insert(key):
+    i = key % 5
+    while table[i] is not None:
+        i = (i + 1) % 5
+    table[i] = key
+
+for k in [3, 8, 13, 4]:
+    insert(k)
+print(table)`,
+      prompt:'What is printed? (linear probing, table size 5)',
+      answer:'[None, None, None, 3, 8]  is wrong — trace shows [13, 8, None, 3, 4]'
+    },
+    code_completion:{
+      code:`def insert(table, key, size):
+    i = «blank1» % size
+    while table[i] is not None:
+        i = «blank2»
+    table[i] = key`,
+      instructions:'Fill in the initial hash index and the linear-probing step.',
+      blanks:['key','(i + 1) % size']
+    },
+    debugging:{
+      code:`def insert(table, key, size):
+    i = key % size
+    «bug»while table[i] is not None:«/bug»
+        i = (i + 1) % size
+    table[i] = key`,
+      prompt:'This function hangs when the table is full. What is the bug?',
+      bugExplanation:'There is no check for a full table, so once every slot is occupied the while loop probes forever without ever finding a None slot.',
+      fix:'Track a count of occupied slots (or the load factor) and raise/resize before the table fills, or bound the probe loop to `size` iterations.'
+    },
+    parsons:{
+      instructions:'Reorder these lines into a correct linear-probing insert.',
+      lines:['def insert(table, key, size):','    i = key % size','    while table[i] is not None:','        i = (i + 1) % size','    table[i] = key'],
+      correctOrderNote:'The probe step must be inside the while loop — moving it after the loop causes only one probe attempt.'
+    },
+    coding:{
+      problem:'Implement hash_index(key, size) using a simple polynomial rolling hash over the characters of a string key, folded into [0, size).',
+      starterCode:`def hash_index(key: str, size: int) -> int:
+    # TODO: polynomial rolling hash, e.g. sum(ord(c) * 31**i)
+    pass`,
+      tests:['hash_index("", 10) == 0','0 <= hash_index("algorithm", 97) < 97','hash_index("ab", 100) != hash_index("ba", 100)']
+    },
+    mcq:{stem:'A hash table has 7 slots and uses separate chaining. After several insertions, which factor most directly determines expected lookup time?', choices:['The table size alone','The load factor (n / table size)','The order keys were inserted','The programming language used'], correctIndex:1, explanation:'Expected chain length — and thus lookup time — scales with the load factor, not the raw table size.'},
+    tf:{statement:'Open addressing and separate chaining can both suffer from clustering as the load factor increases.', answer:true, explanation:'Chains grow long under chaining; probe sequences grow long and start colliding with each other under open addressing — both are load-factor effects.'}
+  },
+  sort: {
+    topic:'Sorting Algorithms', subtopic:'Quicksort',
+    output_prediction:{
+      code:`def partition(arr, lo, hi):
+    pivot = arr[hi]
+    i = lo - 1
+    for j in range(lo, hi):
+        if arr[j] < pivot:
+            i += 1
+            arr[i], arr[j] = arr[j], arr[i]
+    arr[i+1], arr[hi] = arr[hi], arr[i+1]
+    return i + 1
+
+arr = [5, 2, 8, 1, 9]
+p = partition(arr, 0, 4)
+print(arr, p)`,
+      prompt:'What is printed after this single partition call (pivot = last element)?',
+      answer:'[5, 2, 1, 8, 9] 2'
+    },
+    code_completion:{
+      code:`def partition(arr, lo, hi):
+    pivot = arr[hi]
+    i = lo - 1
+    for j in range(lo, hi):
+        «blank1»
+            i += 1
+            arr[i], arr[j] = arr[j], arr[i]
+    arr[i+1], arr[hi] = arr[hi], arr[i+1]
+    return «blank2»`,
+      instructions:'Fill in the comparison that decides a swap, and the final pivot index returned.',
+      blanks:['if arr[j] < pivot:','i + 1']
+    },
+    debugging:{
+      code:`def merge(left, right):
+    result = []
+    i = j = 0
+    «bug»while i < len(left) and j < len(right):«/bug»
+        if left[i] <= right[j]:
+            result.append(left[i]); i += 1
+        else:
+            result.append(right[j]); j += 1
+    return result`,
+      prompt:'merge([1,3,5], [2,4]) returns [1, 2, 3, 4] — one element is silently dropped. Why?',
+      bugExplanation:'The loop stops as soon as either list is exhausted, so leftover elements in the longer list (here, 5) are never appended.',
+      fix:'After the loop, append whatever remains: `result.extend(left[i:]); result.extend(right[j:])`.'
+    },
+    parsons:{
+      instructions:'Reorder these lines into a correct partition step (Lomuto scheme).',
+      lines:['def partition(arr, lo, hi):','    pivot = arr[hi]','    i = lo - 1','    for j in range(lo, hi):','        if arr[j] < pivot:','            i += 1','            arr[i], arr[j] = arr[j], arr[i]','    arr[i+1], arr[hi] = arr[hi], arr[i+1]','    return i + 1'],
+      correctOrderNote:'The final pivot swap must happen after the loop, not inside it — a common distractor order swaps too early.'
+    },
+    coding:{
+      problem:'Implement merge(left, right) that merges two already-sorted lists into one sorted list in O(n + m) time.',
+      starterCode:`def merge(left, right):
+    # TODO: merge two sorted lists
+    pass`,
+      tests:['merge([], []) == []','merge([1,3], [2]) == [1,2,3]','merge([1,2,3], [4,5,6]) == [1,2,3,4,5,6]','merge([5], [1,2,3]) == [1,2,3,5]']
+    },
+    mcq:{stem:'Quicksort is given an already-sorted array and always chooses the first element as pivot. What is the resulting worst-case time complexity?', choices:['O(n)','O(n log n)','O(n^2)','O(log n)'], correctIndex:2, explanation:'Every partition splits off just one element, so the recursion depth is O(n) with O(n) work per level.'},
+    tf:{statement:'Mergesort’s worst-case time complexity is O(n log n), unlike quicksort which degrades to O(n^2) on adversarial input.', answer:true, explanation:'Mergesort always splits the array in half regardless of input order, so its recursion tree depth is guaranteed O(log n).'}
+  }
+};
+
+let chunks = [];
+CHAPTERS.forEach(ch => ch.sections.forEach(s => {
+  chunks.push({...s, chapterNum:ch.num, chapterTitle:ch.title, family:ch.family});
+}));
+
+let state = {
+  selectedChunkNum: '4.3',
+  selectedType: 'multiple_choice',
+  selectedDifficulty: 'medium',
+  activeFilter: 'all',
+  searchTerm: '',
+  chapterCollapsed: {},
+  generated: null,
+  decision: null,
+  selectedReasons: new Set(),
+  history: {
+    '4.3': [
+      {decision:'reject', reasons:['too_similar_repetitive'], comment:'Nearly identical to an existing traversal question in this chunk.', when:'2026-08-24 09:12'}
+    ]
+  }
+};
+
+function el(html){ const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function chunkByNum(num){ return chunks.find(c => c.num === num); }
+
+function renderFilterChips(){
+  const total = chunks.length;
+  const untouched = chunks.filter(c => c.existingQ === 0).length;
+  const hasQ = chunks.filter(c => c.existingQ > 0).length;
+  const lowConf = chunks.filter(c => c.confidence === 'low').length;
+  const defs = [
+    {id:'all', label:'All', count: total},
+    {id:'untouched', label:'Needs questions', count: untouched},
+    {id:'has_q', label:'Has questions', count: hasQ},
+    {id:'low_conf', label:'Low confidence', count: lowConf},
+  ];
+  const wrap = document.getElementById('filterChips');
+  wrap.innerHTML = '';
+  defs.forEach(d => {
+    const b = el(`<button class="filter-chip ${d.id===state.activeFilter?'active':''}">${d.label}<span class="count">${d.count}</span></button>`);
+    b.addEventListener('click', () => { state.activeFilter = d.id; renderFilterChips(); renderChunkList(); });
+    wrap.appendChild(b);
+  });
+}
+
+function matchesFilter(c){
+  if(state.activeFilter === 'untouched') return c.existingQ === 0;
+  if(state.activeFilter === 'has_q') return c.existingQ > 0;
+  if(state.activeFilter === 'low_conf') return c.confidence === 'low';
+  return true;
+}
+function matchesSearch(c){
+  if(!state.searchTerm) return true;
+  const t = state.searchTerm.toLowerCase();
+  return c.num.toLowerCase().includes(t) || c.title.toLowerCase().includes(t);
+}
+
+function renderChunkList(){
+  const wrap = document.getElementById('chunkList');
+  wrap.innerHTML = '';
+  let visibleCount = 0;
+  CHAPTERS.forEach(ch => {
+    const rows = ch.sections.filter(s => matchesFilter(s) && matchesSearch(s));
+    if(rows.length === 0) return;
+    const collapsed = !!state.chapterCollapsed[ch.num];
+    const group = el(`<div class="chapter-group"></div>`);
+    const chapterBtn = el(`
+      <button class="toc-chapter ${collapsed?'':'expanded'}">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+        <span class="chnum">Ch. ${ch.num}</span>
+        <span>${escapeHtml(ch.title)}</span>
+        <span class="chcount">${rows.length}</span>
+      </button>`);
+    chapterBtn.addEventListener('click', () => {
+      state.chapterCollapsed[ch.num] = !state.chapterCollapsed[ch.num];
+      renderChunkList();
+    });
+    group.appendChild(chapterBtn);
+    const sectionsWrap = el(`<div class="toc-sections ${collapsed?'collapsed':''}"></div>`);
+    rows.forEach(s => {
+      visibleCount++;
+      const selected = s.num === state.selectedChunkNum;
+      const row = el(`
+        <button class="chunk-row ${selected?'selected':''}" data-num="${s.num}">
+          <span class="chunk-num">§${s.num}</span>
+          <span class="chunk-main">
+            <span class="chunk-title">${escapeHtml(s.title)}</span>
+            <span class="chunk-meta">pp. ${s.startPage}–${s.endPage} · ${s.chars.toLocaleString()} chars</span>
+          </span>
+          <span class="chunk-badges">
+            ${s.confidence==='low' ? '<span class="badge low-conf">low conf.</span>' : ''}
+            <span class="badge ${s.existingQ>0?'has-q':''}">${s.existingQ} made</span>
+          </span>
+        </button>`);
+      row.addEventListener('click', () => selectChunk(s.num));
+      sectionsWrap.appendChild(row);
+    });
+    group.appendChild(sectionsWrap);
+    wrap.appendChild(group);
+  });
+  document.getElementById('chunkCountReadout').textContent = `${visibleCount} of ${chunks.length} chunks`;
+}
+
+function selectChunk(num){
+  state.selectedChunkNum = num;
+  const c = chunkByNum(num);
+  state.chapterCollapsed[c.chapterNum] = false;
+  document.getElementById('selectedChunkName').textContent = `§${c.num} ${c.title}`;
+  document.getElementById('previewText').textContent = textFor(c);
+  document.getElementById('pageReadout').textContent = `Page ${c.startPage} of 412`;
+  document.getElementById('pageSpanReadout').textContent = `pp. ${c.startPage}–${c.endPage}`;
+  document.getElementById('selectionTag').textContent = `§${c.num} selected`;
+  const confMap = {high:'confidence-high', medium:'confidence-medium', low:'confidence-low'};
+  const chip = document.getElementById('confChip');
+  chip.className = `confidence-chip ${confMap[c.confidence]}`;
+  chip.textContent = `outline confidence: ${c.confidence}`;
+  const box = document.getElementById('selectionBox');
+  const seed = (c.num.charCodeAt(0) + c.num.charCodeAt(2)) % 5;
+  box.style.top = (20 + seed*10) + '%';
+  box.style.height = '20%';
+  renderChunkList();
+  resetGenerated();
+  renderHistory();
+}
+
+document.getElementById('chunkSearch').addEventListener('input', (e) => {
+  state.searchTerm = e.target.value;
+  renderChunkList();
+});
+document.getElementById('tocCollapseBtn').addEventListener('click', () => {
+  document.getElementById('tocPane').classList.toggle('collapsed');
+});
+document.getElementById('previewToggleBtn').addEventListener('click', (e) => {
+  const btn = e.currentTarget;
+  const box = document.getElementById('previewText');
+  btn.classList.toggle('open');
+  box.classList.toggle('open');
+});
+document.getElementById('pdfPrev').addEventListener('click', () => {
+  const idx = chunks.findIndex(c => c.num === state.selectedChunkNum);
+  if(idx > 0) selectChunk(chunks[idx-1].num);
+});
+document.getElementById('pdfNext').addEventListener('click', () => {
+  const idx = chunks.findIndex(c => c.num === state.selectedChunkNum);
+  if(idx < chunks.length-1) selectChunk(chunks[idx+1].num);
+});
+
+function renderTypeRow(){
+  const wrap = document.getElementById('typeRow');
+  wrap.innerHTML = '';
+  QUESTION_TYPES.forEach(t => {
+    const b = el(`<button class="pill ${t.id===state.selectedType?'active':''}">${t.label}</button>`);
+    b.addEventListener('click', () => {
+      state.selectedType = t.id;
+      document.getElementById('kindReadout').textContent = t.kind;
+      renderTypeRow();
+      resetGenerated();
+    });
+    wrap.appendChild(b);
+  });
+  document.getElementById('kindReadout').textContent = QUESTION_TYPES.find(t=>t.id===state.selectedType).kind;
+}
+function renderDifficultyRow(){
+  const wrap = document.getElementById('difficultyRow');
+  wrap.innerHTML = '';
+  DIFFICULTIES.forEach(d => {
+    const b = el(`<button class="pill diff-${d} ${d===state.selectedDifficulty?'active':''}">${d[0].toUpperCase()+d.slice(1)}</button>`);
+    b.addEventListener('click', () => { state.selectedDifficulty = d; renderDifficultyRow(); resetGenerated(); });
+    wrap.appendChild(b);
+  });
+}
+
+function resetGenerated(){
+  state.generated = null;
+  state.decision = null;
+  state.selectedReasons = new Set();
+  document.getElementById('genEmpty').style.display = 'block';
+  document.getElementById('genBody').style.display = 'none';
+  document.getElementById('feedbackCard').style.display = 'none';
+}
+
+function hashScore(str, salt){
+  let h = 0;
+  const s = str + salt;
+  for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
+  return 55 + (h % 45);
+}
+function scoreColor(v){
+  if(v >= 85) return {ring:'#2f7d57', bg:'var(--ok-wash)', text:'var(--ok-solid)'};
+  if(v >= 65) return {ring:'#b06b14', bg:'var(--warn-wash)', text:'var(--warn-solid)'};
+  return {ring:'#b4531f', bg:'var(--critical-wash)', text:'var(--critical-solid)'};
+}
+function ringSvg(v){
+  const c = scoreColor(v);
+  const r = 11, circ = 2*Math.PI*r;
+  const offset = circ * (1 - v/100);
+  return `<svg class="judge-ring" viewBox="0 0 28 28">
+    <circle cx="14" cy="14" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="3"/>
+    <circle cx="14" cy="14" r="${r}" fill="none" stroke="${c.ring}" stroke-width="3" stroke-linecap="round"
+      stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 14 14)"/>
+  </svg>`;
+}
+
+function renderCodeWithMarks(code){
+  return escapeHtml(code)
+    .replace(/«blank\d*»/g, '<span class="blank">________</span>')
+    .replace(/«bug»([\s\S]*?)«\/bug»/g, '<span class="bug">$1</span>');
+}
+
+function buildQuestionBody(family, type, difficulty){
+  const data = CODE[family];
+  let html = `<div class="q-topic mono">${data.topic} → ${data.subtopic} · ${difficulty}</div>`;
+  if(type === 'multiple_choice'){
+    const q = data.mcq;
+    html += `<div class="q-stem">${escapeHtml(q.stem)}</div>`;
+    q.choices.forEach((ch, i) => {
+      html += `<div class="choice ${i===q.correctIndex?'correct':''}"><span class="letter">${String.fromCharCode(65+i)}.</span><span>${escapeHtml(ch)}</span></div>`;
+    });
+    html += `<div class="explain">${escapeHtml(q.explanation)}</div>`;
+  } else if(type === 'true_false'){
+    const q = data.tf;
+    html += `<div class="q-stem">${escapeHtml(q.statement)}</div>`;
+    html += `<div class="tf-row">
+      <div class="tf-opt ${q.answer===true?'correct':''}">True</div>
+      <div class="tf-opt ${q.answer===false?'correct':''}">False</div>
+    </div>`;
+    html += `<div class="explain">${escapeHtml(q.explanation)}</div>`;
+  } else if(type === 'output_prediction'){
+    const q = data.output_prediction;
+    html += `<div class="q-stem">${escapeHtml(q.prompt)}</div>`;
+    html += `<div class="code-block">${escapeHtml(q.code)}</div>`;
+    html += `<div class="answer-box"><span class="k">Expected output</span><span class="mono">${escapeHtml(q.answer)}</span></div>`;
+  } else if(type === 'code_completion'){
+    const q = data.code_completion;
+    html += `<div class="q-stem">${escapeHtml(q.instructions)}</div>`;
+    html += `<div class="code-block">${renderCodeWithMarks(q.code)}</div>`;
+    html += `<div class="answer-box"><span class="k">Reference fill-ins</span><span class="mono">${q.blanks.map(escapeHtml).join('  ·  ')}</span></div>`;
+  } else if(type === 'debugging'){
+    const q = data.debugging;
+    html += `<div class="q-stem">${escapeHtml(q.prompt)}</div>`;
+    html += `<div class="code-block">${renderCodeWithMarks(q.code)}</div>`;
+    html += `<div class="answer-box"><span class="k">Bug</span>${escapeHtml(q.bugExplanation)}</div>`;
+    html += `<div class="answer-box"><span class="k">Fix</span>${escapeHtml(q.fix)}</div>`;
+  } else if(type === 'parsons'){
+    const q = data.parsons;
+    html += `<div class="q-stem">${escapeHtml(q.instructions)}</div>`;
+    const shuffled = [...q.lines];
+    const seed = difficulty.length;
+    for(let i=shuffled.length-1;i>0;i--){ const j=(i*7+seed)%(i+1); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
+    shuffled.forEach((line,i) => {
+      html += `<div class="parsons-line"><span class="handle">⠿</span>${escapeHtml(line)}</div>`;
+    });
+    html += `<div class="explain">${escapeHtml(q.correctOrderNote)}</div>`;
+  } else if(type === 'coding'){
+    const q = data.coding;
+    html += `<div class="q-stem">${escapeHtml(q.problem)}</div>`;
+    html += `<div class="code-block">${escapeHtml(q.starterCode)}</div>`;
+    html += `<span class="field-label">Tests</span>`;
+    html += `<ul class="test-list">${q.tests.map(t=>`<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
+  }
+  return html;
+}
+
+function editableFieldsFor(family, type){
+  const data = CODE[family];
+  if(type === 'multiple_choice') return {prompt:data.mcq.stem, answer:data.mcq.choices[data.mcq.correctIndex], answerLabel:'Correct choice', hasTests:false};
+  if(type === 'true_false') return {prompt:data.tf.statement, answer:String(data.tf.answer), answerLabel:'Correct answer', hasTests:false};
+  if(type === 'output_prediction') return {prompt:data.output_prediction.prompt, answer:data.output_prediction.answer, answerLabel:'Expected output', hasTests:false};
+  if(type === 'code_completion') return {prompt:data.code_completion.instructions, answer:data.code_completion.blanks.join('\n'), answerLabel:'Reference fill-ins', hasTests:false};
+  if(type === 'debugging') return {prompt:data.debugging.prompt, answer:data.debugging.fix, answerLabel:'Fix', hasTests:false};
+  if(type === 'parsons') return {prompt:data.parsons.instructions, answer:data.parsons.lines.join('\n'), answerLabel:'Correct order', hasTests:false};
+  if(type === 'coding') return {prompt:data.coding.problem, answer:data.coding.starterCode, answerLabel:'Reference solution', hasTests:true, tests:data.coding.tests.join('\n')};
+}
+
+document.getElementById('generateBtn').addEventListener('click', () => {
+  const chunk = chunkByNum(state.selectedChunkNum);
+  const type = state.selectedType, diff = state.selectedDifficulty;
+  const salt = `${chunk.num}:${type}:${diff}`;
+  const scores = {
+    issues: hashScore('issues', salt),
+    subtopic: hashScore('subtopic', salt),
+    difficulty: hashScore('difficulty', salt),
+    generatability: hashScore('generatability', salt),
+  };
+  const status = scores.issues < 65 ? 'validation_failed' : 'validation_passed';
+  state.generated = {chunk, type, diff, scores, status};
+
+  document.getElementById('genEmpty').style.display = 'none';
+  const body = document.getElementById('genBody');
+  body.style.display = 'block';
+  body.innerHTML = `
+    <div class="status-row">
+      <span class="status-badge status-${status}">${status.replace('_',' ')}</span>
+      <div class="judge-row">
+        ${Object.entries(scores).map(([k,v]) => `
+          <div class="judge-chip">
+            ${ringSvg(v)}
+            <span class="judge-label">${k}<b>${v}%</b></span>
+          </div>`).join('')}
+      </div>
+    </div>
+    ${buildQuestionBody(chunk.family, type, diff)}
+    <div class="action-row">
+      <button class="btn btn-ghost" id="regenBtn">Regenerate</button>
+      <button class="btn btn-ghost" id="anotherBtn">Another from this chunk</button>
+    </div>
+  `;
+  document.getElementById('regenBtn').addEventListener('click', () => document.getElementById('generateBtn').click());
+  document.getElementById('anotherBtn').addEventListener('click', () => document.getElementById('generateBtn').click());
+
+  document.getElementById('feedbackCard').style.display = 'block';
+  setupFeedbackForm();
+});
+
+function renderReasonGrid(){
+  const wrap = document.getElementById('reasonGrid');
+  wrap.innerHTML = '';
+  REJECTION_REASONS.forEach(r => {
+    const b = el(`<button class="reason-chip ${state.selectedReasons.has(r)?'active':''}">${r.replace(/_/g,' ')}</button>`);
+    b.addEventListener('click', () => {
+      state.selectedReasons.has(r) ? state.selectedReasons.delete(r) : state.selectedReasons.add(r);
+      renderReasonGrid();
+      updateSubmitState();
+    });
+    wrap.appendChild(b);
+  });
+}
+
+function updateSubmitState(){
+  const btn = document.getElementById('submitReviewBtn');
+  const hint = document.getElementById('reasonHint');
+  if(state.decision === 'reject' && state.selectedReasons.size === 0){
+    btn.disabled = true;
+    hint.classList.add('show');
+  } else if(!state.decision){
+    btn.disabled = true;
+    hint.classList.remove('show');
+  } else {
+    btn.disabled = false;
+    hint.classList.remove('show');
+  }
+}
+
+function setupFeedbackForm(){
+  state.decision = null;
+  state.selectedReasons = new Set();
+  document.querySelectorAll('.decision-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('reasonPanel').classList.remove('open');
+  document.getElementById('editPanel').classList.remove('open');
+  document.getElementById('saveToast').classList.remove('show');
+  renderReasonGrid();
+
+  const chunk = chunkByNum(state.selectedChunkNum);
+  const fields = editableFieldsFor(chunk.family, state.selectedType);
+  document.getElementById('editPrompt').value = fields.prompt;
+  document.getElementById('editAnswer').value = fields.answer;
+  document.getElementById('editAnswerLabel').textContent = fields.answerLabel;
+  document.getElementById('editTestsField').style.display = fields.hasTests ? 'block' : 'none';
+  if(fields.hasTests) document.getElementById('editTests').value = fields.tests;
+  document.getElementById('reviewComment').value = '';
+
+  document.querySelectorAll('.decision-btn').forEach(b => {
+    b.onclick = () => {
+      state.decision = b.dataset.decision;
+      document.querySelectorAll('.decision-btn').forEach(x => x.classList.toggle('active', x===b));
+      document.getElementById('reasonPanel').classList.toggle('open', state.decision === 'reject');
+      document.getElementById('editPanel').classList.toggle('open', state.decision === 'edit');
+      updateSubmitState();
+    };
+  });
+  updateSubmitState();
+}
+
+document.getElementById('submitReviewBtn').addEventListener('click', () => {
+  const num = state.selectedChunkNum;
+  if(!state.history[num]) state.history[num] = [];
+  const now = new Date();
+  const when = now.toISOString().slice(0,16).replace('T',' ');
+  state.history[num].unshift({
+    decision: state.decision,
+    reasons: [...state.selectedReasons],
+    comment: document.getElementById('reviewComment').value,
+    when
+  });
+  document.getElementById('saveToast').classList.add('show');
+  renderHistory();
+});
+
+function renderHistory(){
+  const list = document.getElementById('historyList');
+  const items = state.history[state.selectedChunkNum] || [];
+  if(items.length === 0){
+    list.innerHTML = '<div class="history-empty">No prior reviews for questions from this chunk.</div>';
+    return;
+  }
+  list.innerHTML = items.map(it => `
+    <div class="history-item">
+      <span class="history-dot ${it.decision}"></span>
+      <div class="history-body">
+        <b>${it.decision[0].toUpperCase()+it.decision.slice(1)}</b>
+        ${it.reasons && it.reasons.length ? ' — ' + it.reasons.map(r=>r.replace(/_/g,' ')).join(', ') : ''}
+        ${it.comment ? `<div>${escapeHtml(it.comment)}</div>` : ''}
+        <div class="when">${it.when}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+renderFilterChips();
+renderChunkList();
+renderTypeRow();
+renderDifficultyRow();
+selectChunk(state.selectedChunkNum);
+</script>
+</body>
+</html>

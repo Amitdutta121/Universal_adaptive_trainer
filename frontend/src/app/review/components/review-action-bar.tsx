@@ -27,7 +27,7 @@ type ReviewActionBarProps = {
   onReasonsChange: (reasons: RejectionReason[]) => void;
   onCommentChange: (value: string) => void;
   onSubmit: () => void;
-  onSkip: () => void;
+  onSkip?: () => void;
 };
 
 export function ReviewActionBar({
@@ -140,10 +140,12 @@ export function ReviewActionBar({
                   : "Approve and continue"}
             <span className="review-kbd">Enter</span>
           </Button>
-          <Button variant="outline" onClick={onSkip} disabled={isSubmitting}>
-            Skip
-            <ChevronRight className="size-4" />
-          </Button>
+          {onSkip ? (
+            <Button variant="outline" onClick={onSkip} disabled={isSubmitting}>
+              Skip
+              <ChevronRight className="size-4" />
+            </Button>
+          ) : null}
           {effectiveDecision === "reject" && !canReject ? (
             <span className="text-[var(--review-muted)] text-xs">
               Reject stays disabled until you choose at least one reason.

@@ -170,6 +170,10 @@ class Question(BaseModel):
     generator_kind: GeneratorKind = GeneratorKind.BASE
     generator_name: str = "unset"
     generator_version: str = "0"
+    #: Set when an instructor regenerated this question from another one with
+    #: feedback (a new row, never an edit of the source).
+    regenerated_from_question_id: int | None = None
+    regeneration_feedback: str | None = None
 
     #: Selection priority; lowered to :data:`LOWEST_PRIORITY` once served.
     priority: int = DEFAULT_PRIORITY

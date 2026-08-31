@@ -8,6 +8,7 @@ back as JSON under ``/api``, and an invalid upload changes nothing.
 from __future__ import annotations
 
 import book_documents as docs
+import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -38,6 +39,24 @@ def _import_book(client: TestClient) -> dict:
     return response.json()
 
 
+def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
+    """A tiny, real PDF, for exercising the PDF import and source-file routes."""
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), text, fontsize=11)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def _import_pdf_book(client: TestClient) -> dict:
+    response = client.post(
+        "/api/books",
+        files={"file": ("textbook.pdf", _one_page_pdf(), "application/pdf")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def _import_taxonomy(client: TestClient) -> dict:
     response = client.post(
         "/api/curriculum/versions",
@@ -60,7 +79,7 @@ def test_health_reports_a_real_database_probe(client: TestClient) -> None:
 def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient) -> None:
     payload = client.get("/api/config").json()
 
-    assert payload["supported_book_extensions"] == [".json"]
+    assert payload["supported_book_extensions"] == [".json", ".pdf"]
     assert [option["value"] for option in payload["difficulties"]] == ["easy", "medium", "hard"]
     assert {option["value"] for option in payload["question_types"]} == {
         "multiple_choice",
@@ -140,6 +159,32 @@ def test_section_under_the_wrong_book_is_a_404(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
+def test_book_source_streams_the_retained_pdf(client: TestClient) -> None:
+    book_id = _import_pdf_book(client)["id"]
+
+    response = client.get(f"/api/books/{book_id}/source")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+
+def test_book_source_for_a_json_imported_book_is_a_404(client: TestClient) -> None:
+    book_id = _import_book(client)["id"]
+
+    response = client.get(f"/api/books/{book_id}/source")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_book_source_for_an_unknown_book_is_a_404(client: TestClient) -> None:
+    response = client.get("/api/books/999999/source")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
 def test_invalid_book_document_is_rejected_and_stores_nothing(
     client: TestClient, session: Session
 ) -> None:
@@ -155,11 +200,20 @@ def test_invalid_book_document_is_rejected_and_stores_nothing(
 
 def test_unsupported_book_extension_is_rejected(client: TestClient) -> None:
     response = client.post(
-        "/api/books", files={"file": ("book.pdf", b"%PDF-1.4", "application/pdf")}
+        "/api/books", files={"file": ("book.docx", b"whatever", "application/octet-stream")}
     )
 
     assert response.status_code == 415
     assert response.json()["error"]["code"] == "unsupported_file"
+
+
+def test_an_unreadable_pdf_upload_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/books", files={"file": ("book.pdf", b"%PDF-1.4\nnot a real pdf", "application/pdf")}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_book_document"
 
 
 # --------------------------------------------------------------------- curriculum
@@ -290,6 +344,72 @@ def test_batch_generation_uses_the_active_curriculum_version(
     assert seen["curriculum_version_id"] == old
 
 
+def test_regenerate_threads_feedback_and_returns_both_ids(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.persistence.models import QuestionRow
+    from app.web.routes.api import questions as api_questions
+
+    _import_taxonomy(client)
+    seen: dict[str, object] = {}
+
+    class FakeGenerationService:
+        def __init__(self, request_session) -> None:
+            self._session = request_session
+
+        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
+            seen["question_id"] = question_id
+            seen["feedback"] = feedback
+            row = QuestionRow(
+                prompt="a regenerated question", original_prompt="a regenerated question"
+            )
+            self._session.add(row)
+            self._session.flush()
+            return row
+
+    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
+
+    response = client.post(
+        "/api/questions/77/regenerate",
+        json={"feedback": "Make the distractors subtler."},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["regenerated_from_question_id"] == 77
+    assert body["question_id"] == body["question"]["id"]
+    assert seen == {"question_id": 77, "feedback": "Make the distractors subtler."}
+
+
+def test_regenerate_surfaces_an_unknown_question_as_a_json_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.errors import NotFoundError
+    from app.web.routes.api import questions as api_questions
+
+    _import_taxonomy(client)
+
+    class FakeGenerationService:
+        def __init__(self, request_session) -> None:
+            self._session = request_session
+
+        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
+            raise NotFoundError(f"Question {question_id} does not exist.")
+
+    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
+
+    response = client.post("/api/questions/424242/regenerate", json={"feedback": "anything"})
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_regenerate_requires_feedback(client: TestClient) -> None:
+    response = client.post("/api/questions/1/regenerate", json={"feedback": ""})
+
+    assert response.status_code == 422
+
+
 def test_subtopic_detail_reports_a_taxonomy_upload_has_no_evidence(client: TestClient) -> None:
     version = _import_taxonomy(client)
     subtopic_id = version["topics"][0]["subtopics"][0]["id"]
@@ -356,6 +476,33 @@ def test_question_list_filters_by_curriculum_version_across_the_whole_bank(
     assert payload["curriculum_version_id"] == 1
     assert payload["total"] == 4
     assert payload["curriculum_version_counts"] == {"1": 1, "2": 3}
+
+
+def test_question_list_filters_by_section_across_the_whole_bank(
+    client: TestClient, session: Session
+) -> None:
+    """``section_id`` narrows to questions grounded in that one section.
+
+    Grounding is read from the frozen spec (ADR-044), not a foreign key, so this
+    exercises the same scan :meth:`count_grounded_in_sections` already relies on.
+    """
+    from app.persistence.models import QuestionRow
+
+    wanted = QuestionRow(
+        prompt="From section 7.",
+        spec={"source_section_ids": [7]},
+    )
+    session.add(wanted)
+    session.add(QuestionRow(prompt="From section 9.", spec={"source_section_ids": [9]}))
+    session.add(QuestionRow(prompt="No spec at all."))
+    session.commit()
+
+    response = client.get("/api/questions", params={"section_id": 7})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [q["id"] for q in payload["questions"]] == [wanted.id]
+    assert payload["total"] == 3
 
 
 def test_generation_without_an_approved_curriculum_is_refused(client: TestClient) -> None:
@@ -764,6 +911,7 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/questions",
         "/api/questions/generate",
         "/api/questions/{question_id}",
+        "/api/questions/{question_id}/regenerate",
         "/api/questions/{question_id}/review",
         "/api/reviews",
         "/api/reviews/stats",

@@ -62,10 +62,15 @@ export const qk = {
     all: ["question-sets"] as const,
     list: () => ["question-sets", "list"] as const,
     detail: (setVersionId: number) => ["question-sets", "detail", setVersionId] as const,
+    prod: () => ["question-sets", "prod"] as const,
   },
   instructions: {
     all: ["instructions"] as const,
     list: () => ["instructions", "list"] as const,
+  },
+  judgePrompts: {
+    all: ["judge-prompts"] as const,
+    list: () => ["judge-prompts", "list"] as const,
   },
   coverage: {
     all: ["coverage"] as const,
@@ -73,7 +78,8 @@ export const qk = {
   },
   students: {
     all: ["students"] as const,
-    list: () => ["students", "list"] as const,
+    list: (params?: unknown) => ["students", "list", params ?? null] as const,
+    summary: () => ["students", "summary"] as const,
     detail: (studentId: number) => ["students", "detail", studentId] as const,
     progress: (studentId: number) => ["students", "progress", studentId] as const,
   },
@@ -197,6 +203,7 @@ type QuestionListParams = {
   limit?: number;
   status?: QuestionStatus;
   curriculum_version_id?: number;
+  section_id?: number;
 };
 
 export const questionsQuery = (params: QuestionListParams) =>
@@ -206,6 +213,13 @@ export const questionsQuery = (params: QuestionListParams) =>
   });
 
 export const useQuestions = (params: QuestionListParams) => useQuery(questionsQuery(params));
+
+/** Every question already generated from one chunk, newest first. */
+export const useQuestionsForSection = (sectionId: number | null) =>
+  useQuery({
+    ...questionsQuery({ section_id: sectionId ?? 0, limit: 50 }),
+    enabled: sectionId !== null,
+  });
 
 export const useQuestion = (id: number | null, { enabled = true } = {}) =>
   useQuery({
@@ -339,6 +353,51 @@ export function useGenerateBatch() {
   return useMutation({
     mutationFn: (body: Schemas["GenerateBatchRequest"]) =>
       unwrap(api.POST("/api/questions/generate-batch", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questions.all });
+      client.invalidateQueries({ queryKey: qk.system.counts() });
+    },
+  });
+}
+
+/**
+ * Generate from one chunk, one type, one difficulty at a time.
+ *
+ * The same endpoint the bulk sheet's per-format rows resolve to underneath —
+ * given a single section id it creates exactly one question, so the
+ * single-chunk generator needs no endpoint of its own.
+ */
+export function useGenerateQuestions() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["GenerateQuestionsRequest"]) =>
+      unwrap(api.POST("/api/questions/generate", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questions.all });
+      client.invalidateQueries({ queryKey: qk.system.counts() });
+    },
+  });
+}
+
+/** Re-run generation from one source question, preserving the original row. */
+export function useRegenerateWithFeedback() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      questionId,
+      feedback,
+      professor_id,
+    }: {
+      questionId: number;
+      feedback: string;
+      professor_id?: number | null;
+    }) =>
+      unwrap(
+        api.POST("/api/questions/{question_id}/regenerate", {
+          params: { path: { question_id: questionId } },
+          body: { feedback, professor_id },
+        }),
+      ),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
@@ -669,6 +728,38 @@ export const useQuestionSet = (setVersionId: number, { enabled = true } = {}) =>
       ),
   });
 
+export const useProdQuestionSet = ({ enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.questionSets.prod(),
+    enabled,
+    retry: false,
+    queryFn: () => unwrap(api.GET("/api/question-sets/prod", {})),
+  });
+
+/** Freeze the currently approved bank as one immutable question set. */
+export function useCreateQuestionSet() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CreateQuestionSetRequest"]) =>
+      unwrap(api.POST("/api/question-sets", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questionSets.all });
+    },
+  });
+}
+
+export function useSyncProdQuestionSet() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.POST("/api/question-sets/prod/sync", {})),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questionSets.all });
+      client.invalidateQueries({ queryKey: qk.questionSets.prod() });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+    },
+  });
+}
+
 export const instructionsQuery = () =>
   queryOptions({
     queryKey: qk.instructions.list(),
@@ -709,8 +800,108 @@ export function useDeleteInstructionRule() {
   });
 }
 
-export const useStudents = () =>
-  useQuery({ queryKey: qk.students.list(), queryFn: () => unwrap(api.GET("/api/students")) });
+// --- Judge prompts --------------------------------------------------------
+
+/**
+ * The four advisory judges, each with the prompt it runs now and the prompt it
+ * shipped with (ADR-038).
+ */
+export const judgePromptsQuery = () =>
+  queryOptions({
+    queryKey: qk.judgePrompts.list(),
+    queryFn: () => unwrap(api.GET("/api/judge-prompts")),
+  });
+
+export const useJudgePrompts = () => useQuery(judgePromptsQuery());
+
+type JudgeMetricId = Schemas["JudgeMetricId"];
+
+/**
+ * Replace one judge's system prompt.
+ *
+ * Saving re-names the whole panel: every evaluation written afterwards carries a
+ * new `rubric_version`, so calibration reports the repaired judge separately from
+ * the one it replaced (ADR-038). The calibration reads are invalidated for that
+ * reason, not just the prompt list.
+ */
+export function useSaveJudgePrompt() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      metric,
+      body,
+    }: {
+      metric: JudgeMetricId;
+      body: Schemas["JudgePromptRequest"];
+    }) => unwrap(api.PUT("/api/judge-prompts/{metric}", { params: { path: { metric } }, body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.judgePrompts.all });
+      client.invalidateQueries({ queryKey: ["calibration"] });
+    },
+  });
+}
+
+/** Drop one override so the judge runs its shipped prompt again. */
+export function useRevertJudgePrompt() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (metric: JudgeMetricId) =>
+      unwrap(api.DELETE("/api/judge-prompts/{metric}", { params: { path: { metric } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.judgePrompts.all });
+      client.invalidateQueries({ queryKey: ["calibration"] });
+    },
+  });
+}
+
+/**
+ * Re-learn one judge's prompt from the disagreements it is named in (ADR-039).
+ *
+ * The mirror of `useRefreshInstruction`. Reads only this judge's own
+ * disagreements, minus the held-out third reserved to score the result.
+ */
+export function useRefreshJudgePrompt() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (metric: JudgeMetricId) =>
+      unwrap(api.POST("/api/judge-prompts/{metric}/refresh", { params: { path: { metric } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.judgePrompts.all });
+      client.invalidateQueries({ queryKey: ["calibration"] });
+    },
+  });
+}
+
+export interface StudentRosterQuery {
+  search?: string;
+  score?: string;
+  answered?: string;
+  activity?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export const useStudents = (params: StudentRosterQuery = {}) => {
+  const query = {
+    search: params.search ?? "",
+    score: params.score ?? "all",
+    answered: params.answered ?? "all",
+    activity: params.activity ?? "all",
+    page: params.page ?? 1,
+    page_size: params.pageSize ?? 20,
+  };
+  return useQuery({
+    queryKey: qk.students.list(query),
+    queryFn: () => unwrap(api.GET("/api/students", { params: { query } })),
+    placeholderData: keepPreviousData,
+  });
+};
+
+export const useClassSummary = () =>
+  useQuery({
+    queryKey: qk.students.summary(),
+    queryFn: () => unwrap(api.GET("/api/students/class-summary")),
+  });
 
 export const useStudentProgress = (studentId: number | null, { enabled = true } = {}) =>
   useQuery({
@@ -733,6 +924,21 @@ export function useCreateStudent() {
       client.invalidateQueries({ queryKey: qk.students.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
     },
+  });
+}
+
+/**
+ * Recognise a returning browser by its stored resume token (ADR-041).
+ *
+ * A pure lookup -- no cache to invalidate. Resolves to the learner plus their
+ * open run against this classroom set, if one is still going; a 404 means the
+ * token is stale (the database was recreated) and the caller should drop it and
+ * fall back to enrolling.
+ */
+export function useResumeStudent() {
+  return useMutation({
+    mutationFn: (body: Schemas["ResumeStudentRequest"]) =>
+      unwrap(api.POST("/api/students/resume", { body })),
   });
 }
 

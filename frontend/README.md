@@ -1,4 +1,4 @@
-# Professor console (Next.js)
+# Instructor Studio (Next.js)
 
 The React frontend for the FastAPI JSON API. See `docs/DECISIONS.md` ADR-043
 for why it exists and what it is not allowed to do.

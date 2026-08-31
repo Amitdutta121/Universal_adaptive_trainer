@@ -68,6 +68,8 @@ export function useSheetRows(filters: SheetFilters): SheetRowsApi {
             title: entry.section.display_title,
             locationLabel: entry.section.location_label,
             charCount: entry.section.char_count,
+            startPage: entry.section.start_page,
+            endPage: entry.section.end_page,
             existingQuestionCount: entry.existing_question_count,
             selectable: entry.selectable,
             isUnlabelled: entry.section.is_unlabelled,

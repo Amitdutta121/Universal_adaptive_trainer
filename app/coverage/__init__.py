@@ -42,7 +42,12 @@ from app.coverage.schema import (
     needed_for,
     state_for,
 )
-from app.coverage.service import build_coverage_report, create_question_set
+from app.coverage.service import (
+    build_coverage_report,
+    create_question_set,
+    get_prod_question_set,
+    sync_prod_question_set,
+)
 
 __all__ = [
     "MIN_QUESTIONS_PER_CELL",
@@ -53,6 +58,8 @@ __all__ = [
     "TopicCoverage",
     "build_coverage_report",
     "create_question_set",
+    "get_prod_question_set",
     "needed_for",
     "state_for",
+    "sync_prod_question_set",
 ]

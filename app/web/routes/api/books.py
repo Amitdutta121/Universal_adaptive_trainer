@@ -19,9 +19,11 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.domain.enums import SourceFormat
 from app.errors import NotFoundError
 from app.ingestion import (
     SCHEMA_VERSION,
@@ -35,6 +37,7 @@ from app.ingestion import (
     book_authoring_prompt,
     example_json,
 )
+from app.ingestion.storage import resolve_stored_path
 from app.persistence.repositories import BookRepository, BookStructureRepository
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
@@ -149,6 +152,28 @@ def delete_book(session: DbSession, book_id: int, force: bool = False) -> BookDe
     stranded = BookLibraryService(session).delete(book_id, force=force)
     session.commit()
     return BookDeletion(deleted_book_id=book_id, stranded_question_count=stranded)
+
+
+@router.get("/{book_id}/source")
+def get_book_source(session: DbSession, book_id: int) -> FileResponse:
+    """The original PDF as uploaded, for in-browser rendering.
+
+    Only a book imported from a PDF (``SourceFormat.BOOK_PDF``) has a source
+    file worth serving back -- a book declared directly as structured JSON has
+    no PDF to render, even though it also retains its uploaded file.
+
+    Not a download: no ``filename`` is passed to ``FileResponse``, so no
+    ``Content-Disposition: attachment`` header is sent, and a PDF-rendering
+    client can fetch it inline.
+    """
+    book = BookRepository(session).get(book_id)
+    if book.source_format != SourceFormat.BOOK_PDF or not book.stored_filename:
+        raise NotFoundError(f"Book {book_id} has no retained PDF source file.")
+    settings = get_settings()
+    path = resolve_stored_path(book.stored_filename, settings)
+    if not path.is_file():
+        raise NotFoundError(f"Book {book_id} has no retained PDF source file.")
+    return FileResponse(path, media_type="application/pdf")
 
 
 @router.get("/{book_id}/sections", response_model=SectionListResponse)

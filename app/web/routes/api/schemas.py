@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.calibration import (
     MIN_PANEL_SAMPLE,
@@ -727,6 +727,9 @@ class QuestionSummary(BaseModel):
     priority: int
     times_used: int
     is_edited: bool
+    #: The question this one was regenerated from with instructor feedback, or
+    #: ``None`` for a directly generated question.
+    regenerated_from_question_id: int | None
     created_at: datetime
     updated_at: datetime | None
 
@@ -755,6 +758,7 @@ class QuestionSummary(BaseModel):
             # recorded: ``original_prompt`` is seeded on every generated question,
             # so testing it for None reported every question as edited.
             is_edited=row.prompt != row.original_prompt,
+            regenerated_from_question_id=row.regenerated_from_question_id,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -862,6 +866,25 @@ class GenerateQuestionsResponse(BaseModel):
     created: int
     question_ids: list[int]
     questions: list[QuestionSummary]
+
+
+class RegenerateQuestionRequest(BaseModel):
+    """Regenerate one existing question with instructor feedback.
+
+    The feedback is threaded into the generation prompt. The source question is
+    never modified -- a new question is produced (ADR-002).
+    """
+
+    feedback: str = Field(min_length=1, max_length=4000)
+    #: Parity with ``ReviewRequest.professor_id``; recorded for provenance only,
+    #: not used to switch generators.
+    professor_id: int | None = None
+
+
+class RegenerateQuestionResponse(BaseModel):
+    question_id: int
+    regenerated_from_question_id: int
+    question: QuestionSummary
 
 
 class ChunkGenerationSpec(BaseModel):
@@ -1708,9 +1731,10 @@ class QuestionSetOut(BaseModel):
     member_count: int
     created_at: datetime
     question_ids: list[int]
+    is_prod: bool = False
 
     @classmethod
-    def from_row(cls, row: QuestionSetVersionRow) -> QuestionSetOut:
+    def from_row(cls, row: QuestionSetVersionRow, *, is_prod: bool = False) -> QuestionSetOut:
         return cls(
             id=row.id,
             label=row.label,
@@ -1720,6 +1744,7 @@ class QuestionSetOut(BaseModel):
             member_count=len(row.members),
             created_at=row.created_at,
             question_ids=[member.question_id for member in row.members],
+            is_prod=is_prod,
         )
 
 
@@ -1743,6 +1768,7 @@ class StudentOut(BaseModel):
 
     id: int
     display_name: str
+    email: str
     created_at: datetime
     answered_count: int = 0
 
@@ -1751,18 +1777,112 @@ class StudentOut(BaseModel):
         return cls(
             id=row.id,
             display_name=row.display_name,
+            email=row.email,
             created_at=row.created_at,
             answered_count=answered_count,
         )
 
 
+class StudentRosterRowOut(BaseModel):
+    """One learner as the roster table shows them.
+
+    Carries the attempt aggregates the roster used to derive on the client from
+    a per-student progress fetch: the average, the answered count, when they were
+    last active, and the running-average series the row sparkline draws.
+    """
+
+    id: int
+    display_name: str
+    email: str
+    created_at: datetime
+    answered_count: int = 0
+    average_score: float | None = None
+    last_activity_at: datetime | None = None
+    score_series: list[float] = Field(default_factory=list)
+
+
 class StudentListResponse(BaseModel):
-    students: list[StudentOut]
+    """A page of the roster. ``total`` counts the learners matching the filters,
+    not the page, so the client can render page controls."""
+
+    students: list[StudentRosterRowOut]
     total: int
+    page: int = 1
+    page_size: int = 20
+
+
+class ClassTrendAttemptOut(BaseModel):
+    """One scored answer, cohort-wide, for the class trend graph."""
+
+    student_id: int
+    score: float
+    answered_at: datetime | None = None
+    created_at: datetime
+    ordinal: int
+
+
+class ClassWeaknessStudentOut(BaseModel):
+    id: int
+    name: str
+    weakness: float
+    answered: int
+
+
+class ClassWeaknessCellOut(BaseModel):
+    subtopic_id: int
+    subtopic_name: str
+    topic_name: str
+    average_weakness: float
+    student_count: int
+    affected: list[ClassWeaknessStudentOut] = Field(default_factory=list)
+
+
+class ClassSummaryOut(BaseModel):
+    """Cohort-wide numbers the roster's aggregate cards need, computed over every
+    learner regardless of which roster page is open."""
+
+    student_count: int
+    measured_students: int
+    average_score: float | None = None
+    scored_attempts: list[ClassTrendAttemptOut] = Field(default_factory=list)
+    weakness_cells: list[ClassWeaknessCellOut] = Field(default_factory=list)
+
+
+class StudentIdentityOut(BaseModel):
+    """A learner plus the token their browser keeps to come back as them.
+
+    Returned only from enrolment and resume -- the two calls a student's own
+    browser makes. The professor-facing :class:`StudentOut` never carries the
+    token.
+    """
+
+    id: int
+    display_name: str
+    email: str
+    created_at: datetime
+    resume_token: str
+
+    @classmethod
+    def from_row(cls, row: StudentRow) -> StudentIdentityOut:
+        return cls(
+            id=row.id,
+            display_name=row.display_name,
+            email=row.email,
+            created_at=row.created_at,
+            resume_token=row.resume_token,
+        )
 
 
 class CreateStudentRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=200)
+    email: EmailStr
+
+
+class ResumeStudentRequest(BaseModel):
+    """A returning browser identifying itself against one classroom link."""
+
+    resume_token: str = Field(min_length=1, max_length=64)
+    set_version_id: int
 
 
 class TrainingSessionOut(BaseModel):
@@ -1800,6 +1920,13 @@ class TrainingSessionOut(BaseModel):
             served_count=len(attempts),
             answered_count=sum(1 for attempt in attempts if attempt.score is not None),
         )
+
+
+class StudentResumeOut(BaseModel):
+    """Who a resume token belongs to, and the run to drop them back into if any."""
+
+    student: StudentIdentityOut
+    active_session: TrainingSessionOut | None
 
 
 class TrainingSessionListResponse(BaseModel):
@@ -1992,6 +2119,11 @@ class AttemptOut(BaseModel):
     score: float | None
     passed_tests: int | None
     total_tests: int | None
+    #: What the student submitted, verbatim -- an option index for a discrete
+    #: type, source code for an executable one. ``None`` while the attempt is
+    #: still open. Lets a past-question review show the learner's own choice
+    #: beside the correct answer.
+    answer: str | None
     created_at: datetime
     answered_at: datetime | None
 
@@ -2009,6 +2141,7 @@ class AttemptOut(BaseModel):
             score=row.score,
             passed_tests=row.passed_tests,
             total_tests=row.total_tests,
+            answer=row.answer,
             created_at=row.created_at,
             answered_at=row.answered_at,
         )

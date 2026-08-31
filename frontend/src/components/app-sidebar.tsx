@@ -2,13 +2,14 @@
 
 /** The persistent professor navigation, driven entirely by `lib/navigation.ts`. */
 
-import { LogOut, Moon, Sparkles, Sun, SunMoon } from "lucide-react";
+import { ChevronRight, LogOut, Moon, Sparkles, Sun, SunMoon } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +21,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { useCurrentUser, useHealth, useLogout } from "@/lib/api/queries";
@@ -31,13 +35,32 @@ type AppTheme = "light" | "dark" | "system";
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
   { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "generate", "review"] },
   { label: "Calibration", keys: ["instructions", "judges", "coverage"] },
-  { label: "Adaptive Training", keys: ["students"] },
+  { label: "Adaptive Training", keys: ["classrooms", "roster"] },
 ];
 
 function sectionsFor(keys: readonly string[]): NavSection[] {
   return keys
     .map((key) => NAV_SECTIONS.find((section) => section.key === key))
     .filter((section): section is NavSection => Boolean(section));
+}
+
+/** `true` when the current path is `section.path` or a child of it. */
+function pathMatchesSection(pathname: string, path: string): boolean {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+/**
+ * Highlight the most specific section only. `/students` is a prefix of
+ * `/students/roster`, so without this the Classrooms item lights up while the
+ * learner is on Roster.
+ */
+function isSectionActive(pathname: string, section: NavSection): boolean {
+  if (!pathMatchesSection(pathname, section.path)) return false;
+  return !NAV_SECTIONS.some(
+    (other) =>
+      other.path.length > section.path.length &&
+      pathMatchesSection(pathname, other.path),
+  );
 }
 
 function LlmStatus() {
@@ -159,7 +182,7 @@ export function AppSidebar() {
           </span>
           <span className="app-sidebar-brand-copy group-data-[collapsible=icon]:hidden">
             <span className="app-sidebar-brand-title">Adaptive Trainer</span>
-            <span className="app-sidebar-brand-subtitle">Professor console</span>
+            <span className="app-sidebar-brand-subtitle">Instructor Studio</span>
           </span>
         </Link>
       </SidebarHeader>
@@ -177,8 +200,46 @@ export function AppSidebar() {
                   <SidebarMenu>
                     {sections.map((section) => {
                       const Icon = section.icon;
-                      const isActive =
-                        pathname === section.path || pathname.startsWith(`${section.path}/`);
+                      const isActive = isSectionActive(pathname, section);
+
+                      if (section.children?.length) {
+                        return (
+                          <Collapsible
+                            key={section.key}
+                            defaultOpen={isActive}
+                            className="group/collapsible"
+                          >
+                            <SidebarMenuItem>
+                              <CollapsibleTrigger asChild>
+                                <SidebarMenuButton
+                                  isActive={isActive}
+                                  tooltip={section.label}
+                                  className="text-[13px]"
+                                >
+                                  <Icon />
+                                  <span>{section.label}</span>
+                                  <ChevronRight className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                                </SidebarMenuButton>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <SidebarMenuSub>
+                                  {section.children.map((child) => {
+                                    const childActive = pathname === child.path;
+                                    return (
+                                      <SidebarMenuSubItem key={child.key}>
+                                        <SidebarMenuSubButton asChild isActive={childActive}>
+                                          <Link href={child.path}>{child.label}</Link>
+                                        </SidebarMenuSubButton>
+                                      </SidebarMenuSubItem>
+                                    );
+                                  })}
+                                </SidebarMenuSub>
+                              </CollapsibleContent>
+                            </SidebarMenuItem>
+                          </Collapsible>
+                        );
+                      }
+
                       return (
                         <SidebarMenuItem key={section.key}>
                           <SidebarMenuButton

@@ -19,9 +19,17 @@ import {
   Network,
   Scale,
   ScrollText,
+  Users,
   Wand2,
 } from "lucide-react";
 import type { Route } from "next";
+
+/** A sidebar-only sub-link, nested under a `NavSection` that has more than one screen. */
+export interface NavChild {
+  key: string;
+  label: string;
+  path: Route;
+}
 
 export interface NavSection {
   key: string;
@@ -30,6 +38,13 @@ export interface NavSection {
   path: Route;
   summary: string;
   icon: LucideIcon;
+  /**
+   * Sub-screens under one nav item, rendered as a collapsible group in the
+   * sidebar. Dashboard cards (`app/page.tsx`) read only `label`/`path`/
+   * `summary`/`icon`, so a section keeps a working dashboard card whether or
+   * not it has children.
+   */
+  children?: readonly NavChild[];
 }
 
 export const NAV_SECTIONS: readonly NavSection[] = [
@@ -58,8 +73,20 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "generate",
     label: "Generate",
     path: "/questions/generate",
-    summary: "Set what each book chunk should produce, then generate the whole sheet at once.",
+    summary: "Generate one question at a time from a chunk, or produce a whole sheet in bulk.",
     icon: Wand2,
+    children: [
+      {
+        key: "generate-single",
+        label: "Generate questions",
+        path: "/questions/generate/single",
+      },
+      {
+        key: "generate-bulk",
+        label: "Bulk generate",
+        path: "/questions/generate",
+      },
+    ],
   },
   {
     key: "review",
@@ -91,11 +118,18 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     icon: Grid3x3,
   },
   {
-    key: "students",
-    label: "Students",
+    key: "classrooms",
+    label: "Classrooms",
     path: "/students",
-    summary: "Adaptive training progress: BKT topic mastery and subtopic weakness.",
+    summary: "Generate joinable adaptive-training classrooms from frozen question sets.",
     icon: GraduationCap,
+  },
+  {
+    key: "roster",
+    label: "Roster",
+    path: "/students/roster",
+    summary: "Enrolled learners' progress: score trends, BKT topic mastery, and subtopic weakness.",
+    icon: Users,
   },
 ] as const;
 

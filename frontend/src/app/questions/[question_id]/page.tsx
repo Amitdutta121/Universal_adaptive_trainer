@@ -21,7 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ApiError, api, unwrap } from "@/lib/api/client";
+import { ApiError, api, readApiError, unwrap } from "@/lib/api/client";
+import { forwardedCookieHeader } from "@/lib/api/server-request";
 import type { QuestionDetail } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
@@ -55,14 +56,17 @@ export default async function QuestionDetailPage(props: PageProps<"/questions/[q
   let detail: QuestionDetail;
   try {
     detail = await unwrap(
-      api.GET("/api/questions/{question_id}", { params: { path: { question_id: id } } }),
+      api.GET("/api/questions/{question_id}", {
+        params: { path: { question_id: id } },
+        headers: await forwardedCookieHeader(),
+      }),
     );
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) notFound();
     return (
       <>
         <PageHeader title={`Question ${id}`} />
-        <QueryError error={error} />
+        <QueryError error={readApiError(error)} />
       </>
     );
   }

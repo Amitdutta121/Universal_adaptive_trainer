@@ -29,6 +29,8 @@ function row(sectionId: number, overrides: Partial<SheetRow> = {}): SheetRow {
     title: `Section ${sectionId}`,
     locationLabel: "pp. 88-91",
     charCount: 3104,
+    startPage: 88,
+    endPage: 91,
     existingQuestionCount: 0,
     selectable: true,
     isUnlabelled: false,

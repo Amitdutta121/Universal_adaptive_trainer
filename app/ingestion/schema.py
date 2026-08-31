@@ -1,9 +1,16 @@
-"""The structured book document: the only input this application accepts.
+"""The structured book document: the shape every import ultimately declares.
 
-This module *is* the ingestion contract. A book arrives as JSON that already
-states its own structure -- chapters, sections, section text, page ranges -- and
-the application's job is to validate that document and store it. It performs no
-heading detection, no text segmentation and no guessing of any kind.
+This module *is* the ingestion contract. A book document states its own
+structure -- chapters, sections, section text, page ranges -- and this module's
+job is to validate it and hand back the validated result. It performs no
+heading detection, no text segmentation and no guessing of any kind itself.
+
+A JSON upload already has this shape; :func:`parse_book_document` decodes its
+transport bytes and validates it. A PDF upload does not, so
+:mod:`app.ingestion.pdf` builds this same shape from the PDF's own outline (or,
+lacking one, a narrow fallback) and calls :func:`validate_payload` directly --
+see ``docs/DECISIONS.md`` ADR-048. Either way, exactly one validation path
+decides whether a document is accepted.
 
 Why the contract lives here rather than in a parser
     Heuristic extraction (regular expressions over headings, font-size
@@ -11,8 +18,9 @@ Why the contract lives here rather than in a parser
     silently mis-segment the next, and the failure is invisible because the
     output still looks like a structure. Moving structure to a declared input
     makes ingestion total and reproducible -- the same JSON always yields the
-    same rows -- and moves the hard, book-specific work out of this codebase
-    entirely. See ``docs/DECISIONS.md`` ADR-015 and ADR-016.
+    same rows -- and confines the fallible, book-specific work to one module
+    that declares its own uncertainty rather than smoothing it over. See
+    ``docs/DECISIONS.md`` ADR-015, ADR-016 and ADR-048.
 
 Validation is strict on purpose
     ``extra="forbid"`` means a misspelled key is an error rather than a silently
@@ -293,6 +301,21 @@ def parse_book_document(data: bytes) -> BookDocument:
             detail=f"Found a JSON {type(payload).__name__} at the top level.",
         )
 
+    return validate_payload(payload)
+
+
+def validate_payload(payload: dict[str, object]) -> BookDocument:
+    """Validate a book document already parsed into a plain dict.
+
+    Shared by :func:`parse_book_document` (a JSON upload, once decoded) and
+    :mod:`app.ingestion.pdf` (a PDF extraction, which builds this dict directly
+    and has no JSON transport bytes to decode). Both producers get the same
+    uncompromising schema check.
+
+    Raises:
+        InvalidBookDocumentError: the version is missing or unsupported, or the
+            payload does not satisfy the schema.
+    """
     _require_supported_version(payload)
 
     try:

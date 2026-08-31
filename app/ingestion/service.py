@@ -1,8 +1,11 @@
 """The ingestion workflow: validate, then store.
 
-One entry point, :meth:`BookImportService.import_upload`. There is no extraction
-step: the uploaded document already declares its structure, so this validates it
-and writes the rows.
+One entry point, :meth:`BookImportService.import_upload`. A JSON upload already
+declares its structure, so this only validates and writes the rows. A PDF
+upload does not declare anything the application can read directly, so it is
+first turned into that same declared shape by :mod:`app.ingestion.pdf` (ADR-048)
+-- once that step hands back a document, the rest of the workflow below is
+identical for both.
 
 Failure handling is deliberate, and everything is checked **before** the first
 row is written:
@@ -25,7 +28,8 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.domain.enums import BookStatus
+from app.domain.enums import BookStatus, SourceFormat
+from app.ingestion.pdf import extract_book_document
 from app.ingestion.schema import BookDocument, parse_book_document
 from app.ingestion.storage import checksum, store_upload, validate_upload
 from app.persistence.models import BookChapterRow, BookRow, BookSectionRow
@@ -48,7 +52,7 @@ class BookImportService:
 
         Args:
             filename: the name the professor's browser supplied.
-            data: the file's bytes, expected to be a UTF-8 JSON book document.
+            data: the file's bytes -- a UTF-8 JSON book document, or a PDF.
             title: an optional professor-supplied title, which overrides the one
                 in the document.
 
@@ -58,12 +62,17 @@ class BookImportService:
         Raises:
             UnsupportedFileError: the file type is not supported.
             FileTooLargeError: the file exceeds the configured limit.
-            InvalidBookDocumentError: the JSON does not satisfy the schema.
+            InvalidBookDocumentError: the document does not satisfy the schema,
+                or the PDF could not be read.
         """
         source_format = validate_upload(filename, data, self._settings)
         # Validate the structure before storing anything, so a bad document
         # leaves behind neither a file nor a row.
-        document = parse_book_document(data)
+        document = (
+            extract_book_document(data, source_filename=filename)
+            if source_format is SourceFormat.BOOK_PDF
+            else parse_book_document(data)
+        )
 
         stored_name, stored_path = store_upload(data, filename, self._settings)
         book = self._books.add(

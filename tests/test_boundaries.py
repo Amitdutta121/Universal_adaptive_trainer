@@ -68,8 +68,9 @@ def test_book_ingestion_is_implemented() -> None:
     from app.domain.enums import SourceFormat
     from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename, parse_book_document
 
-    assert SUPPORTED_EXTENSIONS == (".json",)
+    assert SUPPORTED_EXTENSIONS == (".json", ".pdf")
     assert format_for_filename("book.json") is SourceFormat.BOOK_JSON
+    assert format_for_filename("book.pdf") is SourceFormat.BOOK_PDF
     assert parse_book_document(docs.to_bytes(docs.minimal())).section_count == 1
 
 
@@ -84,9 +85,10 @@ def test_unsupported_uploads_are_rejected() -> None:
 def test_the_application_does_no_heuristic_extraction() -> None:
     """Structure must be declared by the input, not inferred by this code.
 
-    Guards ADR-015 and ADR-016: the removed heuristic modules must not reappear,
-    and nothing under ``app/`` may reach for a PDF parser or a document-conversion
-    step. Producing a book document is out of scope for this codebase.
+    Guards ADR-015/ADR-016 as narrowed by ADR-048: the removed heuristic modules
+    must not reappear, and nothing under ``app/`` may reach for a PDF parser
+    except ``app/ingestion/pdf/`` -- the one place ADR-048 grants an exception,
+    to read a PDF's own outline and page text.
     """
     import importlib.util
     from pathlib import Path
@@ -94,40 +96,52 @@ def test_the_application_does_no_heuristic_extraction() -> None:
     app_root = Path(importlib.util.find_spec("app").origin).parent  # type: ignore[arg-type]
     for removed in (
         "ingestion/headings.py",
+        # The removed heuristic converter *file*; distinct from the
+        # `ingestion/pdf/` *package* ADR-048 introduces.
         "ingestion/pdf.py",
         "ingestion/text.py",
         "ingestion/assembly.py",
     ):
         assert not (app_root / removed).exists(), f"{removed} must stay removed"
 
-    sources = list(app_root.rglob("*.py"))
+    sources = [
+        path
+        for path in app_root.rglob("*.py")
+        if path.relative_to(app_root).parts[:2] != ("ingestion", "pdf")
+    ]
     assert sources
-    for forbidden in ("pypdf", "PdfReader", "fitz", "pdfplumber", "pdfminer"):
+    for forbidden in ("pypdf", "PdfReader", "fitz", "pdfplumber", "pdfminer", "pymupdf"):
         offenders = [
             path.relative_to(app_root).as_posix()
             for path in sources
             if forbidden in path.read_text(encoding="utf-8")
         ]
-        assert offenders == [], f"the application must not use {forbidden}: {offenders}"
+        assert offenders == [], (
+            f"the application must not use {forbidden} outside ingestion/pdf/: {offenders}"
+        )
 
 
-def test_no_pdf_parser_is_installed_for_the_application() -> None:
-    """The app's dependency set must not include a PDF parser at all.
+def test_pymupdf_is_the_only_pdf_dependency_and_it_is_declared() -> None:
+    """ADR-048 grants exactly one exception to ADR-016's "no PDF parser" rule.
 
-    Absence of the import is easy to reintroduce by accident; absence of the
-    dependency makes it impossible without a deliberate change to pyproject.
+    ``pymupdf``/``pymupdf4llm`` are now a deliberate, declared dependency; every
+    other PDF library stays absent, exactly as before. Absence of the import is
+    easy to reintroduce by accident; absence (or presence) of the dependency
+    makes it impossible without a deliberate change to pyproject.toml.
     """
     import importlib.util
     import tomllib
     from pathlib import Path
 
-    assert importlib.util.find_spec("pypdf") is None, "pypdf must not be installed"
+    for library in ("pypdf", "pdfplumber", "pdfminer"):
+        assert importlib.util.find_spec(library) is None, f"{library} must not be installed"
 
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     declared = " ".join(config["project"]["dependencies"]).lower()
-    for forbidden in ("pypdf", "pdfplumber", "pdfminer", "pymupdf"):
-        assert forbidden not in declared, f"{forbidden} must not be a dependency"
+    for library in ("pypdf", "pdfplumber", "pdfminer"):
+        assert library not in declared, f"{library} must not be a dependency"
+    assert "pymupdf" in declared, "pymupdf must be a declared dependency (ADR-048)"
 
 
 def test_curriculum_boundary_only_exports_taxonomy_import_and_display_helpers() -> None:

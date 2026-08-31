@@ -20,15 +20,19 @@ from app.errors import FileTooLargeError, UnsupportedFileError
 
 logger = logging.getLogger(__name__)
 
-#: The only accepted extension. Structure is declared by the document, never
-#: extracted here, so a raw book file cannot be uploaded.
-FORMAT_BY_EXTENSION: dict[str, SourceFormat] = {".json": SourceFormat.BOOK_JSON}
+#: Accepted extensions. Structured JSON declares its own structure directly; a
+#: PDF is turned into that same declared shape by ``app.ingestion.pdf`` before
+#: validation (ADR-048) -- it is not extracted here, only routed.
+FORMAT_BY_EXTENSION: dict[str, SourceFormat] = {
+    ".json": SourceFormat.BOOK_JSON,
+    ".pdf": SourceFormat.BOOK_PDF,
+}
 
 SUPPORTED_EXTENSIONS = tuple(sorted(FORMAT_BY_EXTENSION))
 
-#: Raw book formats a professor is likely to try by mistake. They get an
+#: Raw book formats this application still does not convert. They get an
 #: explanation of what to supply instead, rather than a bare refusal.
-_RAW_BOOK_EXTENSIONS = {".pdf", ".epub", ".md", ".markdown", ".txt", ".html", ".htm"}
+_RAW_BOOK_EXTENSIONS = {".epub", ".md", ".markdown", ".txt", ".html", ".htm"}
 
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
