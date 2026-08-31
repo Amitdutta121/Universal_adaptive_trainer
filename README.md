@@ -76,37 +76,37 @@ docker compose up --build
 
 The studio is organized around one pipeline: ingest content, build a curriculum, generate questions against it, evaluate what came back, then freeze a set for students.
 
-![Instructor Studio dashboard](docs/images/dashboard.png)
+<img src="docs/images/dashboard.png" alt="Instructor Studio dashboard" width="480">
 
 **Books** — upload structured book documents and track what has been imported, including partial imports with warnings.
 
-![Books](docs/images/books.png)
+<img src="docs/images/books.png" alt="Books" width="480">
 
 **Questions** — a filterable workbench over the whole question bank: status, difficulty, taxonomy, generator, validation outcome, and edit history.
 
-![Questions workbench](docs/images/questions.png)
+<img src="docs/images/questions.png" alt="Questions workbench" width="480">
 
 **Review queue** — the professor-facing review loop. Each question shows the student-facing surface next to its deterministic checks and the verdicts from four advisory judges (issues, subtopic fit, difficulty, generatability).
 
-![Review queue with advisory judges](docs/images/review-queue.png)
+<img src="docs/images/review-queue.png" alt="Review queue with advisory judges" width="480">
 
 **Instructions** — what the generator is told for each question type, plus the rules it has learned from professor review feedback over time.
 
-![Learned generation instructions](docs/images/instructions.png)
+<img src="docs/images/instructions.png" alt="Learned generation instructions" width="480">
 
 ### Student experience
 
 Students join a frozen question set with just a name — no account needed.
 
-![Student join screen](docs/images/student-join.png)
+<img src="docs/images/student-join.png" alt="Student join screen" width="480">
 
 Training questions (multiple choice, Parsons, code completion) are served adaptively, favoring a student's weakest subtopics.
 
-![Adaptive training question](docs/images/adaptive-question.png)
+<img src="docs/images/adaptive-question.png" alt="Adaptive training question" width="480">
 
 Each answer updates topic mastery in real time (BKT-based) and feeds back into what gets served next.
 
-![Adaptive result with mastery update](docs/images/adaptive-result.png)
+<img src="docs/images/adaptive-result.png" alt="Adaptive result with mastery update" width="480">
 
 ## Documentation
 
