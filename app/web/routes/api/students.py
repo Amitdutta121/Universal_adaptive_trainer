@@ -11,6 +11,7 @@ feeds professor preference (ADR-001).
 
 This module mixes two audiences, unlike every other router under
 ``routes/api``: a student reaches ``/api/students`` (enrol),
+``/api/students/resume`` (return as an existing learner),
 ``/api/training-sessions`` (start/serve/answer/end) and ``/api/attempts``
 anonymously by link
 (``/students/join/session/{id}`` on the frontend), plus the one frozen-set read
@@ -24,13 +25,15 @@ from __future__ import annotations
 
 import logging
 import secrets
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.adaptive import AdaptiveTrainingEngine
 from app.auth.backend import current_active_user
+from app.coverage import get_prod_question_set
 from app.domain.mastery import difficulty_for_mastery, mastery_band
-from app.errors import DomainRuleError
+from app.errors import ActiveSessionExistsError, DomainRuleError, NotFoundError
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionSetRepository,
@@ -44,13 +47,21 @@ from app.web.routes.api.schemas import (
     AnsweredOut,
     AnswerRequest,
     AttemptOut,
+    ClassSummaryOut,
+    ClassTrendAttemptOut,
+    ClassWeaknessCellOut,
+    ClassWeaknessStudentOut,
     CreateStudentRequest,
     QuestionSetOut,
+    ResumeStudentRequest,
     ServedQuestionOut,
     StartTrainingSessionRequest,
+    StudentIdentityOut,
     StudentListResponse,
     StudentOut,
     StudentProgressOut,
+    StudentResumeOut,
+    StudentRosterRowOut,
     SubtopicWeaknessOut,
     TopicMasteryOut,
     TrainingSessionListResponse,
@@ -64,6 +75,70 @@ router = APIRouter(tags=["students"])
 #: How many recent attempts a progress view carries.
 RECENT_ATTEMPTS = 25
 
+#: Default roster page size. The client can ask for up to 100.
+ROSTER_PAGE_SIZE = 20
+
+#: Cap on cohort weakness cells returned, matching the client heatmap.
+WEAKNESS_CELLS = 48
+
+
+def _aware(value: datetime) -> datetime:
+    """SQLite hands back naive datetimes; compare them in UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _passes_score(average: float | None, band: str) -> bool:
+    if band == "all":
+        return True
+    if average is None:
+        return False
+    if band == "lt50":
+        return average < 50
+    if band == "50to70":
+        return 50 <= average < 70
+    if band == "70to85":
+        return 70 <= average < 85
+    if band == "85plus":
+        return average >= 85
+    return True
+
+
+def _passes_answered(count: int, band: str) -> bool:
+    if band == "all":
+        return True
+    if band == "0":
+        return count == 0
+    if band == "1to5":
+        return 1 <= count <= 5
+    if band == "6to20":
+        return 6 <= count <= 20
+    if band == "21plus":
+        return count >= 21
+    return True
+
+
+def _passes_activity(last_activity: datetime | None, band: str, *, now: datetime) -> bool:
+    if band == "all":
+        return True
+    if last_activity is None:
+        return band == "inactive"
+    age_days = (now - _aware(last_activity)).total_seconds() / 86400
+    if band == "today":
+        return age_days < 1
+    if band == "last7":
+        return age_days <= 7
+    if band == "last30":
+        return age_days <= 30
+    if band == "inactive":
+        return age_days > 30
+    return True
+
+
+@router.get("/question-sets/prod", response_model=QuestionSetOut)
+def get_prod_classroom(session: DbSession) -> QuestionSetOut:
+    """The current production classroom snapshot behind the stable join link."""
+    return QuestionSetOut.from_row(get_prod_question_set(session), is_prod=True)
+
 
 @router.get("/question-sets/{set_version_id}", response_model=QuestionSetOut)
 def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
@@ -76,25 +151,157 @@ def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
     response_model=StudentListResponse,
     dependencies=[Depends(current_active_user)],
 )
-def list_students(session: DbSession) -> StudentListResponse:
+def list_students(
+    session: DbSession,
+    search: str = "",
+    score: str = "all",
+    answered: str = "all",
+    activity: str = "all",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(ROSTER_PAGE_SIZE, ge=1, le=100),
+) -> StudentListResponse:
+    """One page of the roster, filtered server-side (ADR-041 keeps it read-only).
+
+    The score, answered and activity filters run off one grouped pass over the
+    attempt table -- :meth:`StudentAttemptRepository.stats_by_student` -- rather
+    than a progress fetch per learner, so the cost no longer grows with the
+    cohort. ``total`` is the count *after* filtering, so the client can size its
+    page controls.
+    """
     students = StudentRepository(session)
     attempts = StudentAttemptRepository(session)
-    rows = students.list_all()
+    stats = attempts.stats_by_student()
+    now = datetime.now(UTC)
+
+    matched = []
+    for row in students.search(search):
+        stat = stats.get(row.id)
+        average = stat.average_score if stat else None
+        answered_count = stat.answered_count if stat else 0
+        last_activity = stat.last_activity_at if stat else None
+        if (
+            _passes_score(average, score)
+            and _passes_answered(answered_count, answered)
+            and _passes_activity(last_activity, activity, now=now)
+        ):
+            matched.append(row)
+
+    start = (page - 1) * page_size
+    page_rows = matched[start : start + page_size]
+    series = attempts.scored_series_for([row.id for row in page_rows])
+
     return StudentListResponse(
         students=[
-            StudentOut.from_row(row, answered_count=attempts.count_answered(row.id)) for row in rows
+            StudentRosterRowOut(
+                id=row.id,
+                display_name=row.display_name,
+                email=row.email,
+                created_at=row.created_at,
+                answered_count=stats[row.id].answered_count if row.id in stats else 0,
+                average_score=stats[row.id].average_score if row.id in stats else None,
+                last_activity_at=stats[row.id].last_activity_at if row.id in stats else None,
+                score_series=series.get(row.id, []),
+            )
+            for row in page_rows
         ],
-        total=len(rows),
+        total=len(matched),
+        page=page,
+        page_size=page_size,
     )
 
 
-@router.post("/students", response_model=StudentOut, status_code=status.HTTP_201_CREATED)
-def create_student(session: DbSession, payload: CreateStudentRequest) -> StudentOut:
+@router.get(
+    "/students/class-summary",
+    response_model=ClassSummaryOut,
+    dependencies=[Depends(current_active_user)],
+)
+def class_summary(session: DbSession) -> ClassSummaryOut:
+    """Cohort-wide figures for the roster's aggregate cards.
+
+    Independent of which roster page is open: the class trend graph and the
+    weakness heatmap are about the whole class, so they get their own request
+    instead of being rebuilt from whatever page of learners happens to be loaded.
+    """
+    students = StudentRepository(session)
+    attempts = StudentAttemptRepository(session)
+    state = StudentStateRepository(session)
+    curriculum = CurriculumRepository(session)
+
+    roster = students.search("")
+    stats = attempts.stats_by_student()
+    scored = attempts.scored_attempts_all()
+    weakness_rows = state.list_weakness_all()
+
+    names = {row.id: row.display_name for row in roster}
+    answered_by_student = {student_id: stat.answered_count for student_id, stat in stats.items()}
+    labels = curriculum.subtopic_labels_for([row.subtopic_id for row in weakness_rows])
+
+    buckets: dict[int, list[tuple[int, float]]] = {}
+    for row in weakness_rows:
+        buckets.setdefault(row.subtopic_id, []).append((row.student_id, row.weakness))
+
+    cells: list[ClassWeaknessCellOut] = []
+    for subtopic_id, entries in buckets.items():
+        label = labels.get(subtopic_id, (None, None))
+        affected = sorted(
+            (
+                ClassWeaknessStudentOut(
+                    id=student_id,
+                    name=names.get(student_id, f"Student {student_id}"),
+                    weakness=weakness,
+                    answered=answered_by_student.get(student_id, 0),
+                )
+                for student_id, weakness in entries
+            ),
+            key=lambda item: item.weakness,
+            reverse=True,
+        )
+        cells.append(
+            ClassWeaknessCellOut(
+                subtopic_id=subtopic_id,
+                subtopic_name=label[0] or f"Subtopic {subtopic_id} (removed)",
+                topic_name=label[1] or "—",
+                average_weakness=sum(weakness for _, weakness in entries) / len(entries),
+                student_count=len(entries),
+                affected=affected,
+            )
+        )
+    cells.sort(key=lambda cell: (cell.average_weakness, cell.student_count), reverse=True)
+
+    measured = {student_id for student_id, count in answered_by_student.items() if count}
+    measured.update(row.student_id for row in weakness_rows)
+    all_scores = [attempt.score for attempt in scored]
+
+    return ClassSummaryOut(
+        student_count=len(roster),
+        measured_students=len(measured),
+        average_score=sum(all_scores) / len(all_scores) if all_scores else None,
+        scored_attempts=[
+            ClassTrendAttemptOut(
+                student_id=attempt.student_id,
+                score=attempt.score,
+                answered_at=attempt.answered_at,
+                created_at=attempt.created_at,
+                ordinal=attempt.ordinal,
+            )
+            for attempt in scored
+        ],
+        weakness_cells=cells[:WEAKNESS_CELLS],
+    )
+
+
+@router.post("/students", response_model=StudentIdentityOut, status_code=status.HTTP_201_CREATED)
+def create_student(session: DbSession, payload: CreateStudentRequest) -> StudentIdentityOut:
     """Enrol a learner.
 
-    Names are unique because the picker is by name, so a duplicate would attach
-    one learner's mastery to another. That is reported as a rule violation rather
-    than left to surface as a database error.
+    Takes a name and a contact email. Names are unique because the picker is by
+    name, so a duplicate would attach one learner's mastery to another. That is
+    reported as a rule violation rather than left to surface as a database error.
+    The email is validated for shape only and not required to be distinct.
+
+    The response carries the learner's ``resume_token``: the browser that
+    enrolled them stores it and presents it to ``POST /students/resume`` to come
+    back as the same learner instead of colliding on the unique name.
     """
     students = StudentRepository(session)
     name = payload.display_name.strip()
@@ -105,10 +312,32 @@ def create_student(session: DbSession, payload: CreateStudentRequest) -> Student
             f"A student called {name!r} already exists.",
             detail="Names identify students here, so they have to be distinct.",
         )
-    row = students.add(name)
+    row = students.add(name, email=str(payload.email).strip())
     session.commit()
     logger.info("Enrolled student %s (%s).", row.id, name)
-    return StudentOut.from_row(row)
+    return StudentIdentityOut.from_row(row)
+
+
+@router.post("/students/resume", response_model=StudentResumeOut)
+def resume_student(session: DbSession, payload: ResumeStudentRequest) -> StudentResumeOut:
+    """Recognise a returning browser by its stored token (ADR-041).
+
+    Public, like enrolment: students have no login. An unknown token is a 404 so
+    the caller can drop its stale copy and fall back to enrolling; a known token
+    returns the learner, plus their one unfinished run if there is one -- against
+    *any* classroom set, not only this link's, because a student runs a single
+    session at a time (see :func:`start_training_session`) and the join screen has
+    to be able to send them back to it whichever link they arrive on.
+    """
+    student = StudentRepository(session).get_by_resume_token(payload.resume_token)
+    if student is None:
+        raise NotFoundError("That resume token does not match any learner.")
+    # Validates that the classroom link points at a real set, even though the
+    # open run below is found without reference to it.
+    QuestionSetRepository(session).get(payload.set_version_id)
+    open_run = TrainingSessionRepository(session).open_session_for(student.id)
+    active = _session_out(session, open_run.id) if open_run is not None else None
+    return StudentResumeOut(student=StudentIdentityOut.from_row(student), active_session=active)
 
 
 @router.get(
@@ -194,9 +423,26 @@ def start_training_session(
 
     The seed is generated here and stored, which is what makes the run
     replayable: every roulette draw derives from it and the question's position.
+
+    A learner may hold only one unfinished session at a time. A second is
+    refused with :class:`ActiveSessionExistsError` rather than created, because
+    two attempt streams folding scores into the same per-student BKT state
+    corrupt the mastery estimate (ADR-041) -- and an accidental double-join (a
+    second tab, a re-followed link) is a routine event, not an edge case. The
+    client recovers by resuming the session the error names.
     """
     student = StudentRepository(session).get(payload.student_id)
     frozen = QuestionSetRepository(session).get(payload.set_version_id)
+    open_run = TrainingSessionRepository(session).open_session_for(student.id)
+    if open_run is not None:
+        raise ActiveSessionExistsError(
+            f"{student.display_name} already has a training session in progress.",
+            detail=(
+                f"Session {open_run.id} is still open. Finish or leave it before starting "
+                "another -- one learner runs one session at a time so a second tab cannot "
+                "corrupt the mastery estimate."
+            ),
+        )
     row = TrainingSessionRepository(session).create(
         student_id=student.id,
         set_version_id=frozen.id,

@@ -19,6 +19,7 @@ import {
   Network,
   Scale,
   ScrollText,
+  Users,
   Wand2,
 } from "lucide-react";
 import type { Route } from "next";
@@ -117,11 +118,18 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     icon: Grid3x3,
   },
   {
-    key: "students",
-    label: "Students",
+    key: "classrooms",
+    label: "Classrooms",
     path: "/students",
-    summary: "Adaptive training progress: BKT topic mastery and subtopic weakness.",
+    summary: "Generate joinable adaptive-training classrooms from frozen question sets.",
     icon: GraduationCap,
+  },
+  {
+    key: "roster",
+    label: "Roster",
+    path: "/students/roster",
+    summary: "Enrolled learners' progress: score trends, BKT topic mastery, and subtopic weakness.",
+    icon: Users,
   },
 ] as const;
 

@@ -36,7 +36,7 @@ export function LoginScreen() {
             <Sparkles className="size-5" />
           </span>
           <CardTitle className="text-xl">Adaptive Trainer</CardTitle>
-          <p className="text-muted-foreground text-sm">Sign in to the professor console.</p>
+          <p className="text-muted-foreground text-sm">Sign in to the Instructor Studio.</p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">

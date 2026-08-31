@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/page-header";
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { api, unwrap } from "@/lib/api/client";
+import { api, readApiError, unwrap } from "@/lib/api/client";
 import type { Counts, Health } from "@/lib/api/types";
 import { NAV_SECTIONS } from "@/lib/navigation";
 
@@ -26,13 +26,13 @@ const COUNT_KEYS: Partial<Record<string, keyof Counts>> = {
   questions: "questions",
   review: "reviews",
   instructions: "learned_instructions",
-  students: "students",
+  roster: "students",
 };
 
 export default async function DashboardPage() {
   let counts: Counts | null = null;
   let health: Health | null = null;
-  let error: unknown = null;
+  let error: ReturnType<typeof readApiError> = null;
 
   try {
     [counts, health] = await Promise.all([
@@ -40,13 +40,13 @@ export default async function DashboardPage() {
       unwrap(api.GET("/api/health")),
     ]);
   } catch (caught) {
-    error = caught;
+    error = readApiError(caught);
   }
 
   return (
     <>
       <PageHeader
-        title="Professor console"
+        title="Instructor Studio"
         summary="Content generation and adaptive training, over one shared question bank."
         actions={
           health ? (

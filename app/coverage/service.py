@@ -150,3 +150,17 @@ def create_question_set(
     session.commit()
     logger.info("Froze question set %s (%s) with %s questions.", row.id, clean, len(question_ids))
     return row
+
+
+def sync_prod_question_set(session: Session) -> QuestionSetVersionRow:
+    """Create the next immutable prod snapshot and repoint the stable prod alias to it."""
+    row = create_question_set(session, label="Prod classroom", notes="Current production classroom")
+    QuestionSetRepository(session).point_alias("prod", set_version_id=row.id)
+    session.commit()
+    logger.info("Synced prod classroom to question set %s.", row.id)
+    return row
+
+
+def get_prod_question_set(session: Session) -> QuestionSetVersionRow:
+    """Resolve the stable prod classroom alias to its current frozen snapshot."""
+    return QuestionSetRepository(session).resolve_alias("prod")

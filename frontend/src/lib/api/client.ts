@@ -106,3 +106,62 @@ export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
   }
   return data as T;
 }
+
+/** Plain, JSON-serializable shape of an `ApiError`'s fields. */
+export interface ApiErrorLike {
+  status: number;
+  code: string;
+  message: string;
+  detail?: string;
+  isUpstream: boolean;
+  isNotImplemented: boolean;
+}
+
+/**
+ * Reads an `ApiError`'s fields whether `error` is a real instance (thrown and
+ * caught in the same module) or a plain object with the same shape.
+ *
+ * A server component that catches an `ApiError` and passes it as a prop into a
+ * "use client" component loses the subclass along the way -- React's server/client
+ * boundary serializes props, and a custom `Error` subclass does not survive that
+ * trip as itself, so `error instanceof ApiError` comes back false on the client
+ * even for a real API error. Server components should call this in their catch
+ * block and pass the plain result down instead of the raw error (see
+ * `app/questions/[question_id]/page.tsx`); `QueryError` calls it again so the same
+ * rendering works whether the error was thrown directly in the browser or crossed
+ * the server/client boundary first.
+ */
+export function readApiError(error: unknown): ApiErrorLike | null {
+  if (error instanceof ApiError) {
+    return {
+      status: error.status,
+      code: error.code,
+      message: error.message,
+      detail: error.detail,
+      isUpstream: error.isUpstream,
+      isNotImplemented: error.isNotImplemented,
+    };
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    "code" in error &&
+    "message" in error &&
+    typeof (error as { status: unknown }).status === "number" &&
+    typeof (error as { code: unknown }).code === "string" &&
+    typeof (error as { message: unknown }).message === "string"
+  ) {
+    const status = (error as { status: number }).status;
+    const detail = (error as { detail?: unknown }).detail;
+    return {
+      status,
+      code: (error as { code: string }).code,
+      message: (error as { message: string }).message,
+      detail: typeof detail === "string" ? detail : undefined,
+      isUpstream: status === 502,
+      isNotImplemented: status === 501,
+    };
+  }
+  return null;
+}

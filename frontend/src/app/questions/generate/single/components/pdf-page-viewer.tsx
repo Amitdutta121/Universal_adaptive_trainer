@@ -18,6 +18,7 @@
  * `selectedSectionId` changes to a value it didn't already imply.
  */
 
+import { Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { API_BASE_URL } from "@/lib/env";
@@ -32,6 +33,23 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 const RENDER_RADIUS = 3;
 /** Guess used for a page's height before any page has been measured. */
 const FALLBACK_ASPECT = 1.3;
+/** Zoom bounds and step for the viewer's own resize control. */
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.5;
+const ZOOM_STEP = 0.1;
+/**
+ * Slack subtracted from the scroll area before fitting a whole page into its
+ * height — the container's own padding plus a little breathing room, mirroring
+ * pdf.js's VERTICAL_PADDING for its "Page Fit" zoom mode.
+ */
+const FIT_PAGE_V_PADDING = 40;
+
+type FitMode = "width" | "page";
+
+/** Round to one decimal so repeated steps don't drift (0.30000000004). */
+function clampZoom(value: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 10) / 10));
+}
 
 interface PageAnchor {
   sectionId: number;
@@ -80,15 +98,33 @@ export function PdfPageViewer({
   selectedSectionId: number | null;
   onVisibleSectionChange: (sectionId: number) => void;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const slotRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const visibilityRef = useRef<Map<number, number>>(new Map());
 
   const [numPages, setNumPages] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageHeight, setPageHeight] = useState<number | null>(null);
-  const [pageWidth, setPageWidth] = useState(560);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Aspect ratio of a page (height / width), measured once from the first page
+  // that actually renders — used to size the placeholder slots at any zoom.
+  const [pageAspect, setPageAspect] = useState<number | null>(null);
+  const [containerWidth, setContainerWidth] = useState(560);
+  const [containerHeight, setContainerHeight] = useState(720);
+  const [zoom, setZoom] = useState(1);
+  const [fitMode, setFitMode] = useState<FitMode>("page");
   const [loadError, setLoadError] = useState(false);
+
+  // The base width a page is rendered at, before the user's zoom multiplier.
+  // "width" fills the column (a tall page just scrolls — the browser/pdf.js
+  // "fit width" / "automatic" default). "page" also caps it so a whole page
+  // fits the visible height, so shrinking the pane shrinks the page — pdf.js's
+  // "Page Fit": scale = min(fitByWidth, fitByHeight).
+  const fitByHeight =
+    (containerHeight - FIT_PAGE_V_PADDING) / (pageAspect ?? FALLBACK_ASPECT);
+  const basePageWidth =
+    fitMode === "page" ? Math.min(containerWidth, fitByHeight) : containerWidth;
+  const pageWidth = Math.max(240, Math.round(basePageWidth * zoom));
 
   const sourceUrl = useMemo(() => `${API_BASE_URL}/api/books/${bookId}/source`, [bookId]);
   const anchors = useMemo(() => buildAnchors(rows), [rows]);
@@ -97,13 +133,36 @@ export function PdfPageViewer({
     [rows, selectedSectionId],
   );
 
-  // Page width tracks the column's own width, not a fixed guess.
+  // Native fullscreen on the viewer's own root — no route change, and the
+  // ResizeObserver below re-fits the pages to the new size on its own. The
+  // listener keeps our state honest when the user leaves fullscreen with Esc
+  // or the browser chrome rather than our button.
+  useEffect(() => {
+    const sync = () => setIsFullscreen(document.fullscreenElement === rootRef.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void rootRef.current?.requestFullscreen?.();
+    }
+  };
+
+  // The scroll area's own box drives page sizing — width always, height too in
+  // "page" fit mode. Tracking both means a drag on the pane's resize handle
+  // re-fits the pages live, the same way a real PDF viewer reflows on window
+  // resize.
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
     const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width) setPageWidth(Math.max(280, Math.floor(width - 32)));
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      if (box.width) setContainerWidth(Math.max(280, Math.floor(box.width - 32)));
+      if (box.height) setContainerHeight(Math.max(240, Math.floor(box.height)));
     });
     observer.observe(node);
     return () => observer.disconnect();
@@ -171,10 +230,15 @@ export function PdfPageViewer({
   }, [selectedSectionId, numPages]);
 
   const slots = numPages ? Array.from({ length: numPages }, (_, index) => index + 1) : [];
-  const estimatedHeight = pageHeight ?? pageWidth * FALLBACK_ASPECT;
+  const estimatedHeight = pageWidth * (pageAspect ?? FALLBACK_ASPECT);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1rem] border">
+    <div
+      ref={rootRef}
+      className={`flex h-full min-h-0 flex-col overflow-hidden border bg-background ${
+        isFullscreen ? "" : "rounded-[1rem]"
+      }`}
+    >
       <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2">
         <div className="flex items-center gap-2">
           <button
@@ -198,12 +262,68 @@ export function PdfPageViewer({
             Next
           </button>
         </div>
-        <span className="truncate font-mono text-[0.67rem] text-muted-foreground">
-          {selectedRow?.locationLabel ?? selectedRow?.title ?? "scroll to browse"}
-        </span>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
+            className="rounded-md border px-2 py-1 text-xs leading-none disabled:cursor-not-allowed disabled:opacity-40"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(1)}
+            className="min-w-[3rem] rounded-md border px-2 py-1 text-center font-mono text-[0.7rem] text-muted-foreground tabular-nums hover:bg-muted"
+            title={fitMode === "page" ? "Reset to fit page" : "Reset to fit width"}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
+            className="rounded-md border px-2 py-1 text-xs leading-none disabled:cursor-not-allowed disabled:opacity-40"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setZoom(1);
+              setFitMode((mode) => (mode === "width" ? "page" : "width"));
+            }}
+            className="rounded-md border px-2 py-1 text-muted-foreground text-xs leading-none hover:bg-muted"
+            title={
+              fitMode === "width"
+                ? "Fitting page width — switch to fit whole page"
+                : "Fitting whole page — switch to fit width"
+            }
+          >
+            {fitMode === "width" ? "Fit width" : "Fit page"}
+          </button>
+        </div>
+
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="hidden truncate font-mono text-[0.67rem] text-muted-foreground sm:block">
+            {selectedRow?.locationLabel ?? selectedRow?.title ?? "scroll to browse"}
+          </span>
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="shrink-0 rounded-md border p-1 text-muted-foreground hover:bg-muted"
+            title={isFullscreen ? "Exit full screen (Esc)" : "Full screen"}
+            aria-label={isFullscreen ? "Exit full screen" : "Full screen"}
+          >
+            {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          </button>
+        </div>
       </div>
 
-      <div ref={containerRef} className="flex-1 space-y-3 overflow-y-auto bg-muted/20 p-4">
+      <div ref={containerRef} className="flex-1 space-y-3 overflow-auto bg-muted/20 p-4">
         {loadError ? (
           <p className="max-w-sm py-8 text-center text-muted-foreground text-sm">
             The original PDF isn't available for this book — it may have been imported from a
@@ -250,7 +370,9 @@ export function PdfPageViewer({
                       renderTextLayer={false}
                       renderAnnotationLayer={false}
                       onRenderSuccess={(loaded) => {
-                        if (!pageHeight) setPageHeight(loaded.height);
+                        if (!pageAspect && loaded.height) {
+                          setPageAspect(loaded.height / pageWidth);
+                        }
                       }}
                     />
                   ) : null}

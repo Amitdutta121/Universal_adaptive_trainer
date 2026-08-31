@@ -123,7 +123,13 @@ class BaseQuestionGenerator:
         ]
         return [self.generate_one(spec, version=version) for spec in specs]
 
-    def generate_one(self, spec: QuestionSpec, *, version: CurriculumVersionRow) -> Question:
+    def generate_one(
+        self,
+        spec: QuestionSpec,
+        *,
+        version: CurriculumVersionRow,
+        instructor_feedback: str | None = None,
+    ) -> Question:
         """Generate a typed question grounded in the spec's sole source section.
 
         A classification the approved tree refuses is retried with the violation
@@ -133,6 +139,9 @@ class BaseQuestionGenerator:
         guessing which subtopic the model meant would put an invented tag on a
         question and hide the miss from the subtopic judge that exists to catch
         exactly this.
+
+        ``instructor_feedback`` is forwarded to :func:`build_prompt` when an
+        instructor asked for a new version of an existing question.
         """
         if self._retrieval is None:
             raise DomainRuleError(
@@ -151,6 +160,7 @@ class BaseQuestionGenerator:
             citation=citation,
             taxonomy=render_taxonomy(version),
             type_instruction=type_instruction,
+            instructor_feedback=instructor_feedback,
         )
         client = self._client or get_structured_client()
 

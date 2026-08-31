@@ -14,25 +14,26 @@ import {
   flexRender,
   getCoreRowModel,
   getSortedRowModel,
+  type RowData,
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import {
-  ArrowUpDown,
-  CheckCircle2,
-  Database,
-  Search,
-  SlidersHorizontal,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { ArrowUpDown, CheckCircle2, Database, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { parseAsInteger, parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useDeferredValue, useMemo, useState } from "react";
+import { QuestionReview } from "@/app/questions/generate/single/components/question-review";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -69,6 +70,14 @@ import type {
 type GeneratorKind = Schemas["GeneratorKind"];
 type QuestionKind = Schemas["QuestionKind"];
 type InstructionSource = NonNullable<QuestionSummary["instruction"]>["source"];
+
+// The row click-through is handed to the columns through TanStack's `meta`, so the
+// column defs can stay module-level constants instead of closing over component state.
+declare module "@tanstack/react-table" {
+  interface TableMeta<TData extends RowData> {
+    openPreview: (id: number) => void;
+  }
+}
 
 const STATUSES = [
   "generated",
@@ -248,10 +257,16 @@ const columns: ColumnDef<QuestionSummary>[] = [
     accessorKey: "prompt",
     header: "Prompt",
     enableSorting: false,
-    cell: ({ row }) => (
-      <div className="min-w-72 max-w-lg whitespace-normal">
-        <p className="line-clamp-3 text-foreground text-sm leading-6">{row.original.prompt}</p>
-      </div>
+    cell: ({ row, table }) => (
+      <button
+        type="button"
+        onClick={() => table.options.meta?.openPreview(row.original.id)}
+        className="block min-w-72 max-w-lg whitespace-normal text-left"
+      >
+        <p className="line-clamp-3 text-foreground text-sm leading-6 underline-offset-4 hover:underline">
+          {row.original.prompt}
+        </p>
+      </button>
     ),
   },
   {
@@ -434,6 +449,7 @@ export function QuestionsBrowser() {
     parseAsStringLiteral(INSTRUCTION_SOURCES),
   );
   const [taxonomyVersionId, setTaxonomyVersionId] = useQueryState("taxonomy", parseAsInteger);
+  const [previewId, setPreviewId] = useQueryState("preview", parseAsInteger);
   const [sorting, setSorting] = useState<SortingState>([{ id: "created_at", desc: true }]);
   const [columnVisibility, setColumnVisibility] =
     useState<Record<string, boolean>>(DEFAULT_HIDDEN_COLUMNS);
@@ -574,21 +590,32 @@ export function QuestionsBrowser() {
     onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    meta: { openPreview: (id) => void setPreviewId(id) },
   });
+
+  const previewRow =
+    previewId !== null
+      ? (filteredQuestions.find((question) => question.id === previewId) ?? null)
+      : null;
 
   const canClear = activeFilters.length > 0;
 
   return (
     <>
-      <PageHeader
-        title="Questions"
-        summary="Generate, validate and review Python assessment questions."
-        actions={
-          <Badge variant="outline" className="h-7 rounded-full px-3 font-mono tracking-[0.08em]">
-            live bank
-          </Badge>
-        }
-      />
+        <PageHeader
+          title="Questions"
+          summary="Generate, validate and review Python assessment questions."
+          actions={
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm" className="h-9 border-border/80">
+                <Link href="/coverage">Show coverage</Link>
+              </Button>
+              <Badge variant="outline" className="h-7 rounded-full px-3 font-mono tracking-[0.08em]">
+                live bank
+              </Badge>
+            </div>
+          }
+        />
 
       <section className="space-y-4">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -620,23 +647,7 @@ export function QuestionsBrowser() {
 
         <div className="overflow-hidden rounded-[1.4rem] border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.78),rgba(255,255,255,0.56))] shadow-[0_20px_45px_-32px_rgba(19,26,28,0.55)] backdrop-blur dark:bg-[linear-gradient(180deg,rgba(21,28,30,0.94),rgba(21,28,30,0.76))]">
           <div className="border-border/70 border-b bg-[radial-gradient(circle_at_top_left,rgba(46,111,106,0.14),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.6),transparent)] px-5 py-4 dark:bg-[radial-gradient(circle_at_top_left,rgba(102,184,176,0.16),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)]">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <SlidersHorizontal className="size-4" />
-                  <FilterLabel>Workbench</FilterLabel>
-                </div>
-                <div>
-                  <p className="font-heading text-foreground text-lg tracking-[-0.025em]">
-                    Scan faster, filter harder, keep context while scrolling.
-                  </p>
-                  <p className="max-w-3xl text-muted-foreground text-sm leading-6">
-                    Inspired by current data-table patterns that emphasize sticky headers, visible
-                    filter state, and low-noise row scanning.
-                  </p>
-                </div>
-              </div>
-
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-end">
               <div className="flex flex-wrap items-center gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1065,6 +1076,31 @@ export function QuestionsBrowser() {
           </div>
         </div>
       </section>
+
+      <Dialog
+        open={previewId !== null}
+        onOpenChange={(open) => {
+          if (!open) void setPreviewId(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{previewId !== null ? `Question ${previewId}` : "Question"}</DialogTitle>
+            <DialogDescription>
+              {previewRow
+                ? `${previewRow.question_type?.replace(/_/g, " ") ?? "unclassified"} — ${previewRow.difficulty}`
+                : "Preview, review, edit, or reject this question."}
+            </DialogDescription>
+          </DialogHeader>
+          {previewId !== null ? (
+            <QuestionReview
+              key={previewId}
+              questionId={previewId}
+              onRegenerated={(id) => void setPreviewId(id)}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

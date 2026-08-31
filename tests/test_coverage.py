@@ -19,6 +19,8 @@ from app.coverage import (
     CoverageState,
     build_coverage_report,
     create_question_set,
+    get_prod_question_set,
+    sync_prod_question_set,
     state_for,
 )
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionStatus
@@ -246,6 +248,31 @@ def test_a_set_does_not_change_when_the_bank_grows(session: Session) -> None:
     assert len(QuestionSetRepository(session).approved_question_ids()) == 2
 
 
+def test_syncing_prod_creates_a_snapshot_and_points_the_alias(session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    approved = _question(session, version=version, subtopic_id=subtopic_id)
+
+    synced = sync_prod_question_set(session)
+    prod = get_prod_question_set(session)
+
+    assert synced.id == prod.id
+    assert [member.question_id for member in prod.members] == [approved.id]
+
+
+def test_syncing_prod_again_moves_the_alias_not_the_old_snapshot(session: Session) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    first = _question(session, version=version, subtopic_id=subtopic_id)
+    original = sync_prod_question_set(session)
+    second = _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.HARD)
+
+    moved = sync_prod_question_set(session)
+    original_again = QuestionSetRepository(session).get(original.id)
+
+    assert moved.id != original.id
+    assert [member.question_id for member in original_again.members] == [first.id]
+    assert sorted(member.question_id for member in moved.members) == sorted([first.id, second.id])
+
+
 def test_the_repository_offers_no_way_to_edit_a_set() -> None:
     """A snapshot that can be edited answers nothing about what was served."""
     forbidden = {"update", "add_member", "remove_member", "set_members", "delete"}
@@ -322,7 +349,25 @@ def test_the_endpoint_creates_and_reads_back_a_set(client: TestClient, session: 
 
     assert fetched["question_ids"] == [approved.id]
     assert fetched["question_count"] == fetched["member_count"] == 1
+    assert fetched["is_prod"] is False
     assert listed["total"] == 1
+
+
+def test_the_api_can_sync_and_read_the_current_prod_set(
+    client: TestClient, session: Session
+) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    approved = _question(session, version=version, subtopic_id=subtopic_id)
+
+    synced = client.post("/api/question-sets/prod/sync")
+    assert synced.status_code == 201
+    assert synced.json()["is_prod"] is True
+
+    fetched = client.get("/api/question-sets/prod")
+
+    assert fetched.status_code == 200
+    assert fetched.json()["question_ids"] == [approved.id]
+    assert fetched.json()["is_prod"] is True
 
 
 def test_question_set_detail_stays_public_for_the_join_lobby(
@@ -341,6 +386,23 @@ def test_question_set_detail_stays_public_for_the_join_lobby(
     assert fetched.json()["question_ids"] == [approved.id]
 
 
+def test_the_current_prod_set_is_public_for_the_join_lobby(
+    settings: Settings, session: Session
+) -> None:
+    version, (subtopic_id,) = _taxonomy(session)
+    approved = _question(session, version=version, subtopic_id=subtopic_id)
+    sync_prod_question_set(session)
+
+    from app.main import create_app
+
+    with TestClient(create_app(settings)) as public_client:
+        fetched = public_client.get("/api/question-sets/prod")
+
+    assert fetched.status_code == 200
+    assert fetched.json()["question_ids"] == [approved.id]
+    assert fetched.json()["is_prod"] is True
+
+
 def test_creating_an_empty_set_is_refused_by_the_api(client: TestClient, session: Session) -> None:
     _taxonomy(session)
 
@@ -355,6 +417,8 @@ def test_the_openapi_documents_coverage_as_read_only(client: TestClient) -> None
 
     assert set(schema["paths"]["/api/coverage"]) == {"get"}
     assert set(schema["paths"]["/api/question-sets"]) == {"get", "post"}
+    assert set(schema["paths"]["/api/question-sets/prod"]) == {"get"}
+    assert set(schema["paths"]["/api/question-sets/prod/sync"]) == {"post"}
     # No PUT, PATCH or DELETE: a frozen set is never edited (ADR-036).
     assert set(schema["paths"]["/api/question-sets/{set_version_id}"]) == {"get"}
 

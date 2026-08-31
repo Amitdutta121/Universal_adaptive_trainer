@@ -173,6 +173,21 @@ class CurriculumCompletedError(AdaptiveTrainerError):
     code = "curriculum_completed"
 
 
+class ActiveSessionExistsError(AdaptiveTrainerError):
+    """The student already has an open training session, so a second is refused.
+
+    Two concurrent attempt streams for one learner interleave BKT updates on the
+    same per-student mastery and weakness rows and corrupt the estimate
+    (ADR-041). A student runs exactly one unfinished session at a time; the
+    already-open session's id is named in ``detail`` so the client can return the
+    learner to it rather than stranding them. The common cause is an accidental
+    double-join -- a second tab, a re-followed link -- not misuse.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "active_session_exists"
+
+
 class ResourceInUseError(AdaptiveTrainerError):
     """Deleting this row would strand something that still points at it.
 

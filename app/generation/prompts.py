@@ -122,6 +122,7 @@ def build_prompt(
     citation: str,
     taxonomy: str,
     type_instruction: str | None = None,
+    instructor_feedback: str | None = None,
 ) -> tuple[str, str]:
     """Build the shared system instruction and one format-specific user prompt.
 
@@ -130,7 +131,27 @@ def build_prompt(
     replace the one-liner rather than arriving as a block appended after the
     prompt. Absent, the shipped text is used, which is what a type nobody has
     reviewed gets.
+
+    ``instructor_feedback`` is present only when an instructor asked for a new
+    version of an existing question. It is spliced in after the source text as a
+    binding requirement for the rewrite. It is deliberately kept in the immutable
+    prompt rather than seeded into the retry loop's ``--- correction ---`` block
+    (:mod:`app.generation.attempts`), which is framed as "your previous answer
+    was rejected" and is the wrong lifecycle for instructor intent.
     """
+    feedback_block = ""
+    if instructor_feedback and instructor_feedback.strip():
+        feedback_block = f"""
+
+--- instructor feedback ---
+An earlier version of this question was generated and an instructor asked for a
+new one, with this feedback. Treat it as a binding requirement, not a
+suggestion. Write a NEW question that resolves it while still satisfying every
+rule above. Do not reproduce the earlier question.
+
+{instructor_feedback.strip()}
+--- end instructor feedback ---"""
+
     user = f"""Create a {spec.difficulty.value} {spec.question_type.value} question.
 
 Source citation: {citation}
@@ -141,7 +162,7 @@ Type-specific requirements:
 Use this section text as the grounding source:
 --- section text ---
 {section_text}
---- end section text ---
+--- end section text ---{feedback_block}
 
 {CLASSIFICATION_INSTRUCTION}
 

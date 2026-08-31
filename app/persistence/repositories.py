@@ -10,8 +10,9 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Collection
 from datetime import UTC, datetime
+from typing import NamedTuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.domain.enums import (
@@ -36,6 +37,7 @@ from app.persistence.models import (
     QuestionEvaluationRow,
     QuestionRow,
     QuestionSetMemberRow,
+    QuestionSetAliasRow,
     QuestionSetVersionRow,
     QuestionSubtopicRow,
     ReviewOutcomeRow,
@@ -1149,7 +1151,10 @@ class QuestionSetRepository:
     def list_versions(self, limit: int = 50) -> list[QuestionSetVersionRow]:
         stmt = (
             select(QuestionSetVersionRow)
-            .options(selectinload(QuestionSetVersionRow.members))
+            .options(
+                selectinload(QuestionSetVersionRow.members),
+                selectinload(QuestionSetVersionRow.aliases),
+            )
             .order_by(QuestionSetVersionRow.created_at.desc(), QuestionSetVersionRow.id.desc())
             .limit(limit)
         )
@@ -1163,13 +1168,43 @@ class QuestionSetRepository:
         """
         stmt = (
             select(QuestionSetVersionRow)
-            .options(selectinload(QuestionSetVersionRow.members))
+            .options(
+                selectinload(QuestionSetVersionRow.members),
+                selectinload(QuestionSetVersionRow.aliases),
+            )
             .where(QuestionSetVersionRow.id == set_version_id)
         )
         row = self._session.scalars(stmt).first()
         if row is None:
             raise NotFoundError(f"Question set {set_version_id} was not found.")
         return row
+
+    def point_alias(self, alias: str, *, set_version_id: int) -> QuestionSetAliasRow:
+        """Make ``alias`` resolve to this immutable snapshot."""
+        row = self.get_alias(alias)
+        if row is None:
+            row = QuestionSetAliasRow(alias=alias)
+            self._session.add(row)
+        row.set_version_id = set_version_id
+        self._session.flush()
+        return row
+
+    def get_alias(self, alias: str) -> QuestionSetAliasRow | None:
+        stmt = (
+            select(QuestionSetAliasRow)
+            .options(
+                selectinload(QuestionSetAliasRow.set_version).selectinload(QuestionSetVersionRow.members),
+                selectinload(QuestionSetAliasRow.set_version).selectinload(QuestionSetVersionRow.aliases),
+            )
+            .where(QuestionSetAliasRow.alias == alias)
+        )
+        return self._session.scalars(stmt).first()
+
+    def resolve_alias(self, alias: str) -> QuestionSetVersionRow:
+        row = self.get_alias(alias)
+        if row is None or row.set_version is None:
+            raise NotFoundError(f"Question set alias {alias!r} was not found.")
+        return row.set_version
 
     def coverage_counts(
         self, *, question_ids: Collection[int] | None = None
@@ -1304,6 +1339,30 @@ class StudentRepository:
         stmt = select(StudentRow).order_by(StudentRow.display_name)
         return list(self._session.scalars(stmt))
 
+    def search(self, term: str = "") -> list[StudentRow]:
+        """Every learner whose name or email contains ``term``, ordered by name.
+
+        The roster is paginated in the route (ADR-041 keeps this half read-only),
+        so this returns the full match set and the caller slices it -- the
+        per-student filters need the attempt aggregates, which are cheaper to
+        fetch once for everyone than to fold into this query.
+        """
+        stmt = select(StudentRow)
+        needle = term.strip()
+        if needle:
+            like = f"%{needle}%"
+            stmt = stmt.where(
+                or_(StudentRow.display_name.ilike(like), StudentRow.email.ilike(like))
+            )
+        return list(self._session.scalars(stmt.order_by(StudentRow.display_name)))
+
+    def names_for(self, student_ids: Collection[int]) -> dict[int, str]:
+        ids = list(student_ids)
+        if not ids:
+            return {}
+        stmt = select(StudentRow.id, StudentRow.display_name).where(StudentRow.id.in_(ids))
+        return dict(self._session.execute(stmt).all())
+
     def get(self, student_id: int) -> StudentRow:
         """One student.
 
@@ -1319,8 +1378,20 @@ class StudentRepository:
         stmt = select(StudentRow).where(StudentRow.display_name == display_name)
         return self._session.scalars(stmt).first()
 
-    def add(self, display_name: str) -> StudentRow:
-        row = StudentRow(display_name=display_name)
+    def get_by_resume_token(self, resume_token: str) -> StudentRow | None:
+        """The learner a returning browser's stored token belongs to, if any.
+
+        Returns ``None`` rather than raising: a stale token (the database was
+        recreated, ADR-008) is an ordinary "fall back to enrolling" case, not an
+        error.
+        """
+        if not resume_token:
+            return None
+        stmt = select(StudentRow).where(StudentRow.resume_token == resume_token)
+        return self._session.scalars(stmt).first()
+
+    def add(self, display_name: str, email: str = "") -> StudentRow:
+        row = StudentRow(display_name=display_name, email=email)
         self._session.add(row)
         self._session.flush()
         return row
@@ -1381,6 +1452,13 @@ class StudentStateRepository:
             select(StudentSubtopicWeaknessRow)
             .where(StudentSubtopicWeaknessRow.student_id == student_id)
             .order_by(StudentSubtopicWeaknessRow.subtopic_id)
+        )
+        return list(self._session.scalars(stmt))
+
+    def list_weakness_all(self) -> list[StudentSubtopicWeaknessRow]:
+        """Every learner's subtopic weakness, for the cohort weakness heatmap."""
+        stmt = select(StudentSubtopicWeaknessRow).order_by(
+            StudentSubtopicWeaknessRow.subtopic_id
         )
         return list(self._session.scalars(stmt))
 
@@ -1483,10 +1561,47 @@ class TrainingSessionRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def open_session_for(self, student_id: int) -> TrainingSessionRow | None:
+        """This student's one unfinished run, across every set, if there is one.
+
+        A run is "open" while ``ended_at`` is unset. Scoped to the student and
+        not to any set: a learner is held to a single active session at a time so
+        two attempt streams cannot both fold scores into the same per-student BKT
+        state (ADR-041). Ordered newest-first, though at most one row should ever
+        match once that rule is enforced at the API boundary.
+        """
+        stmt = (
+            select(TrainingSessionRow)
+            .where(
+                TrainingSessionRow.student_id == student_id,
+                TrainingSessionRow.ended_at.is_(None),
+            )
+            .order_by(TrainingSessionRow.created_at.desc(), TrainingSessionRow.id.desc())
+        )
+        return self._session.scalars(stmt).first()
+
     def end(self, row: TrainingSessionRow) -> TrainingSessionRow:
         row.ended_at = datetime.now(UTC)
         self._session.flush()
         return row
+
+
+class StudentAttemptStats(NamedTuple):
+    """Per-student attempt aggregates the roster filters and sorts on."""
+
+    average_score: float | None
+    answered_count: int
+    last_activity_at: datetime | None
+
+
+class ClassTrendAttempt(NamedTuple):
+    """One scored answer, trimmed to what the cohort trend graph plots."""
+
+    student_id: int
+    score: float
+    answered_at: datetime | None
+    created_at: datetime
+    ordinal: int
 
 
 class StudentAttemptRepository:
@@ -1598,3 +1713,93 @@ class StudentAttemptRepository:
             )
         )
         return self._session.scalar(stmt) or 0
+
+    def stats_by_student(self) -> dict[int, StudentAttemptStats]:
+        """One grouped pass over every attempt: the numbers the roster filters by.
+
+        The roster page filters learners by average score, answered count and
+        recency; computing those per row would be one query each per learner.
+        This is the single query that feeds all three.
+        """
+        activity = func.max(
+            func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
+        )
+        stmt = select(
+            StudentAttemptRow.student_id,
+            func.avg(StudentAttemptRow.score),
+            func.count(StudentAttemptRow.score),
+            activity,
+        ).group_by(StudentAttemptRow.student_id)
+        return {
+            student_id: StudentAttemptStats(
+                average_score=average_score,
+                answered_count=answered_count or 0,
+                last_activity_at=last_activity_at,
+            )
+            for student_id, average_score, answered_count, last_activity_at in self._session.execute(
+                stmt
+            )
+        }
+
+    def scored_series_for(
+        self, student_ids: Collection[int], limit: int = 25
+    ) -> dict[int, list[float]]:
+        """Running-average score, oldest to newest, for each of ``student_ids``.
+
+        Only the current roster page is passed in, so this stays bounded. The
+        series is the shape the row sparkline draws; it mirrors the last
+        ``limit`` scored attempts the learner-detail view would show.
+        """
+        ids = list(student_ids)
+        if not ids:
+            return {}
+        ordering = func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
+        stmt = (
+            select(StudentAttemptRow.student_id, StudentAttemptRow.score)
+            .where(
+                StudentAttemptRow.student_id.in_(ids),
+                StudentAttemptRow.score.is_not(None),
+            )
+            .order_by(ordering, StudentAttemptRow.ordinal)
+        )
+        scores: dict[int, list[float]] = {student_id: [] for student_id in ids}
+        for student_id, score in self._session.execute(stmt):
+            scores[student_id].append(score)
+        series: dict[int, list[float]] = {}
+        for student_id, values in scores.items():
+            recent = values[-limit:]
+            running = 0.0
+            series[student_id] = [
+                (running := running + score) / (index + 1)
+                for index, score in enumerate(recent)
+            ]
+        return series
+
+    def scored_attempts_all(self) -> list[ClassTrendAttempt]:
+        """Every scored attempt across the cohort, oldest first: the class trend.
+
+        One request replaces the per-student progress fan-out the class graph
+        used to need. The payload is compact -- four columns per scored answer.
+        """
+        ordering = func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
+        stmt = (
+            select(
+                StudentAttemptRow.student_id,
+                StudentAttemptRow.score,
+                StudentAttemptRow.answered_at,
+                StudentAttemptRow.created_at,
+                StudentAttemptRow.ordinal,
+            )
+            .where(StudentAttemptRow.score.is_not(None))
+            .order_by(ordering, StudentAttemptRow.ordinal)
+        )
+        return [
+            ClassTrendAttempt(
+                student_id=student_id,
+                score=score,
+                answered_at=answered_at,
+                created_at=created_at,
+                ordinal=ordinal,
+            )
+            for student_id, score, answered_at, created_at, ordinal in self._session.execute(stmt)
+        ]

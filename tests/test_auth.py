@@ -116,5 +116,7 @@ def test_anonymous_student_flow_stays_public(real_client: TestClient) -> None:
     assert taxonomy.status_code == 401
     real_client.cookies.clear()
 
-    enrolled = real_client.post("/api/students", json={"display_name": "Anon Kid"})
+    enrolled = real_client.post(
+        "/api/students", json={"display_name": "Anon Kid", "email": "anon.kid@example.edu"}
+    )
     assert enrolled.status_code == 201

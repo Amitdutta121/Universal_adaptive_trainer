@@ -24,7 +24,7 @@ The core idea is to connect four pieces that are usually scattered across separa
 ## Technical Highlights
 
 - FastAPI backend with explicit domain boundaries, typed schemas, and repository-backed persistence
-- Next.js professor console over a typed API surface
+- Next.js Instructor Studio over a typed API surface
 - Structured LLM integration for generation, evaluation, and learned instructions
 - Custom evaluation pipeline with reusable judges and batch re-evaluation support
 - Adaptive engine using BKT topic mastery, subtopic weakness, and question-priority rotation
@@ -72,11 +72,11 @@ docker compose up --build
 
 ## Screenshots
 
-### Professor console
+### Instructor Studio
 
-The console is organized around one pipeline: ingest content, build a curriculum, generate questions against it, evaluate what came back, then freeze a set for students.
+The studio is organized around one pipeline: ingest content, build a curriculum, generate questions against it, evaluate what came back, then freeze a set for students.
 
-![Professor console dashboard](docs/images/dashboard.png)
+![Instructor Studio dashboard](docs/images/dashboard.png)
 
 **Books** — upload structured book documents and track what has been imported, including partial imports with warnings.
 

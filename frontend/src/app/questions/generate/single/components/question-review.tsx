@@ -20,20 +20,27 @@ import {
 import { useReviewForm } from "@/app/review/use-review-form";
 import { QueryError, TableSkeleton } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
-import { useQuestion, useSubmitReview } from "@/lib/api/queries";
+import { Textarea } from "@/components/ui/textarea";
+import { useQuestion, useRegenerateWithFeedback, useSubmitReview } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 
 export function QuestionReview({
   questionId,
   onGenerateAnother,
+  onRegenerated,
 }: {
   questionId: number;
-  onGenerateAnother: () => void;
+  /** Absent in hosts with no chunk to generate from (the question bank). */
+  onGenerateAnother?: () => void;
+  /** Called with the new question's id after a "Regenerate with feedback". */
+  onRegenerated?: (newQuestionId: number) => void;
 }) {
   const { data: detail, isPending, isError, error } = useQuestion(questionId);
   const submitReview = useSubmitReview();
+  const regenerate = useRegenerateWithFeedback();
   const form = useReviewForm(detail ?? null);
   const [justSaved, setJustSaved] = useState(false);
+  const [feedback, setFeedback] = useState("");
 
   if (isPending) return <TableSkeleton rows={3} />;
   if (isError || !detail) return <QueryError error={error} />;
@@ -71,6 +78,19 @@ export function QuestionReview({
     }
   }
 
+  async function onRegenerate() {
+    if (!feedback.trim() || regenerate.isPending) return;
+    try {
+      const result = await regenerate.mutateAsync({ questionId, feedback: feedback.trim() });
+      toast.success("New question generated");
+      setFeedback("");
+      onRegenerated?.(result.question_id);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Regeneration failed.";
+      toast.error("Regeneration failed", { description: message });
+    }
+  }
+
   return (
     <div data-review-theme="signal" className="review-theme-root min-w-0 space-y-4">
       <ReviewQuestionSurface
@@ -92,12 +112,43 @@ export function QuestionReview({
       <JudgeRail detail={detail} />
       <ValidationSummary detail={detail} />
 
+      <div className="space-y-3 rounded-[1rem] border p-4">
+        <div className="review-eyebrow">Regenerate with feedback</div>
+        <p className="text-muted-foreground text-sm">
+          Write a new question from the same section, type and difficulty. This does not change or
+          review the current question.
+        </p>
+        <Textarea
+          rows={4}
+          value={feedback}
+          onChange={(event) => setFeedback(event.target.value)}
+          disabled={regenerate.isPending}
+          placeholder="e.g. The distractors are too obvious — make them plausible misconceptions."
+          className="review-textarea"
+        />
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() => void onRegenerate()}
+            disabled={!feedback.trim() || regenerate.isPending}
+          >
+            {regenerate.isPending ? "Regenerating…" : "Regenerate with feedback"}
+          </Button>
+        </div>
+        {regenerate.isError ? <QueryError error={regenerate.error} /> : null}
+      </div>
+
       {justSaved ? (
-        <div className="flex items-center justify-between rounded-[1rem] border bg-muted/40 p-4">
+        <div
+          className={`flex items-center rounded-[1rem] border bg-muted/40 p-4 ${
+            onGenerateAnother ? "justify-between" : ""
+          }`}
+        >
           <p className="text-sm">
             Saved — nothing here is overwritten, this is a new review record.
           </p>
-          <Button onClick={onGenerateAnother}>Generate another from this chunk</Button>
+          {onGenerateAnother ? (
+            <Button onClick={onGenerateAnother}>Generate another from this chunk</Button>
+          ) : null}
         </div>
       ) : (
         <ReviewActionBar
