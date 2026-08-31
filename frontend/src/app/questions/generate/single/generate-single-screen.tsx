@@ -16,6 +16,13 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -206,13 +213,28 @@ export function GenerateSingleScreen() {
             )}
 
             {generate.isError ? <QueryError error={generate.error} /> : null}
-
-            {questionId !== null ? (
-              <QuestionReview questionId={questionId} onGenerateAnother={runGenerate} />
-            ) : null}
           </div>
         </div>
       ) : null}
+
+      <Dialog
+        open={questionId !== null}
+        onOpenChange={(open) => {
+          if (!open) setQuestionId(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Question</DialogTitle>
+            <DialogDescription>
+              {selectedRow ? `From "${selectedRow.title}".` : "Review, edit, or reject it below."}
+            </DialogDescription>
+          </DialogHeader>
+          {questionId !== null ? (
+            <QuestionReview questionId={questionId} onGenerateAnother={runGenerate} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
