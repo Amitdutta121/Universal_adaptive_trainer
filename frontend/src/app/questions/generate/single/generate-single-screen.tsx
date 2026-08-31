@@ -140,7 +140,7 @@ export function GenerateSingleScreen() {
       ) : null}
 
       {!sheet.isPending && bookId !== null ? (
-        <div className="grid min-w-0 gap-4 xl:h-[calc(100dvh-13rem)] xl:grid-cols-[19rem_minmax(0,1fr)_22rem]">
+        <div className="grid min-w-0 gap-4 xl:h-[calc(100dvh-9rem)] xl:grid-cols-[19rem_minmax(0,1fr)_22rem]">
           <div className="min-w-0 xl:min-h-0">
             <OutlinePanel
               chapters={sheet.chapters}
@@ -155,7 +155,7 @@ export function GenerateSingleScreen() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-4 xl:min-h-0">
-            <div className="min-h-[420px] flex-[3] xl:min-h-0">
+            <div className="min-h-[560px] flex-1 xl:min-h-0">
               <PdfPageViewer
                 bookId={bookId}
                 rows={sheet.allRows}
@@ -173,7 +173,7 @@ export function GenerateSingleScreen() {
                 </p>
               </details>
             ) : null}
-            <div className="min-h-[220px] flex-[2] xl:min-h-0">
+            <div className="h-64 shrink-0">
               <QuestionsForChunk
                 sectionId={sectionId}
                 openQuestionId={questionId}

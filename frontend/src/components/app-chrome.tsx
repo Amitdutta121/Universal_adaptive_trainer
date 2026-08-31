@@ -8,7 +8,13 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
-function ProfessorChrome({ children }: { children: React.ReactNode }) {
+function ProfessorChrome({
+  children,
+  isWideRoute,
+}: {
+  children: React.ReactNode;
+  isWideRoute: boolean;
+}) {
   return (
     <AuthGate>
       <SidebarProvider>
@@ -16,8 +22,13 @@ function ProfessorChrome({ children }: { children: React.ReactNode }) {
         <SidebarInset className="app-inset min-w-0">
           {/* `min-w-0`: without it this flex child refuses to shrink below the
               width of its widest content, and a long code listing would push
-              the whole page into horizontal scroll instead of scrolling itself. */}
-          <div className="app-shell mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6">
+              the whole page into horizontal scroll instead of scrolling itself.
+              `isWideRoute` drops the usual reading-width cap for screens built
+              as a multi-column workspace rather than a document, so they use
+              the full window on a wide monitor instead of leaving it blank. */}
+          <div
+            className={`app-shell mx-auto flex w-full min-w-0 flex-col gap-6 p-6 ${isWideRoute ? "" : "max-w-7xl"}`}
+          >
             {children}
           </div>
         </SidebarInset>
@@ -57,11 +68,14 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   // The login page renders full-page (see login-screen.tsx) and must never sit
   // behind AuthGate itself, or a logged-out visitor could never reach it.
   const isLoginRoute = pathname === "/login";
+  // A multi-column workspace, not a document — capping it to reading width
+  // wastes a wide monitor instead of giving the PDF pane the room it needs.
+  const isWideRoute = pathname.startsWith("/questions/generate/single");
 
   if (isLoginRoute) return <>{children}</>;
   return isStudentRoute ? (
     <StudentChrome>{children}</StudentChrome>
   ) : (
-    <ProfessorChrome>{children}</ProfessorChrome>
+    <ProfessorChrome isWideRoute={isWideRoute}>{children}</ProfessorChrome>
   );
 }
