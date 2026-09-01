@@ -7,10 +7,15 @@ is never edited.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+import book_documents as docs
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from llm_fakes import MalformedThenGoodClient, MetricJudgeClient
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -20,11 +25,13 @@ from app.coverage import (
     build_coverage_report,
     create_question_set,
     get_prod_question_set,
-    sync_prod_question_set,
     state_for,
+    sync_prod_question_set,
 )
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionStatus
 from app.errors import DomainRuleError, NotFoundError
+from app.generation.schemas import MultipleChoiceDraft
+from app.ingestion import BookImportService
 from app.persistence.models import (
     CurriculumVersionRow,
     QuestionRow,
@@ -32,7 +39,10 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
-from app.persistence.repositories import QuestionSetRepository
+from app.persistence.repositories import BookStructureRepository, QuestionSetRepository
+from app.retrieval import SectionEmbeddingStore
+from app.web.routes.api.coverage import active_generation_topic_ids, get_generation_client
+from app.web.routes.api.retrieval import get_query_embedder
 
 
 def _taxonomy(session: Session, *, subtopics: int = 1) -> tuple[CurriculumVersionRow, list[int]]:
@@ -527,23 +537,275 @@ def test_the_endpoint_publishes_the_topic_grouping(client: TestClient, session: 
     assert payload["topics"][0]["subtopics"][0]["cells"][0]["needed"] == MIN_QUESTIONS_PER_CELL - 1
 
 
-# -------------------------------------------- selecting gaps, and refusing them
+# -------------------------------------------- generate for gaps (m2)
 
 
-def test_asking_to_fill_a_gap_is_refused_as_not_implemented(client: TestClient) -> None:
-    """ADR-031 gives the generator the choice of subtopic, and nothing ranks
-    chunks by what they teach, so there is no honest targeted run to start."""
-    response = client.post(
-        "/api/coverage/generation-runs",
-        json={"targets": [{"subtopic_id": 1, "difficulty": "hard"}]},
+class KeywordEmbedder:
+    """Deterministic bag-of-words embedder over a fixed vocabulary.
+
+    Cosine ordering is then a function of shared keywords, so a "while loop"
+    query ranks the while-loop section first and a query with none of the
+    vocabulary embeds to a zero vector -- the retriever's "nothing" case.
+    """
+
+    model = "keyword-test-v1"
+    VOCAB = ("loop", "while", "range", "variable", "string", "slice")
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[float(t.lower().count(word)) for word in self.VOCAB] for t in texts]
+
+
+def _gen_book(session: Session, settings: Settings):
+    sections = [
+        "A while loop repeats while a condition holds. Use a while loop to loop again.",
+        "A string can be sliced. Take a slice of a string. string slice string.",
+        "A variable is a name that refers to a value. variable variable.",
+    ]
+    doc = {
+        "schema_version": "1",
+        "title": "Gen Book",
+        "chapters": [{"sections": [{"text": text} for text in sections]}],
+    }
+    book = BookImportService(session, settings).import_upload(
+        filename="gen_book.json", data=docs.to_bytes(doc)
+    )
+    session.commit()
+    return book
+
+
+def _gen_taxonomy(session: Session, book_id: int):
+    version = CurriculumVersionRow(
+        label="Gen v1",
+        status=CurriculumStatus.APPROVED,
+        approved_at=datetime.now(UTC),
+        source_book_ids=[book_id],
+    )
+    session.add(version)
+    session.flush()
+    loops = TopicRow(curriculum_version_id=version.id, name="Loops", position=0)
+    strings = TopicRow(curriculum_version_id=version.id, name="Strings", position=1)
+    advanced = TopicRow(curriculum_version_id=version.id, name="Advanced", position=2)
+    session.add_all([loops, strings, advanced])
+    session.flush()
+    while_loops = SubtopicRow(
+        topic_id=loops.id,
+        name="While loops",
+        description="Using a while loop to repeat a block.",
+        position=0,
+    )
+    slicing = SubtopicRow(
+        topic_id=strings.id,
+        name="Slicing",
+        description="Taking a slice of a string.",
+        position=0,
+    )
+    recursion = SubtopicRow(
+        topic_id=advanced.id,
+        name="Recursion",
+        description="A function that calls itself.",
+        position=0,
+    )
+    session.add_all([while_loops, slicing, recursion])
+    session.commit()
+    return SimpleNamespace(
+        version=version, while_loops=while_loops, slicing=slicing, recursion=recursion
     )
 
-    assert response.status_code == 501
-    assert response.json()["error"]["code"] == "feature_not_available"
-    assert "cannot be aimed" in response.text
+
+def _mcq(topic_id: int, subtopic_id: int) -> MultipleChoiceDraft:
+    return MultipleChoiceDraft(
+        topic_id=topic_id,
+        subtopic_ids=[subtopic_id],
+        prompt="Which loop repeats while a condition holds?",
+        options=["while loop", "for loop", "do loop", "no loop"],
+        correct_option_index=0,
+        explanation="A while loop runs while its condition is true.",
+    )
 
 
-def test_asking_to_fill_no_gaps_at_all_is_rejected(client: TestClient) -> None:
-    response = client.post("/api/coverage/generation-runs", json={"targets": []})
+@pytest.fixture
+def gen_env(session: Session, settings: Settings) -> SimpleNamespace:
+    book = _gen_book(session, settings)
+    env = _gen_taxonomy(session, book.id)
+    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
+    session.commit()
+    env.book = book
+    env.sections = BookStructureRepository(session).sections_in_book(book.id)
+    return env
+
+
+def _run(app: FastAPI, gen_client: object, targets: list[dict]) -> object:
+    app.dependency_overrides[get_query_embedder] = KeywordEmbedder
+    app.dependency_overrides[get_generation_client] = lambda: gen_client
+    with TestClient(app) as http:
+        return http.post("/api/coverage/generation-runs", json={"targets": targets})
+
+
+def test_a_run_generates_a_grounded_question_into_the_review_queue(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
+
+    response = _run(
+        configured_app,
+        client,
+        [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["run_id"]
+    assert body["skipped"] == [] and body["failed"] == []
+    (produced,) = body["generated"]
+    assert produced["requested_subtopic_id"] == gen_env.while_loops.id
+    assert produced["requested_difficulty"] == "medium"
+    assert produced["claimed_topic_id"] == gen_env.while_loops.topic_id
+    assert produced["aim_matched"] is True
+    assert produced["section_id"] == gen_env.sections[0].id
+    assert produced["status"] == "validation_passed"
+
+    with TestClient(configured_app) as http:
+        listed = http.get("/api/questions", params={"status": "validation_passed"}).json()
+    assert produced["question_id"] in [q["id"] for q in listed["questions"]]
+
+
+def test_a_run_surfaces_an_aim_mismatch_without_filtering_it(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    """The generator classified the question under a different topic than the
+    gap it was retrieved for (ADR-031). It is reported, not dropped."""
+    client = MetricJudgeClient(draft=_mcq(gen_env.slicing.topic_id, gen_env.slicing.id))
+
+    response = _run(
+        configured_app,
+        client,
+        [{"subtopic_id": gen_env.while_loops.id, "difficulty": "easy"}],
+    )
+
+    assert response.status_code == 200, response.text
+    (produced,) = response.json()["generated"]
+    assert produced["requested_subtopic_id"] == gen_env.while_loops.id
+    assert produced["claimed_topic_id"] == gen_env.slicing.topic_id
+    assert produced["aim_matched"] is False
+
+
+def test_a_target_with_no_confident_section_is_skipped_and_the_run_continues(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
+
+    response = _run(
+        configured_app,
+        client,
+        [
+            {"subtopic_id": gen_env.recursion.id, "difficulty": "easy"},
+            {"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"},
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["skipped"] == [
+        {
+            "subtopic_id": gen_env.recursion.id,
+            "difficulty": "easy",
+            "reason": "no confident section",
+        }
+    ]
+    assert [q["requested_subtopic_id"] for q in body["generated"]] == [gen_env.while_loops.id]
+
+
+def test_a_below_floor_section_is_skipped(
+    configured_app: FastAPI,
+    session: Session,
+    gen_env: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.web.routes.api.coverage.MIN_SECTION_SCORE", 0.999)
+    client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
+
+    response = _run(
+        configured_app,
+        client,
+        [{"subtopic_id": gen_env.while_loops.id, "difficulty": "hard"}],
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["generated"] == []
+    assert body["skipped"][0]["reason"] == "no confident section"
+
+
+def test_an_unknown_subtopic_is_a_404_before_anything_is_generated(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
+
+    response = _run(configured_app, client, [{"subtopic_id": 999999, "difficulty": "hard"}])
+
+    assert response.status_code == 404
+    with TestClient(configured_app) as http:
+        assert http.get("/api/questions").json()["total"] == 0
+
+
+def test_a_provider_failure_on_one_target_keeps_the_others(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    # Malformed for the first target's whole retry budget, then answers normally.
+    client = MalformedThenGoodClient(
+        malformed_replies=3,
+        draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id),
+    )
+
+    response = _run(
+        configured_app,
+        client,
+        [
+            {"subtopic_id": gen_env.slicing.id, "difficulty": "easy"},
+            {"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"},
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    (failed,) = body["failed"]
+    assert failed["subtopic_id"] == gen_env.slicing.id
+    assert failed["section_id"] == gen_env.sections[1].id
+    assert failed["error"]
+    assert [q["requested_subtopic_id"] for q in body["generated"]] == [gen_env.while_loops.id]
+
+    with TestClient(configured_app) as http:
+        listed = http.get("/api/questions", params={"status": "validation_passed"}).json()
+    assert [q["id"] for q in listed["questions"]] == [body["generated"][0]["question_id"]]
+    assert active_generation_topic_ids() == []
+
+
+def test_asking_to_fill_no_gaps_at_all_is_rejected(configured_app: FastAPI) -> None:
+    response = _run(configured_app, MetricJudgeClient(), [])
 
     assert response.status_code == 422
+
+
+def test_a_topic_stays_marked_active_until_its_run_finishes(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    """A professor who reloads mid-run, or navigates away and back, must still see
+    the topic as generating -- not an idle button inviting a second, overlapping
+    run over the same gaps. The client can lose all memory of an in-flight run;
+    the server is the one source of truth GET /coverage rehydrates from."""
+
+    class ProbeClient(MetricJudgeClient):
+        def complete_structured(self, **kwargs):
+            assert active_generation_topic_ids() == [gen_env.while_loops.topic_id]
+            return super().complete_structured(**kwargs)
+
+    assert active_generation_topic_ids() == []
+
+    response = _run(
+        configured_app,
+        ProbeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id)),
+        [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
+    )
+
+    assert response.status_code == 200, response.text
+    assert active_generation_topic_ids() == []

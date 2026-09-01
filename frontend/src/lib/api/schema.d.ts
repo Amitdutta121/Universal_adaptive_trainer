@@ -445,12 +445,13 @@ export interface paths {
          * List Questions
          * @description The question bank, newest first, with counts by lifecycle status.
          *
-         *     ``status``, ``curriculum_version_id`` and ``section_id`` narrow the listing;
-         *     without them nothing is hidden. The API does not filter by default even
-         *     though the page does, because a caller reading the bank over JSON has no way
-         *     to discover rows an unrequested default removed. ``status_counts``,
-         *     ``curriculum_version_counts`` and ``total`` always describe the whole bank,
-         *     so a filtered listing still says how much it is showing of what.
+         *     ``status``, ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow
+         *     the listing; without them nothing is hidden. The API does not filter by
+         *     default even though the page does, because a caller reading the bank over
+         *     JSON has no way to discover rows an unrequested default removed.
+         *     ``status_counts``, ``curriculum_version_counts`` and ``total`` always
+         *     describe the whole bank, so a filtered listing still says how much it is
+         *     showing of what.
          */
         get: operations["list_questions_api_questions_get"];
         put?: never;
@@ -973,16 +974,14 @@ export interface paths {
         put?: never;
         /**
          * Start Generation Run
-         * @description Not implemented. Selecting gaps is real; acting on them is not.
+         * @description Generate one grounded question for each selected coverage gap.
          *
-         *     The step this endpoint would perform does not exist. A professor selects a
-         *     chunk, a difficulty and a question type, and the *generator* decides which
-         *     topic and subtopics it wrote for (ADR-031) -- so a named gap cannot be
-         *     requested. Closing one means finding chunks that teach that subtopic,
-         *     generating from them, and seeing what the generator claimed afterwards.
-         *
-         *     Nothing ranks chunks by subtopic yet. Returning a plausible-looking run here
-         *     would report targeted generation that never happened, so it refuses instead.
+         *     For every target: retrieve the top book section that teaches its subtopic,
+         *     generate one multiple-choice question from that section at the requested
+         *     difficulty, and report what the generator claimed it wrote for. A target
+         *     with no confident section is skipped and the run continues; a provider
+         *     failure on one target is reported beside the questions the run did produce
+         *     (ADR-032). The new questions land in the review queue with no extra step.
          */
         post: operations["start_generation_run_api_coverage_generation_runs_post"];
         delete?: never;
@@ -1026,6 +1025,26 @@ export interface paths {
          * @description Freeze the approved bank now and repoint the stable prod classroom link.
          */
         post: operations["sync_prod_set_api_question_sets_prod_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/retrieval/sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve Sections
+         * @description Rank sections for a query or a subtopic. Exactly one of the two is required.
+         */
+        get: operations["retrieve_sections_api_retrieval_sections_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1088,6 +1107,11 @@ export interface paths {
          *     than a progress fetch per learner, so the cost no longer grows with the
          *     cohort. ``total`` is the count *after* filtering, so the client can size its
          *     page controls.
+         *
+         *     ``curriculum_version_id`` narrows to students with at least one session on a
+         *     set built from that taxonomy (see
+         *     :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
+         *     student is never tagged with a taxonomy directly, only a frozen set is.
          */
         get: operations["list_students_api_students_get"];
         put?: never;
@@ -1125,6 +1149,10 @@ export interface paths {
          *     Independent of which roster page is open: the class trend graph and the
          *     weakness heatmap are about the whole class, so they get their own request
          *     instead of being rebuilt from whatever page of learners happens to be loaded.
+         *
+         *     ``curriculum_version_id``, when given, scopes both the trend and the
+         *     heatmap to that taxonomy -- the same filter the roster's own dropdown
+         *     applies to the student list (see :func:`list_students`).
          */
         get: operations["class_summary_api_students_class_summary_get"];
         put?: never;
@@ -2053,6 +2081,8 @@ export interface components {
             topics: components["schemas"]["TopicCoverage"][];
             /** Subtopics */
             subtopics: components["schemas"]["SubtopicCoverage"][];
+            /** Active Run Topic Ids */
+            active_run_topic_ids?: number[];
         };
         /**
          * CoverageState
@@ -2392,6 +2422,23 @@ export interface components {
          */
         ExtractionWarningCode: "no_page_numbers" | "producer_inferred_structure" | "missing_heading" | "source_text_unreadable" | "section_text_truncated" | "metadata_unavailable" | "other";
         /**
+         * FailedRunTarget
+         * @description A gap target whose generation call reached the provider and failed.
+         *
+         *     The section was retrieved and the request was well formed; the model call
+         *     itself did not return a usable question. What the run already produced is
+         *     kept (ADR-032), so this is reported beside ``generated`` rather than raised.
+         */
+        FailedRunTarget: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            difficulty: components["schemas"]["Difficulty"];
+            /** Section Id */
+            section_id: number;
+            /** Error */
+            error: string;
+        };
+        /**
          * FieldLimitOut
          * @description One field of the taxonomy contract, and the bounds the validator enforces.
          *
@@ -2490,6 +2537,31 @@ export interface components {
             questions: components["schemas"]["QuestionSummary"][];
         };
         /**
+         * GeneratedRunQuestion
+         * @description One question a generation run produced, and how its aim landed.
+         *
+         *     ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
+         *     what the generator classified the question as after reading the section
+         *     (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
+         *     never used to filter, so a drift is visible in the review queue instead.
+         */
+        GeneratedRunQuestion: {
+            /** Question Id */
+            question_id: number;
+            /** Requested Subtopic Id */
+            requested_subtopic_id: number;
+            requested_difficulty: components["schemas"]["Difficulty"];
+            /** Claimed Topic Id */
+            claimed_topic_id: number | null;
+            /** Claimed Subtopic Ids */
+            claimed_subtopic_ids: number[];
+            /** Section Id */
+            section_id: number;
+            status: components["schemas"]["QuestionStatus"];
+            /** Aim Matched */
+            aim_matched: boolean;
+        };
+        /**
          * GenerationAttempt
          * @description One model call that tried to produce this question (ADR-032).
          *
@@ -2582,6 +2654,26 @@ export interface components {
             judge_calls: number;
             /** Source Chars */
             source_chars: number;
+        };
+        /**
+         * GenerationRunResponse
+         * @description The outcome of one coverage "Generate" run.
+         *
+         *     Always 200, even when ``failed`` is non-empty: a run that produced some
+         *     questions and lost others part-way is a real, reportable outcome, not an
+         *     error to swallow the successes for.
+         */
+        GenerationRunResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Generated */
+            generated: components["schemas"]["GeneratedRunQuestion"][];
+            /** Skipped */
+            skipped: components["schemas"]["SkippedRunTarget"][];
+            /** Failed */
+            failed: components["schemas"]["FailedRunTarget"][];
+            /** Possible Duplicates */
+            possible_duplicates: number;
         };
         /**
          * GeneratorKind
@@ -2926,6 +3018,19 @@ export interface components {
             already_recorded: number;
         };
         /**
+         * PossibleDuplicateOut
+         * @description One existing question a freshly generated one scored as a likely
+         *     duplicate of (coverage Generate m3). A soft flag, never a gate.
+         */
+        PossibleDuplicateOut: {
+            /** Question Id */
+            question_id: number;
+            /** Prompt Excerpt */
+            prompt_excerpt: string;
+            /** Score */
+            score: number;
+        };
+        /**
          * QuadrantCell
          * @description Which of the four judge/professor outcomes a reviewed question fell into.
          *
@@ -3061,6 +3166,8 @@ export interface components {
             status?: components["schemas"]["QuestionStatus"] | null;
             /** Curriculum Version Id */
             curriculum_version_id?: number | null;
+            /** Run Id */
+            run_id?: string | null;
         };
         /** QuestionSetListResponse */
         QuestionSetListResponse: {
@@ -3147,6 +3254,8 @@ export interface components {
             is_edited: boolean;
             /** Regenerated From Question Id */
             regenerated_from_question_id: number | null;
+            /** Possible Duplicate Of */
+            possible_duplicate_of: components["schemas"]["PossibleDuplicateOut"][];
             /**
              * Created At
              * Format: date-time
@@ -3217,6 +3326,28 @@ export interface components {
             resume_token: string;
             /** Set Version Id */
             set_version_id: number;
+        };
+        /**
+         * RetrievedSectionOut
+         * @description One book section returned by semantic retrieval, with its citation.
+         */
+        RetrievedSectionOut: {
+            /** Section Id */
+            section_id: number;
+            /** Book Id */
+            book_id: number;
+            /** Book Title */
+            book_title: string;
+            /** Chapter Title */
+            chapter_title: string | null;
+            /** Section Number */
+            section_number: string | null;
+            /** Section Title */
+            section_title: string | null;
+            /** Score */
+            score: number;
+            /** Snippet */
+            snippet: string;
         };
         /**
          * ReviewDecision
@@ -3482,6 +3613,17 @@ export interface components {
             code?: string | null;
             /** Blocks */
             blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
+        };
+        /**
+         * SkippedRunTarget
+         * @description A gap target the run did not generate for, and why.
+         */
+        SkippedRunTarget: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            difficulty: components["schemas"]["Difficulty"];
+            /** Reason */
+            reason: string;
         };
         /**
          * SourceFormat
@@ -4824,6 +4966,7 @@ export interface operations {
                 status?: components["schemas"]["QuestionStatus"] | null;
                 curriculum_version_id?: number | null;
                 section_id?: number | null;
+                run_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -5533,6 +5676,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRunResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -5540,15 +5692,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Successful Response */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };
@@ -5626,6 +5769,41 @@ export interface operations {
             };
         };
     };
+    retrieve_sections_api_retrieval_sections_get: {
+        parameters: {
+            query?: {
+                /** @description Free-text query. */
+                query?: string | null;
+                /** @description Curriculum subtopic; its topic + name + description becomes the query. */
+                subtopic_id?: number | null;
+                top_k?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievedSectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_prod_classroom_api_question_sets_prod_get: {
         parameters: {
             query?: never;
@@ -5684,6 +5862,7 @@ export interface operations {
                 score?: string;
                 answered?: string;
                 activity?: string;
+                curriculum_version_id?: number | null;
                 page?: number;
                 page_size?: number;
             };
@@ -5748,7 +5927,9 @@ export interface operations {
     };
     class_summary_api_students_class_summary_get: {
         parameters: {
-            query?: never;
+            query?: {
+                curriculum_version_id?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5762,6 +5943,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

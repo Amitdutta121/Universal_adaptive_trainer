@@ -20,6 +20,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -200,6 +201,36 @@ class BookSectionRow(Base):
 
     book: Mapped[BookRow] = relationship(back_populates="sections")
     chapter: Mapped[BookChapterRow | None] = relationship(back_populates="sections")
+
+
+class SectionEmbeddingRow(Base):
+    """A cached embedding vector for one book section.
+
+    A *derived* index, not source data: it can be rebuilt from
+    ``book_sections.text`` at any time by ``scripts/embed_sections.py``. It lives
+    in its own table -- never a column on ``book_sections`` -- so an existing
+    database needs no migration: ``create_all`` adds a missing table, while
+    ``verify_schema`` (ADR-008) only trips on missing *columns* of tables that
+    already exist.
+
+    ``content_hash`` is the SHA-256 of the section text the vector was built
+    from, so a re-run re-embeds only the sections whose text changed. ``model``
+    and ``dim`` are recorded so a later model swap is detectable rather than
+    silently mixing vector spaces.
+    """
+
+    __tablename__ = "section_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    section_id: Mapped[int] = mapped_column(
+        ForeignKey("book_sections.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class CurriculumVersionRow(TimestampMixin, Base):
@@ -446,6 +477,15 @@ class QuestionRow(TimestampMixin, Base):
         "subtopic_id",
         creator=lambda subtopic_id: QuestionSubtopicRow(subtopic_id=subtopic_id),
     )
+    #: Possible-duplicate flags raised *against* this question (m3). Eager
+    #: loaded for the same reason as ``subtopic_links``: every reader of a
+    #: question wants to know what it might duplicate.
+    similarity_flags: Mapped[list[QuestionSimilarityRow]] = relationship(
+        foreign_keys="[QuestionSimilarityRow.question_id]",
+        cascade="all, delete-orphan",
+        order_by="QuestionSimilarityRow.score.desc()",
+        lazy="selectin",
+    )
 
 
 class QuestionSubtopicRow(Base):
@@ -475,6 +515,38 @@ class QuestionSubtopicRow(Base):
     )
 
     question: Mapped[QuestionRow] = relationship(back_populates="subtopic_links")
+
+
+class QuestionSimilarityRow(Base):
+    """A flagged possible duplicate, written after a generation run (coverage
+    Generate m3).
+
+    Directional: ``question_id`` is the freshly generated question, and
+    ``similar_question_id`` the pre-existing approved/validation-passed
+    question of the same topic it scored above threshold against. A soft flag
+    only -- it never blocks or hides a question, it just gives the review
+    queue something to point at (see MILESTONES.md "Dedup is a soft flag").
+    A new table needs no ``.db`` reset (ADR-008).
+    """
+
+    __tablename__ = "question_similarity_flags"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    similar_question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    score: Mapped[float] = mapped_column(Float)
+    #: The embedding model the comparison was made in, so a later model swap
+    #: is detectable rather than silently mixing vector spaces.
+    model: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    similar_question: Mapped[QuestionRow] = relationship(
+        foreign_keys=[similar_question_id], lazy="selectin"
+    )
 
 
 class QuestionEvaluationRow(TimestampMixin, Base):

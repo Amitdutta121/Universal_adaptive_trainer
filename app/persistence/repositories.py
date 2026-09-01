@@ -563,6 +563,7 @@ class QuestionRepository:
         statuses: Collection[QuestionStatus] | None = None,
         curriculum_version_id: int | None = None,
         section_id: int | None = None,
+        run_id: str | None = None,
     ) -> list[QuestionRow]:
         """The newest questions, optionally narrowed to particular statuses.
 
@@ -571,6 +572,11 @@ class QuestionRepository:
         rather than "no filter". ``curriculum_version_id`` narrows the same way,
         so a taxonomy filter applies to the whole bank rather than only to
         whatever page ``limit`` happened to load.
+
+        ``run_id`` narrows to questions carrying an evaluation from that
+        generation run (coverage Generate m4's "Review these" link) -- a join
+        through :class:`QuestionEvaluationRow`, the only place a run id is
+        stored, rather than a direct column on the question.
 
         ``section_id`` narrows to questions grounded in that one section. Like
         :meth:`count_grounded_in_sections`, this reads the frozen spec rather than
@@ -583,6 +589,14 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        if run_id is not None:
+            stmt = stmt.where(
+                QuestionRow.id.in_(
+                    select(QuestionEvaluationRow.question_id).where(
+                        QuestionEvaluationRow.run_id == run_id
+                    )
+                )
+            )
         if section_id is not None:
             rows = []
             for row in self._session.scalars(stmt):
@@ -613,6 +627,21 @@ class QuestionRepository:
         if row is None:
             raise NotFoundError(f"Question {question_id} does not exist.")
         return row
+
+    def list_dedup_candidates(
+        self, *, topic_id: int, exclude_ids: Collection[int] = ()
+    ) -> list[QuestionRow]:
+        """Existing questions a freshly generated one can be flagged against
+        (m3): approved or validation-passed, in the same topic. Cross-topic and
+        rejected/failed questions are never compared.
+        """
+        stmt = select(QuestionRow).where(
+            QuestionRow.topic_id == topic_id,
+            QuestionRow.status.in_((QuestionStatus.APPROVED, QuestionStatus.VALIDATION_PASSED)),
+        )
+        if exclude_ids:
+            stmt = stmt.where(QuestionRow.id.not_in(exclude_ids))
+        return list(self._session.scalars(stmt))
 
     def list_reviewed_with_evaluation(self) -> list[QuestionRow]:
         """Questions carrying both a stored judge evaluation and a review.
@@ -1455,11 +1484,22 @@ class StudentStateRepository:
         )
         return list(self._session.scalars(stmt))
 
-    def list_weakness_all(self) -> list[StudentSubtopicWeaknessRow]:
-        """Every learner's subtopic weakness, for the cohort weakness heatmap."""
-        stmt = select(StudentSubtopicWeaknessRow).order_by(
-            StudentSubtopicWeaknessRow.subtopic_id
-        )
+    def list_weakness_all(
+        self, curriculum_version_id: int | None = None
+    ) -> list[StudentSubtopicWeaknessRow]:
+        """Every learner's subtopic weakness, for the cohort weakness heatmap.
+
+        ``curriculum_version_id`` narrows to subtopics owned by that taxonomy
+        (via the subtopic's topic), so switching the roster's taxonomy filter
+        re-scopes the heatmap instead of mixing subtopics from every version.
+        """
+        stmt = select(StudentSubtopicWeaknessRow).order_by(StudentSubtopicWeaknessRow.subtopic_id)
+        if curriculum_version_id is not None:
+            stmt = (
+                stmt.join(SubtopicRow, SubtopicRow.id == StudentSubtopicWeaknessRow.subtopic_id)
+                .join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
+                .where(TopicRow.curriculum_version_id == curriculum_version_id)
+            )
         return list(self._session.scalars(stmt))
 
     def count_students_measured_on(
@@ -1584,6 +1624,26 @@ class TrainingSessionRepository:
         row.ended_at = datetime.now(UTC)
         self._session.flush()
         return row
+
+    def student_ids_for_curriculum_version(self, curriculum_version_id: int) -> set[int]:
+        """Every student who has run a session against this taxonomy.
+
+        A student is not tagged with a taxonomy directly -- only a frozen set is
+        (``QuestionSetVersionRow.curriculum_version_id``), and a student's
+        sessions may span several sets. Membership here means "has at least one
+        session on a set built from this curriculum version", not "is currently
+        studying it".
+        """
+        stmt = (
+            select(TrainingSessionRow.student_id)
+            .join(
+                QuestionSetVersionRow,
+                QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+            )
+            .where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+            .distinct()
+        )
+        return set(self._session.scalars(stmt))
 
 
 class StudentAttemptStats(NamedTuple):
@@ -1775,11 +1835,18 @@ class StudentAttemptRepository:
             ]
         return series
 
-    def scored_attempts_all(self) -> list[ClassTrendAttempt]:
+    def scored_attempts_all(
+        self, curriculum_version_id: int | None = None
+    ) -> list[ClassTrendAttempt]:
         """Every scored attempt across the cohort, oldest first: the class trend.
 
         One request replaces the per-student progress fan-out the class graph
         used to need. The payload is compact -- four columns per scored answer.
+
+        ``curriculum_version_id`` narrows to attempts served from a session
+        whose frozen set was built off that taxonomy (mirrors
+        :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`),
+        so the trend line reflects only the selected taxonomy's questions.
         """
         ordering = func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
         stmt = (
@@ -1793,6 +1860,15 @@ class StudentAttemptRepository:
             .where(StudentAttemptRow.score.is_not(None))
             .order_by(ordering, StudentAttemptRow.ordinal)
         )
+        if curriculum_version_id is not None:
+            stmt = (
+                stmt.join(TrainingSessionRow, TrainingSessionRow.id == StudentAttemptRow.session_id)
+                .join(
+                    QuestionSetVersionRow,
+                    QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+                )
+                .where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+            )
         return [
             ClassTrendAttempt(
                 student_id=student_id,

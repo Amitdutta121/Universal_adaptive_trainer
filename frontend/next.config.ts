@@ -15,6 +15,14 @@ const nextConfig: NextConfig = {
     return [{ source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` }];
   },
   typedRoutes: true,
+  experimental: {
+    // Next's rewrite proxy kills the upstream connection after 30s by default
+    // (dist/server/lib/router-utils/proxy-request.js). Coverage generation runs
+    // one retrieval + LLM call per gap cell, sequentially -- a topic with a
+    // dozen-plus gaps easily exceeds 30s even though the backend keeps working
+    // and the request eventually succeeds server-side.
+    proxyTimeout: 600_000,
+  },
 };
 
 export default nextConfig;

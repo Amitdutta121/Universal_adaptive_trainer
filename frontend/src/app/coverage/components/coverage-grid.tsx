@@ -1,10 +1,45 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import Link from "next/link";
+import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { CoverageReport, SubtopicCoverage, TopicCoverage } from "@/lib/api/types";
+import { useGenerateCoverageRun } from "@/lib/api/queries";
+import type {
+  CoverageReport,
+  CoverageTargetRef,
+  GenerationRunResponse,
+  SubtopicCoverage,
+  TopicCoverage,
+} from "@/lib/api/types";
+import { pluralise } from "@/lib/display";
 
 type TopicHeatBand = "low" | "medium" | "high";
+
+/** Every (subtopic, difficulty) cell of a topic still owed questions. */
+function topicGapTargets(topic: TopicCoverage): CoverageTargetRef[] {
+  return (topic.subtopics ?? []).flatMap((row) =>
+    (row.cells ?? [])
+      .filter((cell) => cell.needed > 0)
+      .map((cell) => ({ subtopic_id: row.subtopic_id, difficulty: cell.difficulty })),
+  );
+}
+
+function runSummaryLine(run: GenerationRunResponse): string {
+  const offTopic = run.generated.filter((question) => !question.aim_matched).length;
+  const parts = [`${run.generated.length} generated`];
+  if (run.possible_duplicates > 0) {
+    parts.push(pluralise(run.possible_duplicates, "possible duplicate"));
+  }
+  if (offTopic > 0) {
+    parts.push(`${offTopic} on a different topic`);
+  }
+  if (run.failed.length > 0) {
+    parts.push(`${run.failed.length} failed`);
+  }
+  return parts.join(" · ");
+}
 
 function subtopicQuestionCount(row: SubtopicCoverage): number {
   return (row.cells ?? []).reduce((total, cell) => total + cell.count, 0);
@@ -130,6 +165,64 @@ function TopicSubtopicCell({
   );
 }
 
+/** The topic card's Generate button, its pending state, and its inline result.
+ *
+ * `generatingElsewhere` covers the gap a local mutation can't: reload the page,
+ * or navigate away and back, and this hook's `isPending` starts fresh at
+ * `false` even though the server is still minutes into the run this topic's
+ * last click started. Without it the button would look idle and invite a
+ * second, overlapping run over the same gaps. */
+function TopicGenerateButton({
+  topic,
+  generatingElsewhere,
+}: {
+  topic: TopicCoverage;
+  generatingElsewhere: boolean;
+}) {
+  const targets = topicGapTargets(topic);
+  const run = useGenerateCoverageRun();
+  const generating = run.isPending || generatingElsewhere;
+
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 rounded-full px-3 text-xs"
+          aria-label={`Generate questions for ${topic.topic_name}`}
+          disabled={targets.length === 0 || generating}
+          onClick={() => run.mutate({ targets })}
+        >
+          {generating ? (
+            <>
+              <Loader2 className="size-3 animate-spin" />
+              Generating…
+            </>
+          ) : (
+            "Generate"
+          )}
+        </Button>
+      </div>
+
+      {run.data ? (
+        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs">
+          <p>{runSummaryLine(run.data)}</p>
+          <Link
+            href={`/questions?run_id=${encodeURIComponent(run.data.run_id)}`}
+            className="font-medium underline underline-offset-4"
+          >
+            Review these →
+          </Link>
+        </div>
+      ) : null}
+
+      {run.error ? <QueryError error={run.error} /> : null}
+    </div>
+  );
+}
+
 function Legend() {
   return (
     <div className="flex flex-wrap items-center gap-3 text-muted-foreground text-xs">
@@ -156,6 +249,7 @@ function Legend() {
 
 export function CoverageGrid({ report }: { report: CoverageReport }) {
   const topics = report.topics ?? [];
+  const activeRunTopicIds = report.active_run_topic_ids ?? [];
 
   return (
     <div className="space-y-2">
@@ -211,18 +305,10 @@ export function CoverageGrid({ report }: { report: CoverageReport }) {
                   />
                 ))}
               </div>
-              <div className="mt-2 flex justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-full px-3 text-xs"
-                  aria-label={`Generate questions for ${topic.topic_name}`}
-                  onClick={() => {}}
-                >
-                  Generate
-                </Button>
-              </div>
+              <TopicGenerateButton
+                topic={topic}
+                generatingElsewhere={activeRunTopicIds.includes(topic.topic_id)}
+              />
             </section>
           );
         })}

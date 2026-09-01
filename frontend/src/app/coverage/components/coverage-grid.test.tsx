@@ -1,9 +1,33 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { CoverageReport } from "@/lib/api/types";
+import type { CoverageReport, GenerationRunResponse } from "@/lib/api/types";
+
+const mutate = vi.fn();
+const useGenerateCoverageRun = vi.fn(() => ({
+  mutate,
+  isPending: false,
+  data: undefined as GenerationRunResponse | undefined,
+  error: null as unknown,
+}));
+
+vi.mock("@/lib/api/queries", () => ({
+  useGenerateCoverageRun: () => useGenerateCoverageRun(),
+}));
+
 import { CoverageGrid } from "./coverage-grid";
+
+beforeEach(() => {
+  mutate.mockClear();
+  useGenerateCoverageRun.mockReset();
+  useGenerateCoverageRun.mockReturnValue({
+    mutate,
+    isPending: false,
+    data: undefined,
+    error: null,
+  });
+});
 
 beforeAll(() => {
   if (typeof ResizeObserver !== "undefined") return;
@@ -121,5 +145,179 @@ describe("CoverageGrid", () => {
     expect(screen.getByText("2 of 3 difficulty levels covered")).toBeInTheDocument();
     expect(screen.getByText("Moderate question volume in this topic")).toBeInTheDocument();
     expect(screen.getByText("Topic total: 8/6 questions")).toBeInTheDocument();
+  });
+});
+
+const oneTopicReport: CoverageReport = {
+  ...report,
+  topics: [report.topics[0]],
+};
+
+const completeReport: CoverageReport = {
+  ...report,
+  topics: [
+    {
+      topic_id: 2,
+      topic_name: "Loops",
+      approved_questions: 9,
+      subtopics: [
+        {
+          subtopic_id: 20,
+          subtopic_name: "For loops",
+          topic_id: 2,
+          topic_name: "Loops",
+          cells: [
+            { difficulty: "easy", count: 3, state: "ready", needed: 0 },
+            { difficulty: "medium", count: 3, state: "ready", needed: 0 },
+            { difficulty: "hard", count: 3, state: "ready", needed: 0 },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+describe("CoverageGrid Generate button", () => {
+  it("fires the mutation with the topic's gap targets on click", async () => {
+    const user = userEvent.setup();
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={oneTopicReport} />
+      </TooltipProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate questions for Basics" }));
+
+    expect(mutate).toHaveBeenCalledWith({
+      targets: [
+        { subtopic_id: 10, difficulty: "easy" },
+        { subtopic_id: 10, difficulty: "medium" },
+        { subtopic_id: 10, difficulty: "hard" },
+      ],
+    });
+  });
+
+  it("disables Generate entirely for a topic with zero gaps", () => {
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={completeReport} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Generate questions for Loops" })).toBeDisabled();
+  });
+
+  it("shows a spinner and disables the button while the run is in flight", () => {
+    useGenerateCoverageRun.mockReturnValue({
+      mutate,
+      isPending: true,
+      data: undefined,
+      error: null,
+    });
+
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={oneTopicReport} />
+      </TooltipProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: "Generate questions for Basics" });
+    expect(button).toBeDisabled();
+    expect(screen.getByText("Generating…")).toBeInTheDocument();
+  });
+
+  it("renders the run summary and a Review link filtered by run_id on success", () => {
+    const run: GenerationRunResponse = {
+      run_id: "run_abc123",
+      generated: [
+        {
+          question_id: 1,
+          requested_subtopic_id: 10,
+          requested_difficulty: "easy",
+          claimed_topic_id: 0,
+          claimed_subtopic_ids: [10],
+          section_id: 5,
+          status: "validation_passed",
+          aim_matched: true,
+        },
+        {
+          question_id: 2,
+          requested_subtopic_id: 10,
+          requested_difficulty: "medium",
+          claimed_topic_id: 3,
+          claimed_subtopic_ids: [30],
+          section_id: 6,
+          status: "validation_passed",
+          aim_matched: false,
+        },
+      ],
+      skipped: [],
+      failed: [],
+      possible_duplicates: 1,
+    };
+    useGenerateCoverageRun.mockReturnValue({ mutate, isPending: false, data: run, error: null });
+
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={oneTopicReport} />
+      </TooltipProvider>,
+    );
+
+    expect(
+      screen.getByText("2 generated · 1 possible duplicate · 1 on a different topic"),
+    ).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Review these →" });
+    expect(link).toHaveAttribute("href", "/questions?run_id=run_abc123");
+  });
+
+  it("shows Generating and stays disabled when the server reports the topic active, even with no local mutation", () => {
+    // Simulates a reload or nav-back mid-run: this hook instance never fired
+    // the mutation (isPending/data/error all empty), but the server still
+    // reports the topic as generating.
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={{ ...oneTopicReport, active_run_topic_ids: [0] }} />
+      </TooltipProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: "Generate questions for Basics" });
+    expect(button).toBeDisabled();
+    expect(screen.getByText("Generating…")).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("does not mark a topic generating just because a different topic's run is active", () => {
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={{ ...report, active_run_topic_ids: [1] }} />
+      </TooltipProvider>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Generate questions for Basics" }),
+    ).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Generate questions for Functions" })).toBeDisabled();
+    expect(screen.getByText("Generating…")).toBeInTheDocument();
+  });
+
+  it("shows a readable error instead of a silent no-op", () => {
+    useGenerateCoverageRun.mockReturnValue({
+      mutate,
+      isPending: false,
+      data: undefined,
+      error: {
+        status: 502,
+        code: "upstream_unreachable",
+        message: "The model provider could not be reached.",
+      },
+    });
+
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={oneTopicReport} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("The model provider could not be reached")).toBeInTheDocument();
   });
 });

@@ -9,7 +9,7 @@
  * against the version it shipped with.
  */
 
-import { Gavel, RefreshCw, Scale, Sparkles, Undo2 } from "lucide-react";
+import { Gavel, RefreshCw, Scale, Sparkles, TrendingUp, Undo2 } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
@@ -44,6 +44,17 @@ function describeError(error: unknown): string | undefined {
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// Matches the fixed detail string `_gate` writes in judge_learning.py, e.g.
+// "Held-out agreement 6/8 (75%) -> 7/8 (88%)." Absent when the gate was
+// disabled or too little held-out evidence existed to score a rewrite.
+const HELD_OUT_AGREEMENT_RE = /Held-out agreement \d+\/\d+ \((\d+)%\) -> \d+\/\d+ \((\d+)%\)/;
+
+function parseHeldOutAgreement(note: string | null): { before: number; after: number } | null {
+  const match = note?.match(HELD_OUT_AGREEMENT_RE);
+  if (!match) return null;
+  return { before: Number(match[1]), after: Number(match[2]) };
 }
 
 function formatUpdatedAt(updatedAt: string | null): string {
@@ -133,6 +144,7 @@ function JudgeCard({
 }) {
   const busy = isReverting || isRefreshing;
   const ruleKeys = occurrenceKeys(prompt.rules);
+  const agreement = parseHeldOutAgreement(prompt.note);
 
   return (
     <Card className="review-panel h-full">
@@ -145,6 +157,14 @@ function JudgeCard({
               {capitalize(prompt.label)}
             </CardTitle>
             <JudgeStatusBadges prompt={prompt} />
+            {agreement ? (
+              <div className="flex items-center gap-1.5 font-semibold text-emerald-700 text-sm dark:text-emerald-300">
+                <TrendingUp className="size-4" />
+                Held-out agreement {agreement.before}%
+                <span className="text-muted-foreground">&rarr;</span>
+                {agreement.after}%
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => onEdit(prompt)} disabled={busy}>

@@ -43,7 +43,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useClassSummary, useStudentProgress, useStudents } from "@/lib/api/queries";
+import {
+  useApprovedCurriculum,
+  useClassSummary,
+  useCurriculumVersions,
+  useStudentProgress,
+  useStudents,
+} from "@/lib/api/queries";
 import type { ClassSummary } from "@/lib/api/types";
 import { buildClassScoreTrend, buildScoreTrend, type ClassTrendAttempt } from "../score-trend";
 
@@ -169,6 +175,7 @@ export function RosterScreen() {
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
   const [answeredFilter, setAnsweredFilter] = useState<AnsweredFilter>("all");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+  const [curriculumFilter, setCurriculumFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [selectedSubtopicId, setSelectedSubtopicId] = useState<number | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
@@ -189,15 +196,33 @@ export function RosterScreen() {
     setPage(1);
   }
 
+  const curriculumVersions = useCurriculumVersions();
+  const approvedCurriculum = useApprovedCurriculum();
+  const activeVersionId = approvedCurriculum.data?.version.id ?? null;
+
+  // The roster follows the app's active taxonomy by default -- picking a new
+  // one in the header selector re-filters the list, not just this page's own
+  // dropdown. A professor can still override to "all" or another version below;
+  // that override holds until the active taxonomy changes again.
+  useEffect(() => {
+    if (activeVersionId !== null) {
+      setCurriculumFilter(String(activeVersionId));
+      setPage(1);
+    }
+  }, [activeVersionId]);
+
+  const curriculumVersionId = curriculumFilter === "all" ? null : Number(curriculumFilter);
+
   const list = useStudents({
     search: searchTerm,
     score: scoreFilter,
     answered: answeredFilter,
     activity: activityFilter,
+    curriculumVersionId,
     page,
     pageSize: PAGE_SIZE,
   });
-  const summary = useClassSummary();
+  const summary = useClassSummary(curriculumVersionId);
 
   const rows = list.data?.students ?? [];
   const total = list.data?.total ?? 0;
@@ -207,11 +232,15 @@ export function RosterScreen() {
     searchTerm.length > 0 ||
     scoreFilter !== "all" ||
     answeredFilter !== "all" ||
-    activityFilter !== "all";
+    activityFilter !== "all" ||
+    curriculumFilter !== "all";
 
-  // Land on the first learner of the page until the professor picks one.
+  // Land on the first learner of the page until the professor picks one, and
+  // re-land if a filter change (e.g. switching taxonomy) drops the current
+  // selection out of the visible rows entirely.
   useEffect(() => {
-    if (selectedStudentId === null && rows.length > 0) {
+    if (rows.length === 0) return;
+    if (selectedStudentId === null || !rows.some((row) => row.id === selectedStudentId)) {
       setSelectedStudentId(rows[0]?.id ?? null);
     }
   }, [rows, selectedStudentId]);
@@ -243,12 +272,12 @@ export function RosterScreen() {
         title="Roster"
         summary="Every enrolled learner's adaptive-training progress: score trends, topic mastery, class weakness, and session history."
         actions={
-          summary.data ? (
+          list.data ? (
             <Badge
               variant="outline"
               className="h-7 rounded-full px-3 font-mono tracking-[0.08em]"
             >
-              {summary.data.student_count} learners
+              {total} learner{total === 1 ? "" : "s"}
             </Badge>
           ) : null
         }
@@ -315,6 +344,22 @@ export function RosterScreen() {
                   <SelectItem value="last7">Active in last 7 days</SelectItem>
                   <SelectItem value="last30">Active in last 30 days</SelectItem>
                   <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={curriculumFilter}
+                onValueChange={(value) => pickFilter(setCurriculumFilter, value)}
+              >
+                <SelectTrigger aria-label="Filter by taxonomy">
+                  <SelectValue placeholder="Taxonomy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Taxonomy: all</SelectItem>
+                  {(curriculumVersions.data?.versions ?? []).map((version) => (
+                    <SelectItem key={version.id} value={String(version.id)}>
+                      {version.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

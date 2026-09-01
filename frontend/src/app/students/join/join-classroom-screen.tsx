@@ -7,7 +7,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError } from "@/components/query-state";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -216,14 +215,6 @@ export function JoinClassroomScreen() {
                   )}
                 </Badge>
               </div>
-
-              {classroom.data.notes ? (
-                <Alert>
-                  <ArrowRight />
-                  <AlertTitle>Professor notes</AlertTitle>
-                  <AlertDescription>{classroom.data.notes}</AlertDescription>
-                </Alert>
-              ) : null}
 
               <p className="text-muted-foreground text-sm leading-6">
                 {isProdLink

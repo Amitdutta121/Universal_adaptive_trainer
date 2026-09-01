@@ -32,7 +32,7 @@ export const qk = {
   },
   questions: {
     all: ["questions"] as const,
-    list: (params: { limit?: number; status?: QuestionStatus }) =>
+    list: (params: { limit?: number; status?: QuestionStatus; run_id?: string }) =>
       ["questions", "list", params] as const,
     detail: (id: number) => ["questions", "detail", id] as const,
     evaluations: (id: number) => ["questions", "evaluations", id] as const,
@@ -79,7 +79,8 @@ export const qk = {
   students: {
     all: ["students"] as const,
     list: (params?: unknown) => ["students", "list", params ?? null] as const,
-    summary: () => ["students", "summary"] as const,
+    summary: (curriculumVersionId?: number | null) =>
+      ["students", "summary", curriculumVersionId ?? null] as const,
     detail: (studentId: number) => ["students", "detail", studentId] as const,
     progress: (studentId: number) => ["students", "progress", studentId] as const,
   },
@@ -204,6 +205,7 @@ type QuestionListParams = {
   status?: QuestionStatus;
   curriculum_version_id?: number;
   section_id?: number;
+  run_id?: string;
 };
 
 export const questionsQuery = (params: QuestionListParams) =>
@@ -416,7 +418,31 @@ export const useCoverage = (setVersionId?: number) =>
           params: { query: setVersionId ? { set_version_id: setVersionId } : {} },
         }),
       ),
+    // Coverage generation is a multi-minute server-side run a reload or a nav
+    // away loses all client-side memory of. While the server reports one in
+    // flight, keep refetching so a topic's Generate button un-disables itself
+    // the moment it actually finishes, without the tab that started it.
+    refetchInterval: (query) =>
+      (query.state.data?.active_run_topic_ids?.length ?? 0) > 0 ? 4000 : false,
   });
+
+/**
+ * Run the coverage "Generate" button: one grounded question per selected gap
+ * cell. Synchronous, like `useGenerateBatch` -- the caller shows the run
+ * summary (or the 502/422 it failed with) once the response comes back.
+ */
+export function useGenerateCoverageRun() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["FillGapsRequest"]) =>
+      unwrap(api.POST("/api/coverage/generation-runs", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+      client.invalidateQueries({ queryKey: qk.questions.all });
+      client.invalidateQueries({ queryKey: qk.system.counts() });
+    },
+  });
+}
 
 // --- Books ------------------------------------------------------------------
 
@@ -877,6 +903,7 @@ export interface StudentRosterQuery {
   score?: string;
   answered?: string;
   activity?: string;
+  curriculumVersionId?: number | null;
   page?: number;
   pageSize?: number;
 }
@@ -887,6 +914,7 @@ export const useStudents = (params: StudentRosterQuery = {}) => {
     score: params.score ?? "all",
     answered: params.answered ?? "all",
     activity: params.activity ?? "all",
+    curriculum_version_id: params.curriculumVersionId ?? undefined,
     page: params.page ?? 1,
     page_size: params.pageSize ?? 20,
   };
@@ -897,10 +925,15 @@ export const useStudents = (params: StudentRosterQuery = {}) => {
   });
 };
 
-export const useClassSummary = () =>
+export const useClassSummary = (curriculumVersionId?: number | null) =>
   useQuery({
-    queryKey: qk.students.summary(),
-    queryFn: () => unwrap(api.GET("/api/students/class-summary")),
+    queryKey: qk.students.summary(curriculumVersionId),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/students/class-summary", {
+          params: { query: { curriculum_version_id: curriculumVersionId ?? undefined } },
+        }),
+      ),
   });
 
 export const useStudentProgress = (studentId: number | null, { enabled = true } = {}) =>

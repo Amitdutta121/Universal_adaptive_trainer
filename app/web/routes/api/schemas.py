@@ -12,7 +12,7 @@ Enum-valued fields serialise as their string value because every enum in
 from __future__ import annotations
 
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -82,6 +82,7 @@ from app.persistence.models import (
     TopicRow,
     TrainingSessionRow,
 )
+from app.retrieval import RetrievedSection
 
 
 class EnumOption(BaseModel):
@@ -704,6 +705,19 @@ class InstructionStamp(BaseModel):
         )
 
 
+#: How much of a flagged duplicate's prompt to show without a second fetch.
+_DUPLICATE_EXCERPT_CHARS = 160
+
+
+class PossibleDuplicateOut(BaseModel):
+    """One existing question a freshly generated one scored as a likely
+    duplicate of (coverage Generate m3). A soft flag, never a gate."""
+
+    question_id: int
+    prompt_excerpt: str
+    score: float
+
+
 class QuestionSummary(BaseModel):
     """One generated question, without its solution, tests or reports."""
 
@@ -730,6 +744,9 @@ class QuestionSummary(BaseModel):
     #: The question this one was regenerated from with instructor feedback, or
     #: ``None`` for a directly generated question.
     regenerated_from_question_id: int | None
+    #: Existing approved/validation-passed questions this one was flagged as a
+    #: likely duplicate of (m3). Empty when none, never omitted.
+    possible_duplicate_of: list[PossibleDuplicateOut]
     created_at: datetime
     updated_at: datetime | None
 
@@ -759,6 +776,14 @@ class QuestionSummary(BaseModel):
             # so testing it for None reported every question as edited.
             is_edited=row.prompt != row.original_prompt,
             regenerated_from_question_id=row.regenerated_from_question_id,
+            possible_duplicate_of=[
+                PossibleDuplicateOut(
+                    question_id=flag.similar_question_id,
+                    prompt_excerpt=flag.similar_question.prompt[:_DUPLICATE_EXCERPT_CHARS],
+                    score=flag.score,
+                )
+                for flag in row.similarity_flags
+            ],
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -819,6 +844,7 @@ class QuestionListResponse(BaseModel):
     #: tell a narrowed listing from a bank that happens to hold only these rows.
     status: QuestionStatus | None = None
     curriculum_version_id: int | None = None
+    run_id: str | None = None
 
 
 #: Which unreviewed questions the review queue offers. ``scoreable`` restricts
@@ -1674,9 +1700,20 @@ class CoverageReportResponse(BaseModel):
     #: The same rows, flat. Kept because a client asking "which subtopics are
     #: short" should not have to walk a tree to find out.
     subtopics: list[SubtopicCoverage]
+    #: Topics with a generation run in flight right now, on this server process
+    #: (not persisted -- a restart mid-run means the run is actually gone too).
+    #: Lets the Generate button rehydrate its "generating" state after a reload
+    #: or navigating away and back, instead of forgetting a run is still going
+    #: and inviting a second one over the same gaps.
+    active_run_topic_ids: list[int] = Field(default_factory=list)
 
     @classmethod
-    def from_report(cls, report: CoverageReport) -> CoverageReportResponse:
+    def from_report(
+        cls,
+        report: CoverageReport,
+        *,
+        active_run_topic_ids: Sequence[int] = (),
+    ) -> CoverageReportResponse:
         return cls(
             curriculum_version_id=report.curriculum_version_id,
             curriculum_label=report.curriculum_label,
@@ -1693,6 +1730,7 @@ class CoverageReportResponse(BaseModel):
             is_ready=report.is_ready,
             topics=report.topics,
             subtopics=report.subtopics,
+            active_run_topic_ids=list(active_run_topic_ids),
         )
 
 
@@ -1712,6 +1750,62 @@ class FillGapsRequest(BaseModel):
     """
 
     targets: list[CoverageTargetRef] = Field(min_length=1)
+
+
+class GeneratedRunQuestion(BaseModel):
+    """One question a generation run produced, and how its aim landed.
+
+    ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
+    what the generator classified the question as after reading the section
+    (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
+    never used to filter, so a drift is visible in the review queue instead.
+    """
+
+    question_id: int
+    requested_subtopic_id: int
+    requested_difficulty: Difficulty
+    claimed_topic_id: int | None
+    claimed_subtopic_ids: list[int]
+    section_id: int
+    status: QuestionStatus
+    aim_matched: bool
+
+
+class SkippedRunTarget(BaseModel):
+    """A gap target the run did not generate for, and why."""
+
+    subtopic_id: int
+    difficulty: Difficulty
+    reason: str
+
+
+class FailedRunTarget(BaseModel):
+    """A gap target whose generation call reached the provider and failed.
+
+    The section was retrieved and the request was well formed; the model call
+    itself did not return a usable question. What the run already produced is
+    kept (ADR-032), so this is reported beside ``generated`` rather than raised.
+    """
+
+    subtopic_id: int
+    difficulty: Difficulty
+    section_id: int
+    error: str
+
+
+class GenerationRunResponse(BaseModel):
+    """The outcome of one coverage "Generate" run.
+
+    Always 200, even when ``failed`` is non-empty: a run that produced some
+    questions and lost others part-way is a real, reportable outcome, not an
+    error to swallow the successes for.
+    """
+
+    run_id: str
+    generated: list[GeneratedRunQuestion]
+    skipped: list[SkippedRunTarget]
+    failed: list[FailedRunTarget]
+    possible_duplicates: int
 
 
 class QuestionSetOut(BaseModel):
@@ -2162,6 +2256,32 @@ class StudentProgressOut(BaseModel):
     subtopics: list[SubtopicWeaknessOut]
     recent_attempts: list[AttemptOut]
     sessions: list[TrainingSessionOut]
+
+
+class RetrievedSectionOut(BaseModel):
+    """One book section returned by semantic retrieval, with its citation."""
+
+    section_id: int
+    book_id: int
+    book_title: str
+    chapter_title: str | None
+    section_number: str | None
+    section_title: str | None
+    score: float
+    snippet: str
+
+    @classmethod
+    def from_result(cls, result: RetrievedSection) -> RetrievedSectionOut:
+        return cls(
+            section_id=result.section_id,
+            book_id=result.book_id,
+            book_title=result.book_title,
+            chapter_title=result.chapter_title,
+            section_number=result.section_number,
+            section_title=result.section_title,
+            score=result.score,
+            snippet=result.snippet,
+        )
 
 
 SubtopicDetail.model_rebuild()

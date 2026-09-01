@@ -157,6 +157,7 @@ def list_students(
     score: str = "all",
     answered: str = "all",
     activity: str = "all",
+    curriculum_version_id: int | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(ROSTER_PAGE_SIZE, ge=1, le=100),
 ) -> StudentListResponse:
@@ -167,14 +168,28 @@ def list_students(
     than a progress fetch per learner, so the cost no longer grows with the
     cohort. ``total`` is the count *after* filtering, so the client can size its
     page controls.
+
+    ``curriculum_version_id`` narrows to students with at least one session on a
+    set built from that taxonomy (see
+    :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
+    student is never tagged with a taxonomy directly, only a frozen set is.
     """
     students = StudentRepository(session)
     attempts = StudentAttemptRepository(session)
     stats = attempts.stats_by_student()
     now = datetime.now(UTC)
+    allowed_ids = (
+        TrainingSessionRepository(session).student_ids_for_curriculum_version(
+            curriculum_version_id
+        )
+        if curriculum_version_id is not None
+        else None
+    )
 
     matched = []
     for row in students.search(search):
+        if allowed_ids is not None and row.id not in allowed_ids:
+            continue
         stat = stats.get(row.id)
         average = stat.average_score if stat else None
         answered_count = stat.answered_count if stat else 0
@@ -215,12 +230,16 @@ def list_students(
     response_model=ClassSummaryOut,
     dependencies=[Depends(current_active_user)],
 )
-def class_summary(session: DbSession) -> ClassSummaryOut:
+def class_summary(session: DbSession, curriculum_version_id: int | None = None) -> ClassSummaryOut:
     """Cohort-wide figures for the roster's aggregate cards.
 
     Independent of which roster page is open: the class trend graph and the
     weakness heatmap are about the whole class, so they get their own request
     instead of being rebuilt from whatever page of learners happens to be loaded.
+
+    ``curriculum_version_id``, when given, scopes both the trend and the
+    heatmap to that taxonomy -- the same filter the roster's own dropdown
+    applies to the student list (see :func:`list_students`).
     """
     students = StudentRepository(session)
     attempts = StudentAttemptRepository(session)
@@ -229,8 +248,8 @@ def class_summary(session: DbSession) -> ClassSummaryOut:
 
     roster = students.search("")
     stats = attempts.stats_by_student()
-    scored = attempts.scored_attempts_all()
-    weakness_rows = state.list_weakness_all()
+    scored = attempts.scored_attempts_all(curriculum_version_id)
+    weakness_rows = state.list_weakness_all(curriculum_version_id)
 
     names = {row.id: row.display_name for row in roster}
     answered_by_student = {student_id: stat.answered_count for student_id, stat in stats.items()}
