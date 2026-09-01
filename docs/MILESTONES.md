@@ -84,7 +84,37 @@ Expect the top hit for subtopic 32 to be a range()/counted-loop section of a sou
 
 ---
 
-## m2 — Generate-for-gaps end to end via API (no UI)
+## m2 — Generate-for-gaps end to end via API (no UI)  ✅ DONE
+
+**Outcome.** `POST /api/coverage/generation-runs` returns a run summary
+(`run_id`, `generated[]`, `skipped[]`, `failed[]`); new questions land in the
+review queue with no extra step. Full backend suite green. Seven deviations
+below — all documented, none reduce scope.
+
+**Deviations.**
+- **No `app/coverage/generation.py`.** `app.coverage` documents "must not import
+  `app.generation`" and is read-only. The retrieval→generation wiring is
+  `run_generation_for_gaps` in the route module, exactly as `questions.py`
+  drives `GenerationService` inline.
+- **No `section_id` dedup; one `generate_batch` call per target, sharing an
+  injected `run_id`.** `GenerationService.generate_batch` / `_generate_specs`
+  gained `run_id: str | None = None`. Per-target calls make a partial provider
+  failure isolate to the target that failed (its `failed[]` entry) with no
+  run-id recovery query; output is identical to the deduped single call.
+- **No approved curriculum → 422, not 409.** Reuses `approved_curriculum_id`
+  from `questions.py` (`InvalidQuestionSpecError`), matching
+  `/questions/generate-batch`. No route raises 409 for this; a second
+  convention would be worse.
+- **Unknown subtopic → 404** (`CurriculumRepository.get_subtopic`), resolved for
+  every target before any model call so a bad id leaves no partial run.
+- **The run always returns 200**, full success included — one status code for
+  every outcome (generated / skipped / failed) keeps the m4 client simple.
+- **Embedder-not-configured → 500** on this endpoint (same as
+  `GET /api/retrieval/sections`): a deployment misconfig, distinct from a
+  runtime provider failure during generation, which yields 200 + `failed[]`.
+- **`MIN_SECTION_SCORE = 0.25`**, a named constant in `coverage.py`, uncalibrated
+  (comment cites m1's observed ~0.6 on-topic / <0.2 unrelated). The
+  non-empty-but-sub-floor path is covered by a monkeypatched test.
 
 **Deliverable.** `POST /api/coverage/generation-runs` stops returning 501. Given
 the selected gap targets (`FillGapsRequest`, unchanged: `[{subtopic_id, difficulty}]`),
@@ -210,7 +240,7 @@ curl -s http://127.0.0.1:8099/api/retrieval/status | jq
 
 `m1 → m2 → m3 → m4 → m5` — strict; m2 needs m1's retriever, m3/m4 need m2's endpoint, m5 is polish on m1.
 
-**Active: m2** (m1 committed). Run `start m2` to implement, `verify m2` to check it against the acceptance criteria. One milestone per session; commit before the next.
+**Active: m3** (m1, m2 committed). Run `start m3` to implement, `verify m3` to check it against the acceptance criteria. One milestone per session; commit before the next.
 
 ### Deferred (not milestones yet)
 

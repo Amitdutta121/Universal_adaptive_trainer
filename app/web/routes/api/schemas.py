@@ -1715,6 +1715,61 @@ class FillGapsRequest(BaseModel):
     targets: list[CoverageTargetRef] = Field(min_length=1)
 
 
+class GeneratedRunQuestion(BaseModel):
+    """One question a generation run produced, and how its aim landed.
+
+    ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
+    what the generator classified the question as after reading the section
+    (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
+    never used to filter, so a drift is visible in the review queue instead.
+    """
+
+    question_id: int
+    requested_subtopic_id: int
+    requested_difficulty: Difficulty
+    claimed_topic_id: int | None
+    claimed_subtopic_ids: list[int]
+    section_id: int
+    status: QuestionStatus
+    aim_matched: bool
+
+
+class SkippedRunTarget(BaseModel):
+    """A gap target the run did not generate for, and why."""
+
+    subtopic_id: int
+    difficulty: Difficulty
+    reason: str
+
+
+class FailedRunTarget(BaseModel):
+    """A gap target whose generation call reached the provider and failed.
+
+    The section was retrieved and the request was well formed; the model call
+    itself did not return a usable question. What the run already produced is
+    kept (ADR-032), so this is reported beside ``generated`` rather than raised.
+    """
+
+    subtopic_id: int
+    difficulty: Difficulty
+    section_id: int
+    error: str
+
+
+class GenerationRunResponse(BaseModel):
+    """The outcome of one coverage "Generate" run.
+
+    Always 200, even when ``failed`` is non-empty: a run that produced some
+    questions and lost others part-way is a real, reportable outcome, not an
+    error to swallow the successes for.
+    """
+
+    run_id: str
+    generated: list[GeneratedRunQuestion]
+    skipped: list[SkippedRunTarget]
+    failed: list[FailedRunTarget]
+
+
 class QuestionSetOut(BaseModel):
     """One frozen set of approved questions.
 
