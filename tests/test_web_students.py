@@ -233,6 +233,33 @@ class TestRosterPagination:
         assert summary["weakness_cells"], "a scored answer records subtopic weakness"
         assert summary["weakness_cells"][0]["affected"][0]["name"] == "Ada"
 
+    def test_class_summary_scopes_to_the_requested_taxonomy(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_a = _bank(session)
+        set_b = _bank(session)
+        version_a = QuestionSetRepository(session).get(set_a).curriculum_version_id
+        version_b = QuestionSetRepository(session).get(set_b).curriculum_version_id
+
+        student_a = _answer_one(client, set_a, "Ada")
+        _answer_one(client, set_b, "Bea")
+
+        scoped = client.get(
+            "/api/students/class-summary", params={"curriculum_version_id": version_a}
+        ).json()
+        assert [attempt["student_id"] for attempt in scoped["scored_attempts"]] == [student_a]
+        assert len(scoped["weakness_cells"]) == 1
+        assert [row["name"] for row in scoped["weakness_cells"][0]["affected"]] == ["Ada"]
+
+        unscoped = client.get("/api/students/class-summary").json()
+        assert len(unscoped["scored_attempts"]) == 2
+        assert len(unscoped["weakness_cells"]) == 2
+
+        other = client.get(
+            "/api/students/class-summary", params={"curriculum_version_id": version_b}
+        ).json()
+        assert [row["name"] for row in other["weakness_cells"][0]["affected"]] == ["Bea"]
+
 
 class TestStudentResume:
     """A returning browser is recognised by its token, not by re-typing a name."""

@@ -20,6 +20,17 @@ def main() -> None:
         host=settings.host,
         port=settings.port,
         reload=settings.is_development,
+        # Scope the watch to our own source tree. The default watch root is cwd,
+        # which also covers frontend/ -- next dev's continuous writes to
+        # frontend/.next during compilation/HMR were registering as file changes
+        # and retriggering backend reloads in an unbroken storm.
+        reload_dirs=["app"] if settings.is_development else None,
+        # Dev convention redirects this process's own stdout/stderr to *_fresh_*.log
+        # files at the repo root -- inside the default watch root. Without this
+        # exclusion, every log write is a file change, which triggers another
+        # reload, which writes more log lines: a self-sustaining reload storm that
+        # piles up duplicate worker processes on the same port.
+        reload_excludes=["*_fresh_*.log"] if settings.is_development else None,
         log_level=settings.log_level.lower(),
     )
 

@@ -1484,11 +1484,22 @@ class StudentStateRepository:
         )
         return list(self._session.scalars(stmt))
 
-    def list_weakness_all(self) -> list[StudentSubtopicWeaknessRow]:
-        """Every learner's subtopic weakness, for the cohort weakness heatmap."""
-        stmt = select(StudentSubtopicWeaknessRow).order_by(
-            StudentSubtopicWeaknessRow.subtopic_id
-        )
+    def list_weakness_all(
+        self, curriculum_version_id: int | None = None
+    ) -> list[StudentSubtopicWeaknessRow]:
+        """Every learner's subtopic weakness, for the cohort weakness heatmap.
+
+        ``curriculum_version_id`` narrows to subtopics owned by that taxonomy
+        (via the subtopic's topic), so switching the roster's taxonomy filter
+        re-scopes the heatmap instead of mixing subtopics from every version.
+        """
+        stmt = select(StudentSubtopicWeaknessRow).order_by(StudentSubtopicWeaknessRow.subtopic_id)
+        if curriculum_version_id is not None:
+            stmt = (
+                stmt.join(SubtopicRow, SubtopicRow.id == StudentSubtopicWeaknessRow.subtopic_id)
+                .join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
+                .where(TopicRow.curriculum_version_id == curriculum_version_id)
+            )
         return list(self._session.scalars(stmt))
 
     def count_students_measured_on(
@@ -1613,6 +1624,26 @@ class TrainingSessionRepository:
         row.ended_at = datetime.now(UTC)
         self._session.flush()
         return row
+
+    def student_ids_for_curriculum_version(self, curriculum_version_id: int) -> set[int]:
+        """Every student who has run a session against this taxonomy.
+
+        A student is not tagged with a taxonomy directly -- only a frozen set is
+        (``QuestionSetVersionRow.curriculum_version_id``), and a student's
+        sessions may span several sets. Membership here means "has at least one
+        session on a set built from this curriculum version", not "is currently
+        studying it".
+        """
+        stmt = (
+            select(TrainingSessionRow.student_id)
+            .join(
+                QuestionSetVersionRow,
+                QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+            )
+            .where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+            .distinct()
+        )
+        return set(self._session.scalars(stmt))
 
 
 class StudentAttemptStats(NamedTuple):
@@ -1804,11 +1835,18 @@ class StudentAttemptRepository:
             ]
         return series
 
-    def scored_attempts_all(self) -> list[ClassTrendAttempt]:
+    def scored_attempts_all(
+        self, curriculum_version_id: int | None = None
+    ) -> list[ClassTrendAttempt]:
         """Every scored attempt across the cohort, oldest first: the class trend.
 
         One request replaces the per-student progress fan-out the class graph
         used to need. The payload is compact -- four columns per scored answer.
+
+        ``curriculum_version_id`` narrows to attempts served from a session
+        whose frozen set was built off that taxonomy (mirrors
+        :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`),
+        so the trend line reflects only the selected taxonomy's questions.
         """
         ordering = func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
         stmt = (
@@ -1822,6 +1860,15 @@ class StudentAttemptRepository:
             .where(StudentAttemptRow.score.is_not(None))
             .order_by(ordering, StudentAttemptRow.ordinal)
         )
+        if curriculum_version_id is not None:
+            stmt = (
+                stmt.join(TrainingSessionRow, TrainingSessionRow.id == StudentAttemptRow.session_id)
+                .join(
+                    QuestionSetVersionRow,
+                    QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+                )
+                .where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+            )
         return [
             ClassTrendAttempt(
                 student_id=student_id,

@@ -1,14 +1,13 @@
 "use client";
 
 import { useQueries } from "@tanstack/react-query";
-import { BookOpenCheck, Link as LinkIcon } from "lucide-react";
+import { Link as LinkIcon } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -200,14 +199,6 @@ export function StudentsScreen() {
                     </div>
                   </div>
                 </div>
-
-                {selectedSet.notes ? (
-                  <Alert>
-                    <BookOpenCheck />
-                    <AlertTitle>Professor notes</AlertTitle>
-                    <AlertDescription>{selectedSet.notes}</AlertDescription>
-                  </Alert>
-                ) : null}
 
                 <div className="space-y-2">
                   <label className="font-medium text-sm" htmlFor="classroom-link">

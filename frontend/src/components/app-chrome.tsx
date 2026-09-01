@@ -54,9 +54,6 @@ function StudentChrome({ children }: { children: React.ReactNode }) {
               <span className="student-shell__title">Student Classroom</span>
             </span>
           </Link>
-          <Link href="/" className="student-shell__console-link">
-            Instructor Studio
-          </Link>
         </header>
         <div className="student-shell__content">{children}</div>
       </div>

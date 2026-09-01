@@ -79,7 +79,8 @@ export const qk = {
   students: {
     all: ["students"] as const,
     list: (params?: unknown) => ["students", "list", params ?? null] as const,
-    summary: () => ["students", "summary"] as const,
+    summary: (curriculumVersionId?: number | null) =>
+      ["students", "summary", curriculumVersionId ?? null] as const,
     detail: (studentId: number) => ["students", "detail", studentId] as const,
     progress: (studentId: number) => ["students", "progress", studentId] as const,
   },
@@ -902,6 +903,7 @@ export interface StudentRosterQuery {
   score?: string;
   answered?: string;
   activity?: string;
+  curriculumVersionId?: number | null;
   page?: number;
   pageSize?: number;
 }
@@ -912,6 +914,7 @@ export const useStudents = (params: StudentRosterQuery = {}) => {
     score: params.score ?? "all",
     answered: params.answered ?? "all",
     activity: params.activity ?? "all",
+    curriculum_version_id: params.curriculumVersionId ?? undefined,
     page: params.page ?? 1,
     page_size: params.pageSize ?? 20,
   };
@@ -922,10 +925,15 @@ export const useStudents = (params: StudentRosterQuery = {}) => {
   });
 };
 
-export const useClassSummary = () =>
+export const useClassSummary = (curriculumVersionId?: number | null) =>
   useQuery({
-    queryKey: qk.students.summary(),
-    queryFn: () => unwrap(api.GET("/api/students/class-summary")),
+    queryKey: qk.students.summary(curriculumVersionId),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/students/class-summary", {
+          params: { query: { curriculum_version_id: curriculumVersionId ?? undefined } },
+        }),
+      ),
   });
 
 export const useStudentProgress = (studentId: number | null, { enabled = true } = {}) =>

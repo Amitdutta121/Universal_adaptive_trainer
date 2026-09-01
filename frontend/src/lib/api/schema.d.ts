@@ -1107,6 +1107,11 @@ export interface paths {
          *     than a progress fetch per learner, so the cost no longer grows with the
          *     cohort. ``total`` is the count *after* filtering, so the client can size its
          *     page controls.
+         *
+         *     ``curriculum_version_id`` narrows to students with at least one session on a
+         *     set built from that taxonomy (see
+         *     :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
+         *     student is never tagged with a taxonomy directly, only a frozen set is.
          */
         get: operations["list_students_api_students_get"];
         put?: never;
@@ -1144,6 +1149,10 @@ export interface paths {
          *     Independent of which roster page is open: the class trend graph and the
          *     weakness heatmap are about the whole class, so they get their own request
          *     instead of being rebuilt from whatever page of learners happens to be loaded.
+         *
+         *     ``curriculum_version_id``, when given, scopes both the trend and the
+         *     heatmap to that taxonomy -- the same filter the roster's own dropdown
+         *     applies to the student list (see :func:`list_students`).
          */
         get: operations["class_summary_api_students_class_summary_get"];
         put?: never;
@@ -5853,6 +5862,7 @@ export interface operations {
                 score?: string;
                 answered?: string;
                 activity?: string;
+                curriculum_version_id?: number | null;
                 page?: number;
                 page_size?: number;
             };
@@ -5917,7 +5927,9 @@ export interface operations {
     };
     class_summary_api_students_class_summary_get: {
         parameters: {
-            query?: never;
+            query?: {
+                curriculum_version_id?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5931,6 +5943,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
