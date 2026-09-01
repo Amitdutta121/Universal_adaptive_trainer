@@ -270,6 +270,36 @@ describe("CoverageGrid Generate button", () => {
     expect(link).toHaveAttribute("href", "/questions?run_id=run_abc123");
   });
 
+  it("shows Generating and stays disabled when the server reports the topic active, even with no local mutation", () => {
+    // Simulates a reload or nav-back mid-run: this hook instance never fired
+    // the mutation (isPending/data/error all empty), but the server still
+    // reports the topic as generating.
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={{ ...oneTopicReport, active_run_topic_ids: [0] }} />
+      </TooltipProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: "Generate questions for Basics" });
+    expect(button).toBeDisabled();
+    expect(screen.getByText("Generating…")).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("does not mark a topic generating just because a different topic's run is active", () => {
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={{ ...report, active_run_topic_ids: [1] }} />
+      </TooltipProvider>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Generate questions for Basics" }),
+    ).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Generate questions for Functions" })).toBeDisabled();
+    expect(screen.getByText("Generating…")).toBeInTheDocument();
+  });
+
   it("shows a readable error instead of a silent no-op", () => {
     useGenerateCoverageRun.mockReturnValue({
       mutate,

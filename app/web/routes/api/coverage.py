@@ -17,6 +17,7 @@ always agree.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -60,6 +61,21 @@ router = APIRouter(tags=["coverage"])
 #: once real runs show where the honest hits fall.
 MIN_SECTION_SCORE = 0.25
 
+#: Topic ids with a generation run currently in flight, process-local. A run is
+#: one blocking HTTP request that can take minutes (one retrieval + one LLM call
+#: per gap cell, sequentially) -- long enough that a professor reloading the page
+#: or navigating away loses all client-side memory that it is still running.
+#: Read by ``GET /coverage`` so the button can rehydrate its "generating" state
+#: from the server instead of from a component that may no longer exist, and
+#: stay disabled instead of inviting a second, overlapping run on the same gaps.
+_active_run_lock = threading.Lock()
+_active_run_topic_ids: set[int] = set()
+
+
+def active_generation_topic_ids() -> list[int]:
+    with _active_run_lock:
+        return sorted(_active_run_topic_ids)
+
 
 def get_generation_client() -> StructuredLLMClient | None:
     """The structured client generation runs on. ``None`` lets the service build
@@ -78,7 +94,8 @@ def coverage(session: DbSession, set_version_id: int | None = None) -> CoverageR
     With one it is that frozen set -- what a training run would actually serve.
     """
     return CoverageReportResponse.from_report(
-        build_coverage_report(session, set_version_id=set_version_id)
+        build_coverage_report(session, set_version_id=set_version_id),
+        active_run_topic_ids=active_generation_topic_ids(),
     )
 
 
@@ -121,95 +138,104 @@ def run_generation_for_gaps(
         (target, curriculum.get_subtopic(target.subtopic_id).topic_id) for target in targets
     ]
 
-    retriever = SectionRetriever(session, SectionEmbeddingStore(session, embedder))
-    service = GenerationService(session, client=client)
-    run_id = new_run_id()
+    topic_ids = {topic_id for _, topic_id in resolved}
+    with _active_run_lock:
+        _active_run_topic_ids.update(topic_ids)
+    try:
+        retriever = SectionRetriever(session, SectionEmbeddingStore(session, embedder))
+        service = GenerationService(session, client=client)
+        run_id = new_run_id()
 
-    generated: list[GeneratedRunQuestion] = []
-    skipped: list[SkippedRunTarget] = []
-    failed: list[FailedRunTarget] = []
-    possible_duplicates = 0
+        generated: list[GeneratedRunQuestion] = []
+        skipped: list[SkippedRunTarget] = []
+        failed: list[FailedRunTarget] = []
+        possible_duplicates = 0
 
-    for target, requested_topic_id in resolved:
-        hits = retriever.for_subtopic(target.subtopic_id, top_k=1)
-        if not hits or hits[0].score < MIN_SECTION_SCORE:
-            skipped.append(
-                SkippedRunTarget(
-                    subtopic_id=target.subtopic_id,
-                    difficulty=target.difficulty,
-                    reason="no confident section",
+        for target, requested_topic_id in resolved:
+            hits = retriever.for_subtopic(target.subtopic_id, top_k=1)
+            if not hits or hits[0].score < MIN_SECTION_SCORE:
+                skipped.append(
+                    SkippedRunTarget(
+                        subtopic_id=target.subtopic_id,
+                        difficulty=target.difficulty,
+                        reason="no confident section",
+                    )
                 )
-            )
-            continue
+                continue
 
-        section_id = hits[0].section_id
-        chunk = ChunkQuestionRequest(
-            section_id=section_id,
-            counts={target.difficulty: 1},
-            question_types=(QuestionType.MULTIPLE_CHOICE,),
-        )
-        try:
-            rows = service.generate_batch(
-                curriculum_version_id=curriculum_version_id,
-                chunks=[chunk],
-                run_id=run_id,
-            )
-        except (LLMRequestError, MalformedModelOutputError) as exc:
-            # The questions already committed under this run id stay; only the
-            # target in flight is lost.
-            session.rollback()
-            logger.warning(
-                "generation-run %s: provider failed for subtopic %s: %s",
-                run_id,
-                target.subtopic_id,
-                exc.message,
-            )
-            failed.append(
-                FailedRunTarget(
-                    subtopic_id=target.subtopic_id,
-                    difficulty=target.difficulty,
-                    section_id=section_id,
-                    error=exc.message,
-                )
-            )
-            continue
-
-        row = rows[0]
-        generated.append(
-            GeneratedRunQuestion(
-                question_id=row.id,
-                requested_subtopic_id=target.subtopic_id,
-                requested_difficulty=target.difficulty,
-                claimed_topic_id=row.topic_id,
-                claimed_subtopic_ids=list(row.subtopic_ids),
+            section_id = hits[0].section_id
+            chunk = ChunkQuestionRequest(
                 section_id=section_id,
-                status=row.status,
-                aim_matched=row.topic_id == requested_topic_id,
+                counts={target.difficulty: 1},
+                question_types=(QuestionType.MULTIPLE_CHOICE,),
             )
-        )
-        try:
-            possible_duplicates += flag_possible_duplicates(session, embedder, rows)
-        except Exception:
-            # A flagging failure must never fail the run it followed -- the
-            # questions above are already committed and stay (m3: dedup is a
-            # soft flag, never a gate). Rollback clears any half-written
-            # QuestionSimilarityRow so the next target starts from a clean
-            # session.
-            session.rollback()
-            logger.warning(
-                "generation-run %s: duplicate flagging failed for subtopic %s",
-                run_id,
-                target.subtopic_id,
-                exc_info=True,
-            )
+            try:
+                rows = service.generate_batch(
+                    curriculum_version_id=curriculum_version_id,
+                    chunks=[chunk],
+                    run_id=run_id,
+                )
+            except (LLMRequestError, MalformedModelOutputError) as exc:
+                # The questions already committed under this run id stay; only the
+                # target in flight is lost.
+                session.rollback()
+                logger.warning(
+                    "generation-run %s: provider failed for subtopic %s: %s",
+                    run_id,
+                    target.subtopic_id,
+                    exc.message,
+                )
+                failed.append(
+                    FailedRunTarget(
+                        subtopic_id=target.subtopic_id,
+                        difficulty=target.difficulty,
+                        section_id=section_id,
+                        error=exc.message,
+                    )
+                )
+                continue
 
-    return GenerationRunResponse(
-        run_id=run_id,
-        generated=generated,
-        skipped=skipped,
-        failed=failed,
-        possible_duplicates=possible_duplicates,
-    )
+            row = rows[0]
+            generated.append(
+                GeneratedRunQuestion(
+                    question_id=row.id,
+                    requested_subtopic_id=target.subtopic_id,
+                    requested_difficulty=target.difficulty,
+                    claimed_topic_id=row.topic_id,
+                    claimed_subtopic_ids=list(row.subtopic_ids),
+                    section_id=section_id,
+                    status=row.status,
+                    aim_matched=row.topic_id == requested_topic_id,
+                )
+            )
+            try:
+                possible_duplicates += flag_possible_duplicates(session, embedder, rows)
+            except Exception:
+                # A flagging failure must never fail the run it followed -- the
+                # questions above are already committed and stay (m3: dedup is a
+                # soft flag, never a gate). Rollback clears any half-written
+                # QuestionSimilarityRow so the next target starts from a clean
+                # session.
+                session.rollback()
+                logger.warning(
+                    "generation-run %s: duplicate flagging failed for subtopic %s",
+                    run_id,
+                    target.subtopic_id,
+                    exc_info=True,
+                )
+
+        return GenerationRunResponse(
+            run_id=run_id,
+            generated=generated,
+            skipped=skipped,
+            failed=failed,
+            possible_duplicates=possible_duplicates,
+        )
+    finally:
+        # Cleared even on an unexpected exception -- a topic must never be
+        # stuck showing "Generating..." forever because one run blew up.
+        with _active_run_lock:
+            _active_run_topic_ids.difference_update(topic_ids)
 
 
 @router.get("/question-sets", response_model=QuestionSetListResponse)

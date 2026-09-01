@@ -165,10 +165,23 @@ function TopicSubtopicCell({
   );
 }
 
-/** The topic card's Generate button, its pending state, and its inline result. */
-function TopicGenerateButton({ topic }: { topic: TopicCoverage }) {
+/** The topic card's Generate button, its pending state, and its inline result.
+ *
+ * `generatingElsewhere` covers the gap a local mutation can't: reload the page,
+ * or navigate away and back, and this hook's `isPending` starts fresh at
+ * `false` even though the server is still minutes into the run this topic's
+ * last click started. Without it the button would look idle and invite a
+ * second, overlapping run over the same gaps. */
+function TopicGenerateButton({
+  topic,
+  generatingElsewhere,
+}: {
+  topic: TopicCoverage;
+  generatingElsewhere: boolean;
+}) {
   const targets = topicGapTargets(topic);
   const run = useGenerateCoverageRun();
+  const generating = run.isPending || generatingElsewhere;
 
   return (
     <div className="mt-2 space-y-2">
@@ -179,10 +192,10 @@ function TopicGenerateButton({ topic }: { topic: TopicCoverage }) {
           variant="outline"
           className="h-7 rounded-full px-3 text-xs"
           aria-label={`Generate questions for ${topic.topic_name}`}
-          disabled={targets.length === 0 || run.isPending}
+          disabled={targets.length === 0 || generating}
           onClick={() => run.mutate({ targets })}
         >
-          {run.isPending ? (
+          {generating ? (
             <>
               <Loader2 className="size-3 animate-spin" />
               Generating…
@@ -236,6 +249,7 @@ function Legend() {
 
 export function CoverageGrid({ report }: { report: CoverageReport }) {
   const topics = report.topics ?? [];
+  const activeRunTopicIds = report.active_run_topic_ids ?? [];
 
   return (
     <div className="space-y-2">
@@ -291,7 +305,10 @@ export function CoverageGrid({ report }: { report: CoverageReport }) {
                   />
                 ))}
               </div>
-              <TopicGenerateButton topic={topic} />
+              <TopicGenerateButton
+                topic={topic}
+                generatingElsewhere={activeRunTopicIds.includes(topic.topic_id)}
+              />
             </section>
           );
         })}

@@ -417,6 +417,12 @@ export const useCoverage = (setVersionId?: number) =>
           params: { query: setVersionId ? { set_version_id: setVersionId } : {} },
         }),
       ),
+    // Coverage generation is a multi-minute server-side run a reload or a nav
+    // away loses all client-side memory of. While the server reports one in
+    // flight, keep refetching so a topic's Generate button un-disables itself
+    // the moment it actually finishes, without the tab that started it.
+    refetchInterval: (query) =>
+      (query.state.data?.active_run_topic_ids?.length ?? 0) > 0 ? 4000 : false,
   });
 
 /**

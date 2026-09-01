@@ -12,7 +12,7 @@ Enum-valued fields serialise as their string value because every enum in
 from __future__ import annotations
 
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -1700,9 +1700,20 @@ class CoverageReportResponse(BaseModel):
     #: The same rows, flat. Kept because a client asking "which subtopics are
     #: short" should not have to walk a tree to find out.
     subtopics: list[SubtopicCoverage]
+    #: Topics with a generation run in flight right now, on this server process
+    #: (not persisted -- a restart mid-run means the run is actually gone too).
+    #: Lets the Generate button rehydrate its "generating" state after a reload
+    #: or navigating away and back, instead of forgetting a run is still going
+    #: and inviting a second one over the same gaps.
+    active_run_topic_ids: list[int] = Field(default_factory=list)
 
     @classmethod
-    def from_report(cls, report: CoverageReport) -> CoverageReportResponse:
+    def from_report(
+        cls,
+        report: CoverageReport,
+        *,
+        active_run_topic_ids: Sequence[int] = (),
+    ) -> CoverageReportResponse:
         return cls(
             curriculum_version_id=report.curriculum_version_id,
             curriculum_label=report.curriculum_label,
@@ -1719,6 +1730,7 @@ class CoverageReportResponse(BaseModel):
             is_ready=report.is_ready,
             topics=report.topics,
             subtopics=report.subtopics,
+            active_run_topic_ids=list(active_run_topic_ids),
         )
 
 

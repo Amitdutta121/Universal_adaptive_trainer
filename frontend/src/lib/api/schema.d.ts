@@ -2072,6 +2072,8 @@ export interface components {
             topics: components["schemas"]["TopicCoverage"][];
             /** Subtopics */
             subtopics: components["schemas"]["SubtopicCoverage"][];
+            /** Active Run Topic Ids */
+            active_run_topic_ids?: number[];
         };
         /**
          * CoverageState

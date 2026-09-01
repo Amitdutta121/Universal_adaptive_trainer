@@ -41,7 +41,7 @@ from app.persistence.models import (
 )
 from app.persistence.repositories import BookStructureRepository, QuestionSetRepository
 from app.retrieval import SectionEmbeddingStore
-from app.web.routes.api.coverage import get_generation_client
+from app.web.routes.api.coverage import active_generation_topic_ids, get_generation_client
 from app.web.routes.api.retrieval import get_query_embedder
 
 
@@ -777,9 +777,35 @@ def test_a_provider_failure_on_one_target_keeps_the_others(
     with TestClient(configured_app) as http:
         listed = http.get("/api/questions", params={"status": "validation_passed"}).json()
     assert [q["id"] for q in listed["questions"]] == [body["generated"][0]["question_id"]]
+    assert active_generation_topic_ids() == []
 
 
 def test_asking_to_fill_no_gaps_at_all_is_rejected(configured_app: FastAPI) -> None:
     response = _run(configured_app, MetricJudgeClient(), [])
 
     assert response.status_code == 422
+
+
+def test_a_topic_stays_marked_active_until_its_run_finishes(
+    configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
+) -> None:
+    """A professor who reloads mid-run, or navigates away and back, must still see
+    the topic as generating -- not an idle button inviting a second, overlapping
+    run over the same gaps. The client can lose all memory of an in-flight run;
+    the server is the one source of truth GET /coverage rehydrates from."""
+
+    class ProbeClient(MetricJudgeClient):
+        def complete_structured(self, **kwargs):
+            assert active_generation_topic_ids() == [gen_env.while_loops.topic_id]
+            return super().complete_structured(**kwargs)
+
+    assert active_generation_topic_ids() == []
+
+    response = _run(
+        configured_app,
+        ProbeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id)),
+        [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
+    )
+
+    assert response.status_code == 200, response.text
+    assert active_generation_topic_ids() == []
