@@ -30,10 +30,13 @@ DUPLICATE_THRESHOLD = 0.85
 
 def flag_possible_duplicates(
     session: Session, embedder: Embedder, rows: list[QuestionRow]
-) -> None:
+) -> int:
     """Flag each of ``rows`` against existing approved/passed questions of the
     same topic, writing a :class:`QuestionSimilarityRow` per pair scoring at
     or above :data:`DUPLICATE_THRESHOLD` and committing.
+
+    Returns how many of ``rows`` received at least one flag -- a question
+    count, not a flag-pair count, for the m4 "M possible duplicates" summary.
 
     Raises on an embedder failure -- the caller is the one with the context to
     decide a flagging failure must never fail the generation run it followed
@@ -41,6 +44,7 @@ def flag_possible_duplicates(
     """
     repo = QuestionRepository(session)
     new_ids = {row.id for row in rows}
+    flagged_rows = 0
     for row in rows:
         if row.topic_id is None:
             continue
@@ -55,6 +59,7 @@ def flag_possible_duplicates(
         normalized = vectors / norms
         scores = normalized[0] @ normalized[1:].T
 
+        row_flagged = False
         for candidate, score in zip(candidates, scores, strict=True):
             if score >= DUPLICATE_THRESHOLD:
                 session.add(
@@ -65,7 +70,11 @@ def flag_possible_duplicates(
                         model=embedder.model,
                     )
                 )
+                row_flagged = True
         session.commit()
+        if row_flagged:
+            flagged_rows += 1
+    return flagged_rows
 
 
 def _embed_text(row: QuestionRow) -> str:

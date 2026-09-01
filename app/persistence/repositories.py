@@ -563,6 +563,7 @@ class QuestionRepository:
         statuses: Collection[QuestionStatus] | None = None,
         curriculum_version_id: int | None = None,
         section_id: int | None = None,
+        run_id: str | None = None,
     ) -> list[QuestionRow]:
         """The newest questions, optionally narrowed to particular statuses.
 
@@ -571,6 +572,11 @@ class QuestionRepository:
         rather than "no filter". ``curriculum_version_id`` narrows the same way,
         so a taxonomy filter applies to the whole bank rather than only to
         whatever page ``limit`` happened to load.
+
+        ``run_id`` narrows to questions carrying an evaluation from that
+        generation run (coverage Generate m4's "Review these" link) -- a join
+        through :class:`QuestionEvaluationRow`, the only place a run id is
+        stored, rather than a direct column on the question.
 
         ``section_id`` narrows to questions grounded in that one section. Like
         :meth:`count_grounded_in_sections`, this reads the frozen spec rather than
@@ -583,6 +589,14 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        if run_id is not None:
+            stmt = stmt.where(
+                QuestionRow.id.in_(
+                    select(QuestionEvaluationRow.question_id).where(
+                        QuestionEvaluationRow.run_id == run_id
+                    )
+                )
+            )
         if section_id is not None:
             rows = []
             for row in self._session.scalars(stmt):

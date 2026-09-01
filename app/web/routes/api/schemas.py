@@ -844,6 +844,7 @@ class QuestionListResponse(BaseModel):
     #: tell a narrowed listing from a bank that happens to hold only these rows.
     status: QuestionStatus | None = None
     curriculum_version_id: int | None = None
+    run_id: str | None = None
 
 
 #: Which unreviewed questions the review queue offers. ``scoreable`` restricts
@@ -1792,6 +1793,7 @@ class GenerationRunResponse(BaseModel):
     generated: list[GeneratedRunQuestion]
     skipped: list[SkippedRunTarget]
     failed: list[FailedRunTarget]
+    possible_duplicates: int
 
 
 class QuestionSetOut(BaseModel):

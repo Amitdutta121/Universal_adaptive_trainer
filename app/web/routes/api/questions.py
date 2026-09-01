@@ -76,15 +76,17 @@ def list_questions(
     status: QuestionStatus | None = None,
     curriculum_version_id: int | None = None,
     section_id: int | None = None,
+    run_id: str | None = None,
 ) -> QuestionListResponse:
     """The question bank, newest first, with counts by lifecycle status.
 
-    ``status``, ``curriculum_version_id`` and ``section_id`` narrow the listing;
-    without them nothing is hidden. The API does not filter by default even
-    though the page does, because a caller reading the bank over JSON has no way
-    to discover rows an unrequested default removed. ``status_counts``,
-    ``curriculum_version_counts`` and ``total`` always describe the whole bank,
-    so a filtered listing still says how much it is showing of what.
+    ``status``, ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow
+    the listing; without them nothing is hidden. The API does not filter by
+    default even though the page does, because a caller reading the bank over
+    JSON has no way to discover rows an unrequested default removed.
+    ``status_counts``, ``curriculum_version_counts`` and ``total`` always
+    describe the whole bank, so a filtered listing still says how much it is
+    showing of what.
     """
     repo = QuestionRepository(session)
     rows = repo.list_recent(
@@ -92,6 +94,7 @@ def list_questions(
         statuses=None if status is None else [status],
         curriculum_version_id=curriculum_version_id,
         section_id=section_id,
+        run_id=run_id,
     )
     return QuestionListResponse(
         questions=[QuestionSummary.from_row(row) for row in rows],
@@ -100,6 +103,7 @@ def list_questions(
         total=repo.count(),
         status=status,
         curriculum_version_id=curriculum_version_id,
+        run_id=run_id,
     )
 
 

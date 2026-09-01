@@ -199,7 +199,33 @@ Expect the later questions to list an earlier `question_id` with a score ≥ 0.8
 
 ---
 
-## m4 — The button
+## m4 — The button  ✅ DONE
+
+**Outcome.** The placeholder button now fires `POST /api/coverage/generation-runs`
+with the topic's gap targets (every cell with `needed > 0`), shows a spinner
+while in flight, and renders an inline "N generated · M possible duplicates ·
+K on a different topic" summary with a `Review these →` link to
+`/questions?run_id=...`. Full backend suite green; frontend `biome lint` +
+`tsc --noEmit` + `vitest run src/app/coverage src/app/questions` all clean.
+Two deviations, both closing gaps the m4 handoff had left open rather than
+narrowing scope.
+
+**Deviations.**
+- **`GET /api/questions` gained a `run_id` query param** (joins through
+  `QuestionEvaluationRow`, the only place a run id is stored), rather than
+  filtering client-side on the run response's question ids. Chosen as the
+  cleaner long-term answer per the handoff's own open-decision note; echoed
+  back on `QuestionListResponse.run_id` like `status`/`curriculum_version_id`,
+  and wired into `/questions`'s URL-state filters (`?run_id=`) alongside the
+  existing ones.
+- **`GenerationRunResponse` gained `possible_duplicates: int`** — a count of
+  generated questions that received at least one duplicate flag (question
+  count, not flag-pair count), accumulated in `run_generation_for_gaps` from
+  `flag_possible_duplicates`'s new return value. Needed for the "M possible
+  duplicates" summary line; the handoff had flagged this as unresolved.
+- Acceptance criteria named a 409 for "no approved curriculum"; left as the
+  existing 422 (`approved_curriculum_id`) per m2/m3's own deviation note —
+  not re-litigated here.
 
 **Deliverable.** The **Generate** button in `coverage-grid.tsx` calls
 `POST /api/coverage/generation-runs` with the topic's gap cells, shows a pending
@@ -259,7 +285,7 @@ curl -s http://127.0.0.1:8099/api/retrieval/status | jq
 
 `m1 → m2 → m3 → m4 → m5` — strict; m2 needs m1's retriever, m3/m4 need m2's endpoint, m5 is polish on m1.
 
-**Active: m4** (m1, m2, m3 committed). Run `start m4` to implement, `verify m4` to check it against the acceptance criteria. One milestone per session; commit before the next.
+**Active: m5** (m1, m2, m3 committed; m4 done, not yet committed). Run `start m5` to implement, `verify m5` to check it against the acceptance criteria. One milestone per session; commit before the next.
 
 ### Deferred (not milestones yet)
 

@@ -449,6 +449,7 @@ def test_question_list_is_empty_before_any_generation(client: TestClient) -> Non
         "total": 0,
         "status": None,
         "curriculum_version_id": None,
+        "run_id": None,
     }
 
 

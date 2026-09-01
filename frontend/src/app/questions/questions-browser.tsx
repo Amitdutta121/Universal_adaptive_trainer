@@ -449,6 +449,7 @@ export function QuestionsBrowser() {
     parseAsStringLiteral(INSTRUCTION_SOURCES),
   );
   const [taxonomyVersionId, setTaxonomyVersionId] = useQueryState("taxonomy", parseAsInteger);
+  const [runId, setRunId] = useQueryState("run_id", parseAsString);
   const [previewId, setPreviewId] = useQueryState("preview", parseAsInteger);
   const [sorting, setSorting] = useState<SortingState>([{ id: "created_at", desc: true }]);
   const [columnVisibility, setColumnVisibility] =
@@ -460,8 +461,9 @@ export function QuestionsBrowser() {
       limit,
       ...(status ? { status } : {}),
       ...(taxonomyVersionId !== null ? { curriculum_version_id: taxonomyVersionId } : {}),
+      ...(runId ? { run_id: runId } : {}),
     }),
-    [limit, status, taxonomyVersionId],
+    [limit, status, taxonomyVersionId, runId],
   );
   const { data, isPending, isError, error } = useQuestions(params);
   const curriculumVersions = useCurriculumVersions();
@@ -580,6 +582,7 @@ export function QuestionsBrowser() {
         }
       : null,
     limit !== 50 ? { label: "rows", value: String(limit), onClear: () => void setLimit(50) } : null,
+    runId ? { label: "run", value: runId, onClear: () => void setRunId(null) } : null,
   ].filter((value): value is NonNullable<typeof value> => value !== null);
 
   const table = useReactTable({
@@ -958,6 +961,7 @@ export function QuestionsBrowser() {
                   void setValidation(null);
                   void setEdited(null);
                   void setInstructionSource(null);
+                  void setRunId(null);
                 }}
               >
                 Clear filters

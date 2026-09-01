@@ -32,7 +32,7 @@ export const qk = {
   },
   questions: {
     all: ["questions"] as const,
-    list: (params: { limit?: number; status?: QuestionStatus }) =>
+    list: (params: { limit?: number; status?: QuestionStatus; run_id?: string }) =>
       ["questions", "list", params] as const,
     detail: (id: number) => ["questions", "detail", id] as const,
     evaluations: (id: number) => ["questions", "evaluations", id] as const,
@@ -204,6 +204,7 @@ type QuestionListParams = {
   status?: QuestionStatus;
   curriculum_version_id?: number;
   section_id?: number;
+  run_id?: string;
 };
 
 export const questionsQuery = (params: QuestionListParams) =>
@@ -417,6 +418,24 @@ export const useCoverage = (setVersionId?: number) =>
         }),
       ),
   });
+
+/**
+ * Run the coverage "Generate" button: one grounded question per selected gap
+ * cell. Synchronous, like `useGenerateBatch` -- the caller shows the run
+ * summary (or the 502/422 it failed with) once the response comes back.
+ */
+export function useGenerateCoverageRun() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["FillGapsRequest"]) =>
+      unwrap(api.POST("/api/coverage/generation-runs", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+      client.invalidateQueries({ queryKey: qk.questions.all });
+      client.invalidateQueries({ queryKey: qk.system.counts() });
+    },
+  });
+}
 
 // --- Books ------------------------------------------------------------------
 

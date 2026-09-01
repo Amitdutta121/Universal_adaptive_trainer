@@ -128,6 +128,7 @@ def run_generation_for_gaps(
     generated: list[GeneratedRunQuestion] = []
     skipped: list[SkippedRunTarget] = []
     failed: list[FailedRunTarget] = []
+    possible_duplicates = 0
 
     for target, requested_topic_id in resolved:
         hits = retriever.for_subtopic(target.subtopic_id, top_k=1)
@@ -187,7 +188,7 @@ def run_generation_for_gaps(
             )
         )
         try:
-            flag_possible_duplicates(session, embedder, rows)
+            possible_duplicates += flag_possible_duplicates(session, embedder, rows)
         except Exception:
             # A flagging failure must never fail the run it followed -- the
             # questions above are already committed and stay (m3: dedup is a
@@ -203,7 +204,11 @@ def run_generation_for_gaps(
             )
 
     return GenerationRunResponse(
-        run_id=run_id, generated=generated, skipped=skipped, failed=failed
+        run_id=run_id,
+        generated=generated,
+        skipped=skipped,
+        failed=failed,
+        possible_duplicates=possible_duplicates,
     )
 
 
