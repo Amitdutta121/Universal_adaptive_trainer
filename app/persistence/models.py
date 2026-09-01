@@ -20,6 +20,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -200,6 +201,36 @@ class BookSectionRow(Base):
 
     book: Mapped[BookRow] = relationship(back_populates="sections")
     chapter: Mapped[BookChapterRow | None] = relationship(back_populates="sections")
+
+
+class SectionEmbeddingRow(Base):
+    """A cached embedding vector for one book section.
+
+    A *derived* index, not source data: it can be rebuilt from
+    ``book_sections.text`` at any time by ``scripts/embed_sections.py``. It lives
+    in its own table -- never a column on ``book_sections`` -- so an existing
+    database needs no migration: ``create_all`` adds a missing table, while
+    ``verify_schema`` (ADR-008) only trips on missing *columns* of tables that
+    already exist.
+
+    ``content_hash`` is the SHA-256 of the section text the vector was built
+    from, so a re-run re-embeds only the sections whose text changed. ``model``
+    and ``dim`` are recorded so a later model swap is detectable rather than
+    silently mixing vector spaces.
+    """
+
+    __tablename__ = "section_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    section_id: Mapped[int] = mapped_column(
+        ForeignKey("book_sections.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class CurriculumVersionRow(TimestampMixin, Base):

@@ -82,6 +82,7 @@ from app.persistence.models import (
     TopicRow,
     TrainingSessionRow,
 )
+from app.retrieval import RetrievedSection
 
 
 class EnumOption(BaseModel):
@@ -2162,6 +2163,32 @@ class StudentProgressOut(BaseModel):
     subtopics: list[SubtopicWeaknessOut]
     recent_attempts: list[AttemptOut]
     sessions: list[TrainingSessionOut]
+
+
+class RetrievedSectionOut(BaseModel):
+    """One book section returned by semantic retrieval, with its citation."""
+
+    section_id: int
+    book_id: int
+    book_title: str
+    chapter_title: str | None
+    section_number: str | None
+    section_title: str | None
+    score: float
+    snippet: str
+
+    @classmethod
+    def from_result(cls, result: RetrievedSection) -> RetrievedSectionOut:
+        return cls(
+            section_id=result.section_id,
+            book_id=result.book_id,
+            book_title=result.book_title,
+            chapter_title=result.chapter_title,
+            section_number=result.section_number,
+            section_title=result.section_title,
+            score=result.score,
+            snippet=result.snippet,
+        )
 
 
 SubtopicDetail.model_rebuild()
