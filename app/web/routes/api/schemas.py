@@ -705,6 +705,19 @@ class InstructionStamp(BaseModel):
         )
 
 
+#: How much of a flagged duplicate's prompt to show without a second fetch.
+_DUPLICATE_EXCERPT_CHARS = 160
+
+
+class PossibleDuplicateOut(BaseModel):
+    """One existing question a freshly generated one scored as a likely
+    duplicate of (coverage Generate m3). A soft flag, never a gate."""
+
+    question_id: int
+    prompt_excerpt: str
+    score: float
+
+
 class QuestionSummary(BaseModel):
     """One generated question, without its solution, tests or reports."""
 
@@ -731,6 +744,9 @@ class QuestionSummary(BaseModel):
     #: The question this one was regenerated from with instructor feedback, or
     #: ``None`` for a directly generated question.
     regenerated_from_question_id: int | None
+    #: Existing approved/validation-passed questions this one was flagged as a
+    #: likely duplicate of (m3). Empty when none, never omitted.
+    possible_duplicate_of: list[PossibleDuplicateOut]
     created_at: datetime
     updated_at: datetime | None
 
@@ -760,6 +776,14 @@ class QuestionSummary(BaseModel):
             # so testing it for None reported every question as edited.
             is_edited=row.prompt != row.original_prompt,
             regenerated_from_question_id=row.regenerated_from_question_id,
+            possible_duplicate_of=[
+                PossibleDuplicateOut(
+                    question_id=flag.similar_question_id,
+                    prompt_excerpt=flag.similar_question.prompt[:_DUPLICATE_EXCERPT_CHARS],
+                    score=flag.score,
+                )
+                for flag in row.similarity_flags
+            ],
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

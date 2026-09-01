@@ -614,6 +614,21 @@ class QuestionRepository:
             raise NotFoundError(f"Question {question_id} does not exist.")
         return row
 
+    def list_dedup_candidates(
+        self, *, topic_id: int, exclude_ids: Collection[int] = ()
+    ) -> list[QuestionRow]:
+        """Existing questions a freshly generated one can be flagged against
+        (m3): approved or validation-passed, in the same topic. Cross-topic and
+        rejected/failed questions are never compared.
+        """
+        stmt = select(QuestionRow).where(
+            QuestionRow.topic_id == topic_id,
+            QuestionRow.status.in_((QuestionStatus.APPROVED, QuestionStatus.VALIDATION_PASSED)),
+        )
+        if exclude_ids:
+            stmt = stmt.where(QuestionRow.id.not_in(exclude_ids))
+        return list(self._session.scalars(stmt))
+
     def list_reviewed_with_evaluation(self) -> list[QuestionRow]:
         """Questions carrying both a stored judge evaluation and a review.
 

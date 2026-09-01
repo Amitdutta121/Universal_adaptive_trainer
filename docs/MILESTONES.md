@@ -148,7 +148,26 @@ Expect 2 new questions, each citing a retrieved section, visible in the unreview
 
 ---
 
-## m3 — Duplicate flagging surfaced in review
+## m3 — Duplicate flagging surfaced in review  ✅ DONE
+
+**Outcome.** After each target in a generation run, the new question is
+compared by cosine to existing `APPROVED` + `VALIDATION_PASSED` questions of
+the same topic; scores ≥ 0.85 write a `question_similarity_flags` row.
+`QuestionSummary` (used by `GET /api/questions`, the review queue and
+question-detail) now carries `possible_duplicate_of`. Full backend suite
+green. Two deviations, neither reducing scope.
+
+**Deviations.**
+- **Flagging lives in `app/web/routes/api/dedup.py`, not `app/coverage/generation.py`.**
+  `app.generation`'s own docstring omits `app.retrieval` from its allowed
+  dependencies, and this needs the `Embedder` protocol from there; a new
+  module the web layer owns keeps that boundary intact, per the option the
+  handoff itself named.
+- **The comparison pool is queried fresh per flagging call, not persisted.**
+  Only `QuestionSimilarityRow` was in the acceptance criteria; a
+  `question_embeddings` cache table (mirroring `section_embeddings`) was not,
+  and at question-bank scale (hundreds, not thousands) an uncached embed call
+  per generated question is cheap enough that the cache would be premature.
 
 **Deliverable.** After a generation run, each new question is embedded
 (`prompt` + option text) and compared by cosine to existing `APPROVED` +
@@ -240,7 +259,7 @@ curl -s http://127.0.0.1:8099/api/retrieval/status | jq
 
 `m1 → m2 → m3 → m4 → m5` — strict; m2 needs m1's retriever, m3/m4 need m2's endpoint, m5 is polish on m1.
 
-**Active: m3** (m1, m2 committed). Run `start m3` to implement, `verify m3` to check it against the acceptance criteria. One milestone per session; commit before the next.
+**Active: m4** (m1, m2, m3 committed). Run `start m4` to implement, `verify m4` to check it against the acceptance criteria. One milestone per session; commit before the next.
 
 ### Deferred (not milestones yet)
 

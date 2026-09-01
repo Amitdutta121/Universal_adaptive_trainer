@@ -31,6 +31,7 @@ from app.llm import StructuredLLMClient
 from app.persistence.repositories import CurriculumRepository, QuestionSetRepository
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
 from app.retrieval.embedder import Embedder
+from app.web.routes.api.dedup import flag_possible_duplicates
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.questions import approved_curriculum_id
 from app.web.routes.api.retrieval import EmbedderDep
@@ -185,6 +186,21 @@ def run_generation_for_gaps(
                 aim_matched=row.topic_id == requested_topic_id,
             )
         )
+        try:
+            flag_possible_duplicates(session, embedder, rows)
+        except Exception:
+            # A flagging failure must never fail the run it followed -- the
+            # questions above are already committed and stay (m3: dedup is a
+            # soft flag, never a gate). Rollback clears any half-written
+            # QuestionSimilarityRow so the next target starts from a clean
+            # session.
+            session.rollback()
+            logger.warning(
+                "generation-run %s: duplicate flagging failed for subtopic %s",
+                run_id,
+                target.subtopic_id,
+                exc_info=True,
+            )
 
     return GenerationRunResponse(
         run_id=run_id, generated=generated, skipped=skipped, failed=failed

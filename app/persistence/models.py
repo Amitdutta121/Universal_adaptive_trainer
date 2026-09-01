@@ -477,6 +477,15 @@ class QuestionRow(TimestampMixin, Base):
         "subtopic_id",
         creator=lambda subtopic_id: QuestionSubtopicRow(subtopic_id=subtopic_id),
     )
+    #: Possible-duplicate flags raised *against* this question (m3). Eager
+    #: loaded for the same reason as ``subtopic_links``: every reader of a
+    #: question wants to know what it might duplicate.
+    similarity_flags: Mapped[list[QuestionSimilarityRow]] = relationship(
+        foreign_keys="[QuestionSimilarityRow.question_id]",
+        cascade="all, delete-orphan",
+        order_by="QuestionSimilarityRow.score.desc()",
+        lazy="selectin",
+    )
 
 
 class QuestionSubtopicRow(Base):
@@ -506,6 +515,38 @@ class QuestionSubtopicRow(Base):
     )
 
     question: Mapped[QuestionRow] = relationship(back_populates="subtopic_links")
+
+
+class QuestionSimilarityRow(Base):
+    """A flagged possible duplicate, written after a generation run (coverage
+    Generate m3).
+
+    Directional: ``question_id`` is the freshly generated question, and
+    ``similar_question_id`` the pre-existing approved/validation-passed
+    question of the same topic it scored above threshold against. A soft flag
+    only -- it never blocks or hides a question, it just gives the review
+    queue something to point at (see MILESTONES.md "Dedup is a soft flag").
+    A new table needs no ``.db`` reset (ADR-008).
+    """
+
+    __tablename__ = "question_similarity_flags"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    similar_question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    score: Mapped[float] = mapped_column(Float)
+    #: The embedding model the comparison was made in, so a later model swap
+    #: is detectable rather than silently mixing vector spaces.
+    model: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    similar_question: Mapped[QuestionRow] = relationship(
+        foreign_keys=[similar_question_id], lazy="selectin"
+    )
 
 
 class QuestionEvaluationRow(TimestampMixin, Base):
