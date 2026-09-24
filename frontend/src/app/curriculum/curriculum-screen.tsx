@@ -9,6 +9,9 @@
  * "New taxonomy" opens the same modal blank. Importing a finished document is a smaller modal
  * opened from the header.
  *
+ * Opening a row never asks anything and never touches work left unsaved elsewhere: each taxonomy
+ * has its own slot in browser storage, and what is kept there is offered back on the page.
+ *
  * Server state — the list, the approved version, every mutation — belongs to TanStack Query in
  * `lib/api/queries.ts`. What this component owns is what the browser owns: the search box, the
  * status filter, whether the builder is open and whether it holds changes that closing would throw
@@ -54,9 +57,13 @@ import {
 import type { CurriculumVersionSummary } from "@/lib/api/types";
 import { formatTimestamp, pluralise } from "@/lib/display";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
-import { type BuilderSource, TaxonomyBuilder } from "./builder/taxonomy-builder";
+import {
+  type BuilderSource,
+  TaxonomyBuilder,
+  type TaxonomyBuilderHandle,
+} from "./builder/taxonomy-builder";
 import { copyLabel, draftFromVersion, emptyDraft } from "./builder/taxonomy-draft";
-import { clearDraft, loadDraft, type StoredDraft } from "./builder/taxonomy-draft-storage";
+import { clearDraft, loadDrafts, type SavedDraft } from "./builder/taxonomy-draft-storage";
 import { ApprovedVersionCard } from "./components/approved-version-card";
 import { CurriculumVersionsTable } from "./components/curriculum-versions-table";
 import { TaxonomyImportDialog } from "./components/taxonomy-import-dialog";
@@ -107,9 +114,9 @@ export function CurriculumScreen() {
   const [dirty, setDirty] = useState(false);
   const [openingId, setOpeningId] = useState<number | null>(null);
   const [discarding, setDiscarding] = useState(false);
-  /** Asked when opening something would replace the unsaved draft kept in this browser. */
-  const [replacing, setReplacing] = useState<{ target: OpenTarget } | null>(null);
-  const [stored, setStored] = useState<StoredDraft | null>(null);
+  /** The unsaved taxonomies kept in this browser, each in its own slot. */
+  const [drafts, setDrafts] = useState<SavedDraft[]>([]);
+  const builder = useRef<TaxonomyBuilderHandle>(null);
   const opened = useRef(0);
 
   const [editing, setEditing] = useState<CurriculumVersionSummary | null>(null);
@@ -123,7 +130,7 @@ export function CurriculumScreen() {
 
   // Browser-only, so read after mount rather than during render.
   useEffect(() => {
-    setStored(loadDraft());
+    setDrafts(loadDrafts());
   }, []);
 
   const visible = useMemo(() => {
@@ -180,18 +187,12 @@ export function CurriculumScreen() {
     }
   }
 
-  /** Opening replaces the unsaved draft kept in this browser, so ask first when there is one. */
-  function requestOpen(target: OpenTarget) {
-    if (stored) setReplacing({ target });
-    else void open(target);
-  }
-
   function closeEditor() {
     opened.current += 1;
     setEditor(null);
     setDirty(false);
     setDiscarding(false);
-    setStored(loadDraft());
+    setDrafts(loadDrafts());
   }
 
   /** Closing with unsaved changes asks; the changes are dropped only if the professor says so. */
@@ -219,33 +220,46 @@ export function CurriculumScreen() {
         error={approved.error}
       />
 
-      {stored && !editor ? (
-        <Alert>
-          <History />
-          <AlertTitle>You have an unsaved taxonomy</AlertTitle>
-          <AlertDescription>
-            {stored.origin
-              ? `A copy of “${stored.origin.label}” you were editing`
-              : "A taxonomy you were building"}
-            , last edited {formatTimestamp(stored.savedAt)}.
-          </AlertDescription>
-          <AlertAction className="flex gap-1">
-            <Button size="xs" onClick={() => setEditor({ source: null })}>
-              Continue editing
-            </Button>
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={() => {
-                clearDraft();
-                setStored(null);
-              }}
-            >
-              Discard
-            </Button>
-          </AlertAction>
-        </Alert>
-      ) : null}
+      {editor
+        ? null
+        : drafts.map((draft) => (
+            <Alert key={draft.key}>
+              <History />
+              <AlertTitle>Unsaved taxonomy: “{draft.draft.label || "Untitled"}”</AlertTitle>
+              <AlertDescription>
+                {draft.origin
+                  ? `A copy of “${draft.origin.label}” you were editing`
+                  : "A taxonomy you were building"}
+                , last edited {formatTimestamp(draft.savedAt)}.
+              </AlertDescription>
+              <AlertAction className="flex gap-1">
+                <Button
+                  size="xs"
+                  onClick={() =>
+                    setEditor({
+                      source: {
+                        origin: draft.origin,
+                        draft: draft.draft,
+                        restoredAt: draft.savedAt,
+                      },
+                    })
+                  }
+                >
+                  Continue editing
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    clearDraft(draft.origin);
+                    setDrafts(loadDrafts());
+                  }}
+                >
+                  Discard
+                </Button>
+              </AlertAction>
+            </Alert>
+          ))}
 
       <Card>
         <CardContent className="space-y-4">
@@ -279,7 +293,7 @@ export function CurriculumScreen() {
                 ? pluralise(total, "version")
                 : `${visible.length} of ${pluralise(total, "version")}`}
             </p>
-            <Button onClick={() => requestOpen(null)}>
+            <Button onClick={() => void open(null)}>
               <Plus />
               New taxonomy
             </Button>
@@ -308,7 +322,7 @@ export function CurriculumScreen() {
               approvedVersionId={approvedVersionId}
               activatingVersionId={activateVersion.isPending ? activateVersion.variables : null}
               openingId={openingId}
-              onOpen={requestOpen}
+              onOpen={open}
               onActivate={handleActivate}
               onEdit={setEditing}
               onDelete={setDeleting}
@@ -347,6 +361,7 @@ export function CurriculumScreen() {
             </DialogDescription>
           </DialogHeader>
           <TaxonomyBuilder
+            ref={builder}
             source={editor?.source ?? null}
             onDirtyChange={setDirty}
             onSaved={closeEditor}
@@ -369,39 +384,11 @@ export function CurriculumScreen() {
             <Button
               variant="destructive"
               onClick={() => {
-                clearDraft();
+                builder.current?.discardStored();
                 closeEditor();
               }}
             >
               Discard changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={replacing !== null} onOpenChange={(open) => !open && setReplacing(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Replace your unsaved taxonomy?</DialogTitle>
-            <DialogDescription>
-              There is a taxonomy you were editing that was never saved. Opening this replaces it.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReplacing(null)}>
-              Keep it
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                const target = replacing?.target ?? null;
-                setReplacing(null);
-                clearDraft();
-                setStored(null);
-                void open(target);
-              }}
-            >
-              Replace it
             </Button>
           </DialogFooter>
         </DialogContent>

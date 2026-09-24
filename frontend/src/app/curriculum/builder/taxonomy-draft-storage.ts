@@ -1,8 +1,11 @@
 /**
- * Keep an unsaved taxonomy across a reload, a rejected save, or a closed tab.
+ * Keep unsaved taxonomies across a reload, a rejected save, or a closed tab.
  *
  * A professor typing thirty subtopics should not lose them to a refresh, and a
- * rejected save must leave what they typed exactly where it is. This is a
+ * rejected save must leave what they typed exactly where it is. Each taxonomy has
+ * its own slot (a new one, or a copy of a particular saved one), so opening or
+ * previewing something else never touches, replaces or has to ask about work left
+ * unsaved somewhere else; only editing that same taxonomy again overwrites its slot. This is a
  * per-browser convenience, not a record: nothing here reaches the server, and it
  * never has to be present for the screen to work. Every access is guarded because
  * storage can be blocked, full, or cleared (private windows, site-data settings),
@@ -15,7 +18,10 @@
 
 import type { Draft } from "./taxonomy-draft";
 
-const KEY = "adaptive-trainer:taxonomy-draft:v1";
+/** One slot per taxonomy. */
+const KEY = "adaptive-trainer:taxonomy-drafts:v2";
+/** The single slot this replaced; read once and moved, so nobody's unsaved work is orphaned. */
+const LEGACY_KEY = "adaptive-trainer:taxonomy-draft:v1";
 
 /** The saved taxonomy a draft was opened from, if it was opened from one. */
 export interface DraftOrigin {
@@ -29,6 +35,14 @@ export interface StoredDraft {
   origin: DraftOrigin | null;
 }
 
+/** A stored draft together with the slot it lives in. */
+export interface SavedDraft extends StoredDraft {
+  key: string;
+}
+
+/** Which slot a draft belongs in: a copy of a particular saved taxonomy, or a new one. */
+export const draftKey = (origin: DraftOrigin | null): string => (origin ? `v${origin.id}` : "new");
+
 const isText = (value: unknown): value is string => typeof value === "string";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -41,7 +55,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export function parseStoredDraft(raw: string | null): StoredDraft | null {
   if (!raw) return null;
   try {
-    const value: unknown = JSON.parse(raw);
+    return checkStoredDraft(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function checkStoredDraft(value: unknown): StoredDraft | null {
+  try {
     if (!isRecord(value) || !isText(value.savedAt) || !isRecord(value.draft)) return null;
     const { label, topics } = value.draft;
     if (!isText(label) || !Array.isArray(topics)) return null;
@@ -78,27 +99,61 @@ export function parseStoredDraft(raw: string | null): StoredDraft | null {
   }
 }
 
-export function loadDraft(): StoredDraft | null {
+function readAll(): Record<string, StoredDraft> {
+  const all: Record<string, StoredDraft> = {};
   try {
-    return parseStoredDraft(window.localStorage.getItem(KEY));
+    const raw = window.localStorage.getItem(KEY);
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    if (isRecord(value)) {
+      for (const [key, entry] of Object.entries(value)) {
+        const parsed = checkStoredDraft(entry);
+        if (parsed) all[key] = parsed;
+      }
+    }
   } catch {
-    return null;
+    // Unreadable or blocked storage is the same as having nothing stored.
   }
+  return all;
 }
 
-export function saveDraft(draft: Draft, origin: DraftOrigin | null = null): void {
+function writeAll(all: Record<string, StoredDraft>): void {
   try {
-    const stored: StoredDraft = { savedAt: new Date().toISOString(), draft, origin };
-    window.localStorage.setItem(KEY, JSON.stringify(stored));
+    if (Object.keys(all).length === 0) window.localStorage.removeItem(KEY);
+    else window.localStorage.setItem(KEY, JSON.stringify(all));
   } catch {
     // Storage is unavailable or full. Editing carries on; the draft just is not kept.
   }
 }
 
-export function clearDraft(): void {
+/** Every unsaved taxonomy kept in this browser, most recently edited first. */
+export function loadDrafts(): SavedDraft[] {
   try {
-    window.localStorage.removeItem(KEY);
+    const legacy = parseStoredDraft(window.localStorage.getItem(LEGACY_KEY));
+    if (legacy) {
+      const all = readAll();
+      const key = draftKey(legacy.origin);
+      if (!all[key]) all[key] = legacy;
+      writeAll(all);
+      window.localStorage.removeItem(LEGACY_KEY);
+    }
   } catch {
-    // Nothing to clear if storage is unavailable.
+    // Nothing to migrate if storage cannot be read.
   }
+  return Object.entries(readAll())
+    .map(([key, stored]) => ({ ...stored, key }))
+    .sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+}
+
+/** Keep `draft` in the slot for `origin`, replacing only what was already kept for that taxonomy. */
+export function saveDraft(draft: Draft, origin: DraftOrigin | null = null): void {
+  const all = readAll();
+  all[draftKey(origin)] = { savedAt: new Date().toISOString(), draft, origin };
+  writeAll(all);
+}
+
+/** Forget the draft kept for `origin`, and no other. */
+export function clearDraft(origin: DraftOrigin | null = null): void {
+  const all = readAll();
+  delete all[draftKey(origin)];
+  writeAll(all);
 }

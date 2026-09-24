@@ -2031,9 +2031,14 @@ from the ids they were recorded against.
   no endpoint can change a saved version's shape, and the new version has new rows. That is the
   consequence to keep in view: questions and student measurements recorded against the old version
   stay with it, and the confirm before replacing the active taxonomy says so.
-- **Unsaved work is never lost silently.** Closing the modal with changes asks first. Work left unsaved
-  by a reload is kept in the browser and offered back on the page (Continue editing / Discard), and
-  opening something else over it asks. An unchanged copy is not kept: it holds nothing the saved
+- **Unsaved work is never lost silently, and previewing is never blocked by it.** Closing the modal
+  with changes asks first. Work left unsaved by a reload is kept in the browser, one slot per
+  taxonomy (a new one, or a copy of a particular saved one), and offered back on the page (Continue
+  editing / Discard). Opening or previewing a row, or starting a new taxonomy, never asks and never
+  touches what is kept; only editing that same taxonomy again overwrites its own slot. An earlier
+  version kept a single slot and asked "replace your unsaved taxonomy?" before opening anything else,
+  which made looking at a saved taxonomy depend on settling unrelated work; per-taxonomy slots remove
+  the conflict instead of asking about it. An unchanged copy is not kept: it holds nothing the saved
   version does not.
 - **The builder produces the document and nothing else.** `frontend/src/app/curriculum/builder/` edits a
   draft in the browser, serialises it with `toTaxonomyDocument`, and sends it through the existing

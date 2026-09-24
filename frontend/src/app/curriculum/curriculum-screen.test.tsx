@@ -4,10 +4,8 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { sampleDraft } from "./builder/taxonomy-draft.fixtures";
-import { saveDraft } from "./builder/taxonomy-draft-storage";
+import { loadDrafts, saveDraft } from "./builder/taxonomy-draft-storage";
 import { CurriculumScreen } from "./curriculum-screen";
-
-const STORAGE_KEY = "adaptive-trainer:taxonomy-draft:v1";
 
 const summary = (id: number, label: string) => ({
   id,
@@ -175,14 +173,14 @@ describe("CurriculumScreen", () => {
     await user.click(screen.getByText("Older"));
     const dialog = await modal();
     await user.type(within(dialog).getByLabelText("Taxonomy name"), " v2");
-    await waitFor(() => expect(window.localStorage.getItem(STORAGE_KEY)).not.toBeNull());
+    await waitFor(() => expect(loadDrafts()).toHaveLength(1));
 
     await user.keyboard("{Escape}");
     await user.click(await screen.findByRole("button", { name: "Discard changes" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
-    expect(screen.queryByText("You have an unsaved taxonomy")).not.toBeInTheDocument();
+    expect(loadDrafts()).toEqual([]);
+    expect(screen.queryByText(/Unsaved taxonomy/)).not.toBeInTheDocument();
   });
 
   it("says a load failed and opens nothing", async () => {
@@ -203,7 +201,9 @@ describe("CurriculumScreen", () => {
     it("offers to continue it, naming where it came from", async () => {
       renderScreen();
 
-      expect(await screen.findByText("You have an unsaved taxonomy")).toBeInTheDocument();
+      expect(
+        await screen.findByText(/Unsaved taxonomy: “Introductory Python”/),
+      ).toBeInTheDocument();
       expect(screen.getByText(/A copy of “Older”/)).toBeInTheDocument();
     });
 
@@ -216,6 +216,7 @@ describe("CurriculumScreen", () => {
       const dialog = await modal();
       expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Introductory Python");
       expect(within(dialog).getByText("Unsaved draft restored")).toBeInTheDocument();
+      expect(within(dialog).getByText(/Editing a copy of/)).toHaveTextContent("Older");
       expect(fetchQuery).not.toHaveBeenCalled();
     });
 
@@ -225,33 +226,61 @@ describe("CurriculumScreen", () => {
 
       await user.click(await screen.findByRole("button", { name: "Discard" }));
 
-      expect(screen.queryByText("You have an unsaved taxonomy")).not.toBeInTheDocument();
-      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(screen.queryByText(/Unsaved taxonomy/)).not.toBeInTheDocument();
+      expect(loadDrafts()).toEqual([]);
     });
 
-    it("asks before opening something else over it, and leaves it alone if told to keep it", async () => {
+    it("never asks anything before previewing a row or starting a new one, and leaves the kept work alone", async () => {
       const user = userEvent.setup();
       renderScreen();
-      await screen.findByText("You have an unsaved taxonomy");
-
-      await user.click(screen.getByRole("button", { name: "New taxonomy" }));
-      expect(await screen.findByText("Replace your unsaved taxonomy?")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Keep it" }));
-
-      expect(screen.queryByRole("dialog", { name: "Taxonomy builder" })).not.toBeInTheDocument();
-      expect(window.localStorage.getItem(STORAGE_KEY)).not.toBeNull();
-    });
-
-    it("replaces it when told to", async () => {
-      const user = userEvent.setup();
-      renderScreen();
-      await screen.findByText("You have an unsaved taxonomy");
+      await screen.findByText(/Unsaved taxonomy/);
 
       await user.click(screen.getByText("Older"));
-      await user.click(await screen.findByRole("button", { name: "Replace it" }));
+      const first = await modal();
+      expect(within(first).getByLabelText("Taxonomy name")).toHaveValue("Older (copy)");
+      expect(within(first).queryByText("Unsaved draft restored")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Replace your unsaved/)).not.toBeInTheDocument();
 
-      const dialog = await modal();
-      expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Older (copy)");
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(await screen.findByText(/Unsaved taxonomy/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "New taxonomy" }));
+      expect(within(await modal()).getByLabelText("Taxonomy name")).toHaveValue("");
+      expect(screen.queryByText(/Replace your unsaved/)).not.toBeInTheDocument();
+      expect(loadDrafts()).toHaveLength(1);
     });
+
+    it("leaves work kept for another taxonomy alone when changes to this one are discarded", async () => {
+      const user = userEvent.setup();
+      renderScreen();
+      await screen.findByText(/Unsaved taxonomy/);
+      await user.click(screen.getByText("Newer"));
+      const dialog = await modal();
+      await user.type(within(dialog).getByLabelText("Taxonomy name"), " x");
+      await waitFor(() => expect(loadDrafts()).toHaveLength(2));
+      await user.keyboard("{Escape}");
+
+      await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(loadDrafts().map((d) => d.key)).toEqual(["v1"]);
+    });
+  });
+
+  it("offers each unsaved taxonomy separately, and discarding one leaves the other", async () => {
+    saveDraft({ ...sampleDraft(), label: "First" }, { id: 1, label: "Older" });
+    saveDraft({ ...sampleDraft(), label: "Second" });
+    const user = userEvent.setup();
+    renderScreen();
+
+    expect(await screen.findByText(/Unsaved taxonomy: “First”/)).toBeInTheDocument();
+    expect(screen.getByText(/Unsaved taxonomy: “Second”/)).toBeInTheDocument();
+
+    const [discardFirst] = screen.getAllByRole("button", { name: "Discard" });
+    await user.click(discardFirst as HTMLElement);
+
+    expect(loadDrafts()).toHaveLength(1);
+    expect(screen.getAllByText(/Unsaved taxonomy:/)).toHaveLength(1);
   });
 });

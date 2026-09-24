@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { type BuilderSource, TaxonomyBuilder } from "./taxonomy-builder";
 import { draftFromVersion } from "./taxonomy-draft";
 import { sampleDraft } from "./taxonomy-draft.fixtures";
-import { saveDraft } from "./taxonomy-draft-storage";
+import { loadDrafts, saveDraft } from "./taxonomy-draft-storage";
 
 const mutateAsync = vi.fn();
 let approved: { data: unknown } = { data: undefined };
@@ -31,6 +31,15 @@ vi.mock("@/lib/api/queries", () => ({
 const APPROVED = {
   data: { version: { label: "Live taxonomy" }, topic_count: 4, subtopic_count: 11 },
 };
+
+const DRAFTS_KEY = "adaptive-trainer:taxonomy-drafts:v2";
+
+/** Unsaved work being resumed, as the page hands it over from what is kept in the browser. */
+const resumed = (draft = sampleDraft(), origin: BuilderSource["origin"] = null): BuilderSource => ({
+  origin,
+  draft,
+  restoredAt: "2026-01-01T00:00:00.000Z",
+});
 
 const callbacks = { onDirtyChange: vi.fn(), onSaved: vi.fn() };
 
@@ -118,7 +127,7 @@ describe("TaxonomyBuilder", () => {
     });
     await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
     expect(callbacks.onSaved.mock.calls[0]?.[0].version.id).toBe(7);
-    expect(window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1")).toBeNull();
+    expect(window.localStorage.getItem(DRAFTS_KEY)).toBeNull();
   });
 
   it("asks before replacing the live taxonomy, and sends nothing until told to", async () => {
@@ -154,11 +163,7 @@ describe("TaxonomyBuilder", () => {
     expect(callbacks.onSaved).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Taxonomy name")).toHaveValue("My taxonomy");
     // Autosave is debounced; it must still land after a refused save.
-    await waitFor(() =>
-      expect(window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1")).toContain(
-        "while loops",
-      ),
-    );
+    await waitFor(() => expect(window.localStorage.getItem(DRAFTS_KEY)).toContain("while loops"));
   });
 
   it("removes at once and puts the item back on Undo", async () => {
@@ -176,9 +181,8 @@ describe("TaxonomyBuilder", () => {
   });
 
   it("filters the outline as you search", async () => {
-    saveDraft(sampleDraft());
     const user = userEvent.setup();
-    renderScreen();
+    renderScreen(resumed());
     await screen.findByText("Unsaved draft restored");
 
     await user.type(screen.getByLabelText("Search the outline"), "rebinding");
@@ -191,14 +195,14 @@ describe("TaxonomyBuilder", () => {
   it("offers a restored draft, and discards it on request", async () => {
     saveDraft(sampleDraft());
     const user = userEvent.setup();
-    renderScreen();
+    renderScreen(resumed());
 
     expect(await screen.findByText("Unsaved draft restored")).toBeInTheDocument();
     expect(screen.getByLabelText("Taxonomy name")).toHaveValue("Introductory Python");
 
     await user.click(screen.getByRole("button", { name: "Discard draft" }));
     expect(screen.getByLabelText("Taxonomy name")).toHaveValue("");
-    expect(window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1")).toBeNull();
+    expect(loadDrafts()).toEqual([]);
   });
 
   it("answers `/` by focusing the search box", async () => {
@@ -240,7 +244,7 @@ describe("TaxonomyBuilder", () => {
       await screen.findByLabelText("Taxonomy name");
 
       await new Promise((resolve) => setTimeout(resolve, 600));
-      expect(window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1")).toBeNull();
+      expect(window.localStorage.getItem(DRAFTS_KEY)).toBeNull();
     });
 
     it("keeps an edited copy, together with the taxonomy it came from", async () => {
@@ -249,16 +253,14 @@ describe("TaxonomyBuilder", () => {
       await user.type(await screen.findByLabelText("Taxonomy name"), " v2");
 
       await waitFor(() => {
-        const raw = window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1");
-        const stored = JSON.parse(raw ?? "null");
+        const stored = loadDrafts().find((d) => d.key === "v3");
         expect(stored?.origin).toEqual({ id: 3, label: "Intro Python" });
         expect(stored?.draft.label).toBe("Intro Python (copy) v2");
       });
     });
 
-    it("restores an edited copy on the next visit and says which taxonomy it belongs to", async () => {
-      saveDraft(sampleDraft(), { id: 9, label: "Nine" });
-      renderScreen();
+    it("resumes an edited copy and says which taxonomy it belongs to", async () => {
+      renderScreen(resumed(sampleDraft(), { id: 9, label: "Nine" }));
 
       expect(await screen.findByText("Unsaved draft restored")).toBeInTheDocument();
       expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Nine");
@@ -303,6 +305,46 @@ describe("TaxonomyBuilder", () => {
       expect(within(screen.getByRole("tree")).getByText("Functions")).toBeInTheDocument();
       // The removal made on the previous draft cannot be "undone" into this one.
       expect(screen.getByRole("button", { name: /^Undo/ })).toBeDisabled();
+    });
+
+    it("never touches work kept for another taxonomy, whether the copy is left alone or edited", async () => {
+      saveDraft({ ...sampleDraft(), label: "Someone else's" }, { id: 8, label: "Eight" });
+      saveDraft({ ...sampleDraft(), label: "A new one" });
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+
+      // Looking at a copy does not clear anything...
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(
+        loadDrafts()
+          .map((d) => d.key)
+          .sort(),
+      ).toEqual(["new", "v8"]);
+
+      // ...and editing it writes only its own slot.
+      await user.type(screen.getByLabelText("Taxonomy name"), " v2");
+      await waitFor(() =>
+        expect(
+          loadDrafts()
+            .map((d) => d.key)
+            .sort(),
+        ).toEqual(["new", "v3", "v8"]),
+      );
+      expect(loadDrafts().find((d) => d.key === "v8")?.draft.label).toBe("Someone else's");
+      expect(loadDrafts().find((d) => d.key === "new")?.draft.label).toBe("A new one");
+    });
+
+    it("forgets its own kept draft when it is changed back to what was loaded", async () => {
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      const name = await screen.findByLabelText("Taxonomy name");
+      await user.type(name, "X");
+      await waitFor(() => expect(loadDrafts().some((d) => d.key === "v3")).toBe(true));
+
+      await user.type(name, "{Backspace}");
+
+      await waitFor(() => expect(loadDrafts().some((d) => d.key === "v3")).toBe(false));
     });
   });
 });

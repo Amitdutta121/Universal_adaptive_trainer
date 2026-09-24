@@ -16,8 +16,10 @@
  * Input limits are read from the served field reference, not typed here.
  *
  * The draft is kept in this browser while it has unsaved changes, so a reload or a
- * refused save loses nothing. A copy that has not been changed is not kept: there is
- * nothing in it that the saved version does not already hold.
+ * refused save loses nothing. It has its own slot (per saved taxonomy, or "new"), so
+ * opening or previewing something else never touches it. A copy that has not been
+ * changed is not kept: there is nothing in it that the saved version does not hold.
+ * The builder never reads storage itself; the page hands it what to resume.
  *
  * Removal never asks "are you sure". It happens at once and can be undone three
  * ways — the toast (for `UNDO_TOAST_MS`, held while hovered), the header Undo, and
@@ -37,7 +39,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/copy-button";
 import { QueryError } from "@/components/query-state";
@@ -100,7 +102,7 @@ import {
   type Selection,
   toTaxonomyDocument,
 } from "./taxonomy-draft";
-import { clearDraft, type DraftOrigin, loadDraft, saveDraft } from "./taxonomy-draft-storage";
+import { clearDraft, type DraftOrigin, saveDraft } from "./taxonomy-draft-storage";
 
 /** How long the removal toast stays up. It holds while hovered, and the header Undo outlasts it. */
 const UNDO_TOAST_MS = 10_000;
@@ -151,13 +153,23 @@ const REMOVE =
 export interface BuilderSource {
   origin: DraftOrigin | null;
   draft: Draft;
+  /** Set when this is unsaved work being resumed rather than a fresh start: when it was last edited. */
+  restoredAt?: string;
+}
+
+/** What the page can ask of a builder it holds a ref to. */
+export interface TaxonomyBuilderHandle {
+  /** Forget the unsaved draft kept for this builder's taxonomy (the page calls this on "discard"). */
+  discardStored: () => void;
 }
 
 export function TaxonomyBuilder({
   source = null,
   onDirtyChange,
   onSaved,
+  ref,
 }: {
+  ref?: React.Ref<TaxonomyBuilderHandle>;
   source?: BuilderSource | null;
   /** Whether the draft differs from what was loaded, so the page can warn before replacing it. */
   onDirtyChange?: (dirty: boolean) => void;
@@ -191,8 +203,8 @@ export function TaxonomyBuilder({
   const [previewOpen, setPreviewOpen] = useState(false);
   /** What was last sent, so a refusal can name the topic it is about even if the draft has changed since. */
   const [sentDocument, setSentDocument] = useState<NamedDocument | null>(null);
-  /** False until the stored draft has been looked at, so the autosave below cannot overwrite it with an empty one. */
-  const hydrated = useRef(false);
+  /** Whether something of this draft is currently kept in storage, so going back to clean forgets it. */
+  const kept = useRef(false);
   /** The saved taxonomy this draft is a copy of, if any. */
   const [origin, setOrigin] = useState<DraftOrigin | null>(null);
   /** What the draft looked like when it was loaded; anything else is an unsaved change. */
@@ -208,27 +220,20 @@ export function TaxonomyBuilder({
   // The topic on the right is always one that exists: a removal or a search never leaves it dangling.
   const activeTopic = draft.topics.find((topic) => topic.id === selection.topicId);
 
-  // Restored after mount, not in the initial state: storage exists only in the browser, and
-  // reading it during render would make the server and the client disagree about the page.
   useEffect(() => {
-    const stored = loadDraft();
-    if (stored && !isDraftEmpty(stored.draft)) {
-      setDoc({ draft: stored.draft, undo: [] });
-      setSelection({ topicId: stored.draft.topics[0]?.id ?? "", subtopicId: null });
-      setRestored({ savedAt: stored.savedAt });
-      setOrigin(stored.origin);
-    }
-    hydrated.current = true;
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated.current) return;
     const timer = setTimeout(() => {
-      if (!dirty || isDraftEmpty(draft)) clearDraft();
-      else saveDraft(draft, origin);
+      if (dirty && !isDraftEmpty(draft)) {
+        saveDraft(draft, origin);
+        kept.current = true;
+      } else if (kept.current) {
+        clearDraft(origin);
+        kept.current = false;
+      }
     }, 400);
     return () => clearTimeout(timer);
   }, [draft, dirty, origin]);
+
+  useImperativeHandle(ref, () => ({ discardStored: () => clearDraft(origin) }), [origin]);
 
   useEffect(() => {
     onDirtyChangeRef.current?.(dirty);
@@ -240,16 +245,17 @@ export function TaxonomyBuilder({
   useEffect(() => {
     if (!source) return;
     setDoc({ draft: source.draft, undo: [] });
-    setBaseline(draftSignature(source.draft));
+    // Resumed work is unsaved by definition, so it never matches a baseline.
+    setBaseline(source.restoredAt ? "" : draftSignature(source.draft));
     setOrigin(source.origin);
+    kept.current = false;
     setSelection({ topicId: source.draft.topics[0]?.id ?? "", subtopicId: null });
     setCollapsed(new Set());
     setQuery("");
     setProblem(null);
-    setRestored(null);
+    setRestored(source.restoredAt ? { savedAt: source.restoredAt } : null);
     setSentDocument(null);
     importTaxonomy.reset();
-    clearDraft();
   }, [source]);
 
   const requestFocus = useCallback((target: NonNullable<FocusRequest>["target"]) => {
@@ -417,7 +423,8 @@ export function TaxonomyBuilder({
     setDoc({ draft: emptyDraft(), undo: [] });
     setBaseline(draftSignature(emptyDraft()));
     setSelection({ topicId: "", subtopicId: null });
-    clearDraft();
+    clearDraft(origin);
+    kept.current = false;
     setRestored(null);
     setProblem(null);
     setOrigin(null);
@@ -455,7 +462,8 @@ export function TaxonomyBuilder({
         file: fileFromPastedJson(JSON.stringify(taxonomyDocument), MANUAL_TAXONOMY_FILENAME),
       });
       // Only now is the draft dropped: a refused save leaves it exactly as typed.
-      clearDraft();
+      clearDraft(origin);
+      kept.current = false;
       toast.success(`Saved “${detail.version.label}”`, {
         description:
           `${pluralise(detail.topic_count, "topic")} and ` +
