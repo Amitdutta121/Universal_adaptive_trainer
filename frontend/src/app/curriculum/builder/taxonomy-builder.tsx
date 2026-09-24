@@ -9,11 +9,14 @@
  * existing `POST /curriculum/versions` (`useImportTaxonomy`). This screen holds no
  * validation rules of its own beyond "finished": the backend owns what a valid
  * taxonomy is, duplicate names included, and its refusal is shown as it words it.
- * The document is a new version, never an edit of an existing one (ADR-021/046).
+ * The document is a new version, never an edit of an existing one (ADR-021/046). A
+ * saved taxonomy can be opened here as a copy (`source`); saving still creates a new
+ * version and leaves the one it was opened from untouched.
  * Input limits are read from the served field reference, not typed here.
  *
- * The draft is kept in this browser as it is edited, so a reload or a refused save
- * loses nothing.
+ * The draft is kept in this browser while it has unsaved changes, so a reload or a
+ * refused save loses nothing. A copy that has not been changed is not kept: there is
+ * nothing in it that the saved version does not already hold.
  *
  * Removal never asks "are you sure". It happens at once and can be undone three
  * ways — the toast (for `UNDO_TOAST_MS`, held while hovered), the header Undo, and
@@ -33,7 +36,6 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/copy-button";
@@ -67,6 +69,7 @@ import {
   useImportTaxonomy,
   useTaxonomyDocumentGuide,
 } from "@/lib/api/queries";
+import type { CurriculumVersionDetail } from "@/lib/api/types";
 import { formatTimestamp, pluralise } from "@/lib/display";
 import { fileFromPastedJson } from "@/lib/json-document";
 import { cn } from "@/lib/utils";
@@ -79,6 +82,7 @@ import {
   type Draft,
   type DraftProblem,
   describeRemoval,
+  draftSignature,
   emptyDraft,
   filterTree,
   findProblem,
@@ -95,7 +99,7 @@ import {
   type Selection,
   toTaxonomyDocument,
 } from "./taxonomy-draft";
-import { clearDraft, loadDraft, saveDraft } from "./taxonomy-draft-storage";
+import { clearDraft, type DraftOrigin, loadDraft, saveDraft } from "./taxonomy-draft-storage";
 
 /** How long the removal toast stays up. It holds while hovered, and the header Undo outlasts it. */
 const UNDO_TOAST_MS = 10_000;
@@ -142,7 +146,26 @@ const ROW =
 const REMOVE =
   "size-5 shrink-0 text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
 
-export function TaxonomyBuilder() {
+/** What to put in the builder: a blank draft, or a copy of a saved taxonomy. A new object loads again. */
+export interface BuilderSource {
+  origin: DraftOrigin | null;
+  draft: Draft;
+}
+
+export function TaxonomyBuilder({
+  source = null,
+  onDirtyChange,
+  onOriginChange,
+  onSaved,
+}: {
+  source?: BuilderSource | null;
+  /** Whether the draft differs from what was loaded, so the page can warn before replacing it. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Which saved taxonomy the draft is a copy of (`null` for a new one), for the list to highlight. */
+  onOriginChange?: (origin: DraftOrigin | null) => void;
+  /** Called with the version that was just created. */
+  onSaved?: (detail: CurriculumVersionDetail) => void;
+}) {
   const [doc, setDoc] = useState<Doc>(() => ({ draft: emptyDraft(), undo: [] }));
   const { draft } = doc;
 
@@ -159,7 +182,6 @@ export function TaxonomyBuilder() {
   const toastFor = useRef(new Map<string, string | number>());
   const focusSerial = useRef(0);
 
-  const router = useRouter();
   const guide = useTaxonomyDocumentGuide();
   const approved = useApprovedCurriculum();
   const importTaxonomy = useImportTaxonomy();
@@ -173,6 +195,15 @@ export function TaxonomyBuilder() {
   const [sentDocument, setSentDocument] = useState<NamedDocument | null>(null);
   /** False until the stored draft has been looked at, so the autosave below cannot overwrite it with an empty one. */
   const hydrated = useRef(false);
+  /** The saved taxonomy this draft is a copy of, if any. */
+  const [origin, setOrigin] = useState<DraftOrigin | null>(null);
+  /** What the draft looked like when it was loaded; anything else is an unsaved change. */
+  const [baseline, setBaseline] = useState(() => draftSignature(emptyDraft()));
+  const dirty = useMemo(() => draftSignature(draft) !== baseline, [draft, baseline]);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  const onOriginChangeRef = useRef(onOriginChange);
+  onOriginChangeRef.current = onOriginChange;
 
   const searching = query.trim() !== "";
   const tree = useMemo(() => filterTree(draft.topics, query), [draft.topics, query]);
@@ -189,6 +220,8 @@ export function TaxonomyBuilder() {
       setDoc({ draft: stored.draft, undo: [] });
       setSelection({ topicId: stored.draft.topics[0]?.id ?? "", subtopicId: null });
       setRestored({ savedAt: stored.savedAt });
+      setOrigin(stored.origin);
+      onOriginChangeRef.current?.(stored.origin);
     }
     hydrated.current = true;
   }, []);
@@ -196,11 +229,34 @@ export function TaxonomyBuilder() {
   useEffect(() => {
     if (!hydrated.current) return;
     const timer = setTimeout(() => {
-      if (isDraftEmpty(draft)) clearDraft();
-      else saveDraft(draft);
+      if (!dirty || isDraftEmpty(draft)) clearDraft();
+      else saveDraft(draft, origin);
     }, 400);
     return () => clearTimeout(timer);
-  }, [draft]);
+  }, [draft, dirty, origin]);
+
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty);
+  }, [dirty]);
+
+  // Load what the page asks for: a blank draft, or a copy of a saved taxonomy. Everything that
+  // belonged to the previous draft (selection, search, messages, undo history) goes with it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `importTaxonomy` changes every render; only a new source should reload.
+  useEffect(() => {
+    if (!source) return;
+    setDoc({ draft: source.draft, undo: [] });
+    setBaseline(draftSignature(source.draft));
+    setOrigin(source.origin);
+    setSelection({ topicId: source.draft.topics[0]?.id ?? "", subtopicId: null });
+    setCollapsed(new Set());
+    setQuery("");
+    setProblem(null);
+    setRestored(null);
+    setSentDocument(null);
+    importTaxonomy.reset();
+    clearDraft();
+    onOriginChangeRef.current?.(source.origin);
+  }, [source]);
 
   const requestFocus = useCallback((target: NonNullable<FocusRequest>["target"]) => {
     focusSerial.current += 1;
@@ -365,10 +421,13 @@ export function TaxonomyBuilder() {
 
   const discardDraft = () => {
     setDoc({ draft: emptyDraft(), undo: [] });
+    setBaseline(draftSignature(emptyDraft()));
     setSelection({ topicId: "", subtopicId: null });
     clearDraft();
     setRestored(null);
     setProblem(null);
+    setOrigin(null);
+    onOriginChange?.(null);
   };
 
   const requestSave = () => {
@@ -403,7 +462,6 @@ export function TaxonomyBuilder() {
         file: fileFromPastedJson(JSON.stringify(taxonomyDocument), MANUAL_TAXONOMY_FILENAME),
       });
       // Only now is the draft dropped: a refused save leaves it exactly as typed.
-      hydrated.current = false;
       clearDraft();
       toast.success(`Saved “${detail.version.label}”`, {
         description:
@@ -412,7 +470,7 @@ export function TaxonomyBuilder() {
           "It is now the active taxonomy.",
       });
       setConfirmOpen(false);
-      router.push(`/curriculum/versions/${detail.version.id}`);
+      onSaved?.(detail);
     } catch {
       // Rendered from `importTaxonomy.error` with the backend's own wording; the draft is untouched.
       setConfirmOpen(false);
@@ -489,7 +547,13 @@ export function TaxonomyBuilder() {
   const lastRemoval = doc.undo.at(-1);
 
   return (
-    <>
+    <div className="@container flex min-w-0 flex-col gap-4">
+      {origin ? (
+        <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+          Editing a copy of <span className="font-medium">“{origin.label}”</span>. Saving creates a
+          new version and leaves it unchanged.
+        </p>
+      ) : null}
       {restored ? (
         <Alert>
           <History />
@@ -542,7 +606,7 @@ export function TaxonomyBuilder() {
         </p>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+      <div className="grid @2xl:grid-cols-[16rem_minmax(0,1fr)] items-start gap-4">
         {/* ---- outline ---- */}
         <Card>
           <CardHeader>
@@ -1034,9 +1098,9 @@ export function TaxonomyBuilder() {
       </div>
 
       {/* Actions on the left, so the removal toast (bottom right) never covers Save. */}
-      <div className="sticky bottom-0 -mx-6 flex flex-wrap items-center gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
         <Button onClick={requestSave} disabled={!taxonomyDocument || importTaxonomy.isPending}>
-          {importTaxonomy.isPending ? "Saving…" : "Save taxonomy"}
+          {importTaxonomy.isPending ? "Saving…" : origin ? "Save as new version" : "Save taxonomy"}
         </Button>
         <Button variant="ghost" disabled={!taxonomyDocument} onClick={() => setPreviewOpen(true)}>
           Preview document
@@ -1103,6 +1167,6 @@ export function TaxonomyBuilder() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

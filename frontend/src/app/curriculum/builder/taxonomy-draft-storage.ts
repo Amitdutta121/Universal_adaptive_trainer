@@ -17,9 +17,16 @@ import type { Draft } from "./taxonomy-draft";
 
 const KEY = "adaptive-trainer:taxonomy-draft:v1";
 
+/** The saved taxonomy a draft was opened from, if it was opened from one. */
+export interface DraftOrigin {
+  id: number;
+  label: string;
+}
+
 export interface StoredDraft {
   savedAt: string;
   draft: Draft;
+  origin: DraftOrigin | null;
 }
 
 const isText = (value: unknown): value is string => typeof value === "string";
@@ -60,7 +67,12 @@ export function parseStoredDraft(raw: string | null): StoredDraft | null {
         }
       }
     }
-    return { savedAt: value.savedAt, draft: value.draft as unknown as Draft };
+    const { origin } = value;
+    const validOrigin =
+      isRecord(origin) && typeof origin.id === "number" && isText(origin.label)
+        ? { id: origin.id, label: origin.label }
+        : null;
+    return { savedAt: value.savedAt, draft: value.draft as unknown as Draft, origin: validOrigin };
   } catch {
     return null;
   }
@@ -74,9 +86,9 @@ export function loadDraft(): StoredDraft | null {
   }
 }
 
-export function saveDraft(draft: Draft): void {
+export function saveDraft(draft: Draft, origin: DraftOrigin | null = null): void {
   try {
-    const stored: StoredDraft = { savedAt: new Date().toISOString(), draft };
+    const stored: StoredDraft = { savedAt: new Date().toISOString(), draft, origin };
     window.localStorage.setItem(KEY, JSON.stringify(stored));
   } catch {
     // Storage is unavailable or full. Editing carries on; the draft just is not kept.

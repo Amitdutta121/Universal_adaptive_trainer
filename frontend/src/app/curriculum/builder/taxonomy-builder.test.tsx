@@ -2,15 +2,14 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { TaxonomyBuilder } from "./taxonomy-builder";
+import { type BuilderSource, TaxonomyBuilder } from "./taxonomy-builder";
+import { draftFromVersion } from "./taxonomy-draft";
 import { sampleDraft } from "./taxonomy-draft.fixtures";
 import { saveDraft } from "./taxonomy-draft-storage";
 
-const push = vi.fn();
 const mutateAsync = vi.fn();
 let approved: { data: unknown } = { data: undefined };
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), dismiss: vi.fn() }),
 }));
@@ -33,13 +32,37 @@ const APPROVED = {
   data: { version: { label: "Live taxonomy" }, topic_count: 4, subtopic_count: 11 },
 };
 
-function renderScreen() {
-  return render(
+const callbacks = { onDirtyChange: vi.fn(), onOriginChange: vi.fn(), onSaved: vi.fn() };
+
+function renderScreen(source: BuilderSource | null = null) {
+  const ui = (next: BuilderSource | null) => (
     <TooltipProvider>
-      <TaxonomyBuilder />
-    </TooltipProvider>,
+      <TaxonomyBuilder source={next} {...callbacks} />
+    </TooltipProvider>
   );
+  const view = render(ui(source));
+  return { ...view, load: (next: BuilderSource) => view.rerender(ui(next)) };
 }
+
+/** A copy of a saved taxonomy, as the page hands it to the builder. */
+const copyOf = (id: number, label: string): BuilderSource => ({
+  origin: { id, label },
+  draft: draftFromVersion(`${label} (copy)`, [
+    {
+      name: "Loops",
+      description: null,
+      subtopics: [
+        { name: "for loops", description: "Iterating." },
+        { name: "while loops", description: null },
+      ],
+    },
+    {
+      name: "Functions",
+      description: "Reusable.",
+      subtopics: [{ name: "Defining", description: null }],
+    },
+  ]),
+});
 
 /** Build a one-topic, one-subtopic taxonomy through the UI, the way a professor would. */
 async function typeFinishedDraft(user: ReturnType<typeof userEvent.setup>) {
@@ -52,7 +75,7 @@ async function typeFinishedDraft(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   window.localStorage.clear();
-  push.mockReset();
+  for (const fn of Object.values(callbacks)) fn.mockReset();
   mutateAsync.mockReset();
   approved = { data: undefined };
 });
@@ -71,7 +94,7 @@ describe("TaxonomyBuilder", () => {
     expect(mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("sends the taxonomy document the backend expects, then leaves for the new version", async () => {
+  it("sends the taxonomy document the backend expects, then hands the new version to the page", async () => {
     mutateAsync.mockResolvedValue({
       version: { id: 7, label: "My taxonomy" },
       topic_count: 1,
@@ -93,7 +116,8 @@ describe("TaxonomyBuilder", () => {
         { name: "Loops", description: "", subtopics: [{ name: "while loops", description: "" }] },
       ],
     });
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/curriculum/versions/7"));
+    await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+    expect(callbacks.onSaved.mock.calls[0]?.[0].version.id).toBe(7);
     expect(window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1")).toBeNull();
   });
 
@@ -127,7 +151,7 @@ describe("TaxonomyBuilder", () => {
     await user.click(screen.getByRole("button", { name: /^Save taxonomy$/ }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
-    expect(push).not.toHaveBeenCalled();
+    expect(callbacks.onSaved).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Taxonomy name")).toHaveValue("My taxonomy");
     // Autosave is debounced; it must still land after a refused save.
     await waitFor(() =>
@@ -183,5 +207,104 @@ describe("TaxonomyBuilder", () => {
 
     await user.keyboard("/");
     expect(screen.getByLabelText("Search the outline")).toHaveFocus();
+  });
+
+  describe("editing a copy of a saved taxonomy", () => {
+    it("fills the builder with the copy and says what saving will do", async () => {
+      renderScreen(copyOf(3, "Intro Python"));
+
+      expect(await screen.findByLabelText("Taxonomy name")).toHaveValue("Intro Python (copy)");
+      expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Intro Python");
+      const tree = screen.getByRole("tree");
+      expect(within(tree).getByText("Loops")).toBeInTheDocument();
+      expect(within(tree).getByText("for loops")).toBeInTheDocument();
+      expect(within(tree).getByText("Functions")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save as new version" })).toBeInTheDocument();
+      expect(callbacks.onOriginChange).toHaveBeenCalledWith({ id: 3, label: "Intro Python" });
+    });
+
+    it("is not dirty until something changes, and not dirty again once it is changed back", async () => {
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+      await waitFor(() => expect(callbacks.onDirtyChange).toHaveBeenLastCalledWith(false));
+
+      const name = screen.getByLabelText("Taxonomy name");
+      await user.type(name, "X");
+      await waitFor(() => expect(callbacks.onDirtyChange).toHaveBeenLastCalledWith(true));
+      await user.type(name, "{Backspace}");
+      await waitFor(() => expect(callbacks.onDirtyChange).toHaveBeenLastCalledWith(false));
+    });
+
+    it("keeps nothing in the browser for a copy nobody changed, so a reload does not offer it back", async () => {
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1")).toBeNull();
+    });
+
+    it("keeps an edited copy, together with the taxonomy it came from", async () => {
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await user.type(await screen.findByLabelText("Taxonomy name"), " v2");
+
+      await waitFor(() => {
+        const raw = window.localStorage.getItem("adaptive-trainer:taxonomy-draft:v1");
+        const stored = JSON.parse(raw ?? "null");
+        expect(stored?.origin).toEqual({ id: 3, label: "Intro Python" });
+        expect(stored?.draft.label).toBe("Intro Python (copy) v2");
+      });
+    });
+
+    it("restores an edited copy on the next visit and tells the page which taxonomy it belongs to", async () => {
+      saveDraft(sampleDraft(), { id: 9, label: "Nine" });
+      renderScreen();
+
+      expect(await screen.findByText("Unsaved draft restored")).toBeInTheDocument();
+      expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Nine");
+      expect(callbacks.onOriginChange).toHaveBeenCalledWith({ id: 9, label: "Nine" });
+    });
+
+    it("saves the copy as a new version, sending the edited document and not the original's", async () => {
+      mutateAsync.mockResolvedValue({
+        version: { id: 11, label: "Renamed" },
+        topic_count: 2,
+        subtopic_count: 3,
+      });
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      const name = await screen.findByLabelText("Taxonomy name");
+      await user.clear(name);
+      await user.type(name, "Renamed");
+
+      await user.click(screen.getByRole("button", { name: "Save as new version" }));
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+      const [[{ file }]] = mutateAsync.mock.calls as [[{ file: File }]];
+      const sent = JSON.parse(await file.text());
+      expect(sent.label).toBe("Renamed");
+      expect(sent.topics.map((t: { name: string }) => t.name)).toEqual(["Loops", "Functions"]);
+      expect(sent.topics[0].subtopics[1]).toEqual({ name: "while loops", description: "" });
+      await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+    });
+
+    it("replaces the previous draft completely when another copy is loaded", async () => {
+      const user = userEvent.setup();
+      const view = renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+      const tree = screen.getByRole("tree");
+      await user.click(within(tree).getByRole("button", { name: "Remove topic Functions" }));
+      await user.type(screen.getByLabelText("Search the outline"), "for");
+
+      view.load(copyOf(4, "Other"));
+
+      expect(await screen.findByDisplayValue("Other (copy)")).toBeInTheDocument();
+      expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Other");
+      expect(screen.getByLabelText("Search the outline")).toHaveValue("");
+      expect(within(screen.getByRole("tree")).getByText("Functions")).toBeInTheDocument();
+      // The removal made on the previous draft cannot be "undone" into this one.
+      expect(screen.getByRole("button", { name: /^Undo/ })).toBeDisabled();
+    });
   });
 });

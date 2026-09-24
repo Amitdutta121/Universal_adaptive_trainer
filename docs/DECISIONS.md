@@ -2017,15 +2017,27 @@ from the ids they were recorded against.
 
 **Decisions.**
 
-- **One page, with Import as a modal.** The curriculum page is the builder (below the approved-version card and above the versions table). Importing a document the professor already has is an **Import** button at the top right of the page header, which opens a modal holding the same upload / paste form and the prompt, example and field reference. It is not a tab or a page of its own; a successful import closes the modal, and a refused one leaves it open with the text intact.
+- **Two panes, with Import as a modal.** The curriculum page has the saved taxonomies on the left
+  (name, size, date, standing) and the builder on the right, under the active-taxonomy card. Importing
+  a document the professor already has is an **Import** button at the top right of the page header,
+  which opens a modal holding the same upload / paste form and the prompt, example and field
+  reference. It is not a tab or a page of its own; a successful import closes the modal, and a
+  refused one leaves it open with the text intact.
+- **Choosing a saved taxonomy opens a copy of it in the builder.** The copy is a draft like any
+  other, named "<label> (copy)", with a line saying what saving does. Saving creates a *new* version
+  and leaves the one that was opened untouched, so this is not the structural edit ADR-046 refused:
+  no endpoint can change a saved version's shape, and the new version has new rows. That is the
+  consequence to keep in view: questions and student measurements recorded against the old version
+  stay with it, and the confirm before replacing the active taxonomy says so. An unchanged copy is
+  not kept in the browser (nothing in it that the saved version does not hold), and replacing a draft
+  that has unsaved changes asks first.
 - **The builder produces the document and nothing else.** `frontend/src/app/curriculum/builder/` edits a
   draft in the browser, serialises it with `toTaxonomyDocument`, and sends it through the existing
   `POST /api/curriculum/versions` (`useImportTaxonomy`). No endpoint, model or migration is added, so
   everything ADR-021 guarantees still holds: the whole document is validated, an invalid one writes
   nothing, and a valid one becomes the approved version at once.
-- **It creates a version; it never edits one.** Saving from the builder is an upload. Building on top
-  of an existing version is a separate, later decision, because it inherits ADR-046's consequence that
-  a new version has new row ids.
+- **It creates a version; it never edits one.** Saving from the builder is an upload, whether the
+  draft was typed from nothing or opened as a copy of a saved taxonomy.
 - **The browser checks only that the draft is finished.** A blank label or name, no topics, or a topic
   with no subtopics is refused locally, and the message points at the row. Every other rule is the
   backend's, duplicate names included (`normalize_label` has one implementation), and its refusal is

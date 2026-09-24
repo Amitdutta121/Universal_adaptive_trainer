@@ -548,8 +548,8 @@ export const useCurriculumVersions = () =>
   });
 
 /** One version with its Topic → Subtopic tree, and what deleting it would cost. */
-export const useCurriculumVersion = (versionId: number) =>
-  useQuery({
+export const curriculumVersionQuery = (versionId: number) =>
+  queryOptions({
     queryKey: qk.curriculum.version(versionId),
     queryFn: () =>
       unwrap(
@@ -558,6 +558,9 @@ export const useCurriculumVersion = (versionId: number) =>
         }),
       ),
   });
+
+export const useCurriculumVersion = (versionId: number) =>
+  useQuery(curriculumVersionQuery(versionId));
 
 /**
  * The version question generation is grounded in.

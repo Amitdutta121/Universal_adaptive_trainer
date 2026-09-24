@@ -219,6 +219,48 @@ export function emptyDraft(): Draft {
   return { label: "", topics: [] };
 }
 
+/** The shape of a saved version's tree that a draft is made from (the API's `TopicOut`, structurally). */
+interface VersionTopic {
+  name: string;
+  description?: string | null;
+  subtopics: { name: string; description?: string | null }[];
+}
+
+/**
+ * A draft holding a copy of a saved taxonomy, to edit and save as a new version.
+ *
+ * Ids are fresh: a draft row is a client-side key, never the saved row's id, because saving
+ * creates new rows and the two must not be confused. Missing descriptions become empty text.
+ */
+export function draftFromVersion(label: string, topics: readonly VersionTopic[]): Draft {
+  return {
+    label,
+    topics: topics.map((topic) => ({
+      id: newId("topic"),
+      name: topic.name,
+      description: topic.description ?? "",
+      subtopics: topic.subtopics.map((subtopic) => ({
+        id: newId("sub"),
+        name: subtopic.name,
+        description: subtopic.description ?? "",
+      })),
+    })),
+  };
+}
+
+/** The name a copy starts with. A copy of a copy is not "X (copy) (copy)". */
+export function copyLabel(label: string): string {
+  return /\(copy\)\s*$/i.test(label) ? label : `${label} (copy)`;
+}
+
+/**
+ * A comparable fingerprint of a draft, so "has this changed since it was loaded" is a string
+ * comparison. Editing something and then editing it back is not a change.
+ */
+export function draftSignature(draft: Draft): string {
+  return JSON.stringify(draft);
+}
+
 /** Whether there is anything worth keeping: an empty draft is not saved, and restoring one would be noise. */
 export function isDraftEmpty(draft: Draft): boolean {
   return draft.label.trim() === "" && draft.topics.length === 0;
