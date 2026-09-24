@@ -13,3 +13,9 @@
 
 /** The name a pasted taxonomy document is uploaded under. `.json` is the only accepted extension. */
 export const PASTED_TAXONOMY_FILENAME = "pasted-taxonomy.json";
+
+/**
+ * The name a taxonomy built in the manual builder is uploaded under. Distinct from
+ * the pasted one so a rejected upload is traceable to the screen that sent it.
+ */
+export const MANUAL_TAXONOMY_FILENAME = "manual-taxonomy.json";

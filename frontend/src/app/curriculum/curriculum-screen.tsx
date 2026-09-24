@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * The curriculum library: upload a taxonomy, and manage what is already uploaded.
+ * The curriculum library: build a taxonomy by hand, import one that already exists
+ * (a modal opened from the header), and manage what is already saved.
  *
- * Server state — the list, the approved version, the guide, every mutation —
+ * Server state — the list, the approved version, every mutation —
  * belongs to TanStack Query in `lib/api/queries.ts`. What this component owns is
  * what the browser owns: the search box, the status filter, and which row a
  * dialog is open for.
@@ -14,11 +15,13 @@
  * approved, and "show me the live one" is the common question.
  */
 
+import { Upload } from "lucide-react";
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,18 +35,17 @@ import {
   useActivateCurriculumVersion,
   useApprovedCurriculum,
   useCurriculumVersions,
-  useTaxonomyDocumentGuide,
 } from "@/lib/api/queries";
 import type { CurriculumVersionSummary } from "@/lib/api/types";
 import { pluralise } from "@/lib/display";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
 import { ApprovedVersionCard } from "./components/approved-version-card";
 import { CurriculumVersionsTable } from "./components/curriculum-versions-table";
-import { TaxonomyGuideCard } from "./components/taxonomy-guide-card";
-import { TaxonomyUploadCard } from "./components/taxonomy-upload-card";
+import { TaxonomyImportDialog } from "./components/taxonomy-import-dialog";
 import { VersionDeleteDialog } from "./components/version-delete-dialog";
 import { VersionEditDialog } from "./components/version-edit-dialog";
 import { generatedByLabel, versionStanding } from "./curriculum-display";
+import { TaxonomyBuilder } from "./builder/taxonomy-builder";
 
 /**
  * The filter is over *standing*, not over the raw status column.
@@ -56,7 +58,7 @@ const STANDING_FILTERS = ["all", "live", "replaced", "proposed", "under_review"]
 
 const STANDING_FILTER_LABEL: Record<(typeof STANDING_FILTERS)[number], string> = {
   all: "All versions",
-  live: "In use",
+  live: "Active",
   replaced: "Replaced",
   proposed: "Proposed",
   under_review: "Under review",
@@ -76,6 +78,7 @@ export function CurriculumScreen() {
     parseAsStringLiteral(STANDING_FILTERS).withDefault("all"),
   );
   const [search, setSearch] = useQueryState("q", parseAsString.withDefault(""));
+  const [importOpen, setImportOpen] = useState(false);
 
   const [editing, setEditing] = useState<CurriculumVersionSummary | null>(null);
   const [deleting, setDeleting] = useState<CurriculumVersionSummary | null>(null);
@@ -83,7 +86,6 @@ export function CurriculumScreen() {
   const activateVersion = useActivateCurriculumVersion();
   const versions = useCurriculumVersions();
   const approved = useApprovedCurriculum();
-  const guide = useTaxonomyDocumentGuide();
 
   const approvedVersionId = versions.data?.approved_version_id;
 
@@ -110,11 +112,16 @@ export function CurriculumScreen() {
 
   return (
     <>
-      <PageHeader title={section.label} summary={section.summary} />
-
-      <TaxonomyUploadCard guide={guide.data} />
-
-      <TaxonomyGuideCard guide={guide.data} isPending={guide.isPending} error={guide.error} />
+      <PageHeader
+        title={section.label}
+        summary={section.summary}
+        actions={
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload />
+            Import
+          </Button>
+        }
+      />
 
       <ApprovedVersionCard
         approved={approved.data}
@@ -122,15 +129,19 @@ export function CurriculumScreen() {
         error={approved.error}
       />
 
+      <TaxonomyBuilder />
+
+      <TaxonomyImportDialog open={importOpen} onOpenChange={setImportOpen} />
+
       <Card>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value || null)}
-              placeholder="Search label or source"
+              placeholder="Search by name"
               className="max-w-xs"
-              aria-label="Search curriculum versions"
+              aria-label="Search taxonomies by name"
             />
             <Select
               value={standing}
@@ -163,7 +174,7 @@ export function CurriculumScreen() {
             total === 0 ? (
               <EmptyState
                 title="No taxonomy has been uploaded yet"
-                hint="Copy the prompt above, have an assistant turn your syllabus into a taxonomy document, then upload it."
+                hint="Build a taxonomy above, or use Import if you already have a taxonomy document."
               />
             ) : (
               <EmptyState

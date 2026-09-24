@@ -2001,3 +2001,68 @@ plausible boundary and readable-enough text, which is the bar this ADR holds to 
   `structure_source`/`structure_confidence`/warnings fields regardless of which producer wrote them.
 - The original uploaded PDF is retained exactly like a retained JSON document today (ADR-013), so a
   correction is re-running extraction against the same source, not asking the professor to re-upload.
+
+---
+
+## ADR-049 — A taxonomy can be built by hand, as another producer of the same document
+
+**Status:** accepted. Extends ADR-021 and ADR-046; changes none of either. Structure is still declared
+by a whole document and never edited row by row.
+
+**Context.** The only way to create a taxonomy was to upload a finished JSON document, so a professor
+without one had to write it out or have an assistant write it, then paste it in. ADR-046 rejected
+row-level structural edits on an existing version, because a payload or endpoint that can add, move or
+delete one topic makes a structural edit *expressible* and detaches every question and measurement
+from the ids they were recorded against.
+
+**Decisions.**
+
+- **One page, with Import as a modal.** The curriculum page is the builder (below the approved-version card and above the versions table). Importing a document the professor already has is an **Import** button at the top right of the page header, which opens a modal holding the same upload / paste form and the prompt, example and field reference. It is not a tab or a page of its own; a successful import closes the modal, and a refused one leaves it open with the text intact.
+- **The builder produces the document and nothing else.** `frontend/src/app/curriculum/builder/` edits a
+  draft in the browser, serialises it with `toTaxonomyDocument`, and sends it through the existing
+  `POST /api/curriculum/versions` (`useImportTaxonomy`). No endpoint, model or migration is added, so
+  everything ADR-021 guarantees still holds: the whole document is validated, an invalid one writes
+  nothing, and a valid one becomes the approved version at once.
+- **It creates a version; it never edits one.** Saving from the builder is an upload. Building on top
+  of an existing version is a separate, later decision, because it inherits ADR-046's consequence that
+  a new version has new row ids.
+- **The browser checks only that the draft is finished.** A blank label or name, no topics, or a topic
+  with no subtopics is refused locally, and the message points at the row. Every other rule is the
+  backend's, duplicate names included (`normalize_label` has one implementation), and its refusal is
+  shown as it words it, with the draft left as typed.
+- **Input limits are read from the served guide, not typed.** `limitsFromGuide` binds `maxLength` to
+  the field reference `GET /api/curriculum/document-guide` publishes (ADR-046). Until the guide has
+  loaded the inputs are unbounded rather than carrying a second copy of a number the backend owns.
+  The schema version sent is likewise the guide's.
+- **The draft is kept in this browser.** It is autosaved to `localStorage` (guarded: storage may be
+  blocked or full) and offered back on the next visit, so a reload or a refused save loses nothing. It
+  is dropped only after a successful save. It is a per-browser convenience, never a record, and the
+  undo history is deliberately not stored.
+- **Removal is immediate and undoable, not confirmed.** A confirm on every ✕ teaches people to click
+  through it. Each removal can be undone from a toast (held while hovered), from a header Undo that
+  keeps the last 20 removals, and with Ctrl+Z.
+- **A save that would replace the live taxonomy says so first.** Because a valid save is approved
+  immediately (ADR-021), the builder names the version it will replace before sending, and that
+  questions and measurements already recorded stay with the older version.
+
+**Known limits, recorded rather than hidden.**
+
+- A version made in the builder is stored with `generated_by = "taxonomy-upload"`, so it is not
+  distinguishable from an uploaded one in the list.
+- A refusal reaches the browser as one string of `path: message` problems, joined by `; `
+  (`topics.1.subtopics.1.name: Value error, duplicate subtopic name 'x'`). `taxonomy-refusal.ts`
+  rewrites *how each problem is described* (positions counted from one, the topic or subtopic named,
+  the parser's vocabulary dropped) and passes anything it does not recognise through unchanged, so
+  it can never hide or invent a problem. It does not pin a problem to its row in the editor.
+  That parse is a contract with the backend's wording, so `tests/test_taxonomy_builder_contract.py`
+  pins the real strings the validator produces; if Pydantic or the schema changes them, that test
+  fails and the parser is updated, rather than the messages quietly degrading to the raw text. A
+  structured errors response (path and message as data) would remove the coupling and is the way to
+  pin a problem to a row.
+
+**Alternatives rejected.** *Per-item add, move and delete endpoints on a version:* ADR-046's argument,
+unchanged. *A copy of `normalize_label` in the browser to flag duplicates as you type:* the rule has
+one implementation. *A typed-outline input (indent for subtopics) as the primary editor:* it adds a
+second document format the application must define and parse, and paste-JSON already covers bulk entry.
+*A board of draggable cards:* worst for typing many items and the heaviest to build, for a job (moving a
+subtopic between topics) the outline covers with cut and re-add until it proves not to.
