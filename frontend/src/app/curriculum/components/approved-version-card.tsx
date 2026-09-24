@@ -40,9 +40,9 @@ export function ApprovedVersionCard({
     return (
       <Alert>
         <TriangleAlert />
-        <AlertTitle>No curriculum has been approved yet</AlertTitle>
+        <AlertTitle>No taxonomy is active yet</AlertTitle>
         <AlertDescription>
-          Question generation is refused until a valid taxonomy is uploaded. Upload one above.
+          Questions cannot be generated until a taxonomy is active. Build one below, or use Import.
         </AlertDescription>
       </Alert>
     );
@@ -57,17 +57,17 @@ export function ApprovedVersionCard({
         <Link href={`/curriculum/versions/${approved.version.id}`} className="hover:underline">
           {approved.version.label}
         </Link>{" "}
-        is the approved curriculum
+        is the active taxonomy
       </AlertTitle>
       <AlertDescription>
         <p>
           {pluralise(approved.topic_count, "topic")} ·{" "}
           {pluralise(approved.subtopic_count, "subtopic")}
           {approved.version.approved_at
-            ? ` · approved ${formatTimestamp(approved.version.approved_at)}`
+            ? ` · active since ${formatTimestamp(approved.version.approved_at)}`
             : ""}
         </p>
-        <p>Question generation and coverage are both grounded in this version.</p>
+        <p>Question generation and coverage use this taxonomy.</p>
       </AlertDescription>
     </Alert>
   );

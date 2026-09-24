@@ -80,7 +80,7 @@ describe("isTaxonomyUpload", () => {
 
 describe("generatedByLabel", () => {
   it("names an upload in words", () => {
-    expect(generatedByLabel({ generated_by: TAXONOMY_UPLOAD_GENERATOR })).toBe("Uploaded taxonomy");
+    expect(generatedByLabel({ generated_by: TAXONOMY_UPLOAD_GENERATOR })).toBe("Built or imported");
   });
 
   it("shows the model for a legacy row", () => {
@@ -137,8 +137,8 @@ describe("versionStanding", () => {
     }
   });
 
-  it("claims generation is grounded only in the live one", () => {
-    expect(STANDING_MEANING.live).toMatch(/grounded/);
-    expect(STANDING_MEANING.replaced).not.toMatch(/grounded/);
+  it("says questions use only the active one", () => {
+    expect(STANDING_MEANING.live).toMatch(/use this taxonomy/);
+    expect(STANDING_MEANING.replaced).not.toMatch(/use this taxonomy/);
   });
 });

@@ -99,7 +99,7 @@ export function VersionDeleteDialog({
           <DialogTitle>Delete “{version.label}”?</DialogTitle>
           <DialogDescription>
             This removes the version and every topic and subtopic in it. It cannot be undone, and
-            the document is not retained — upload your own copy again to recreate it.
+            no copy of the document is kept — you would have to build or import it again.
           </DialogDescription>
         </DialogHeader>
 

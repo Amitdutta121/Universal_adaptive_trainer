@@ -58,13 +58,13 @@ export function CurriculumVersionsTable({
       <TableHeader>
         <TableRow>
           <TableHead className="w-12">#</TableHead>
-          <TableHead>Label</TableHead>
+          <TableHead>Name</TableHead>
           <TableHead>Status</TableHead>
           <TableHead className="text-right">Topics</TableHead>
           <TableHead className="text-right">Subtopics</TableHead>
           <TableHead>Source</TableHead>
-          <TableHead>Uploaded</TableHead>
-          <TableHead>Approved</TableHead>
+          <TableHead>Created</TableHead>
+          <TableHead>Made active</TableHead>
           <TableHead className="w-10" />
         </TableRow>
       </TableHeader>

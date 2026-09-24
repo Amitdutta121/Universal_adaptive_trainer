@@ -68,15 +68,15 @@ export function VersionEditDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Rename this curriculum version</DialogTitle>
+            <DialogTitle>Rename this taxonomy</DialogTitle>
             <DialogDescription>
-              The label only. Its topics and subtopics come from the uploaded document — to change
-              the structure, fix the document and upload it again.
+              This changes the name only. To change its topics or subtopics, build or import a
+              corrected taxonomy; it is saved as a new version.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2">
-            <Label htmlFor={labelFieldId}>Label</Label>
+            <Label htmlFor={labelFieldId}>Name</Label>
             <Input
               id={labelFieldId}
               value={label}
