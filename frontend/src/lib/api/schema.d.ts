@@ -367,6 +367,30 @@ export interface paths {
         patch: operations["update_version_api_curriculum_versions__version_id__patch"];
         trace?: never;
     };
+    "/api/curriculum/versions/{version_id}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Tree
+         * @description Edit a version's tree in place: rename, add, reorder and soft-delete (ADR-050).
+         *
+         *     The body is the whole tree as it should now be. A row that is no longer listed is hidden, not
+         *     removed, so anything that points at it still resolves. The version's status is unchanged, so
+         *     editing the active taxonomy changes what the product uses immediately.
+         */
+        put: operations["update_tree_api_curriculum_versions__version_id__tree_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/curriculum/versions/{version_id}/activate": {
         parameters: {
             query?: never;
@@ -2141,9 +2165,13 @@ export interface components {
          *     a professor works through a proposal item by item, so each item carries its
          *     own review status. Everything the proposer writes starts at ``PROPOSED``;
          *     nothing is ever persisted as though it had already been reviewed.
+         *
+         *     ``DELETED`` is not a verdict on a proposal: it is how a professor removes a topic
+         *     or subtopic from a taxonomy that is already in use (ADR-050). The row stays, so
+         *     that anything pointing at it still resolves, and a tree read no longer includes it.
          * @enum {string}
          */
-        CurriculumItemStatus: "proposed" | "accepted" | "edited" | "rejected";
+        CurriculumItemStatus: "proposed" | "accepted" | "edited" | "rejected" | "deleted";
         /** CurriculumListResponse */
         CurriculumListResponse: {
             /** Versions */
@@ -2199,8 +2227,8 @@ export interface components {
          * CurriculumVersionLabelUpdate
          * @description A professor's edit to a curriculum version's label.
          *
-         *     The tree is declared by the uploaded document and is never edited here, and
-         *     neither is the version's status: which taxonomy the product is grounded in
+         *     The tree is edited through ``PUT .../tree`` (ADR-050) and is never changed here,
+         *     and neither is the version's status: which taxonomy the product is grounded in
          *     changes by uploading one, not by editing a row (ADR-021).
          */
         CurriculumVersionLabelUpdate: {
@@ -4054,6 +4082,52 @@ export interface components {
             answered_count: number;
         };
         /**
+         * TreeSubtopic
+         * @description One subtopic as the professor now wants it. ``id`` is absent for a new one.
+         */
+        TreeSubtopic: {
+            /** Id */
+            id?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /**
+         * TreeTopic
+         * @description One topic as the professor now wants it, with its subtopics in the order they should read.
+         */
+        TreeTopic: {
+            /** Id */
+            id?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Subtopics */
+            subtopics: components["schemas"]["TreeSubtopic"][];
+        };
+        /**
+         * TreeUpdate
+         * @description The whole tree of a version as it should be after the edit, and its label.
+         *
+         *     The size limits here are deliberately looser than the schema's: they only stop an absurd body
+         *     from being read, and the real limits are applied by the taxonomy document, so that the
+         *     refusal reads exactly as an upload's would.
+         */
+        TreeUpdate: {
+            /** Label */
+            label: string;
+            /** Topics */
+            topics: components["schemas"]["TreeTopic"][];
+        };
+        /**
          * TrendPointOut
          * @description One judge panel's agreement record.
          */
@@ -4804,6 +4878,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CurriculumVersionLabelUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_tree_api_curriculum_versions__version_id__tree_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TreeUpdate"];
             };
         };
         responses: {

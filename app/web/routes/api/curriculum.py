@@ -22,7 +22,9 @@ from app.curriculum import (
     SCHEMA_VERSION,
     SUPPORTED_EXTENSIONS,
     CurriculumLibraryService,
+    CurriculumTreeService,
     TaxonomyImportService,
+    TreeUpdate,
     example_json,
     extraction_metadata,
     proposal_warnings,
@@ -161,6 +163,25 @@ def update_version(
     """Rename a curriculum version. Its status and its tree are unchanged."""
     CurriculumLibraryService(session).update_version_label(version_id, label=update.label)
     session.commit()
+    return get_version(session, version_id)
+
+
+@router.put("/versions/{version_id}/tree", response_model=CurriculumVersionDetail)
+def update_tree(session: DbSession, version_id: int, update: TreeUpdate) -> CurriculumVersionDetail:
+    """Edit a version's tree in place: rename, add, reorder and soft-delete (ADR-050).
+
+    The body is the whole tree as it should now be. A row that is no longer listed is hidden, not
+    removed, so anything that points at it still resolves. The version's status is unchanged, so
+    editing the active taxonomy changes what the product uses immediately.
+    """
+    try:
+        CurriculumTreeService(session).apply(version_id, update)
+    except Exception:
+        session.rollback()
+        raise
+    session.commit()
+    # The session keeps what it loaded across a commit, and the tree was just rewritten under it.
+    session.expire_all()
     return get_version(session, version_id)
 
 

@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
 )
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -265,10 +266,24 @@ class CurriculumVersionRow(TimestampMixin, Base):
         "warnings_json", JsonList, default=list, nullable=True
     )
 
+    #: The topics a professor can see: every one that has not been soft-deleted (ADR-050).
+    #: Reading and appending go through this, so nothing that walks a tree needs to know that
+    #: deletion exists.
     topics: Mapped[list[TopicRow]] = relationship(
         back_populates="curriculum_version",
         cascade="all, delete-orphan",
         order_by="TopicRow.position",
+        primaryjoin=lambda: and_(
+            CurriculumVersionRow.id == TopicRow.curriculum_version_id,
+            TopicRow.review_status != CurriculumItemStatus.DELETED,
+        ),
+    )
+    #: Every topic row, deleted ones included. Read-only: it exists for the two jobs that must
+    #: see hidden rows, restoring one that is added back and removing a version for good.
+    all_topics: Mapped[list[TopicRow]] = relationship(
+        viewonly=True,
+        order_by="TopicRow.position",
+        primaryjoin="CurriculumVersionRow.id == TopicRow.curriculum_version_id",
     )
 
 
@@ -294,10 +309,21 @@ class TopicRow(Base):
     )
 
     curriculum_version: Mapped[CurriculumVersionRow] = relationship(back_populates="topics")
+    #: The subtopics not soft-deleted (ADR-050); see ``CurriculumVersionRow.topics``.
     subtopics: Mapped[list[SubtopicRow]] = relationship(
         back_populates="topic",
         cascade="all, delete-orphan",
         order_by="SubtopicRow.position",
+        primaryjoin=lambda: and_(
+            TopicRow.id == SubtopicRow.topic_id,
+            SubtopicRow.review_status != CurriculumItemStatus.DELETED,
+        ),
+    )
+    #: Every subtopic row, deleted ones included; read-only.
+    all_subtopics: Mapped[list[SubtopicRow]] = relationship(
+        viewonly=True,
+        order_by="SubtopicRow.position",
+        primaryjoin="TopicRow.id == SubtopicRow.topic_id",
     )
 
 

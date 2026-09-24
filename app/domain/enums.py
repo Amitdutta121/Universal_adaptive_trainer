@@ -136,12 +136,17 @@ class CurriculumItemStatus(StrEnum):
     a professor works through a proposal item by item, so each item carries its
     own review status. Everything the proposer writes starts at ``PROPOSED``;
     nothing is ever persisted as though it had already been reviewed.
+
+    ``DELETED`` is not a verdict on a proposal: it is how a professor removes a topic
+    or subtopic from a taxonomy that is already in use (ADR-050). The row stays, so
+    that anything pointing at it still resolves, and a tree read no longer includes it.
     """
 
     PROPOSED = "proposed"
     ACCEPTED = "accepted"
     EDITED = "edited"
     REJECTED = "rejected"
+    DELETED = "deleted"
 
 
 class ConceptConfidence(StrEnum):

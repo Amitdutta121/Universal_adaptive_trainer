@@ -6,7 +6,8 @@ Display decoders remain so existing database rows can still be rendered safely.
 Beside import sit the two things a version needs after it exists: the generated
 instruction that produces a valid document (:mod:`app.curriculum.authoring`), and
 the editing and removal of rows an import already wrote
-(:mod:`app.curriculum.library`). Neither proposes curriculum; both are ADR-046.
+(:mod:`app.curriculum.library`), and reshaping a version's tree in place with soft
+deletion (:mod:`app.curriculum.tree_editing`, ADR-050). None proposes curriculum.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from app.curriculum.taxonomy_schema import (
     SCHEMA_VERSION,
     parse_taxonomy_document,
 )
+from app.curriculum.tree_editing import CurriculumTreeService, TreeUpdate
 
 __all__ = [
     "ALL_FIELDS",
@@ -44,9 +46,11 @@ __all__ = [
     "SUPPORTED_EXTENSIONS",
     "TOPIC_FIELDS",
     "CurriculumLibraryService",
+    "CurriculumTreeService",
     "CurriculumUsage",
     "FieldLimit",
     "TaxonomyImportService",
+    "TreeUpdate",
     "example_json",
     "extraction_metadata",
     "parse_taxonomy_document",

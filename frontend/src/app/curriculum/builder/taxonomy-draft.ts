@@ -16,12 +16,16 @@
 
 export interface DraftSubtopic {
   id: string;
+  /** The saved row this one is, when it came from a saved taxonomy. Absent for a new one. */
+  serverId?: number;
   name: string;
   description: string;
 }
 
 export interface DraftTopic {
   id: string;
+  /** The saved row this one is, when it came from a saved taxonomy. Absent for a new one. */
+  serverId?: number;
   name: string;
   description: string;
   subtopics: DraftSubtopic[];
@@ -221,26 +225,31 @@ export function emptyDraft(): Draft {
 
 /** The shape of a saved version's tree that a draft is made from (the API's `TopicOut`, structurally). */
 interface VersionTopic {
+  id?: number;
   name: string;
   description?: string | null;
-  subtopics: { name: string; description?: string | null }[];
+  subtopics: { id?: number; name: string; description?: string | null }[];
 }
 
 /**
- * A draft holding a copy of a saved taxonomy, to edit and save as a new version.
+ * A draft holding a saved taxonomy, to edit and save back to it or as a new version.
  *
- * Ids are fresh: a draft row is a client-side key, never the saved row's id, because saving
- * creates new rows and the two must not be confused. Missing descriptions become empty text.
+ * A draft row's own `id` is a client-side key and is always fresh. The saved row it came from is
+ * remembered separately as `serverId`, which is what lets a save tell the server "this is the
+ * same row, renamed" rather than "delete that and add this". Missing descriptions become empty
+ * text.
  */
 export function draftFromVersion(label: string, topics: readonly VersionTopic[]): Draft {
   return {
     label,
     topics: topics.map((topic) => ({
       id: newId("topic"),
+      ...(topic.id === undefined ? {} : { serverId: topic.id }),
       name: topic.name,
       description: topic.description ?? "",
       subtopics: topic.subtopics.map((subtopic) => ({
         id: newId("sub"),
+        ...(subtopic.id === undefined ? {} : { serverId: subtopic.id }),
         name: subtopic.name,
         description: subtopic.description ?? "",
       })),
@@ -281,6 +290,27 @@ export function toTaxonomyDocument(draft: Draft, schemaVersion: string) {
       name: topic.name.trim(),
       description: topic.description.trim(),
       subtopics: topic.subtopics.map((subtopic) => ({
+        name: subtopic.name.trim(),
+        description: subtopic.description.trim(),
+      })),
+    })),
+  };
+}
+
+/**
+ * The edit that brings a saved taxonomy to this draft (`PUT .../tree`): the whole tree, each row
+ * carrying the saved id it came from, or none if it is new. Names are trimmed as the document's
+ * are; what makes a tree valid is still the server's to say.
+ */
+export function toTreeUpdate(draft: Draft) {
+  return {
+    label: draft.label.trim(),
+    topics: draft.topics.map((topic) => ({
+      id: topic.serverId ?? null,
+      name: topic.name.trim(),
+      description: topic.description.trim(),
+      subtopics: topic.subtopics.map((subtopic) => ({
+        id: subtopic.serverId ?? null,
         name: subtopic.name.trim(),
         description: subtopic.description.trim(),
       })),

@@ -19,7 +19,13 @@ import {
 } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/env";
 import { ApiError, api, unwrap } from "./client";
-import type { QuestionStatus, QuestionType, Schemas, TypeInstructionListResponse } from "./types";
+import type {
+  QuestionStatus,
+  QuestionType,
+  Schemas,
+  TreeUpdate,
+  TypeInstructionListResponse,
+} from "./types";
 
 type ChunkGenerationSpec = Schemas["ChunkGenerationSpec"];
 
@@ -629,6 +635,31 @@ export function useImportTaxonomy() {
       client.invalidateQueries({ queryKey: qk.curriculum.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
       // Coverage is computed against the approved taxonomy, so its grid changes.
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+    },
+  });
+}
+
+/**
+ * Edit a version's tree in place (ADR-050): rename, add, reorder, and hide what is left out.
+ *
+ * The body is the whole tree as it should now be, each row carrying the id it has. The version
+ * keeps its status, so editing the active taxonomy changes what generation and coverage use.
+ */
+export function useUpdateCurriculumTree() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ versionId, body }: { versionId: number; body: TreeUpdate }) =>
+      unwrap(
+        api.PUT("/api/curriculum/versions/{version_id}/tree", {
+          params: { path: { version_id: versionId } },
+          body,
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.curriculum.all });
+      client.invalidateQueries({ queryKey: qk.system.counts() });
+      // Coverage is computed against the tree, so its grid changes.
       client.invalidateQueries({ queryKey: qk.coverage.all });
     },
   });

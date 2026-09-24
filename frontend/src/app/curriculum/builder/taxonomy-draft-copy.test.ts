@@ -5,6 +5,7 @@ import {
   draftSignature,
   emptyDraft,
   findProblem,
+  toTreeUpdate,
 } from "./taxonomy-draft";
 import { sampleDraft } from "./taxonomy-draft.fixtures";
 import { parseStoredDraft } from "./taxonomy-draft-storage";
@@ -51,6 +52,75 @@ describe("draftFromVersion", () => {
 
   it("produces a draft that passes the same 'finished' check as one typed by hand", () => {
     expect(findProblem(draftFromVersion("Intro (copy)", TREE))).toBeNull();
+  });
+});
+
+describe("editing a saved taxonomy in place", () => {
+  const SAVED = [
+    {
+      id: 10,
+      name: "Loops",
+      description: null,
+      subtopics: [
+        { id: 11, name: "for loops", description: null },
+        { id: 12, name: "while loops", description: "Until a condition fails." },
+      ],
+    },
+  ];
+
+  it("remembers which saved row each draft row came from, apart from its own key", () => {
+    const draft = draftFromVersion("Intro", SAVED);
+
+    expect(draft.topics[0]?.serverId).toBe(10);
+    expect(draft.topics[0]?.subtopics.map((s) => s.serverId)).toEqual([11, 12]);
+    expect(draft.topics[0]?.id).not.toBe("10");
+  });
+
+  it("leaves rows of a hand-built draft without a saved id", () => {
+    expect(sampleDraft().topics.every((t) => t.serverId === undefined)).toBe(true);
+    expect(draftFromVersion("A", TREE).topics[0]?.serverId).toBeUndefined();
+  });
+
+  it("describes the whole tree for the server: saved ids kept, new rows without one, text trimmed", () => {
+    const draft = draftFromVersion("  Intro  ", SAVED);
+    draft.topics[0]?.subtopics.push({ id: "new-sub", name: " ranges ", description: "" });
+    draft.topics.push({ id: "new-topic", name: "Functions", description: "", subtopics: [] });
+
+    expect(toTreeUpdate(draft)).toEqual({
+      label: "Intro",
+      topics: [
+        {
+          id: 10,
+          name: "Loops",
+          description: "",
+          subtopics: [
+            { id: 11, name: "for loops", description: "" },
+            { id: 12, name: "while loops", description: "Until a condition fails." },
+            { id: null, name: "ranges", description: "" },
+          ],
+        },
+        { id: null, name: "Functions", description: "", subtopics: [] },
+      ],
+    });
+  });
+
+  it("changes the draft's signature when a saved row is only renamed", () => {
+    const before = draftFromVersion("Intro", SAVED);
+    const after = structuredClone(before);
+    (after.topics[0] as { name: string }).name = "Iteration";
+
+    expect(draftSignature(after)).not.toBe(draftSignature(before));
+  });
+
+  it("keeps saved ids through storage, and refuses a stored id that is not a number", () => {
+    const draft = draftFromVersion("Intro", SAVED);
+    const stored = (d: unknown) =>
+      parseStoredDraft(JSON.stringify({ savedAt: "2026-01-01T00:00:00Z", draft: d, origin: null }));
+
+    expect(stored(draft)?.draft.topics[0]?.serverId).toBe(10);
+    const tampered = structuredClone(draft) as unknown as { topics: { serverId: unknown }[] };
+    for (const topic of tampered.topics) topic.serverId = "10; drop";
+    expect(stored(tampered)).toBeNull();
   });
 });
 

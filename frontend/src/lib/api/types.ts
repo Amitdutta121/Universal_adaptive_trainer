@@ -60,6 +60,7 @@ export type CurriculumVersionSummary = Schemas["CurriculumVersionSummary"];
 export type CurriculumVersionDetail = Schemas["CurriculumVersionDetail"];
 export type CurriculumVersionUsage = Schemas["CurriculumVersionUsage"];
 export type TaxonomyDocumentGuide = Schemas["TaxonomyDocumentGuide"];
+export type TreeUpdate = Schemas["TreeUpdate"];
 export type TopicOut = Schemas["TopicOut"];
 export type SubtopicSummary = Schemas["SubtopicSummary"];
 export type SubtopicDetail = Schemas["SubtopicDetail"];

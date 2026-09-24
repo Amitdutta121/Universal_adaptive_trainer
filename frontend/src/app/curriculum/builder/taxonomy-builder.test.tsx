@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,6 +8,7 @@ import { sampleDraft } from "./taxonomy-draft.fixtures";
 import { loadDrafts, saveDraft } from "./taxonomy-draft-storage";
 
 const mutateAsync = vi.fn();
+const updateAsync = vi.fn();
 let approved: { data: unknown } = { data: undefined };
 
 vi.mock("sonner", () => ({
@@ -26,6 +27,12 @@ vi.mock("@/lib/api/queries", () => ({
   }),
   useApprovedCurriculum: () => approved,
   useImportTaxonomy: () => ({ mutateAsync, reset: vi.fn(), isPending: false, error: null }),
+  useUpdateCurriculumTree: () => ({
+    mutateAsync: updateAsync,
+    reset: vi.fn(),
+    isPending: false,
+    error: null,
+  }),
 }));
 
 const APPROVED = {
@@ -53,22 +60,24 @@ function renderScreen(source: BuilderSource | null = null) {
   return { ...view, load: (next: BuilderSource) => view.rerender(ui(next)) };
 }
 
-/** A copy of a saved taxonomy, as the page hands it to the builder. */
+/** A saved taxonomy, as the page hands it to the builder: its rows keep the ids they have. */
 const copyOf = (id: number, label: string): BuilderSource => ({
   origin: { id, label },
-  draft: draftFromVersion(`${label} (copy)`, [
+  draft: draftFromVersion(label, [
     {
+      id: 100,
       name: "Loops",
       description: null,
       subtopics: [
-        { name: "for loops", description: "Iterating." },
-        { name: "while loops", description: null },
+        { id: 101, name: "for loops", description: "Iterating." },
+        { id: 102, name: "while loops", description: null },
       ],
     },
     {
+      id: 200,
       name: "Functions",
       description: "Reusable.",
-      subtopics: [{ name: "Defining", description: null }],
+      subtopics: [{ id: 201, name: "Defining", description: null }],
     },
   ]),
 });
@@ -86,6 +95,7 @@ beforeEach(() => {
   window.localStorage.clear();
   for (const fn of Object.values(callbacks)) fn.mockReset();
   mutateAsync.mockReset();
+  updateAsync.mockReset();
   approved = { data: undefined };
 });
 
@@ -213,16 +223,17 @@ describe("TaxonomyBuilder", () => {
     expect(screen.getByLabelText("Search the outline")).toHaveFocus();
   });
 
-  describe("editing a copy of a saved taxonomy", () => {
-    it("fills the builder with the copy and says what saving will do", async () => {
+  describe("editing a saved taxonomy", () => {
+    it("fills the builder with the taxonomy and offers both ways of saving", async () => {
       renderScreen(copyOf(3, "Intro Python"));
 
-      expect(await screen.findByLabelText("Taxonomy name")).toHaveValue("Intro Python (copy)");
-      expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Intro Python");
+      expect(await screen.findByLabelText("Taxonomy name")).toHaveValue("Intro Python");
+      expect(screen.getByText(/^Editing/)).toHaveTextContent("Intro Python");
       const tree = screen.getByRole("tree");
       expect(within(tree).getByText("Loops")).toBeInTheDocument();
       expect(within(tree).getByText("for loops")).toBeInTheDocument();
       expect(within(tree).getByText("Functions")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Save as new version" })).toBeInTheDocument();
     });
 
@@ -255,7 +266,7 @@ describe("TaxonomyBuilder", () => {
       await waitFor(() => {
         const stored = loadDrafts().find((d) => d.key === "v3");
         expect(stored?.origin).toEqual({ id: 3, label: "Intro Python" });
-        expect(stored?.draft.label).toBe("Intro Python (copy) v2");
+        expect(stored?.draft.label).toBe("Intro Python v2");
       });
     });
 
@@ -263,10 +274,10 @@ describe("TaxonomyBuilder", () => {
       renderScreen(resumed(sampleDraft(), { id: 9, label: "Nine" }));
 
       expect(await screen.findByText("Unsaved draft restored")).toBeInTheDocument();
-      expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Nine");
+      expect(screen.getByText(/^Editing/)).toHaveTextContent("Nine");
     });
 
-    it("saves the copy as a new version, sending the edited document and not the original's", async () => {
+    it("saves as a new version, sending the edited document and not the original's", async () => {
       mutateAsync.mockResolvedValue({
         version: { id: 11, label: "Renamed" },
         topic_count: 2,
@@ -287,6 +298,119 @@ describe("TaxonomyBuilder", () => {
       expect(sent.topics.map((t: { name: string }) => t.name)).toEqual(["Loops", "Functions"]);
       expect(sent.topics[0].subtopics[1]).toEqual({ name: "while loops", description: "" });
       await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+      expect(updateAsync).not.toHaveBeenCalled();
+    });
+
+    it("does not send a copy out under the very name it was opened with", async () => {
+      mutateAsync.mockResolvedValue({
+        version: { id: 11, label: "Intro Python (copy)" },
+        topic_count: 2,
+        subtopic_count: 3,
+      });
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+
+      await user.click(screen.getByRole("button", { name: "Save as new version" }));
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+      const [[{ file }]] = mutateAsync.mock.calls as [[{ file: File }]];
+      expect(JSON.parse(await file.text()).label).toBe("Intro Python (copy)");
+    });
+
+    it("saves changes to the same taxonomy in place, with the ids it already has and no confirmation", async () => {
+      approved = APPROVED;
+      updateAsync.mockResolvedValue({
+        version: { id: 3, label: "Intro Python" },
+        topic_count: 1,
+        subtopic_count: 2,
+      });
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+      const tree = screen.getByRole("tree");
+      await user.click(within(tree).getByRole("button", { name: "Remove topic Functions" }));
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(updateAsync).toHaveBeenCalledTimes(1));
+      expect(mutateAsync).not.toHaveBeenCalled();
+      expect(screen.queryByText("Make this the active taxonomy?")).not.toBeInTheDocument();
+      const [[{ versionId, body }]] = updateAsync.mock.calls as [
+        [{ versionId: number; body: { label: string; topics: { id: number | null; name: string }[] } }],
+      ];
+      expect(versionId).toBe(3);
+      expect(body.label).toBe("Intro Python");
+      // Functions is left out, which is how the server knows to hide it.
+      expect(body.topics.map((t) => [t.id, t.name])).toEqual([[100, "Loops"]]);
+      await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+      expect(loadDrafts()).toEqual([]);
+    });
+
+    it("sends one edit however fast Save changes is clicked", async () => {
+      let finish: (value: unknown) => void = () => {};
+      updateAsync.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+      const button = screen.getByRole("button", { name: "Save changes" });
+
+      // Both clicks land before React has re-rendered the button as disabled.
+      fireEvent.click(button);
+      fireEvent.click(button);
+      await user.click(button);
+
+      expect(updateAsync).toHaveBeenCalledTimes(1);
+      finish({ version: { id: 3, label: "Intro Python" }, topic_count: 2, subtopic_count: 3 });
+      await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+    });
+
+    it("sends a topic added while editing without an id, so the server creates it", async () => {
+      updateAsync.mockResolvedValue({
+        version: { id: 3, label: "Intro Python" },
+        topic_count: 3,
+        subtopic_count: 4,
+      });
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await screen.findByLabelText("Taxonomy name");
+      await user.click(screen.getAllByRole("button", { name: /^Add topic$/ })[0] as HTMLElement);
+      await user.type(await screen.findByLabelText("Topic name"), "Classes");
+      await user.click(screen.getAllByRole("button", { name: /Add subtopic/ }).at(-1) as HTMLElement);
+      await user.type(await screen.findByLabelText("Subtopic 1 name"), "Methods");
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(updateAsync).toHaveBeenCalledTimes(1));
+      const [[{ body }]] = updateAsync.mock.calls as [
+        [{ body: { topics: { id: number | null; name: string; subtopics: { id: number | null }[] }[] } }],
+      ];
+      const added = body.topics.find((t) => t.name === "Classes");
+      expect(added?.id).toBeNull();
+      expect(added?.subtopics.map((s) => s.id)).toEqual([null]);
+      expect(body.topics.filter((t) => t.id !== null).map((t) => t.id)).toEqual([100, 200]);
+    });
+
+    it("keeps the draft when the in-place save is refused", async () => {
+      updateAsync.mockRejectedValue(new Error("refused"));
+      const user = userEvent.setup();
+      renderScreen(copyOf(3, "Intro Python"));
+      await user.type(await screen.findByLabelText("Taxonomy name"), " v2");
+      await waitFor(() => expect(loadDrafts().some((d) => d.key === "v3")).toBe(true));
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(updateAsync).toHaveBeenCalledTimes(1));
+      expect(callbacks.onSaved).not.toHaveBeenCalled();
+      expect(loadDrafts().some((d) => d.key === "v3")).toBe(true);
+    });
+
+    it("offers a new taxonomy only Save taxonomy: there is nothing to edit in place", async () => {
+      renderScreen(resumed());
+      await screen.findByLabelText("Taxonomy name");
+
+      expect(screen.getByRole("button", { name: "Save taxonomy" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
     });
 
     it("replaces the previous draft completely when another copy is loaded", async () => {
@@ -299,8 +423,8 @@ describe("TaxonomyBuilder", () => {
 
       view.load(copyOf(4, "Other"));
 
-      expect(await screen.findByDisplayValue("Other (copy)")).toBeInTheDocument();
-      expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Other");
+      expect(await screen.findByDisplayValue("Other")).toBeInTheDocument();
+      expect(screen.getByText(/^Editing/)).toHaveTextContent("Other");
       expect(screen.getByLabelText("Search the outline")).toHaveValue("");
       expect(within(screen.getByRole("tree")).getByText("Functions")).toBeInTheDocument();
       // The removal made on the previous draft cannot be "undone" into this one.

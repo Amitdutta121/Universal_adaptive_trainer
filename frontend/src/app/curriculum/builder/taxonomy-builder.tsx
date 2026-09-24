@@ -6,19 +6,19 @@
  * curriculum page opens from its table (a title bar with the name, the two panes, a
  * bar of actions), so it sizes itself to the height it is given and scrolls inside.
  *
- * Saving serialises the draft to the taxonomy document and sends it through the
- * existing `POST /curriculum/versions` (`useImportTaxonomy`). This screen holds no
- * validation rules of its own beyond "finished": the backend owns what a valid
- * taxonomy is, duplicate names included, and its refusal is shown as it words it.
- * The document is a new version, never an edit of an existing one (ADR-021/046). A
- * saved taxonomy can be opened here as a copy (`source`); saving still creates a new
- * version and leaves the one it was opened from untouched.
+ * A new taxonomy is saved by serialising the draft to the taxonomy document and sending it
+ * through the existing `POST /curriculum/versions` (`useImportTaxonomy`). A saved taxonomy
+ * opened here (`source`) is saved two ways: "Save changes" edits it in place
+ * (`PUT /curriculum/versions/{id}/tree`, `useUpdateCurriculumTree`; what was removed is
+ * soft-deleted, ADR-050), and "Save as new version" posts the document and leaves it as it was.
+ * This screen holds no validation rules of its own beyond "finished": the backend owns what a
+ * valid taxonomy is, duplicate names included, and its refusal is shown as it words it.
  * Input limits are read from the served field reference, not typed here.
  *
  * The draft is kept in this browser while it has unsaved changes, so a reload or a
  * refused save loses nothing. It has its own slot (per saved taxonomy, or "new"), so
- * opening or previewing something else never touches it. A copy that has not been
- * changed is not kept: there is nothing in it that the saved version does not hold.
+ * opening or previewing something else never touches it. A saved taxonomy that has not
+ * been changed is not kept: there is nothing in it that the saved version does not hold.
  * The builder never reads storage itself; the page hands it what to resume.
  *
  * Removal never asks "are you sure". It happens at once and can be undone three
@@ -71,6 +71,7 @@ import {
   useApprovedCurriculum,
   useImportTaxonomy,
   useTaxonomyDocumentGuide,
+  useUpdateCurriculumTree,
 } from "@/lib/api/queries";
 import type { CurriculumVersionDetail } from "@/lib/api/types";
 import { formatTimestamp, pluralise } from "@/lib/display";
@@ -81,6 +82,7 @@ import { MANUAL_TAXONOMY_FILENAME } from "../taxonomy-document";
 import type { NamedDocument } from "../taxonomy-refusal";
 import {
   countMatches,
+  copyLabel,
   countSubtopics,
   type Draft,
   type DraftProblem,
@@ -101,6 +103,7 @@ import {
   restoreRemoval,
   type Selection,
   toTaxonomyDocument,
+  toTreeUpdate,
 } from "./taxonomy-draft";
 import { clearDraft, type DraftOrigin, saveDraft } from "./taxonomy-draft-storage";
 
@@ -149,7 +152,7 @@ const ROW =
 const REMOVE =
   "size-5 shrink-0 text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
 
-/** What to put in the builder: a blank draft, or a copy of a saved taxonomy. A new object loads again. */
+/** What to put in the builder: a blank draft, or a saved taxonomy to edit. A new object loads again. */
 export interface BuilderSource {
   origin: DraftOrigin | null;
   draft: Draft;
@@ -195,6 +198,11 @@ export function TaxonomyBuilder({
   const guide = useTaxonomyDocumentGuide();
   const approved = useApprovedCurriculum();
   const importTaxonomy = useImportTaxonomy();
+  const updateTree = useUpdateCurriculumTree();
+  const saving = importTaxonomy.isPending || updateTree.isPending;
+  /** Set the moment a save starts: two clicks in one frame both see `saving` as false. */
+  const inFlight = useRef(false);
+  const saveError = updateTree.error ?? importTaxonomy.error;
   const limits = useMemo(() => limitsFromGuide(guide.data?.fields), [guide.data]);
 
   const [restored, setRestored] = useState<{ savedAt: string } | null>(null);
@@ -205,7 +213,7 @@ export function TaxonomyBuilder({
   const [sentDocument, setSentDocument] = useState<NamedDocument | null>(null);
   /** Whether something of this draft is currently kept in storage, so going back to clean forgets it. */
   const kept = useRef(false);
-  /** The saved taxonomy this draft is a copy of, if any. */
+  /** The saved taxonomy this draft was opened from, if any. */
   const [origin, setOrigin] = useState<DraftOrigin | null>(null);
   /** What the draft looked like when it was loaded; anything else is an unsaved change. */
   const [baseline, setBaseline] = useState(() => draftSignature(emptyDraft()));
@@ -239,9 +247,9 @@ export function TaxonomyBuilder({
     onDirtyChangeRef.current?.(dirty);
   }, [dirty]);
 
-  // Load what the page asks for: a blank draft, or a copy of a saved taxonomy. Everything that
+  // Load what the page asks for: a blank draft, or a saved taxonomy to edit. Everything that
   // belonged to the previous draft (selection, search, messages, undo history) goes with it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `importTaxonomy` changes every render; only a new source should reload.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the mutations change every render; only a new source should reload.
   useEffect(() => {
     if (!source) return;
     setDoc({ draft: source.draft, undo: [] });
@@ -256,6 +264,7 @@ export function TaxonomyBuilder({
     setRestored(source.restoredAt ? { savedAt: source.restoredAt } : null);
     setSentDocument(null);
     importTaxonomy.reset();
+    updateTree.reset();
   }, [source]);
 
   const requestFocus = useCallback((target: NonNullable<FocusRequest>["target"]) => {
@@ -430,8 +439,13 @@ export function TaxonomyBuilder({
     setOrigin(null);
   };
 
-  const requestSave = () => {
+  /**
+   * Check the draft, then save it: "edit" writes to the saved taxonomy it came from, "create"
+   * makes a new version (the only way a new taxonomy is saved).
+   */
+  const requestSave = (mode: "edit" | "create") => {
     importTaxonomy.reset();
+    updateTree.reset();
     const found = findProblem(draft);
     setProblem(found);
     if (found) {
@@ -449,17 +463,52 @@ export function TaxonomyBuilder({
       }
       return;
     }
-    // A valid save becomes the live taxonomy at once (ADR-021), so say so first when there is one to replace.
+    if (mode === "edit") {
+      void saveChanges();
+      return;
+    }
+    // A new version becomes the live taxonomy at once (ADR-021), so say so first when there is one to replace.
     if (approved.data) setConfirmOpen(true);
     else void save();
   };
 
-  const save = async () => {
-    if (!taxonomyDocument) return;
+  /** Edit the saved taxonomy this draft came from. It keeps its status, so nothing is replaced. */
+  const saveChanges = async () => {
+    if (!origin || inFlight.current) return;
+    inFlight.current = true;
     setSentDocument(taxonomyDocument);
     try {
+      const detail = await updateTree.mutateAsync({
+        versionId: origin.id,
+        body: toTreeUpdate(draft),
+      });
+      clearDraft(origin);
+      kept.current = false;
+      toast.success(`Saved changes to “${detail.version.label}”`, {
+        description:
+          `${pluralise(detail.topic_count, "topic")} and ` +
+          `${pluralise(detail.subtopic_count, "subtopic")}.`,
+      });
+      onSaved?.(detail);
+    } catch {
+      // Rendered from `updateTree.error` with the backend's own wording; the draft is untouched.
+    } finally {
+      inFlight.current = false;
+    }
+  };
+
+  const save = async () => {
+    if (!taxonomyDocument || inFlight.current) return;
+    inFlight.current = true;
+    // A copy under the name it was opened with would be indistinguishable in the list.
+    const named =
+      origin && taxonomyDocument.label === origin.label
+        ? { ...taxonomyDocument, label: copyLabel(taxonomyDocument.label) }
+        : taxonomyDocument;
+    setSentDocument(named);
+    try {
       const detail = await importTaxonomy.mutateAsync({
-        file: fileFromPastedJson(JSON.stringify(taxonomyDocument), MANUAL_TAXONOMY_FILENAME),
+        file: fileFromPastedJson(JSON.stringify(named), MANUAL_TAXONOMY_FILENAME),
       });
       // Only now is the draft dropped: a refused save leaves it exactly as typed.
       clearDraft(origin);
@@ -475,6 +524,8 @@ export function TaxonomyBuilder({
     } catch {
       // Rendered from `importTaxonomy.error` with the backend's own wording; the draft is untouched.
       setConfirmOpen(false);
+    } finally {
+      inFlight.current = false;
     }
   };
 
@@ -553,9 +604,9 @@ export function TaxonomyBuilder({
         <p className="text-muted-foreground text-xs">
           {origin ? (
             <>
-              Editing a copy of{" "}
-              <span className="font-medium text-foreground">“{origin.label}”</span>. Saving creates
-              a new version and leaves it unchanged.
+              Editing{" "}
+              <span className="font-medium text-foreground">“{origin.label}”</span>. Save changes
+              updates it; Save as new version leaves it as it is.
             </>
           ) : (
             "New taxonomy"
@@ -603,9 +654,9 @@ export function TaxonomyBuilder({
             <AlertDescription>{problem.message}</AlertDescription>
           </Alert>
         ) : null}
-        {importTaxonomy.error ? (
+        {saveError ? (
           <TaxonomyRefusalAlert
-            error={importTaxonomy.error}
+            error={saveError}
             doc={sentDocument}
             heading="This taxonomy was not saved. Please fix the following:"
           />
@@ -1123,9 +1174,24 @@ export function TaxonomyBuilder({
 
       {/* Actions on the left, so the removal toast (bottom right) never covers Save. */}
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/30 px-6 py-3">
-        <Button onClick={requestSave} disabled={!taxonomyDocument || importTaxonomy.isPending}>
-          {importTaxonomy.isPending ? "Saving…" : origin ? "Save as new version" : "Save taxonomy"}
-        </Button>
+        {origin ? (
+          <>
+            <Button onClick={() => requestSave("edit")} disabled={!taxonomyDocument || saving}>
+              {updateTree.isPending ? "Saving…" : "Save changes"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => requestSave("create")}
+              disabled={!taxonomyDocument || saving}
+            >
+              {importTaxonomy.isPending ? "Saving…" : "Save as new version"}
+            </Button>
+          </>
+        ) : (
+          <Button onClick={() => requestSave("create")} disabled={!taxonomyDocument || saving}>
+            {importTaxonomy.isPending ? "Saving…" : "Save taxonomy"}
+          </Button>
+        )}
         <Button variant="ghost" disabled={!taxonomyDocument} onClick={() => setPreviewOpen(true)}>
           Preview document
         </Button>
@@ -1168,7 +1234,7 @@ export function TaxonomyBuilder({
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => void save()} disabled={importTaxonomy.isPending}>
+            <Button onClick={() => void save()} disabled={saving}>
               {importTaxonomy.isPending ? "Saving…" : "Save and make active"}
             </Button>
           </DialogFooter>

@@ -29,7 +29,7 @@ import {
 } from "./curriculum-display";
 
 const STATUSES: CurriculumStatus[] = ["approved", "superseded", "proposed", "under_review"];
-const ITEM_STATUSES: CurriculumItemStatus[] = ["accepted", "edited", "proposed", "rejected"];
+const ITEM_STATUSES: CurriculumItemStatus[] = ["accepted", "edited", "proposed", "rejected", "deleted"];
 
 describe("status maps", () => {
   it("covers every version status the backend can send", () => {

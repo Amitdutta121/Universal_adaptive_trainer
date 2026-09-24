@@ -12,11 +12,12 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import NamedTuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.domain.enums import (
     BookStatus,
+    CurriculumItemStatus,
     CurriculumStatus,
     Difficulty,
     JudgeMetricId,
@@ -201,6 +202,15 @@ class BookStructureRepository:
         self._session.flush()
 
 
+def _visible(*rows: type[TopicRow] | type[SubtopicRow]) -> list[ColumnElement[bool]]:
+    """Conditions leaving out soft-deleted topics and subtopics (ADR-050).
+
+    The relationships ``version.topics`` and ``topic.subtopics`` already do; this is for
+    the few queries that enumerate a tree without going through them.
+    """
+    return [row.review_status != CurriculumItemStatus.DELETED for row in rows]
+
+
 class CurriculumRepository:
     """Curriculum versions and their Topic -> Subtopic trees."""
 
@@ -336,7 +346,7 @@ class CurriculumRepository:
             select(func.count())
             .select_from(SubtopicRow)
             .join(TopicRow, SubtopicRow.topic_id == TopicRow.id)
-            .where(TopicRow.curriculum_version_id == version_id)
+            .where(TopicRow.curriculum_version_id == version_id, *_visible(TopicRow, SubtopicRow))
         )
         return self._session.scalar(stmt) or 0
 
@@ -353,7 +363,7 @@ class CurriculumRepository:
         stmt = (
             select(TopicRow.curriculum_version_id, func.count(SubtopicRow.id))
             .join(SubtopicRow, SubtopicRow.topic_id == TopicRow.id)
-            .where(TopicRow.curriculum_version_id.in_(ids))
+            .where(TopicRow.curriculum_version_id.in_(ids), *_visible(TopicRow, SubtopicRow))
             .group_by(TopicRow.curriculum_version_id)
         )
         return dict(self._session.execute(stmt).all())
@@ -398,14 +408,18 @@ class CurriculumRepository:
     def sibling_topic_names(self, version_id: int, *, exclude_topic_id: int) -> list[str]:
         """The names a topic in this version may not collide with once renamed."""
         stmt = select(TopicRow.name).where(
-            TopicRow.curriculum_version_id == version_id, TopicRow.id != exclude_topic_id
+            TopicRow.curriculum_version_id == version_id,
+            TopicRow.id != exclude_topic_id,
+            *_visible(TopicRow),
         )
         return list(self._session.scalars(stmt))
 
     def sibling_subtopic_names(self, topic_id: int, *, exclude_subtopic_id: int) -> list[str]:
         """The names a subtopic under this topic may not collide with once renamed."""
         stmt = select(SubtopicRow.name).where(
-            SubtopicRow.topic_id == topic_id, SubtopicRow.id != exclude_subtopic_id
+            SubtopicRow.topic_id == topic_id,
+            SubtopicRow.id != exclude_subtopic_id,
+            *_visible(SubtopicRow),
         )
         return list(self._session.scalars(stmt))
 
@@ -435,8 +449,12 @@ class CurriculumRepository:
         """
         stmt = (
             select(TopicRow.id, SubtopicRow.id)
-            .outerjoin(SubtopicRow, SubtopicRow.topic_id == TopicRow.id)
-            .where(TopicRow.curriculum_version_id == curriculum_version_id)
+            .outerjoin(
+                SubtopicRow,
+                (SubtopicRow.topic_id == TopicRow.id)
+                & (SubtopicRow.review_status != CurriculumItemStatus.DELETED),
+            )
+            .where(TopicRow.curriculum_version_id == curriculum_version_id, *_visible(TopicRow))
             .order_by(TopicRow.position, TopicRow.id, SubtopicRow.position, SubtopicRow.id)
         )
         ordered: dict[int, list[int]] = {}
@@ -454,7 +472,16 @@ class CurriculumRepository:
         enforce, so they are left pointing at rows that no longer exist -- counted
         and reported by :class:`app.curriculum.library.CurriculumLibraryService`
         before the caller decides, never silently repaired here.
+
+        Soft-deleted topics and subtopics (ADR-050) go too: the tree relationships leave them
+        out, so they would otherwise survive the version they belong to.
         """
+        for topic in version.all_topics:
+            for subtopic in topic.all_subtopics:
+                if subtopic.review_status is CurriculumItemStatus.DELETED:
+                    self._session.delete(subtopic)
+            if topic.review_status is CurriculumItemStatus.DELETED:
+                self._session.delete(topic)
         self._session.delete(version)
         self._session.flush()
 
