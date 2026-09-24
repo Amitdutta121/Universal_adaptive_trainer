@@ -38,6 +38,16 @@ describe("explainRefusal", () => {
     ).toEqual(["The list of topics: this needs at least one entry"]);
   });
 
+  it("says a rule about the whole document (no path) without a stray colon", () => {
+    // The server reports duplicate topic names with an empty path: `: Value error, duplicate topic name 'x'`.
+    expect(explainRefusal(": Value error, duplicate topic name 'sets'", doc)).toEqual([
+      "Duplicate topic name 'sets'",
+    ]);
+    expect(
+      explainRefusal(": Value error, duplicate topic name 'a'; topics.0.name: Field required", doc),
+    ).toEqual(["Duplicate topic name 'a'", "The name of topic 1 (“Lists”): this is required"]);
+  });
+
   it("keeps every problem, in order", () => {
     const out = explainRefusal(
       "topics.0.name: Field required; topics.1: Value error, duplicate subtopic name 'a'",

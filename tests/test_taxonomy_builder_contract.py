@@ -96,8 +96,8 @@ def _doc(**overrides: object) -> dict:
         ),
         pytest.param(
             lambda d: d["topics"].append({"name": "sets", "subtopics": [{"name": "x"}]}),
-            "Value error, duplicate topic name 'sets'",
-            id="duplicate-topic-names",
+            ": Value error, duplicate topic name 'sets'",
+            id="duplicate-topic-names-have-an-empty-path",
         ),
         pytest.param(
             lambda d: d["topics"][0]["subtopics"][1].update(name="x" * 301),

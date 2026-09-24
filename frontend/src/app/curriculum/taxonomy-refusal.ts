@@ -60,6 +60,8 @@ function describeProblem(message: string): string {
   return text;
 }
 
+const capitalised = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
 /** One sentence per problem the server reported, in the order it reported them. */
 export function explainRefusal(detail: string, doc?: NamedDocument | null): string[] {
   return detail
@@ -69,7 +71,11 @@ export function explainRefusal(detail: string, doc?: NamedDocument | null): stri
     .map((part) => {
       const at = part.indexOf(": ");
       if (at < 0) return part;
-      const where = describeLocation(part.slice(0, at), doc);
+      const path = part.slice(0, at);
+      // A rule about the whole document (two topics with the same name) has no path at all, so the
+      // server sends it as ": Value error, duplicate topic name 'x'". Say it without the stray colon.
+      if (path === "") return capitalised(describeProblem(part.slice(at + 2)));
+      const where = describeLocation(path, doc);
       if (!where) return part;
       return `${where}: ${describeProblem(part.slice(at + 2))}`;
     });
