@@ -61,6 +61,11 @@ export function parseStoredDraft(raw: string | null): StoredDraft | null {
   }
 }
 
+/** The saved row a draft row came from is a number when there is one; anything else is not ours. */
+function isOptionalId(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isInteger(value));
+}
+
 function checkStoredDraft(value: unknown): StoredDraft | null {
   try {
     if (!isRecord(value) || !isText(value.savedAt) || !isRecord(value.draft)) return null;
@@ -73,6 +78,7 @@ function checkStoredDraft(value: unknown): StoredDraft | null {
         !isText(topic.id) ||
         !isText(topic.name) ||
         !isText(topic.description) ||
+        !isOptionalId(topic.serverId) ||
         !Array.isArray(topic.subtopics)
       ) {
         return null;
@@ -82,7 +88,8 @@ function checkStoredDraft(value: unknown): StoredDraft | null {
           !isRecord(subtopic) ||
           !isText(subtopic.id) ||
           !isText(subtopic.name) ||
-          !isText(subtopic.description)
+          !isText(subtopic.description) ||
+          !isOptionalId(subtopic.serverId)
         ) {
           return null;
         }

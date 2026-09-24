@@ -592,8 +592,8 @@ class TaxonomyDocumentGuide(BaseModel):
 class CurriculumVersionLabelUpdate(BaseModel):
     """A professor's edit to a curriculum version's label.
 
-    The tree is declared by the uploaded document and is never edited here, and
-    neither is the version's status: which taxonomy the product is grounded in
+    The tree is edited through ``PUT .../tree`` (ADR-050) and is never changed here,
+    and neither is the version's status: which taxonomy the product is grounded in
     changes by uploading one, not by editing a row (ADR-021).
     """
 

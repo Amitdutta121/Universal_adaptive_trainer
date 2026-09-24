@@ -64,6 +64,12 @@ vi.mock("@/lib/api/queries", () => ({
     isPending: false,
     error: null,
   }),
+  useUpdateCurriculumTree: () => ({
+    mutateAsync: vi.fn(),
+    reset: vi.fn(),
+    isPending: false,
+    error: null,
+  }),
 }));
 
 const DETAIL = {
@@ -105,7 +111,7 @@ describe("CurriculumScreen", () => {
     expect(screen.queryByLabelText("Taxonomy name")).not.toBeInTheDocument();
   });
 
-  it("opens a row in the builder modal as a copy of that taxonomy", async () => {
+  it("opens a row in the builder modal, to edit in place or save as a new version", async () => {
     const user = userEvent.setup();
     renderScreen();
 
@@ -113,8 +119,8 @@ describe("CurriculumScreen", () => {
 
     const dialog = await modal();
     expect(fetchQuery).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["version", 1] }));
-    expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Older (copy)");
-    expect(within(dialog).getByText(/Editing a copy of/)).toHaveTextContent("Older");
+    expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Older");
+    expect(within(dialog).getByText(/^Editing/)).toHaveTextContent("Older");
     const tree = within(dialog).getByRole("tree");
     expect(within(tree).getByText("Loops")).toBeInTheDocument();
     expect(within(tree).getByText("while loops")).toBeInTheDocument();
@@ -164,7 +170,7 @@ describe("CurriculumScreen", () => {
 
     expect(await screen.findByText("Discard your changes?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(within(await modal()).getByLabelText("Taxonomy name")).toHaveValue("Older (copy) v2");
+    expect(within(await modal()).getByLabelText("Taxonomy name")).toHaveValue("Older v2");
   });
 
   it("drops the changes, and the kept draft, when told to discard", async () => {
@@ -204,7 +210,7 @@ describe("CurriculumScreen", () => {
       expect(
         await screen.findByText(/Unsaved taxonomy: “Introductory Python”/),
       ).toBeInTheDocument();
-      expect(screen.getByText(/A copy of “Older”/)).toBeInTheDocument();
+      expect(screen.getByText(/Changes to “Older”/)).toBeInTheDocument();
     });
 
     it("continues it in the builder, restored as it was", async () => {
@@ -216,7 +222,7 @@ describe("CurriculumScreen", () => {
       const dialog = await modal();
       expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Introductory Python");
       expect(within(dialog).getByText("Unsaved draft restored")).toBeInTheDocument();
-      expect(within(dialog).getByText(/Editing a copy of/)).toHaveTextContent("Older");
+      expect(within(dialog).getByText(/^Editing/)).toHaveTextContent("Older");
       expect(fetchQuery).not.toHaveBeenCalled();
     });
 
@@ -237,7 +243,7 @@ describe("CurriculumScreen", () => {
 
       await user.click(screen.getByText("Older"));
       const first = await modal();
-      expect(within(first).getByLabelText("Taxonomy name")).toHaveValue("Older (copy)");
+      expect(within(first).getByLabelText("Taxonomy name")).toHaveValue("Older");
       expect(within(first).queryByText("Unsaved draft restored")).not.toBeInTheDocument();
       expect(screen.queryByText(/Replace your unsaved/)).not.toBeInTheDocument();
 

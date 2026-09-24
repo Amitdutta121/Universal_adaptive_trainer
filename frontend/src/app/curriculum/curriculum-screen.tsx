@@ -62,7 +62,7 @@ import {
   TaxonomyBuilder,
   type TaxonomyBuilderHandle,
 } from "./builder/taxonomy-builder";
-import { copyLabel, draftFromVersion, emptyDraft } from "./builder/taxonomy-draft";
+import { draftFromVersion, emptyDraft } from "./builder/taxonomy-draft";
 import { clearDraft, loadDrafts, type SavedDraft } from "./builder/taxonomy-draft-storage";
 import { ApprovedVersionCard } from "./components/approved-version-card";
 import { CurriculumVersionsTable } from "./components/curriculum-versions-table";
@@ -175,7 +175,7 @@ export function CurriculumScreen() {
       setEditor({
         source: {
           origin: { id: target.id, label: detail.version.label },
-          draft: draftFromVersion(copyLabel(detail.version.label), detail.topics),
+          draft: draftFromVersion(detail.version.label, detail.topics),
         },
       });
     } catch {
@@ -228,7 +228,7 @@ export function CurriculumScreen() {
               <AlertTitle>Unsaved taxonomy: “{draft.draft.label || "Untitled"}”</AlertTitle>
               <AlertDescription>
                 {draft.origin
-                  ? `A copy of “${draft.origin.label}” you were editing`
+                  ? `Changes to “${draft.origin.label}” you were making`
                   : "A taxonomy you were building"}
                 , last edited {formatTimestamp(draft.savedAt)}.
               </AlertDescription>

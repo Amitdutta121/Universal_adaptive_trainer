@@ -48,6 +48,7 @@ export const CURRICULUM_ITEM_STATUS_LABEL: Record<CurriculumItemStatus, string> 
   edited: "edited",
   proposed: "proposed",
   rejected: "rejected",
+  deleted: "deleted",
 };
 
 /** `rejected` is the one genuinely negative value here. */
@@ -59,6 +60,7 @@ export const CURRICULUM_ITEM_STATUS_VARIANT: Record<
   edited: "outline",
   proposed: "outline",
   rejected: "destructive",
+  deleted: "outline",
 };
 
 export const CONFIDENCE_VARIANT: Record<
