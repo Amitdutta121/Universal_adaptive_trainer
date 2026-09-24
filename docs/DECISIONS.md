@@ -2017,20 +2017,24 @@ from the ids they were recorded against.
 
 **Decisions.**
 
-- **Two panes, with Import as a modal.** The curriculum page has the saved taxonomies on the left
-  (name, size, date, standing) and the builder on the right, under the active-taxonomy card. Importing
-  a document the professor already has is an **Import** button at the top right of the page header,
-  which opens a modal holding the same upload / paste form and the prompt, example and field
-  reference. It is not a tab or a page of its own; a successful import closes the modal, and a
-  refused one leaves it open with the text intact.
+- **The table is the page; the builder is a big modal opened from it.** The curriculum page shows the
+  saved taxonomies as a table (with the active taxonomy above it) and nothing editable. Choosing a row,
+  or its Preview button, opens a modal that takes most of the screen and holds the builder: the name
+  as its title, an outline with search on the left, the selected topic and its subtopics on the right,
+  and a bar of actions. **New taxonomy** opens the same modal blank. Importing a document the
+  professor already has is an **Import** button at the top right of the page header, which opens a
+  smaller modal holding the upload / paste form and the prompt, example and field reference. A
+  successful save or import closes its modal; a refused one leaves it open with the work intact.
 - **Choosing a saved taxonomy opens a copy of it in the builder.** The copy is a draft like any
   other, named "<label> (copy)", with a line saying what saving does. Saving creates a *new* version
   and leaves the one that was opened untouched, so this is not the structural edit ADR-046 refused:
   no endpoint can change a saved version's shape, and the new version has new rows. That is the
   consequence to keep in view: questions and student measurements recorded against the old version
-  stay with it, and the confirm before replacing the active taxonomy says so. An unchanged copy is
-  not kept in the browser (nothing in it that the saved version does not hold), and replacing a draft
-  that has unsaved changes asks first.
+  stay with it, and the confirm before replacing the active taxonomy says so.
+- **Unsaved work is never lost silently.** Closing the modal with changes asks first. Work left unsaved
+  by a reload is kept in the browser and offered back on the page (Continue editing / Discard), and
+  opening something else over it asks. An unchanged copy is not kept: it holds nothing the saved
+  version does not.
 - **The builder produces the document and nothing else.** `frontend/src/app/curriculum/builder/` edits a
   draft in the browser, serialises it with `toTaxonomyDocument`, and sends it through the existing
   `POST /api/curriculum/versions` (`useImportTaxonomy`). No endpoint, model or migration is added, so

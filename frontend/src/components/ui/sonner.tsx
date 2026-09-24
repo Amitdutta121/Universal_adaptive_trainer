@@ -34,6 +34,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          // A modal dialog switches pointer events off for everything outside it, toasts included, so
+          // an action on a toast (Undo) could not be clicked while one was open.
+          pointerEvents: "auto",
         } as React.CSSProperties
       }
       toastOptions={{

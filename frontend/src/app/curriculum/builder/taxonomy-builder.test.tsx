@@ -32,7 +32,7 @@ const APPROVED = {
   data: { version: { label: "Live taxonomy" }, topic_count: 4, subtopic_count: 11 },
 };
 
-const callbacks = { onDirtyChange: vi.fn(), onOriginChange: vi.fn(), onSaved: vi.fn() };
+const callbacks = { onDirtyChange: vi.fn(), onSaved: vi.fn() };
 
 function renderScreen(source: BuilderSource | null = null) {
   const ui = (next: BuilderSource | null) => (
@@ -220,7 +220,6 @@ describe("TaxonomyBuilder", () => {
       expect(within(tree).getByText("for loops")).toBeInTheDocument();
       expect(within(tree).getByText("Functions")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Save as new version" })).toBeInTheDocument();
-      expect(callbacks.onOriginChange).toHaveBeenCalledWith({ id: 3, label: "Intro Python" });
     });
 
     it("is not dirty until something changes, and not dirty again once it is changed back", async () => {
@@ -257,13 +256,12 @@ describe("TaxonomyBuilder", () => {
       });
     });
 
-    it("restores an edited copy on the next visit and tells the page which taxonomy it belongs to", async () => {
+    it("restores an edited copy on the next visit and says which taxonomy it belongs to", async () => {
       saveDraft(sampleDraft(), { id: 9, label: "Nine" });
       renderScreen();
 
       expect(await screen.findByText("Unsaved draft restored")).toBeInTheDocument();
       expect(screen.getByText(/Editing a copy of/)).toHaveTextContent("Nine");
-      expect(callbacks.onOriginChange).toHaveBeenCalledWith({ id: 9, label: "Nine" });
     });
 
     it("saves the copy as a new version, sending the edited document and not the original's", async () => {

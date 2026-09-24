@@ -18,9 +18,9 @@ const version = (id: number, label: string): CurriculumVersionSummary =>
     subtopic_count: 6,
   }) as CurriculumVersionSummary;
 
-function setup(selectedId: number | null = null) {
+function setup(openingId: number | null = null) {
   const handlers = {
-    onSelect: vi.fn(),
+    onOpen: vi.fn(),
     onActivate: vi.fn(),
     onEdit: vi.fn(),
     onDelete: vi.fn(),
@@ -31,8 +31,7 @@ function setup(selectedId: number | null = null) {
         versions={[version(2, "Newer"), version(1, "Older")]}
         approvedVersionId={2}
         activatingVersionId={null}
-        selectedId={selectedId}
-        openingId={null}
+        openingId={openingId}
         {...handlers}
       />
     </TooltipProvider>,
@@ -40,50 +39,72 @@ function setup(selectedId: number | null = null) {
   return handlers;
 }
 
+const bodyRows = () => screen.getAllByRole("row").slice(1);
+
 describe("CurriculumVersionsTable", () => {
-  it("lists each taxonomy with its size and its standing", () => {
+  it("shows every column of a taxonomy's record, with its standing", () => {
     setup();
 
-    const rows = screen.getAllByRole("row");
-    expect(rows).toHaveLength(2);
-    expect(within(rows[0] as HTMLElement).getByText("Newer")).toBeInTheDocument();
-    expect(within(rows[0] as HTMLElement).getByText(/3 topics · 6 subtopics/)).toBeInTheDocument();
-    expect(within(rows[0] as HTMLElement).getByText("active")).toBeInTheDocument();
-    expect(within(rows[1] as HTMLElement).getByText("replaced")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+      "#",
+      "Name",
+      "Status",
+      "Topics",
+      "Subtopics",
+      "Source",
+      "Created",
+      "Made active",
+      "",
+    ]);
+    const [newer, older] = bodyRows() as [HTMLElement, HTMLElement];
+    expect(within(newer).getByText("Newer")).toBeInTheDocument();
+    expect(within(newer).getByText("active")).toBeInTheDocument();
+    expect(within(newer).getByText("3")).toBeInTheDocument();
+    expect(within(newer).getByText("6")).toBeInTheDocument();
+    expect(within(older).getByText("replaced")).toBeInTheDocument();
   });
 
-  it("selects a row on click and on Enter or Space", async () => {
+  it("opens a row on click and on Enter or Space", async () => {
     const user = userEvent.setup();
-    const { onSelect } = setup();
+    const { onOpen } = setup();
 
     await user.click(screen.getByText("Older"));
-    expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ id: 1 }));
+    expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 1 }));
 
-    const newer = screen.getAllByRole("row")[0] as HTMLElement;
-    newer.focus();
+    (bodyRows()[0] as HTMLElement).focus();
     await user.keyboard("{Enter}");
-    expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ id: 2 }));
+    expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 2 }));
     await user.keyboard(" ");
-    expect(onSelect).toHaveBeenCalledTimes(3);
+    expect(onOpen).toHaveBeenCalledTimes(3);
   });
 
-  it("marks the open taxonomy as selected", () => {
+  it("opens a row from its Preview button, once", async () => {
+    const user = userEvent.setup();
+    const { onOpen } = setup();
+
+    await user.click(screen.getByRole("button", { name: "Preview Older" }));
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it("dims the row whose taxonomy is still being fetched", () => {
     setup(1);
 
-    const [newer, older] = screen.getAllByRole("row");
-    expect(newer).toHaveAttribute("aria-selected", "false");
-    expect(older).toHaveAttribute("aria-selected", "true");
+    const [newer, older] = bodyRows();
+    expect(older).toHaveClass("opacity-60");
+    expect(newer).not.toHaveClass("opacity-60");
   });
 
-  it("opens a row's actions without also selecting the row", async () => {
+  it("opens a row's actions without also opening the row", async () => {
     const user = userEvent.setup();
-    const { onSelect, onEdit } = setup();
+    const { onOpen, onEdit } = setup();
 
     await user.click(screen.getByRole("button", { name: "Actions for Older" }));
     await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
 
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("offers Make active only for a replaced taxonomy, and a link to the full record", async () => {
