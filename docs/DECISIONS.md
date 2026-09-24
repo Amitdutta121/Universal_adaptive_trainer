@@ -2087,3 +2087,63 @@ one implementation. *A typed-outline input (indent for subtopics) as the primary
 second document format the application must define and parse, and paste-JSON already covers bulk entry.
 *A board of draggable cards:* worst for typing many items and the heaviest to build, for a job (moving a
 subtopic between topics) the outline covers with cut and re-add until it proves not to.
+
+
+---
+
+## ADR-050 — A saved taxonomy can be edited in place, and removing a row hides it
+
+**Status:** accepted. Amends ADR-046, which said structure is declared by a document and never edited
+row by row, and ADR-049, which had every save from the builder create a new version.
+
+**Context.** ADR-046 refused in-place structural edits because a topic or subtopic row is what
+questions, question sets and a student's measured weakness point at, and deleting one leaves them
+pointing at nothing. The price was that fixing one subtopic name's neighbour meant a whole new version
+with new rows, and everything recorded against the old one stayed behind. A professor working on a
+taxonomy wants to change it, and knows what they are removing.
+
+**Decisions.**
+
+- **Removal is soft.** A topic or subtopic that is removed keeps its row, its ids and its
+  `stable_id`; only its `review_status` becomes `deleted` (a new value of a string column, so no
+  migration). Nothing that points at it is checked, warned about or cleaned up: a question, a
+  student's weakness and a frozen set still resolve it by id.
+- **The tree leaves deleted rows out without its readers knowing.** `CurriculumVersionRow.topics`
+  and `TopicRow.subtopics` are filtered relationships, so everything that walks a tree through them
+  (the API, generation, coverage, evaluation, validation) sees only what is left. `all_topics` and
+  `all_subtopics` are read-only and unfiltered, for the two jobs that must see hidden rows: reviving
+  one, and deleting a version for good. The few queries that enumerate a tree without a relationship
+  are filtered by hand: the subtopic counts on a version, the sibling names a rename is checked
+  against, and the order the adaptive engine walks topics in, so a student is not served a topic that
+  was removed.
+- **`PUT /api/curriculum/versions/{id}/tree` brings a version to match a tree.** The body is the whole
+  tree as it should now be, each row carrying the id it has (or none, if new). Listed rows keep their
+  ids and take the new name, description and position; rows no longer listed are hidden. Validity is
+  the upload's: the edit is turned into a taxonomy document and judged by the same validator, so a
+  refusal reads exactly as an upload's would. A refused edit changes nothing.
+- **A returning name revives its row.** A row without an id whose normalised name matches a hidden
+  row, or a visible one the edit does not otherwise account for, is that row: two rows may not share
+  a `stable_id`, and deleting a row only to create it again would lose its history for nothing.
+- **A subtopic cannot be moved to another topic.** Its id must arrive under the topic that owns it.
+  A move would change what every question and measurement recorded against it means, which is what
+  soft deletion exists to leave alone.
+- **The status of a version is untouched.** Editing the active taxonomy changes what generation,
+  coverage and students use, immediately. That is the point, and it is why the builder does not ask.
+
+**Consequences, recorded rather than hidden.**
+
+- A question whose topic was hidden can no longer be evaluated or validated: its topic "is not in its
+  curriculum version". The question is untouched and returns if the topic does.
+- A coverage report, frozen sets included, shows only the rows that are left; a hidden topic's
+  questions are no longer in the grid, though `question_count` still counts them.
+- A student's stored mastery and weakness for a hidden row stay, unused.
+- There is no restore control: adding the same name back is the restore.
+- There is no audit trail of what was removed or when beyond the row's status.
+
+**Alternatives rejected.** *Hard delete with a warning:* strands references, which is ADR-046's whole
+objection. *A `deleted_at` column:* needs a schema change the project has no tool for (ADR-008), and
+the status already says what is needed. *Filtering every query for deleted rows:* the relationships
+cover the readers, and touching sixty call sites for the sake of a flag is how one gets missed.
+*Reusing `rejected`:* legacy rows already carry it, with a different meaning, and hiding them would
+change what old versions show.
+

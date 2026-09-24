@@ -80,6 +80,15 @@ def parse_taxonomy_document(data: bytes) -> TaxonomyDocument:
             "Unsupported taxonomy schema_version.",
             detail=f"Expected {SCHEMA_VERSION!r}, got {payload.get('schema_version')!r}.",
         )
+    return validate_taxonomy_payload(payload)
+
+
+def validate_taxonomy_payload(payload: dict) -> TaxonomyDocument:
+    """Check a taxonomy that is already a mapping against the schema.
+
+    The one place a taxonomy is judged, whether it arrived as an uploaded file or as an edit of a
+    saved version, so the two cannot disagree about what is valid or word a refusal differently.
+    """
     try:
         return TaxonomyDocument.model_validate(payload)
     except ValidationError as exc:

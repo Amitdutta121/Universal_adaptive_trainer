@@ -150,7 +150,8 @@ def test_curriculum_boundary_only_exports_taxonomy_import_and_display_helpers() 
     An exact list rather than a subset check: every addition to this boundary has
     to be looked at, because the one thing that must never come back is a way to
     derive curriculum instead of receiving it (ADR-021). Authoring and library
-    (ADR-046) act on documents a professor wrote and rows an import already made.
+    (ADR-046) act on documents a professor wrote and rows an import already made;
+    the tree service (ADR-050) reshapes such a version in place, never proposing one.
     """
     import app.curriculum as curriculum
 
@@ -166,9 +167,11 @@ def test_curriculum_boundary_only_exports_taxonomy_import_and_display_helpers() 
         "SUPPORTED_EXTENSIONS",
         "TOPIC_FIELDS",
         "CurriculumLibraryService",
+        "CurriculumTreeService",
         "CurriculumUsage",
         "FieldLimit",
         "TaxonomyImportService",
+        "TreeUpdate",
         "example_json",
         "extraction_metadata",
         "parse_taxonomy_document",
