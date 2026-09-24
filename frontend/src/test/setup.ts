@@ -7,3 +7,15 @@ import { afterEach } from "vitest";
 afterEach(() => {
   cleanup();
 });
+
+/**
+ * jsdom has no `ResizeObserver`, and Radix popovers (tooltips, selects) measure themselves with one
+ * the moment they open. Without this a tooltip that happens to open during a test throws inside
+ * React and unmounts the whole tree, which made tests that hover a button pass or fail by timing.
+ */
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub;

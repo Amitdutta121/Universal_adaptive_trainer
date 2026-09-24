@@ -16,7 +16,9 @@
  * component that calls this needs `"use client"`.
  */
 export function formatTimestamp(iso: string): string {
-  const at = new Date(iso);
+  // The API sends UTC times without a zone marker ("2026-09-24T01:41:00"). `new Date` reads such a
+  // string as *local* time, which shows a professor a time hours off from the one they saw.
+  const at = new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}Z`);
   return Number.isNaN(at.getTime())
     ? "—"
     : at.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
