@@ -90,7 +90,7 @@ export function TaxonomyGuideCard({
     <div className="space-y-2">
       <CollapsiblePanel
         title="Prompt for an assistant"
-        summary="Paste it into Claude or ChatGPT above your syllabus, then upload what comes back."
+        summary="Paste it into Claude or ChatGPT together with your syllabus, then import what comes back."
         openLabel="Show prompt"
         actions={<CopyButton text={guide.prompt} label="Copy prompt" copiedLabel="Copied" />}
       >
@@ -107,8 +107,8 @@ export function TaxonomyGuideCard({
       </CollapsiblePanel>
 
       <CollapsiblePanel
-        title="What the validator requires"
-        summary="Every field and every limit. An unknown key is rejected, not ignored."
+        title="What a valid document must contain"
+        summary="Every field and its limits. A field that is not listed is rejected, not ignored."
         openLabel="Show fields"
       >
         <div className="space-y-4">

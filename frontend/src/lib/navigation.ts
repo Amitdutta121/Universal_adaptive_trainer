@@ -59,7 +59,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "curriculum",
     label: "Curriculum",
     path: "/curriculum",
-    summary: "Upload a fixed Topic → Subtopic taxonomy JSON for adaptive training.",
+    summary: "Build a Topic → Subtopic taxonomy, or import one you already have. The active taxonomy is what questions and coverage use.",
     icon: Network,
   },
   {

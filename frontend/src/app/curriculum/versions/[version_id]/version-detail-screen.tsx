@@ -103,7 +103,7 @@ export function VersionDetailScreen({ versionId }: { versionId: number }) {
         className="flex w-fit items-center gap-1 text-muted-foreground text-sm hover:underline"
       >
         <ArrowLeft className="size-3" />
-        All curriculum versions
+        All taxonomies
       </Link>
 
       {/* Legacy proposals only: an upload records no caveats about itself. */}
@@ -120,10 +120,10 @@ export function VersionDetailScreen({ versionId }: { versionId: number }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{fromUpload ? "Approved hierarchy" : "Proposed hierarchy"}</CardTitle>
+          <CardTitle>{fromUpload ? "Topics and subtopics" : "Proposed hierarchy"}</CardTitle>
           <CardDescription>
             {fromUpload
-              ? "The fixed taxonomy you supplied. Display names can be edited here; the structure comes from the document."
+              ? "You can rename any topic or subtopic here with its pencil. To change the structure, build or import a corrected taxonomy; it is saved as a new version."
               : "Click a subtopic to see its definition, the sections that support it, and why the differing book wordings behind it were merged."}
           </CardDescription>
         </CardHeader>

@@ -80,9 +80,9 @@ export function TaxonomySelector() {
           </Select>
         ) : (
           <p className="mt-1 text-muted-foreground text-sm">
-            No approved taxonomy yet.{" "}
+            No active taxonomy yet.{" "}
             <Link href="/curriculum" className="underline underline-offset-4">
-              Upload one
+              Create one
             </Link>
             .
           </p>

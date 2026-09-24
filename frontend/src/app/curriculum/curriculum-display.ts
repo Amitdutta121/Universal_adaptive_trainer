@@ -37,8 +37,8 @@ export const CURRICULUM_STATUS_VARIANT: Record<CurriculumStatus, "secondary" | "
 };
 
 export const CURRICULUM_STATUS_MEANING: Record<CurriculumStatus, string> = {
-  approved: "Question generation is grounded in this version.",
-  superseded: "A later upload replaced it. Questions generated from it keep their taxonomy claim.",
+  approved: "Question generation uses this taxonomy.",
+  superseded: "A newer taxonomy replaced it. Questions generated from it keep their taxonomy.",
   proposed: "A legacy proposal that was never approved. Nothing generates from it.",
   under_review: "A legacy proposal part-way through review. Nothing generates from it.",
 };
@@ -93,7 +93,7 @@ export function versionStanding(
 
 export const STANDING_LABEL: Record<VersionStanding, string> = {
   ...CURRICULUM_STATUS_LABEL,
-  live: "in use",
+  live: "active",
   replaced: "replaced",
 };
 
@@ -105,9 +105,9 @@ export const STANDING_VARIANT: Record<VersionStanding, "secondary" | "outline"> 
 
 export const STANDING_MEANING: Record<VersionStanding, string> = {
   ...CURRICULUM_STATUS_MEANING,
-  live: "Question generation and coverage are grounded in this version.",
+  live: "Question generation and coverage use this taxonomy.",
   replaced:
-    "A later upload took over. It is still marked approved, and questions generated from it keep their taxonomy claim.",
+    "A newer taxonomy took over. Questions generated from this one keep their taxonomy. You can make it active again.",
 };
 
 /**
@@ -123,7 +123,7 @@ export function isTaxonomyUpload(version: Pick<CurriculumVersionSummary, "genera
 
 /** How a version was produced, in words — never the string "null". */
 export function generatedByLabel(version: Pick<CurriculumVersionSummary, "generated_by">): string {
-  if (isTaxonomyUpload(version)) return "Uploaded taxonomy";
+  if (isTaxonomyUpload(version)) return "Built or imported";
   return version.generated_by?.trim() || "—";
 }
 

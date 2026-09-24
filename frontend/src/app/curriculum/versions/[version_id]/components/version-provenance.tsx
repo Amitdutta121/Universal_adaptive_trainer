@@ -32,10 +32,11 @@ export function VersionProvenance({ detail }: { detail: CurriculumVersionDetail 
   if (isTaxonomyUpload(version)) {
     return (
       <div className="space-y-2 text-sm">
-        <p>Uploaded fixed taxonomy, {formatTimestamp(version.created_at)}.</p>
+        <p>Built or imported by a professor, saved {formatTimestamp(version.created_at)}.</p>
         <p className="text-muted-foreground">
-          Validation is strict and total: unknown fields, duplicate names and empty topic or
-          subtopic lists are refused before anything is stored. The uploaded file is not retained.
+          A taxonomy is checked in full before it is saved: duplicate names, unknown fields and
+          empty topics are refused, and nothing is stored if anything is wrong. No copy of the
+          original file is kept.
         </p>
       </div>
     );
