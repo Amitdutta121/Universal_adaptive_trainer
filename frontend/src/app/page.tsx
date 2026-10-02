@@ -27,7 +27,7 @@ import { SECTIONS_BY_KEY } from "@/lib/navigation";
 export const metadata: Metadata = {
   title: "Adaptive Trainer",
   description:
-    "Generate, review and serve adaptive Python practice questions from your own textbook. Runs locally.",
+    "Generate, review and serve adaptive practice questions from your own textbook. Runs locally.",
 };
 
 const BACKEND_CMD = `# from the repository root
@@ -112,7 +112,7 @@ export default function LandingPage() {
       <main className="mx-auto max-w-5xl px-5">
         <section className="pt-16 pb-12 sm:pt-20">
           <h1 className="max-w-[20ch] text-balance font-heading font-semibold text-[clamp(2.1rem,5vw,3.4rem)] leading-[1.06] tracking-[-0.03em]">
-            Adaptive Python practice, built from your own textbook.
+            Adaptive practice, built from your own textbook.
           </h1>
           <p className="mt-6 max-w-[62ch] text-[1.05rem] text-[var(--ink-2)] leading-7">
             Bring a textbook, as a PDF or structured JSON, and a topic outline. Adaptive Trainer drafts
@@ -187,7 +187,10 @@ export default function LandingPage() {
         <section className="pb-16">
           <h2 className="mb-4 font-heading font-semibold text-2xl tracking-[-0.02em]">Limits</h2>
           <ul className="flex max-w-[62ch] list-disc flex-col gap-2 pl-5 text-[var(--ink-2)] leading-7">
-            <li>It is for introductory Python. The generators, the checks and the sample outline all assume it.</li>
+            <li>
+              Each course picks a subject and the question types it uses. Some types for newer
+              subjects are still marked coming soon.
+            </li>
             <li>
               Books are PDF or structured JSON. A PDF with no table of contents still imports, marked
               partial, with its chapters guessed. EPUB, Markdown, plain text and HTML are refused.

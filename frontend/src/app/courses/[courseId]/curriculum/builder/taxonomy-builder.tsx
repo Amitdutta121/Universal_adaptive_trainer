@@ -632,7 +632,7 @@ export function TaxonomyBuilder({
             id="version-label"
             value={draft.label}
             maxLength={limits.label}
-            placeholder="Taxonomy name, e.g. Introductory Python, Fall 2026"
+            placeholder="Taxonomy name, e.g. Unit outline, Fall 2026"
             className="h-auto max-w-xl border-transparent bg-transparent px-1.5 py-0.5 font-heading font-semibold text-xl shadow-none hover:border-input focus-visible:bg-background md:text-xl"
             onChange={(event) => update((d) => ({ ...d, label: event.target.value }))}
           />

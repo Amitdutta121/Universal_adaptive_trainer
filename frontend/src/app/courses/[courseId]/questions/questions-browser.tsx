@@ -57,7 +57,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useApprovedCurriculum, useCurriculumVersions, useQuestions } from "@/lib/api/queries";
+import {
+  useApprovedCurriculum,
+  useAssessmentCatalog,
+  useCourse,
+  useCurriculumVersions,
+  useQuestions,
+} from "@/lib/api/queries";
 import type {
   Difficulty,
   QuestionStatus,
@@ -67,6 +73,8 @@ import type {
 } from "@/lib/api/types";
 import { CourseLink } from "@/components/course-link";
 import { BUILT_QUESTION_TYPES } from "@/lib/question-types/registry";
+import { useCourseId } from "@/lib/use-course";
+import { questionsSummary, subjectLabel } from "./questions-summary";
 
 type GeneratorKind = Schemas["GeneratorKind"];
 type QuestionKind = Schemas["QuestionKind"];
@@ -416,6 +424,9 @@ const columns: ColumnDef<QuestionSummary>[] = [
 ];
 
 export function QuestionsBrowser() {
+  const course = useCourse(useCourseId());
+  const catalog = useAssessmentCatalog();
+  const summary = questionsSummary(subjectLabel(course.data?.subject, catalog.data?.subjects));
   const [status, setStatus] = useQueryState("status", parseAsStringLiteral(STATUSES));
   const [limit, setLimit] = useQueryState("limit", parseAsInteger.withDefault(50));
   const [query, setQuery] = useQueryState("q", parseAsString.withDefault(""));
@@ -614,7 +625,7 @@ export function QuestionsBrowser() {
     <>
       <PageHeader
         title="Questions"
-        summary="Generate, validate and review Python assessment questions."
+        summary={summary}
         actions={
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" size="sm" className="h-9 border-border/80">
