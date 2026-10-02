@@ -307,7 +307,7 @@ function CourseFormDialog({
               value={name}
               maxLength={200}
               autoFocus
-              placeholder="Intro to Python"
+              placeholder="e.g. CS 135 · Intro to Programming"
               onChange={(event) => setName(event.target.value)}
             />
           </div>
@@ -321,7 +321,7 @@ function CourseFormDialog({
               value={description}
               maxLength={2000}
               className="h-[5rem]"
-              placeholder="CS 135 · Fall 2026 · Programming (Python)"
+              placeholder="Term, section, who it is for…"
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>

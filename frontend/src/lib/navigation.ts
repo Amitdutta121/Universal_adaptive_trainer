@@ -54,7 +54,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "books",
     label: "Books",
     path: "/books",
-    summary: "Upload introductory Python textbooks and inspect their extracted structure.",
+    summary: "Upload textbooks and inspect their extracted structure.",
     icon: BookOpen,
   },
   {
@@ -69,7 +69,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "questions",
     label: "Questions",
     path: "/questions",
-    summary: "Generate, validate and review Python assessment questions.",
+    summary: "Generate, validate and review assessment questions.",
     icon: ListChecks,
   },
   {

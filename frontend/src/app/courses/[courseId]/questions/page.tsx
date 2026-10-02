@@ -19,7 +19,7 @@ export default function QuestionsPage() {
         <>
           <PageHeader
             title="Questions"
-            summary="Generate, validate and review Python assessment questions."
+            summary="Generate, validate and review assessment questions."
           />
           <TableSkeleton />
         </>

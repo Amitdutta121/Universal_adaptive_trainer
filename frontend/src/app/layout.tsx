@@ -26,7 +26,7 @@ const headingSans = Archivo({
 export const metadata: Metadata = {
   title: "Adaptive Trainer — Instructor Studio",
   description:
-    "Generate, validate and review Python assessment questions, and follow adaptive student training.",
+    "Generate, validate and review assessment questions, and follow adaptive student training.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
