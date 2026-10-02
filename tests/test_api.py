@@ -21,6 +21,7 @@ from app.persistence.repositories import (
     CurriculumRepository,
     TypeInstructionRepository,
 )
+from app.question_types import implemented_types
 
 VALID_TAXONOMY = (
     b'{"schema_version":"1","label":"Uploaded","topics":['
@@ -754,7 +755,7 @@ def test_every_type_is_listed_with_its_shipped_instruction(client: TestClient) -
     payload = client.get("/api/instructions").json()
 
     entries = {entry["question_type"]: entry for entry in payload["instructions"]}
-    assert set(entries) == {question_type.value for question_type in QuestionType}
+    assert set(entries) == {question_type.value for question_type in implemented_types()}
     multiple_choice = entries["multiple_choice"]
     assert multiple_choice["learned"] is False
     assert multiple_choice["rules"] == []

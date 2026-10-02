@@ -1,13 +1,19 @@
 /**
  * The vocabulary of the spec sheet: what a chunk asks for, and what a row shows.
  *
- * Pure. No React, no fetching. Everything here is either a name for something the
+ * No fetching. Type names and labels come from the question-type registry
+ * (`@/lib/question-types`). Everything here is either a name for something the
  * backend already models or a shaping helper with no rule in it — the rule that
  * turns counts into questions lives in the API (ADR-044) and is read from
  * `/api/questions/batch-plan`.
  */
 
 import type { Difficulty, QuestionType, Schemas } from "@/lib/api/types";
+import {
+  BUILT_QUESTION_TYPES,
+  questionTypeLabel,
+  questionTypeShortLabel,
+} from "@/lib/question-types/registry";
 
 export type GenerationPlanResponse = Schemas["GenerationPlanResponse"];
 export type ChunkGenerationSpec = Schemas["ChunkGenerationSpec"];
@@ -17,36 +23,17 @@ export type BookSummary = Schemas["BookSummary"];
 /** The three difficulty columns, in the order the compiled run walks them. */
 export const DIFFICULTIES = ["easy", "medium", "hard"] as const satisfies readonly Difficulty[];
 
-export const QUESTION_TYPES = [
-  "multiple_choice",
-  "true_false",
-  "output_prediction",
-  "code_completion",
-  "debugging",
-  "parsons",
-  "coding",
-] as const satisfies readonly QuestionType[];
+/** Every question type with a built UI, in canonical order (from the type registry). */
+export const QUESTION_TYPES: readonly QuestionType[] = BUILT_QUESTION_TYPES;
 
-export const QUESTION_TYPE_LABEL: Record<QuestionType, string> = {
-  multiple_choice: "Multiple choice",
-  true_false: "True / false",
-  output_prediction: "Output prediction",
-  code_completion: "Code completion",
-  debugging: "Debugging",
-  parsons: "Parsons",
-  coding: "Coding",
-};
+export const QUESTION_TYPE_LABEL: Record<QuestionType, string> = Object.fromEntries(
+  QUESTION_TYPES.map((type) => [type, questionTypeLabel(type)]),
+) as Record<QuestionType, string>;
 
 /** Short forms for the row, where a full label would not fit. */
-export const QUESTION_TYPE_SHORT: Record<QuestionType, string> = {
-  multiple_choice: "MCQ",
-  true_false: "T/F",
-  output_prediction: "Output",
-  code_completion: "Completion",
-  debugging: "Debugging",
-  parsons: "Parsons",
-  coding: "Coding",
-};
+export const QUESTION_TYPE_SHORT: Record<QuestionType, string> = Object.fromEntries(
+  QUESTION_TYPES.map((type) => [type, questionTypeShortLabel(type)]),
+) as Record<QuestionType, string>;
 
 /** The highest count one stepper offers, matching the API's per-difficulty bound. */
 export const MAX_COUNT_PER_DIFFICULTY = 20;

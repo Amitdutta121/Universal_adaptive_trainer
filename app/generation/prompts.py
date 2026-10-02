@@ -9,60 +9,6 @@ from app.generation.principles import COMMON_SYSTEM
 from app.generation.spec import MAX_CLAIMED_SUBTOPICS, QuestionSpec
 from app.persistence.models import CurriculumVersionRow
 
-#: How the validator runs the tests a draft declares. Stated for every executable
-#: type because the model consistently got it wrong without it: it would write a
-#: solution that only *defines* functions, then declare a ``stdout`` expectation
-#: as though the function had been called and printed. Four of six hard debugging
-#: questions failed that way; spelling out the contract took them to six of six,
-#: with declared stdout cases falling from 14 to 1.
-_EXECUTABLE_CONTRACT = """
-How your tests will be run:
-* reference_solution is written to a file and executed as a whole program.
-* For each test, its `assert` code is APPENDED to the end of your solution and
-  runs after it, in the same scope.
-* Its `stdin` is piped to the program as standard input. It is NOT executed as
-  Python -- never put code in stdin.
-* A test passes if the program exits cleanly and, when `stdout` is set, its
-  printed output matches exactly.
-So: if your solution only defines functions and prints nothing, leave `stdout`
-unset and put every check in `assert`. Only set `stdout` if the program really
-prints that text when run. Before answering, run your reference_solution against
-every test in your head and confirm it does what you declared."""
-
-_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
-    QuestionType.MULTIPLE_CHOICE: (
-        "Write a multiple-choice question with plausible alternatives. "
-        "Set correct_option_index to the zero-based index of the one correct option."
-    ),
-    QuestionType.TRUE_FALSE: (
-        "Write one unambiguous true-or-false statement. Set correct_answer to its truth value."
-    ),
-    QuestionType.OUTPUT_PREDICTION: (
-        "Provide a short runnable code snippet and ask for its exact output. "
-        "Set expected_output exactly, including line breaks."
-    ),
-    QuestionType.CODE_COMPLETION: (
-        "Provide incomplete code to finish, a complete reference_solution, "
-        "and executable test cases." + _EXECUTABLE_CONTRACT
-    ),
-    QuestionType.DEBUGGING: (
-        "Provide buggy code, ask the learner to diagnose or fix it, and provide a correct "
-        "reference_solution plus executable test cases.\n"
-        "The code must contain exactly one defect, and one a learner plausibly writes. "
-        "reference_solution is the complete corrected program, runnable as-is -- code, never "
-        "an explanation of the fix." + _EXECUTABLE_CONTRACT
-    ),
-    QuestionType.PARSONS: (
-        "Create a Parsons puzzle. Each block must have an id, text, and correct indent level; "
-        "correct_order must list the block ids in solution order."
-    ),
-    QuestionType.CODING: (
-        "Ask for a small implementation, then provide a complete reference_solution and "
-        "executable test cases. Name the function, its parameters and what it returns, so "
-        "one correct implementation is obvious in shape." + _EXECUTABLE_CONTRACT
-    ),
-}
-
 CLASSIFICATION_INSTRUCTION = f"""Classify your own question.
 Choose the one topic it belongs to and set topic_id to that topic's numeric id.
 Then set subtopic_ids to the ids of the subtopics your question actually
@@ -74,8 +20,21 @@ bend the question toward a subtopic that reads as a neater fit."""
 
 
 def base_type_instruction(question_type: QuestionType) -> str:
-    """The shipped instruction for a type, before anything is learned."""
-    return _TYPE_INSTRUCTIONS[question_type]
+    """The shipped instruction for a type, before anything is learned (its module's).
+
+    Raises:
+        FeatureNotAvailableError: the type is in the enum but its module has not landed.
+    """
+    from app.errors import FeatureNotAvailableError
+    from app.question_types import get_type
+
+    try:
+        return get_type(question_type).instruction
+    except KeyError as error:
+        raise FeatureNotAvailableError(
+            f"The {question_type.value} question type is not built yet.",
+            detail=str(error),
+        ) from error
 
 
 #: Hex characters of the digest that names one instruction. Short enough to read
@@ -157,7 +116,7 @@ rule above. Do not reproduce the earlier question.
 Source citation: {citation}
 
 Type-specific requirements:
-{type_instruction or _TYPE_INSTRUCTIONS[spec.question_type]}
+{type_instruction or base_type_instruction(spec.question_type)}
 
 Use this section text as the grounding source:
 --- section text ---

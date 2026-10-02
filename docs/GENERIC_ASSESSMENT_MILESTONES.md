@@ -201,15 +201,25 @@ class QuestionTypeModule(Protocol):
     kind: QuestionKind                                  # discrete | testable_program
     draft_model: type[TaxonomyClaim]                    # what the LLM must return
     instruction: str                                    # shipped type instruction (ADR-033 may replace it)
-    def content_from_draft(self, draft) -> DraftColumns  # content + prompt/reference/tests columns
+    def columns_from_draft(self, draft) -> DraftColumns   # prompt / reference_solution / tests columns
     def grading_plan(self, content: dict, tests: object) -> GradingPlan    # raises Unmarkable
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]
+    def student_view(self, content: dict, *, seed: int) -> StudentView   # whitelist: options, code,
+                                                                         # blocks, answer_hint
+# Each module ends with  TYPE = <instance>.  The whole draft is stored as `content` (build_content).
 
 # app/question_types/__init__.py
 _MODULES = (..., "app.question_types.numeric_response", "app.question_types.equation_response")
 def get_type(question_type: QuestionType) -> QuestionTypeModule: ...   # KeyError if not built
 def implemented_types() -> list[QuestionType]: ...                       # missing module = not built
+def type_for_draft(draft) -> QuestionTypeModule: ...
 ```
+
+Shared helpers for type modules: `app/question_types/_shared.py` (explanation, test-case specs,
+authoring-check helpers, the executable-test contract text) and `_executable.py` (base for the
+code types). `ServedQuestionOut.answer_hint` carries `StudentView.answer_hint` to the student.
+Unbuilt types: generation refuses them (`InvalidQuestionSpecError`), the instruction API answers
+501, validation reports `question_type_built` failed, scoring treats them as unmarkable.
 
 ```ts
 // frontend/src/lib/question-types/registry.ts

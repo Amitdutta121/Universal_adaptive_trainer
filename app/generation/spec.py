@@ -115,9 +115,16 @@ def build_question_spec(
     """Resolve and validate one generation request before the model runs.
 
     Raises:
-        InvalidQuestionSpecError: the curriculum is not approved, or a source
-            section is missing.
+        InvalidQuestionSpecError: the curriculum is not approved, a source
+            section is missing, or the question type is not built yet.
     """
+    from app.question_types import implemented_types
+
+    if question_type not in implemented_types():
+        raise InvalidQuestionSpecError(
+            "This question type cannot be generated yet.",
+            detail=f"{question_type.value} has no module in app/question_types.",
+        )
     require_approved_version(session, curriculum_version_id)
     structure = BookStructureRepository(session)
 

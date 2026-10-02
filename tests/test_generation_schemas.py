@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from app.domain.enums import QuestionKind, QuestionType
 from app.generation.schemas import (
-    RESPONSE_MODEL_FOR,
     CodingDraft,
     DebuggingDraft,
     ExecutableTestCase,
@@ -15,15 +14,20 @@ from app.generation.schemas import (
     OutputPredictionDraft,
     ParsonsBlock,
     ParsonsDraft,
+    TaxonomyClaim,
     TrueFalseDraft,
     build_content,
     prompt_fields_from_draft,
+    response_model_for,
     scoring_kind_for,
 )
+from app.question_types import implemented_types
 
 
-def test_all_seven_types_have_response_models() -> None:
-    assert set(RESPONSE_MODEL_FOR) == set(QuestionType)
+def test_every_built_type_has_a_response_model() -> None:
+    built = implemented_types()
+    assert len(built) == 7
+    assert all(issubclass(response_model_for(qtype), TaxonomyClaim) for qtype in built)
 
 
 @pytest.mark.parametrize(

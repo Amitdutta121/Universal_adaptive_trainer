@@ -11,7 +11,6 @@ Enum-valued fields serialise as their string value because every enum in
 
 from __future__ import annotations
 
-import random
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Literal
@@ -108,6 +107,12 @@ def _options(values: Any, labels: dict[Any, str] | None = None) -> list[EnumOpti
     ]
 
 
+def _built_question_types() -> list[QuestionType]:
+    from app.question_types import implemented_types
+
+    return implemented_types()
+
+
 # --------------------------------------------------------------------------- system
 
 
@@ -175,7 +180,8 @@ class ConfigResponse(BaseModel):
             supported_book_extensions=list(supported_book_extensions),
             max_book_upload_mb=max_book_upload_mb,
             difficulties=_options(Difficulty),
-            question_types=_options(QuestionType),
+            # Built types only: an enum value whose module has not landed is not offered.
+            question_types=_options(_built_question_types()),
             question_statuses=_options(QuestionStatus),
             review_decisions=_options(ReviewDecision),
             rejection_reasons=_options(RejectionReason, REJECTION_REASON_LABELS),
@@ -2270,12 +2276,14 @@ class ServedQuestionOut(BaseModel):
     code: str | None = None
     #: Parsons only, in a shuffled order the student has to fix.
     blocks: list[ParsonsBlockOut] | None = None
+    #: How to write the answer, for types that need it (e.g. "a number with its unit").
+    answer_hint: str | None = None
 
     @classmethod
     def from_served(cls, served: Any, *, subtopic_name: str | None = None) -> ServedQuestionOut:
         attempt = served.attempt
         question = served.question
-        content = question.content or {}
+        view = _student_view(question.question_type, question.content or {}, seed=attempt.id)
         return cls(
             training_session_id=attempt.session_id,
             attempt_id=attempt.id,
@@ -2289,58 +2297,25 @@ class ServedQuestionOut(BaseModel):
             question_id=question.id,
             question_type=question.question_type,
             prompt=question.prompt,
-            options=_presentable_options(question.question_type, content),
-            code=_presentable_code(question.question_type, content),
-            blocks=_presentable_blocks(question.question_type, content, seed=attempt.id),
+            options=view.options,
+            code=view.code,
+            blocks=None
+            if view.blocks is None
+            else [ParsonsBlockOut(**block) for block in view.blocks],
+            answer_hint=view.answer_hint,
         )
 
 
-def _presentable_options(question_type: QuestionType | None, content: dict) -> list[str] | None:
-    if question_type is not QuestionType.MULTIPLE_CHOICE:
-        return None
-    options = content.get("options")
-    if not isinstance(options, list):
-        return None
-    return [str(option) for option in options]
+def _student_view(question_type: QuestionType | None, content: dict, *, seed: int):
+    """The type module's whitelist of what a student may see (T0a)."""
+    from app.question_types import StudentView, get_type
 
-
-def _presentable_code(question_type: QuestionType | None, content: dict) -> str | None:
-    """The code a student reads or edits -- never the reference solution."""
-    if question_type not in {
-        QuestionType.OUTPUT_PREDICTION,
-        QuestionType.CODE_COMPLETION,
-        QuestionType.DEBUGGING,
-    }:
-        return None
-    code = content.get("code")
-    return code if isinstance(code, str) else None
-
-
-def _presentable_blocks(
-    question_type: QuestionType | None, content: dict, *, seed: int
-) -> list[ParsonsBlockOut] | None:
-    """Parsons blocks, shuffled.
-
-    Stored order is the correct order, so publishing it unshuffled would answer
-    the puzzle. The shuffle is seeded on the attempt id so a reload shows the
-    same arrangement rather than silently re-posing the question.
-    """
-    if question_type is not QuestionType.PARSONS:
-        return None
-    blocks = content.get("blocks")
-    if not isinstance(blocks, list):
-        return None
-    presentable = [
-        ParsonsBlockOut(
-            id=str(block.get("id")),
-            text=str(block.get("text")),
-            indent=block.get("indent", 0) if isinstance(block.get("indent", 0), int) else 0,
-        )
-        for block in blocks
-        if isinstance(block, dict) and block.get("id") is not None and block.get("text") is not None
-    ]
-    random.Random(seed).shuffle(presentable)
-    return presentable
+    if question_type is None:
+        return StudentView()
+    try:
+        return get_type(question_type).student_view(content, seed=seed)
+    except KeyError:
+        return StudentView()
 
 
 class AnswerRequest(BaseModel):

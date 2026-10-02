@@ -52,8 +52,13 @@ class QuestionTypeSpec:
     group: str
     graded_by: tuple[str, ...]
     also_needs: tuple[str, ...] = ()
-    #: Generated, validated and scored end to end by this application.
-    implemented: bool = False
+
+    @property
+    def implemented(self) -> bool:
+        """Generated, validated and scored end to end: its ``app/question_types`` module exists."""
+        from app.question_types import implemented_types
+
+        return self.id in {question_type.value for question_type in implemented_types()}
 
 
 @dataclass(frozen=True)
@@ -136,7 +141,6 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "choice buttons",
         "quick",
         ("structured.choice",),
-        implemented=True,
     ),
     QuestionTypeSpec(
         QuestionType.TRUE_FALSE.value,
@@ -144,7 +148,6 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "two buttons",
         "quick",
         ("structured.choice",),
-        implemented=True,
     ),
     QuestionTypeSpec(
         "short_answer", "Short answer", "a text box", "quick", ("text.normalized_match",)
@@ -156,7 +159,6 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "code",
         ("structured.ordering",),
         (_PY,),
-        implemented=True,
     ),
     QuestionTypeSpec(
         QuestionType.OUTPUT_PREDICTION.value,
@@ -165,7 +167,6 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "code",
         ("text.normalized_match",),
         (_PY,),
-        implemented=True,
     ),
     QuestionTypeSpec(
         QuestionType.CODE_COMPLETION.value,
@@ -174,7 +175,6 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "code",
         ("code.python.tests",),
         (_PY,),
-        implemented=True,
     ),
     QuestionTypeSpec(
         QuestionType.DEBUGGING.value,
@@ -183,7 +183,6 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "code",
         ("code.python.tests",),
         (_PY,),
-        implemented=True,
     ),
     QuestionTypeSpec(
         QuestionType.CODING.value,
@@ -192,13 +191,16 @@ QUESTION_TYPES: tuple[QuestionTypeSpec, ...] = (
         "code",
         ("code.python.tests",),
         (_PY,),
-        implemented=True,
     ),
     QuestionTypeSpec(
-        "numeric_response", "Numeric response", "a number and unit", "maths", ("quantity.units",)
+        QuestionType.NUMERIC_RESPONSE.value,
+        "Numeric response",
+        "a number and unit",
+        "maths",
+        ("quantity.units",),
     ),
     QuestionTypeSpec(
-        "equation_response",
+        QuestionType.EQUATION_RESPONSE.value,
         "Equation response",
         "a maths input",
         "maths",

@@ -10,7 +10,7 @@ from app.curriculum import TaxonomyImportService
 from app.domain.enums import ClaimViolation, Difficulty, QuestionKind, QuestionType
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.base import DESCRIPTOR, BaseQuestionGenerator
-from app.generation.schemas import RESPONSE_MODEL_FOR, DebuggingDraft
+from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
 from app.generation.spec import build_question_spec
 from app.ingestion import BookImportService, SourceRetrieval
@@ -85,7 +85,7 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
     assert question.content["sources"][0]["section_id"] == section_ids[0]
     assert question.tests and "assert fixed('ab') == 'cb'" in question.tests
     call = client.generation_calls[0]
-    assert call["model"] is RESPONSE_MODEL_FOR[QuestionType.DEBUGGING]
+    assert call["model"] is DebuggingDraft
     assert "section text" in call["prompt"].lower()
 
 

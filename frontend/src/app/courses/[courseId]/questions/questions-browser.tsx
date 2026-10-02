@@ -66,6 +66,7 @@ import type {
   Schemas,
 } from "@/lib/api/types";
 import { CourseLink } from "@/components/course-link";
+import { BUILT_QUESTION_TYPES } from "@/lib/question-types/registry";
 
 type GeneratorKind = Schemas["GeneratorKind"];
 type QuestionKind = Schemas["QuestionKind"];
@@ -88,15 +89,7 @@ const STATUSES = [
 ] as const satisfies readonly QuestionStatus[];
 
 const DIFFICULTIES = ["easy", "medium", "hard"] as const satisfies readonly Difficulty[];
-const QUESTION_TYPES = [
-  "multiple_choice",
-  "true_false",
-  "output_prediction",
-  "code_completion",
-  "debugging",
-  "parsons",
-  "coding",
-] as const satisfies readonly QuestionType[];
+const QUESTION_TYPES = BUILT_QUESTION_TYPES;
 const QUESTION_KINDS = ["testable_program", "discrete"] as const satisfies readonly QuestionKind[];
 const GENERATOR_KINDS = ["base", "personalized"] as const satisfies readonly GeneratorKind[];
 const INSTRUCTION_SOURCES = ["learned", "shipped"] as const satisfies readonly InstructionSource[];

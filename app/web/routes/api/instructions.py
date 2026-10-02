@@ -18,6 +18,7 @@ from app.personalization import (
     refresh_type_instruction,
     reviews_for_type,
 )
+from app.question_types import implemented_types
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
     TypeInstructionListResponse,
@@ -49,7 +50,7 @@ def _out(
 
 @router.get("", response_model=TypeInstructionListResponse)
 def list_instructions(session: DbSession) -> TypeInstructionListResponse:
-    """Every question type, with whatever has been learned for it.
+    """Every built question type, with whatever has been learned for it.
 
     Types with nothing learned are listed too, carrying the shipped instruction
     and a review count -- that is how a professor sees which types have enough
@@ -59,7 +60,7 @@ def list_instructions(session: DbSession) -> TypeInstructionListResponse:
     return TypeInstructionListResponse(
         instructions=[
             _out(session, question_type, row=stored.get(question_type))
-            for question_type in QuestionType
+            for question_type in implemented_types()
         ]
     )
 

@@ -18,10 +18,10 @@ from app.generation.prompts import (
     render_taxonomy,
 )
 from app.generation.schemas import (
-    RESPONSE_MODEL_FOR,
     TaxonomyClaim,
     build_content,
     prompt_fields_from_draft,
+    response_model_for,
     scoring_kind_for,
 )
 from app.generation.spec import (
@@ -195,7 +195,7 @@ class BaseQuestionGenerator:
             client,
             system=system,
             prompt=prompt,
-            response_model=RESPONSE_MODEL_FOR[spec.question_type],
+            response_model=response_model_for(spec.question_type),
             version=version,
             build_question=build,
             validator=self._validator,

@@ -839,7 +839,7 @@ export interface paths {
         };
         /**
          * List Instructions
-         * @description Every question type, with whatever has been learned for it.
+         * @description Every built question type, with whatever has been learned for it.
          *
          *     Types with nothing learned are listed too, carrying the shipped instruction
          *     and a review count -- that is how a professor sees which types have enough
@@ -3640,7 +3640,7 @@ export interface components {
          * @description Assessment format (independent of scoring mode).
          * @enum {string}
          */
-        QuestionType: "multiple_choice" | "true_false" | "output_prediction" | "code_completion" | "debugging" | "parsons" | "coding";
+        QuestionType: "multiple_choice" | "true_false" | "output_prediction" | "code_completion" | "debugging" | "parsons" | "coding" | "numeric_response" | "equation_response";
         /** QuestionTypeGroupOut */
         QuestionTypeGroupOut: {
             /** Id */
@@ -4000,6 +4000,8 @@ export interface components {
             code?: string | null;
             /** Blocks */
             blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
+            /** Answer Hint */
+            answer_hint?: string | null;
         };
         /** SetupStepOut */
         SetupStepOut: {

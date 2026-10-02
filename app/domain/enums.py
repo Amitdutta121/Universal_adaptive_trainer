@@ -201,6 +201,9 @@ class QuestionType(StrEnum):
     DEBUGGING = "debugging"
     PARSONS = "parsons"
     CODING = "coding"
+    #: Phase 2: built only when ``app/question_types/<value>.py`` lands (T1, T2).
+    NUMERIC_RESPONSE = "numeric_response"
+    EQUATION_RESPONSE = "equation_response"
 
 
 class ClaimViolation(StrEnum):

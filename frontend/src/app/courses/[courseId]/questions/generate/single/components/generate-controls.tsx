@@ -4,20 +4,10 @@
 
 import type * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Difficulty, QuestionKind, QuestionType } from "@/lib/api/types";
+import type { Difficulty, QuestionType } from "@/lib/api/types";
+import { questionTypeUI } from "@/lib/question-types/registry";
 import { DIFFICULTIES, QUESTION_TYPE_LABEL } from "../../spec-sheet-types";
 import { useCourseQuestionTypes } from "../../use-course-question-types";
-
-/** Not exposed as a client constant elsewhere — mirrors `app.domain.enums`'s split. */
-const QUESTION_TYPE_KIND: Record<QuestionType, QuestionKind> = {
-  multiple_choice: "discrete",
-  true_false: "discrete",
-  output_prediction: "testable_program",
-  code_completion: "testable_program",
-  debugging: "testable_program",
-  parsons: "testable_program",
-  coding: "testable_program",
-};
 
 function Pill({
   active,
@@ -81,7 +71,7 @@ export function GenerateControls({
           <p className="text-[0.7rem] text-muted-foreground">
             Question kind{" "}
             <span className="rounded bg-muted px-1 py-0.5 font-mono">
-              {QUESTION_TYPE_KIND[type]}
+              {questionTypeUI(type)?.kind}
             </span>{" "}
             — set automatically from the type, matching how the grader executes it.
           </p>

@@ -28,6 +28,7 @@ from app.persistence.repositories import (
 )
 from app.personalization import LearnedRule, LearnedRules, refresh_type_instruction
 from app.personalization.instructions import render_instruction
+from app.question_types import implemented_types
 
 TAXONOMY = (
     b'{"schema_version":"1","label":"Python","topics":['
@@ -215,6 +216,18 @@ def test_render_instruction_keeps_the_shipped_text(session: Session) -> None:
     assert render_instruction("BASE CONTRACT", []) == "BASE CONTRACT"
 
 
-@pytest.mark.parametrize("question_type", list(QuestionType))
-def test_every_type_has_a_shipped_instruction(question_type: QuestionType) -> None:
+@pytest.mark.parametrize("question_type", implemented_types())
+def test_every_built_type_has_a_shipped_instruction(question_type: QuestionType) -> None:
     assert base_type_instruction(question_type)
+
+
+def test_an_unbuilt_type_has_no_instruction_and_says_so() -> None:
+    from app.errors import FeatureNotAvailableError
+    from app.question_types import get_type
+
+    unbuilt = [qt for qt in QuestionType if qt not in implemented_types()]
+    for question_type in unbuilt:
+        with pytest.raises(KeyError):
+            get_type(question_type)
+        with pytest.raises(FeatureNotAvailableError):
+            base_type_instruction(question_type)
