@@ -23,7 +23,7 @@ from app.generation.service import GenerationService
 from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 from app.question_types import get_type, implemented_types
-from app.question_types.numeric_response import NumericResponseDraft
+from app.question_types.numeric_response import TYPE, NumericResponseDraft
 from app.validation import get_question_validator
 from app.validation.runner import LocalCodeRunner
 from app.web.routes.api.schemas import ServedQuestionOut
@@ -47,6 +47,7 @@ def _draft(
         "value": 9.81,
         "unit": "m/s^2",
         "relative_tolerance": 0.01,
+        "calculation": "9.81",
         "explanation": "Near Earth's surface every falling body accelerates at g.",
     }
     fields.update(overrides)
@@ -171,7 +172,11 @@ def test_validation_fails_a_prompt_that_states_the_answer(session: Session) -> N
 def test_authoring_checks_pass_a_sound_question_and_ignore_other_numbers() -> None:
     module = get_type(QuestionType.NUMERIC_RESPONSE)
     content = build_content(
-        _draft(prompt="A ball falls from rest for 2 s. Its speed, in m/s?", value=19.62)
+        _draft(
+            prompt="A ball falls from rest for 2 s. Its speed, in m/s?",
+            value=19.62,
+            calculation="9.81*2",
+        )
     )
     assert all(check.passed for check in module.authoring_checks(content, LocalCodeRunner()))
     content["explanation"] = " "
@@ -304,3 +309,72 @@ def test_the_hint_follows_accepted_units_sig_figs_and_pure_numbers() -> None:
         "Give a number with its unit, in km/h or m/s. Use at least 2 significant figures."
     )
     assert view(build_content(_draft(unit="")), seed=1).answer_hint == "Give a number."
+
+
+# --- the answer key is checked against its own calculation (live prompt experiment) ---------
+
+
+def _checks(content: dict) -> dict[str, object]:
+    return {check.name: check for check in TYPE.authoring_checks(content, None)}
+
+
+def test_a_key_that_matches_its_calculation_passes() -> None:
+    content = {
+        "value": 3.833,
+        "unit": "s",
+        "relative_tolerance": 0.01,
+        "calculation": "sqrt(2*72.0/9.80)",
+        "prompt": "Dropped 72.0 m.",
+        "explanation": "x",
+    }
+    assert _checks(content)["numeric_value_matches_calculation"].passed
+
+
+@pytest.mark.parametrize(
+    ("value", "calculation"),
+    [(3.0, "sqrt(2*45.0/9.80)"), (-157000.0, "-0.5*1500*14.5^2")],
+    ids=["rounded key 3.0 vs 3.030", "key off by 0.44%"],
+)
+def test_a_key_that_disagrees_with_its_calculation_fails(value: float, calculation: str) -> None:
+    content = {
+        "value": value,
+        "unit": "s",
+        "relative_tolerance": 0.01,
+        "calculation": calculation,
+        "prompt": "p",
+        "explanation": "x",
+    }
+    check = _checks(content)["numeric_value_matches_calculation"]
+    assert not check.passed
+    assert "set value to the calculation's result" in check.evidence
+
+
+def test_an_unsafe_calculation_is_refused_not_run() -> None:
+    content = {
+        "value": 1.0,
+        "unit": "s",
+        "relative_tolerance": 0.01,
+        "calculation": "__import__('os').getcwd()",
+        "prompt": "p",
+        "explanation": "x",
+    }
+    check = _checks(content)["numeric_value_matches_calculation"]
+    assert not check.passed and "not plain arithmetic" in check.evidence
+
+
+def test_a_question_stored_before_calculations_still_passes() -> None:
+    content = {
+        "value": 9.81,
+        "unit": "m/s^2",
+        "relative_tolerance": 0.01,
+        "prompt": "p",
+        "explanation": "x",
+    }
+    assert _checks(content)["numeric_value_matches_calculation"].passed
+
+
+def test_trigonometry_in_a_calculation_is_in_degrees() -> None:
+    from app.question_types._arithmetic import evaluate_arithmetic
+
+    assert evaluate_arithmetic("2.50*9.80*5.00*sin(30.0)") == pytest.approx(61.25)
+    assert evaluate_arithmetic("sqrt(2*72.0/9.80)") == pytest.approx(3.8333, rel=1e-4)

@@ -32,6 +32,27 @@ _VARIABLE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _OPERATORS = frozenset("+-*/^()=")
 
 
+_ASKED_FOR = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_]*)\s*=(?!=)(.*)$", re.DOTALL)
+
+
+def _answer_side(variables: list[str]):
+    """In expression mode, ``v_f = sqrt(2*g*h)`` is graded as ``sqrt(2*g*h)``.
+
+    Students naturally name the quantity they were asked for. Only a single name that is not
+    one of the declared variables is dropped, so ``2*y = 4*x`` (a real equation) still reads
+    as a format error rather than being silently half-graded.
+    """
+    declared = set(variables)
+
+    def rewrite(answer: str) -> str:
+        match = _ASKED_FOR.match(answer) if isinstance(answer, str) else None
+        if match and match.group(1) not in declared and "=" not in match.group(2):
+            return match.group(2)
+        return answer
+
+    return rewrite
+
+
 class EquationResponseDraft(TaxonomyClaim):
     """Equation-response question draft."""
 
@@ -99,21 +120,30 @@ class EquationResponse:
     question_type = QuestionType.EQUATION_RESPONSE
     kind = QuestionKind.DISCRETE
     draft_model = EquationResponseDraft
+    # Condition B of the phase-2 prompt experiment: every draft valid first time, expression
+    # mode by default (equation mode only accepts a constant multiple, so rearrangements fail).
     instruction = (
-        "Ask for one expression or equation the student writes from what the section "
-        "teaches, such as a formula, a derived quantity or a rearranged relation. "
-        "Set expected to one correct answer in plain math syntax: * for multiplication, "
-        "^ for powers, parentheses for grouping, and only the functions sin, cos, tan, "
-        "asin, acos, atan, sinh, cosh, tanh, exp, log, ln, sqrt and abs, with the "
-        "constants pi and E. "
-        "Declare every symbol the answer uses in variables, as plain names such as x, v_0 "
-        "or theta, and name each of them in the prompt so the student knows which symbols "
-        "to write. "
-        "Any answer equivalent to expected earns full marks, so ask for a quantity, not "
-        "for a particular form such as expanded or factored. "
-        "Set equation to true only when the answer is a relation written as left = right, "
-        "with exactly one =; otherwise expected contains no =. "
-        "Never state the answer in the prompt. Explain in explanation how it is obtained."
+        "Ask for one quantity as an expression the student writes from what the section "
+        "teaches, such as a derived quantity or a relation solved for one quantity; at medium or "
+        "hard difficulty it should take a derivation or rearrangement, not recall of a formula "
+        "the section states. Phrase it as 'Write an expression for v_f in terms of g and h.' "
+        "Set expected to the right-hand side only (sqrt(2*g*h), not v_f = sqrt(2*g*h)) and "
+        "leave equation false: in equation mode only a constant multiple of expected counts, so "
+        "correct rearrangements such as F_net = m*a for a = F_net/m, or v_f^2 = 2*g*h, would be "
+        "marked wrong. Set equation to true only when the task is a relation between quantities "
+        "with none singled out; then expected has exactly one =. "
+        "Write expected in plain math syntax: * for multiplication, ^ for powers, parentheses "
+        "for grouping, and only the functions sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, "
+        "exp, log, ln, sqrt and abs, with the constants pi and E. "
+        "variables must list exactly the symbols that appear in expected, and the prompt's "
+        "'in terms of' list must name exactly those symbols, spelled the same way; do not name a "
+        "symbol the answer does not use, and do not put the quantity being asked for in variables. "
+        "Use symbols a student can type: letters, digits and single underscores such as v_0, "
+        "F_net or theta, never Greek characters, primes, braces or a delta sign (write delta_x). "
+        "Keep constants such as g symbolic. Any answer equivalent to expected earns full marks, "
+        "so ask for a quantity, not for a particular form such as expanded or factored. "
+        "Never state the answer in the prompt. In explanation, show how it is obtained, as "
+        r"plain text: no LaTeX (no \(, \frac or $), formulas like v_f = sqrt(2*g*h)."
     )
 
     def columns_from_draft(self, draft: EquationResponseDraft) -> DraftColumns:
@@ -139,7 +169,8 @@ class EquationResponse:
             if functions is None:
                 raise Unmarkable("the allowed functions are not a list of names")
             spec["allowed_functions"] = functions
-        return GradingPlan("symbolic.expression_equivalence", spec, same)
+        rewrite = same if spec["equation"] else _answer_side(variables)
+        return GradingPlan("symbolic.expression_equivalence", spec, rewrite)
 
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
         del runner

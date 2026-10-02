@@ -75,7 +75,7 @@ def test_the_type_is_built_discrete_and_offerable() -> None:
 def test_the_instruction_is_subject_neutral_and_states_the_answer_syntax() -> None:
     text = TYPE.instruction.lower()
     assert not [word for word in FORBIDDEN_IN_INSTRUCTION if word in text]
-    assert "^" in TYPE.instruction and "left = right" in TYPE.instruction
+    assert "^" in TYPE.instruction and "leave equation false" in TYPE.instruction
     assert "variables" in TYPE.instruction
 
 
@@ -298,3 +298,22 @@ def test_the_hint_names_the_equation_form_and_restricted_functions() -> None:
     assert hint.startswith("Write an equation, left = right, using x and y.")
     assert hint.endswith("Functions you may use: sin.")
     assert "sin(x)" not in hint
+
+
+@pytest.mark.parametrize(
+    ("answer", "score"),
+    [
+        ("v_f = sqrt(2*g*h)", 100.0),  # naming the asked-for quantity is fine
+        ("sqrt(2gh)", 100.0),
+        ("g = sqrt(2*g*h)", 0.0),  # a declared variable on the left is not "the answer's name"
+        ("v_f = 2*g*h", 0.0),
+    ],
+)
+def test_an_expression_answer_may_name_what_it_computes(answer: str, score: float) -> None:
+    content = {
+        "prompt": "Write an expression for v_f in terms of g and h.",
+        "expected": "sqrt(2*g*h)",
+        "variables": ["g", "h"],
+        "explanation": "Energy.",
+    }
+    assert score_answer(_question(content), answer).score == score

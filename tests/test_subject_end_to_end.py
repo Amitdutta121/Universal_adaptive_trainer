@@ -282,6 +282,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
             value=9.81,
             unit="m/s^2",
             relative_tolerance=0.01,
+            calculation="9.81",
             explanation="Near Earth's surface every falling body accelerates at g.",
         ),
         "equation_response": EquationResponseDraft(
