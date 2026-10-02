@@ -39,9 +39,24 @@ replaced, up to ``4 * numeric_samples`` draws. The answer is correct when at lea
 ``tolerance * max(1, |expected|)`` (equation mode: all ratios ``A/E`` agree and are nonzero).
 Simplify can only prove equivalence, never refute it -- the numeric check is what marks wrong.
 
-Known limit: time budgets use a daemon thread, which cannot be killed; a pathological expression
-that blows the budget keeps computing in the background until it finishes. The input limits
-above keep that rare.
+**Time budgets are killable.** Simplify and the numeric check run in a worker *process*, not a
+thread: a thread cannot be stopped, so a pathological answer would keep burning CPU inside the
+web server after its budget. :func:`_with_budget` sends ``(function, args)`` (module-level
+function, pickled by reference; sympy expressions pickle) over a pipe to a worker and waits
+``seconds`` for the reply. On timeout -- or if the worker dies -- that worker is terminated
+(``TerminateProcess`` / ``SIGTERM``, then ``kill``) and joined, so nothing keeps computing.
+
+Workers are started with ``spawn`` on every platform (no ``fork`` from a threaded server) and
+are reused, because starting one costs an interpreter plus a sympy import (1-2 s on Windows): a
+normal grade pays only the pipe round trip. The pool keeps one warm spare beyond those in use,
+so the call right after a kill (simplify timed out, the numeric check follows) does not wait for
+a fresh interpreter. At most :data:`MAX_WORKERS` budgeted computations run at once, at most
+:data:`MAX_IDLE_WORKERS` idle workers are kept. Workers are daemonic (terminated at a normal
+parent exit) and also leave their loop when the pipe closes, so a hard-killed parent orphans
+nothing that keeps polling. Waiting for a worker to start is not counted against a budget; a
+worker that does not start within :data:`WORKER_STARTUP_TIMEOUT_S` raises ``RuntimeError`` (an
+infrastructure fault, never a wrong answer). Because the work runs in another process, a test
+that replaces ``_symbolically_equal`` must replace it with a module-level (picklable) function.
 """
 
 from __future__ import annotations
@@ -49,6 +64,7 @@ from __future__ import annotations
 import io
 import keyword
 import math
+import multiprocessing
 import random
 import re
 import threading
@@ -56,6 +72,7 @@ import tokenize
 import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from multiprocessing.connection import Connection
 from typing import Any, TypeVar
 
 import sympy
@@ -258,23 +275,113 @@ def _parse(text: str, context: _Context) -> tuple[sympy.Expr, sympy.Expr | None]
 
 _T = TypeVar("_T")
 
+#: Waiting for a fresh worker to import sympy is not part of any budget, but it must end.
+WORKER_STARTUP_TIMEOUT_S = 60.0
+#: At most this many budgeted computations run at once; further callers wait for a worker.
+MAX_WORKERS = 4
+#: Idle workers kept warm; one more than in use is started ahead so a kill costs no startup.
+MAX_IDLE_WORKERS = 2
 
-def _with_budget(fn: Callable[[], _T], seconds: float) -> tuple[bool, _T | None]:
-    """Run ``fn`` in a daemon thread; ``(False, None)`` if it does not finish in time."""
-    box: dict[str, Any] = {}
+_MP = multiprocessing.get_context("spawn")
+_WORKER_NAME = "symbolic-budget-worker"
 
-    def target() -> None:
+
+def _worker_main(conn: Connection) -> None:
+    """Child process loop: run ``(fn, args)`` requests until the pipe closes."""
+    conn.send("ready")
+    while True:
         try:
-            box["value"] = fn()
-        except Exception as error:  # surfaced to the caller as "not proven"
-            box["error"] = error
+            fn, args = conn.recv()
+        except (EOFError, OSError):
+            return
+        except Exception as error:  # the request did not unpickle
+            conn.send(("error", repr(error)))
+            continue
+        try:
+            reply: tuple[str, Any] = ("ok", fn(*args))
+        except Exception as error:  # surfaced to the caller as "not done"
+            reply = ("error", repr(error))
+        conn.send(reply)
 
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
-    thread.join(seconds)
-    if thread.is_alive() or "error" in box:
+
+class _Worker:
+    def __init__(self) -> None:
+        self.conn, child_conn = _MP.Pipe()
+        self.process = _MP.Process(
+            target=_worker_main, args=(child_conn,), daemon=True, name=_WORKER_NAME
+        )
+        self.process.start()
+        child_conn.close()
+        self.ready = False
+
+    def wait_ready(self, timeout: float) -> bool:
+        if not self.ready:
+            try:
+                self.ready = self.conn.poll(timeout) and self.conn.recv() == "ready"
+            except (EOFError, OSError):
+                self.ready = False
+        return self.ready
+
+    def kill(self) -> None:
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(5)
+            if self.process.is_alive():
+                self.process.kill()
+                self.process.join(5)
+        self.conn.close()
+
+
+_pool_lock = threading.Lock()
+_idle: list[_Worker] = []
+_slots = threading.BoundedSemaphore(MAX_WORKERS)
+
+
+def _acquire() -> _Worker:
+    with _pool_lock:
+        worker = _idle.pop() if _idle else _Worker()
+        if not _idle:
+            _idle.append(_Worker())  # warm spare, so the next caller (or a restart) waits less
+    return worker
+
+
+def _release(worker: _Worker) -> None:
+    with _pool_lock:
+        if len(_idle) < MAX_IDLE_WORKERS:
+            _idle.append(worker)
+            return
+    worker.kill()
+
+
+def _with_budget(
+    fn: Callable[..., _T], args: tuple[Any, ...], seconds: float
+) -> tuple[bool, _T | None]:
+    """Run ``fn(*args)`` in a worker process; ``(False, None)`` if it fails or does not finish
+    within ``seconds``, in which case that worker is terminated. ``fn`` and ``args`` must pickle
+    (``fn`` by reference: a module-level function)."""
+    with _slots:
+        worker = _acquire()
+        if not worker.wait_ready(WORKER_STARTUP_TIMEOUT_S):
+            worker.kill()
+            raise RuntimeError("The symbolic grading worker process did not start.")
+        try:
+            worker.conn.send((fn, args))
+            if worker.conn.poll(seconds):
+                status, value = worker.conn.recv()
+            else:
+                status, value = "timeout", None
+        except (EOFError, OSError):  # the worker died (e.g. out of memory)
+            status, value = "crashed", None
+        except BaseException:
+            worker.kill()
+            raise
+        if status in ("timeout", "crashed"):
+            worker.kill()
+        else:
+            _release(worker)
+    if status != "ok":
         return False, None
-    return True, box.get("value")
+    return True, value
 
 
 def _symbolically_equal(answer: sympy.Expr, expected: sympy.Expr, equation: bool) -> bool:
@@ -401,7 +508,7 @@ class SymbolicEquivalenceGrader:
         reference = expected[0] - expected[1] if expected[1] is not None else expected[0]
         symbols = [context.symbols[name] for name in sorted(context.symbols)]
         done, sampled = _with_budget(
-            lambda: _numerically_equal(reference, reference, parsed, symbols), NUMERIC_BUDGET_S
+            _numerically_equal, (reference, reference, parsed, symbols), NUMERIC_BUDGET_S
         )
         if not (done and sampled):
             return [
@@ -433,15 +540,13 @@ class SymbolicEquivalenceGrader:
             answer_expr, expected_expr = given[0], expected[0]
 
         done, proven = _with_budget(
-            lambda: _symbolically_equal(answer_expr, expected_expr, parsed.equation),
-            SIMPLIFY_BUDGET_S,
+            _symbolically_equal, (answer_expr, expected_expr, parsed.equation), SIMPLIFY_BUDGET_S
         )
         if done and proven:
             return GradeResult(score=1.0, feedback=feedback)
         symbols = [context.symbols[name] for name in sorted(context.symbols)]
         done, equal = _with_budget(
-            lambda: _numerically_equal(answer_expr, expected_expr, parsed, symbols),
-            NUMERIC_BUDGET_S,
+            _numerically_equal, (answer_expr, expected_expr, parsed, symbols), NUMERIC_BUDGET_S
         )
         if not done:
             return GradeResult(

@@ -77,6 +77,28 @@ def test_relative_tolerance_on_zero_value_needs_exact() -> None:
     assert G.grade({"value": 0, "unit": "N"}, "0.001 N").score == 0.0
 
 
+@pytest.mark.parametrize("tolerance", [None, {"relative": 0.05}, {"relative": 0.05, "absolute": 0}])
+def test_zero_value_without_absolute_tolerance_is_a_spec_issue(
+    tolerance: dict[str, float] | None,
+) -> None:
+    spec: dict[str, Any] = {"value": 0, "unit": "N"}
+    if tolerance is not None:
+        spec["tolerance"] = tolerance
+    assert "zero_value_needs_absolute" in {issue.code for issue in G.check_spec(spec)}
+
+
+def test_zero_value_with_absolute_tolerance_is_accepted_and_graded_by_it() -> None:
+    spec = {"value": 0, "unit": "N", "tolerance": {"absolute": 0.01}}
+    assert G.check_spec(spec) == []
+    assert G.grade(spec, "0.005 N").score == 1.0
+    assert G.grade(spec, "-0.5 cN").score == 1.0
+    assert G.grade(spec, "0.02 N").score == 0.0
+
+
+def test_nonzero_value_needs_no_absolute_tolerance() -> None:
+    assert G.check_spec({"value": 1e-9, "unit": "N"}) == []
+
+
 # --- format errors ---------------------------------------------------------------------------
 
 
