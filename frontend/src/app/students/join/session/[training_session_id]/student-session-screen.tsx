@@ -73,29 +73,6 @@ function resultIcon(score: number) {
   return XCircle;
 }
 
-// Explains why a served question's difficulty doesn't match the student's
-// mastery: the set simply had nothing at the requested difficulty for this
-// subtopic, so the engine fell back rather than serving nothing at all.
-function article(word: string) {
-  return /^[aeiou]/i.test(word) ? "an" : "a";
-}
-
-function fallbackNotice(question: ServedQuestionOut) {
-  if (!question.fallback_used) return null;
-  return (
-    <Alert>
-      <AlertCircle />
-      <AlertTitle>Difficulty fallback used</AlertTitle>
-      <AlertDescription>
-        Your measured mastery called for {article(question.requested_difficulty)}{" "}
-        <strong>{question.requested_difficulty}</strong> question, but this set only had{" "}
-        {article(question.served_difficulty)} <strong>{question.served_difficulty}</strong> one
-        available for this subtopic.
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 // Localized, human-readable timestamp for session/attempt display.
 function learnerDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -915,8 +892,6 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                   ) : null}
                 </CardHeader>
                 <CardContent className="space-y-5 px-6 py-6 sm:px-7">
-                  {fallbackNotice(currentQuestion.data)}
-
                   <div className="space-y-4">
                     <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
                       <div className="mb-3 flex items-center justify-between gap-3">
