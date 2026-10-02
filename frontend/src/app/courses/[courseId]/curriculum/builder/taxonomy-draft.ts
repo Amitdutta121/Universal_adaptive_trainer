@@ -56,9 +56,14 @@ export interface TreeTopic {
  * Client-side keys for rows that have no database id yet. Random rather than a
  * counter: a draft restored from storage carries the ids it was saved with, and a
  * counter that restarts at zero on every page load would reuse them.
+ *
+ * `crypto.randomUUID` exists only in secure contexts, so the app opened over plain
+ * http on a LAN address has none; `getRandomValues` is available everywhere.
  */
 export function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  if (typeof crypto.randomUUID === "function") return `${prefix}-${crypto.randomUUID()}`;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `${prefix}-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function matches(item: { name: string; description: string }, needle: string): boolean {

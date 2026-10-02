@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   countMatches,
   countSubtopics,
@@ -8,6 +8,7 @@ import {
   findProblem,
   isDraftEmpty,
   limitsFromGuide,
+  newId,
   moveSubtopic,
   moveTopic,
   removeSubtopic,
@@ -196,5 +197,17 @@ describe("isDraftEmpty", () => {
     expect(isDraftEmpty(emptyDraft())).toBe(true);
     expect(isDraftEmpty({ label: "x", topics: [] })).toBe(false);
     expect(isDraftEmpty(sampleDraft())).toBe(false);
+  });
+});
+
+describe("newId", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Plain http on a LAN address is not a secure context, so `crypto.randomUUID` is missing there.
+  it("works without crypto.randomUUID", () => {
+    vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    const first = newId("topic");
+    expect(first).toMatch(/^topic-[0-9a-f]{32}$/);
+    expect(newId("topic")).not.toBe(first);
   });
 });
