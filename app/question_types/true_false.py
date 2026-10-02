@@ -44,13 +44,9 @@ class TrueFalse:
         )
 
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
+        """A boolean ``correct_answer`` is ``gradable``'s (the grading plan requires one)."""
         del runner
         return [
-            make_check(
-                "tf_boolean_answer",
-                isinstance(content.get("correct_answer"), bool),
-                "Valid boolean answer",
-            ),
             make_check(
                 "tf_explanation_present",
                 present_text(content.get("explanation")),

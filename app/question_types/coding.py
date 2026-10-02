@@ -6,13 +6,7 @@ from app.domain.enums import QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import CodingDraft
 from app.question_types._executable import Executable
-from app.question_types._shared import (
-    EXECUTABLE_CONTRACT,
-    parse_tests,
-    parses,
-    reference_check,
-    run_reference,
-)
+from app.question_types._shared import EXECUTABLE_CONTRACT, parses
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
 
@@ -28,18 +22,19 @@ class Coding(Executable):
     )
 
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
+        """Usable tests and "the reference passes them" are ``gradable``'s (check_spec).
+
+        A reference is still required here: grading a student does not need one, so
+        ``check_spec`` cannot tell a missing reference from a question that has none.
+        """
+        del runner
         reference = content.get("reference_solution")
-        reference_parses = isinstance(reference, str) and parses(reference)
-        tests = parse_tests(content.get("tests"))
-        summary = run_reference(reference, reference_parses, tests, runner)
         return [
             make_check(
                 "coding_reference_parses",
-                reference_parses,
+                isinstance(reference, str) and parses(reference),
                 "Reference solution parses",
             ),
-            make_check("harness_valid", tests is not None, "Test harness is valid"),
-            reference_check(summary, len(tests) if tests is not None else 0),
         ]
 
 

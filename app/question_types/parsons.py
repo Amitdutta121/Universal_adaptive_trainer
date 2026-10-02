@@ -35,6 +35,11 @@ class Parsons:
         return GradingPlan("structured.ordering", _ordering_spec(content), same)
 
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
+        """Unknown or repeated ids in the order and bad indents are ``gradable``'s.
+
+        Two checks are this type's own: every block is used (the grader would accept unused
+        blocks as distractors, which this type does not author), and the solution compiles.
+        """
         del runner
         blocks = content.get("blocks")
         order = content.get("correct_order")
@@ -43,53 +48,30 @@ class Parsons:
             and bool(blocks)
             and all(isinstance(block, dict) for block in blocks)
         )
-        block_ids = [block.get("id") for block in blocks] if valid_blocks else []
-        order_consistent = (
+        block_ids = [str(block.get("id")) for block in blocks] if valid_blocks else []
+        order_ids = [str(block_id) for block_id in order] if isinstance(order, list) else []
+        all_blocks_used = (
             valid_blocks
-            and isinstance(order, list)
-            and all(isinstance(block_id, str) for block_id in order)
-            and all(isinstance(block_id, str) for block_id in block_ids)
             and len(set(block_ids)) == len(block_ids)
-            and len(order) == len(block_ids)
-            and len(set(order)) == len(order)
-            and set(order) == set(block_ids)
-        )
-        indent_valid = valid_blocks and all(
-            isinstance(block.get("indent"), int)
-            and not isinstance(block.get("indent"), bool)
-            and block["indent"] >= 0
-            for block in blocks
+            and sorted(order_ids) == sorted(block_ids)
         )
 
         reference_compiles = False
         evidence = None
-        if order_consistent and indent_valid:
-            blocks_by_id = {block["id"]: block for block in blocks}
-            text_valid = all(
-                isinstance(blocks_by_id[block_id].get("text"), str) for block_id in order
-            )
-            if text_valid:
-                source = "\n".join(
-                    (" " * (4 * blocks_by_id[block_id]["indent"])) + blocks_by_id[block_id]["text"]
-                    for block_id in order
-                )
-                try:
-                    compile(source, "<parsons>", "exec")
-                except (SyntaxError, TypeError, ValueError) as error:
-                    evidence = str(error)
-                else:
-                    reference_compiles = True
+        source = _reference_source(blocks, order_ids) if valid_blocks else None
+        if source is not None:
+            try:
+                compile(source, "<parsons>", "exec")
+            except (SyntaxError, TypeError, ValueError) as error:
+                evidence = str(error)
+            else:
+                reference_compiles = True
 
         return [
             make_check(
                 "parsons_order_consistent",
-                order_consistent,
-                "Canonical order is consistent",
-            ),
-            make_check(
-                "parsons_indent_valid",
-                indent_valid,
-                "Indentation representation is valid",
+                all_blocks_used,
+                "Canonical order uses every block once",
             ),
             make_check(
                 "parsons_reference_compiles",
@@ -122,6 +104,21 @@ class Parsons:
         ]
         random.Random(seed).shuffle(presentable)
         return StudentView(blocks=presentable)
+
+
+def _reference_source(blocks: list[dict], order_ids: list[str]) -> str | None:
+    """The solution program, or ``None`` when a block in the order lacks text or an indent."""
+    by_id = {str(block.get("id")): block for block in blocks}
+    lines = []
+    for block_id in order_ids:
+        block = by_id.get(block_id)
+        text = block.get("text") if block is not None else None
+        indent = block.get("indent") if block is not None else None
+        valid_indent = isinstance(indent, int) and not isinstance(indent, bool) and indent >= 0
+        if not isinstance(text, str) or not valid_indent:
+            return None
+        lines.append(" " * (4 * indent) + text)
+    return "\n".join(lines) if lines else None
 
 
 def _ordering_spec(content: dict) -> dict[str, Any]:
