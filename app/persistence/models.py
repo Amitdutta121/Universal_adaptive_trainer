@@ -31,6 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.books import ExtractionWarning
 from app.domain.enums import (
     BookStatus,
@@ -816,7 +817,7 @@ class TypeInstructionRow(TimestampMixin, Base):
     """The generation instruction for one question type, learned from reviews.
 
     Personalization lives here rather than in a block appended to the prompt
-    (ADR-033). One row per :class:`~app.domain.enums.QuestionType`, holding the
+    (ADR-033). One row per subject and :class:`~app.domain.enums.QuestionType`, holding the
     text that occupies the type-specific slot the shipped one-liner used to fill.
 
     ``rules`` is the accumulated list the rewriter edits; ``instruction`` is the
@@ -826,11 +827,17 @@ class TypeInstructionRow(TimestampMixin, Base):
     """
 
     __tablename__ = "type_instructions"
+    __table_args__ = (
+        UniqueConstraint("subject", "question_type", name="uq_type_instructions_subject_type"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    question_type: Mapped[QuestionType] = mapped_column(
-        StrEnumType(QuestionType, 32), unique=True, index=True
+    #: The subject preset this instruction was learned for. A rule a Python course
+    #: earned must never reach a Physics course, so the row is per (subject, type).
+    subject: Mapped[str] = mapped_column(
+        String(50), default=LEGACY_SUBJECT, server_default=LEGACY_SUBJECT
     )
+    question_type: Mapped[QuestionType] = mapped_column(StrEnumType(QuestionType, 32), index=True)
     instruction: Mapped[str] = mapped_column(Text)
     #: One entry per learned rule: ``{"rule": str, "review_ids": [int]}``.
     rules: Mapped[list[dict]] = mapped_column("rules_json", JsonList, default=list, nullable=True)
@@ -929,11 +936,17 @@ class JudgePromptRow(TimestampMixin, Base):
     """
 
     __tablename__ = "judge_prompts"
+    __table_args__ = (
+        UniqueConstraint("subject", "metric", name="uq_judge_prompts_subject_metric"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    metric: Mapped[JudgeMetricId] = mapped_column(
-        StrEnumType(JudgeMetricId, 32), unique=True, index=True
+    #: The subject preset this judge was edited for: one per (subject, metric), so an
+    #: edit made for one subject's questions never judges another subject's.
+    subject: Mapped[str] = mapped_column(
+        String(50), default=LEGACY_SUBJECT, server_default=LEGACY_SUBJECT
     )
+    metric: Mapped[JudgeMetricId] = mapped_column(StrEnumType(JudgeMetricId, 32), index=True)
     system_prompt: Mapped[str] = mapped_column(Text)
     revision: Mapped[int] = mapped_column(Integer, default=1)
     #: Why the professor changed it. Not required, but it is the only record of

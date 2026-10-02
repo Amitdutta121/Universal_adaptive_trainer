@@ -15,6 +15,7 @@ from typing import NamedTuple
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.enums import (
     BookStatus,
     CurriculumItemStatus,
@@ -1158,23 +1159,35 @@ class ReviewOutcomeRepository:
 
 
 class JudgePromptRepository:
-    """Professor-edited judge prompts, and the version they imply (ADR-038)."""
+    """Professor-edited judge prompts, and the version they imply (ADR-038).
+
+    Every method is scoped to one subject preset: an override saved for one subject
+    is invisible to every other. ``subject`` defaults to the legacy subject, which
+    is what every row written before subjects existed belongs to.
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(self, metric: JudgeMetricId) -> JudgePromptRow | None:
-        stmt = select(JudgePromptRow).where(JudgePromptRow.metric == metric)
+    def get(self, metric: JudgeMetricId, *, subject: str = LEGACY_SUBJECT) -> JudgePromptRow | None:
+        stmt = select(JudgePromptRow).where(
+            JudgePromptRow.subject == subject, JudgePromptRow.metric == metric
+        )
         return self._session.scalars(stmt).first()
 
-    def list_all(self) -> list[JudgePromptRow]:
-        stmt = select(JudgePromptRow).order_by(JudgePromptRow.metric)
+    def list_all(self, *, subject: str = LEGACY_SUBJECT) -> list[JudgePromptRow]:
+        stmt = (
+            select(JudgePromptRow)
+            .where(JudgePromptRow.subject == subject)
+            .order_by(JudgePromptRow.metric)
+        )
         return list(self._session.scalars(stmt))
 
     def save(
         self,
         metric: JudgeMetricId,
         *,
+        subject: str = LEGACY_SUBJECT,
         system_prompt: str,
         note: str | None,
         rules: list[dict] | None = None,
@@ -1195,9 +1208,9 @@ class JudgePromptRepository:
         the rules were rendered into, so continuing to claim those rules produced
         it would be false.
         """
-        row = self.get(metric)
+        row = self.get(metric, subject=subject)
         if row is None:
-            row = JudgePromptRow(metric=metric, revision=1)
+            row = JudgePromptRow(subject=subject, metric=metric, revision=1)
             self._session.add(row)
         else:
             row.revision += 1
@@ -1213,9 +1226,9 @@ class JudgePromptRepository:
         self._session.flush()
         return row
 
-    def delete(self, metric: JudgeMetricId) -> bool:
+    def delete(self, metric: JudgeMetricId, *, subject: str = LEGACY_SUBJECT) -> bool:
         """Drop one override, returning that judge to its shipped prompt."""
-        row = self.get(metric)
+        row = self.get(metric, subject=subject)
         if row is None:
             return False
         self._session.delete(row)
@@ -1224,35 +1237,50 @@ class JudgePromptRepository:
 
 
 class TypeInstructionRepository:
-    """The learned generation instruction for each question type (ADR-033)."""
+    """The learned generation instruction for each question type (ADR-033).
+
+    Scoped per subject preset like :class:`JudgePromptRepository`: a rule learned
+    for one subject is never returned for another. ``subject`` defaults to the
+    legacy subject every pre-existing row belongs to.
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(self, question_type: QuestionType) -> TypeInstructionRow | None:
+    def get(
+        self, question_type: QuestionType, *, subject: str = LEGACY_SUBJECT
+    ) -> TypeInstructionRow | None:
         """The stored instruction for this type, or ``None`` if none was learned.
 
         ``None`` is a normal answer, not an error: a type nobody has reviewed
         keeps the shipped instruction, and the caller decides that fallback.
         """
-        stmt = select(TypeInstructionRow).where(TypeInstructionRow.question_type == question_type)
+        stmt = select(TypeInstructionRow).where(
+            TypeInstructionRow.subject == subject,
+            TypeInstructionRow.question_type == question_type,
+        )
         return self._session.scalars(stmt).first()
 
-    def list_all(self) -> list[TypeInstructionRow]:
-        stmt = select(TypeInstructionRow).order_by(TypeInstructionRow.question_type)
+    def list_all(self, *, subject: str = LEGACY_SUBJECT) -> list[TypeInstructionRow]:
+        stmt = (
+            select(TypeInstructionRow)
+            .where(TypeInstructionRow.subject == subject)
+            .order_by(TypeInstructionRow.question_type)
+        )
         return list(self._session.scalars(stmt))
 
     def upsert(
         self,
         question_type: QuestionType,
         *,
+        subject: str = LEGACY_SUBJECT,
         instruction: str,
         rules: list[dict],
         review_count: int,
     ) -> TypeInstructionRow:
-        row = self.get(question_type)
+        row = self.get(question_type, subject=subject)
         if row is None:
-            row = TypeInstructionRow(question_type=question_type)
+            row = TypeInstructionRow(subject=subject, question_type=question_type)
             self._session.add(row)
         else:
             row.updated_at = datetime.now(UTC)
@@ -1262,9 +1290,9 @@ class TypeInstructionRepository:
         self._session.flush()
         return row
 
-    def delete(self, question_type: QuestionType) -> bool:
+    def delete(self, question_type: QuestionType, *, subject: str = LEGACY_SUBJECT) -> bool:
         """Drop one learned row, returning that type to its shipped instruction."""
-        row = self.get(question_type)
+        row = self.get(question_type, subject=subject)
         if row is None:
             return False
         self._session.delete(row)
