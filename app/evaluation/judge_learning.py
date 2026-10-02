@@ -42,6 +42,7 @@ from app.evaluation.schema import RESPONSE_MODEL_FOR
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import JudgePromptRow, ReviewOutcomeRow
 from app.persistence.repositories import JudgePromptRepository, ReviewOutcomeRepository
+from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,7 @@ DISAGREEMENT_LIMIT = 60
 #: Characters of a question kept when quoting it as evidence.
 SNIPPET_CHARS = 240
 
-SYSTEM = (
-    "You maintain the instruction ONE automated reviewer follows when it judges "
-    "introductory-Python assessment questions. You are given the rules it has already "
+_SYSTEM_TAIL = (
     "learned and the cases where it disagreed with the professor. Each case says what "
     "the reviewer decided, what it said, and what the professor decided. Return the "
     "rules edited: keep the ones the evidence still supports, reword one that is vague, "
@@ -64,6 +63,22 @@ SYSTEM = (
     "not restate the reviewer's existing instructions. Do not invent a standard the "
     "professor has not shown. Cite the question ids each rule comes from."
 )
+
+
+def system_for(profile: SubjectProfile) -> str:
+    """The rewriter's system prompt for one subject's judges.
+
+    Only the subject phrase varies; nothing in it is about code.
+    """
+    return (
+        "You maintain the instruction ONE automated reviewer follows when it judges "
+        f"{profile.phrase} assessment questions. You are given the rules it has already "
+        + _SYSTEM_TAIL
+    )
+
+
+#: The Python profile's output, used by :func:`refresh_judge_prompt` until callers pass a subject.
+SYSTEM = system_for(PYTHON_PROFILE)
 
 
 class LearnedJudgeRule(BaseModel):
