@@ -13,6 +13,10 @@ rewrites to reach round six, and did not — the text drifted from "test a singl
 concept, not a collection of unrelated facts" to "avoid broad, unrelated
 content", and specific rules about annotating defects and verifying a single
 correct option disappeared entirely.
+
+Learned instructions are stored **per subject**: a rule learned for one subject
+preset never reaches another subject's generator. ``subject`` defaults to the
+legacy subject that every pre-existing instruction belongs to.
 """
 
 from __future__ import annotations
@@ -21,13 +25,20 @@ import json
 import logging
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.enums import QuestionType, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS, professor_edits
 from app.errors import NotFoundError
 from app.llm import StructuredLLMClient, get_structured_client
-from app.persistence.models import ProfessorReviewRow, TypeInstructionRow
+from app.persistence.models import (
+    CourseRow,
+    CurriculumVersionRow,
+    ProfessorReviewRow,
+    TypeInstructionRow,
+)
 from app.persistence.repositories import ProfessorReviewRepository, TypeInstructionRepository
 
 logger = logging.getLogger(__name__)
@@ -113,13 +124,50 @@ def _serialize(reviews: list[ProfessorReviewRow]) -> str:
     return json.dumps(entries, separators=(",", ":"))
 
 
-def reviews_for_type(session: Session, question_type: QuestionType) -> list[ProfessorReviewRow]:
-    """Reviews of questions of this type, newest first, capped at the limit."""
+def _subject_by_curriculum(session: Session, version_ids: set[int]) -> dict[int, str]:
+    """The subject of the course each curriculum version belongs to.
+
+    A version with no course, or a course that never recorded a subject, is
+    absent here and so counts as the legacy subject -- which is what every such
+    row was built for.
+    """
+    if not version_ids:
+        return {}
+    stmt = (
+        select(CurriculumVersionRow.id, CourseRow.subject)
+        .join(CourseRow, CourseRow.id == CurriculumVersionRow.course_id)
+        .where(CurriculumVersionRow.id.in_(version_ids), CourseRow.subject.is_not(None))
+    )
+    return dict(session.execute(stmt).tuples().all())
+
+
+def reviews_for_type(
+    session: Session, question_type: QuestionType, *, subject: str = LEGACY_SUBJECT
+) -> list[ProfessorReviewRow]:
+    """Reviews of this subject's questions of this type, newest first, capped at the limit.
+
+    A question's subject is its course's, reached through the curriculum version
+    it was generated against. Filtering here is what keeps a Physics professor's
+    reviews out of the rules a Python course learns, and the other way round.
+    """
     reviews = ProfessorReviewRepository(session).list_with_questions(limit=500)
-    matching = [
+    of_type = [
         review
         for review in reviews
         if review.question is not None and review.question.question_type is question_type
+    ]
+    subjects = _subject_by_curriculum(
+        session,
+        {
+            review.question.curriculum_version_id
+            for review in of_type
+            if review.question.curriculum_version_id is not None
+        },
+    )
+    matching = [
+        review
+        for review in of_type
+        if subjects.get(review.question.curriculum_version_id, LEGACY_SUBJECT) == subject
     ]
     return matching[:REVIEW_LIMIT]
 
@@ -130,6 +178,7 @@ def refresh_type_instruction(
     *,
     base_instruction: str,
     client: StructuredLLMClient | None = None,
+    subject: str = LEGACY_SUBJECT,
 ) -> TypeInstructionRow | None:
     """Re-learn one type's instruction from its reviews.
 
@@ -137,13 +186,13 @@ def refresh_type_instruction(
     instruction in place. A type nobody has reviewed has nothing to learn from,
     and inventing rules for it would be the opposite of personalization.
     """
-    reviews = reviews_for_type(session, question_type)
+    reviews = reviews_for_type(session, question_type, subject=subject)
     if not reviews:
         logger.info("No reviews for %s; instruction left unchanged.", question_type.value)
         return None
 
     repository = TypeInstructionRepository(session)
-    existing = repository.get(question_type)
+    existing = repository.get(question_type, subject=subject)
     current = [LearnedRule.model_validate(rule) for rule in (existing.rules if existing else [])]
 
     llm = client or get_structured_client()
@@ -161,6 +210,7 @@ def refresh_type_instruction(
 
     row = repository.upsert(
         question_type,
+        subject=subject,
         instruction=render_instruction(base_instruction, learned.rules),
         rules=[rule.model_dump() for rule in learned.rules],
         review_count=len(reviews),
@@ -182,6 +232,7 @@ def delete_type_instruction_rule(
     *,
     rule_index: int,
     base_instruction: str,
+    subject: str = LEGACY_SUBJECT,
 ) -> TypeInstructionRow | None:
     """Delete one learned rule and re-render the stored instruction.
 
@@ -189,7 +240,7 @@ def delete_type_instruction_rule(
     shipped instruction is back in force and the stored row can be dropped.
     """
     repository = TypeInstructionRepository(session)
-    row = repository.get(question_type)
+    row = repository.get(question_type, subject=subject)
     if row is None:
         raise NotFoundError(
             f"The {question_type.value} type is already using its shipped instruction.",
@@ -205,7 +256,7 @@ def delete_type_instruction_rule(
 
     removed = rules.pop(rule_index)
     if not rules:
-        repository.delete(question_type)
+        repository.delete(question_type, subject=subject)
         session.commit()
         logger.info(
             "Deleted the last learned rule for %s (%s); reverted to shipped instruction.",
@@ -216,6 +267,7 @@ def delete_type_instruction_rule(
 
     updated = repository.upsert(
         question_type,
+        subject=subject,
         instruction=render_instruction(base_instruction, rules),
         rules=[rule.model_dump() for rule in rules],
         review_count=row.review_count,

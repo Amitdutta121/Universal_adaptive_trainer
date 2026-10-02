@@ -13,6 +13,10 @@ would pool pairs from two different panels into one agreement figure, which is
 exactly the mistake ADR-035 exists to prevent. A fingerprint cannot do that:
 identical prompts always produce the same name, and any change always produces a
 different one.
+
+**Overrides are per subject.** A judge edited for one subject preset never
+judges another subject's questions; every function here takes ``subject``,
+defaulting to the legacy subject that every pre-existing override belongs to.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import hashlib
 
 from sqlalchemy.orm import Session
 
+from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.enums import JudgeMetricId
 from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
 from app.persistence.repositories import JudgePromptRepository
@@ -30,20 +35,25 @@ from app.persistence.repositories import JudgePromptRepository
 _FINGERPRINT_CHARS = 8
 
 
-def resolve_system_prompts(session: Session) -> dict[JudgeMetricId, str]:
-    """The system prompt each judge runs now: the override, else the shipped one."""
-    overrides = {row.metric: row.system_prompt for row in JudgePromptRepository(session).list_all()}
+def resolve_system_prompts(
+    session: Session, *, subject: str = LEGACY_SUBJECT
+) -> dict[JudgeMetricId, str]:
+    """The system prompt each judge runs for this subject: its override, else the shipped one."""
+    overrides = {
+        row.metric: row.system_prompt
+        for row in JudgePromptRepository(session).list_all(subject=subject)
+    }
     return {metric: overrides.get(metric, SYSTEM_PROMPT_FOR[metric]) for metric in JudgeMetricId}
 
 
-def effective_rubric_version(session: Session) -> str:
+def effective_rubric_version(session: Session, *, subject: str = LEGACY_SUBJECT) -> str:
     """Name the panel in force, so two panels can never share a name.
 
     An untouched installation returns :data:`RUBRIC_VERSION` unchanged -- there is
     no edit, so claiming a modified judge would be a lie about provenance. Any
     override appends a fingerprint of all four prompts.
     """
-    prompts = resolve_system_prompts(session)
+    prompts = resolve_system_prompts(session, subject=subject)
     if all(prompts[metric] == SYSTEM_PROMPT_FOR[metric] for metric in JudgeMetricId):
         return RUBRIC_VERSION
     return f"{RUBRIC_VERSION}+{fingerprint(prompts)}"
@@ -65,6 +75,6 @@ def fingerprint(prompts: dict[JudgeMetricId, str]) -> str:
     return digest.hexdigest()[:_FINGERPRINT_CHARS]
 
 
-def is_edited(session: Session, metric: JudgeMetricId) -> bool:
-    """Whether this judge is running professor-edited text."""
-    return JudgePromptRepository(session).get(metric) is not None
+def is_edited(session: Session, metric: JudgeMetricId, *, subject: str = LEGACY_SUBJECT) -> bool:
+    """Whether this judge is running professor-edited text for this subject."""
+    return JudgePromptRepository(session).get(metric, subject=subject) is not None
