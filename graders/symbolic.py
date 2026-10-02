@@ -54,9 +54,11 @@ a fresh interpreter. At most :data:`MAX_WORKERS` budgeted computations run at on
 :data:`MAX_IDLE_WORKERS` idle workers are kept. Workers are daemonic (terminated at a normal
 parent exit) and also leave their loop when the pipe closes, so a hard-killed parent orphans
 nothing that keeps polling. Waiting for a worker to start is not counted against a budget; a
-worker that does not start within :data:`WORKER_STARTUP_TIMEOUT_S` raises ``RuntimeError`` (an
-infrastructure fault, never a wrong answer). Because the work runs in another process, a test
-that replaces ``_symbolically_equal`` must replace it with a module-level (picklable) function.
+worker that does not start within :data:`WORKER_STARTUP_TIMEOUT_S` raises
+:class:`~graders.executors.base.ExecutorError` (an infrastructure fault, never a wrong
+answer: scoring answers 503 and validation reports an outage). Because the work runs in
+another process, a test that replaces ``_symbolically_equal`` must replace it with a
+module-level (picklable) function.
 """
 
 from __future__ import annotations
@@ -85,7 +87,7 @@ from sympy.parsing.sympy_parser import (
 )
 
 from graders.core import Grader, GradeResult, SpecError, SpecIssue, parse_spec
-from graders.executors.base import Executor
+from graders.executors.base import Executor, ExecutorError
 
 CAPABILITY = "symbolic.expression_equivalence"
 
@@ -363,7 +365,7 @@ def _with_budget(
         worker = _acquire()
         if not worker.wait_ready(WORKER_STARTUP_TIMEOUT_S):
             worker.kill()
-            raise RuntimeError("The symbolic grading worker process did not start.")
+            raise ExecutorError("The symbolic grading worker process did not start.")
         try:
             worker.conn.send((fn, args))
             if worker.conn.poll(seconds):

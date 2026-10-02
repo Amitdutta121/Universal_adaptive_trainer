@@ -204,3 +204,29 @@ def test_build_content_includes_draft_and_metadata() -> None:
     assert content["expected_output"] == "3"
     assert content["sources"][0]["section_id"] == 7
     assert content["model"] == "fake/test-model"
+
+
+def test_a_live_draft_subclass_is_still_recognised() -> None:
+    """The structured-output library returns a subclass of the draft model (live regression).
+
+    instructor wraps ``response_model`` in its own subclass, so a live draft is never exactly a
+    ``MultipleChoiceDraft``; the fakes return the plain class and hid this.
+    """
+    from instructor.function_calls import openai_schema
+
+    from app.question_types import type_for_draft
+
+    for model in (MultipleChoiceDraft, CodingDraft):
+        wrapped = openai_schema(model)
+        assert wrapped is not model and issubclass(wrapped, model)
+    live = openai_schema(MultipleChoiceDraft)(
+        topic_id=1,
+        subtopic_ids=[1],
+        prompt="Which is mutable?",
+        options=["tuple", "list"],
+        correct_option_index=1,
+        explanation="Lists are mutable.",
+    )
+    assert type_for_draft(live).question_type is QuestionType.MULTIPLE_CHOICE
+    prompt, reference, tests = prompt_fields_from_draft(live)
+    assert (prompt, reference, tests) == ("Which is mutable?", "list", None)

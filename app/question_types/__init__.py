@@ -62,10 +62,16 @@ def implemented_types() -> list[QuestionType]:
 
 
 def type_for_draft(draft: object) -> QuestionTypeModule:
-    """The module whose ``draft_model`` produced ``draft``. ``TypeError`` if none."""
-    for module in _types().values():
-        if type(draft) is module.draft_model:
-            return module
+    """The module whose ``draft_model`` produced ``draft``. ``TypeError`` if none.
+
+    Matched along the draft's class hierarchy, nearest class first: the structured-output
+    library returns an instance of a *subclass* it builds from ``draft_model``, so an exact
+    ``type(draft) is draft_model`` never matches a live draft (only test fakes).
+    """
+    by_model = {module.draft_model: module for module in _types().values()}
+    for cls in type(draft).__mro__:
+        if cls in by_model:
+            return by_model[cls]
     raise TypeError(f"Unsupported draft type: {type(draft).__name__}")
 
 

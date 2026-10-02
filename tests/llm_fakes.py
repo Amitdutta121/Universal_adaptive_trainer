@@ -78,6 +78,14 @@ def verdict_for(
     raise AssertionError(f"Unexpected response model: {response_model!r}")
 
 
+
+def as_live(draft: BaseModel) -> BaseModel:
+    """The draft as the live structured-output library returns it: an instance of a subclass
+    that instructor builds from the response model (never the model class itself)."""
+    from instructor.function_calls import openai_schema
+
+    return openai_schema(type(draft)).model_validate(draft.model_dump(by_alias=True))
+
 class MetricJudgeClient:
     """Answers whichever verdict it is asked for, configurably.
 
@@ -131,7 +139,7 @@ class MetricJudgeClient:
             self.generation_calls.append(
                 {"system": system, "prompt": prompt, "model": response_model}
             )
-            return self.draft
+            return as_live(self.draft)
         if response_model is IssuesVerdict:
             return IssuesVerdict(
                 issue_codes=self.issue_codes,
