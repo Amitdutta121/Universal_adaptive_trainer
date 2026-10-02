@@ -25,11 +25,12 @@ class Executable:
         # The app's own per-run limit, as the old runner used, so scores do not move.
         from app.config import get_settings
 
-        return GradingPlan(
-            "code.python.tests",
-            {"tests": cases, "timeout_s": get_settings().validation_timeout_seconds},
-            same,
-        )
+        spec: dict = {"tests": cases, "timeout_s": get_settings().validation_timeout_seconds}
+        reference = content.get("reference_solution")
+        if isinstance(reference, str):
+            # Grading a student ignores it; ``check_spec`` runs it to prove the tests are passable.
+            spec["reference_solution"] = reference
+        return GradingPlan("code.python.tests", spec, same)
 
     def student_view(self, content: dict, *, seed: int) -> StudentView:
         del seed

@@ -51,8 +51,17 @@ export function TestsPanel({
   onTestsEdit: (value: string) => void;
 }) {
   const tests = presentTests(detail.content?.tests);
+  // Reports written before C8 carry the two old checks; newer ones carry one `gradable` check
+  // (usable tests and a reference that passes them, via the grader's check_spec).
   const harness = checkByName(detail.validation_checks, "harness_valid");
-  const reference = checkByName(detail.validation_checks, "reference_passes_tests");
+  const legacyReference = checkByName(detail.validation_checks, "reference_passes_tests");
+  const gradable = checkByName(detail.validation_checks, "gradable");
+  const reference = legacyReference ?? gradable;
+  const referenceLabel = legacyReference?.detail
+    ? legacyReference.detail
+    : reference?.passed
+      ? "reference passes"
+      : "reference failed";
 
   return (
     <Card className="review-panel border">
@@ -61,7 +70,7 @@ export function TestsPanel({
         <CardDescription className="flex flex-wrap items-center gap-2">
           {reference ? (
             <ReviewChip tone={statusTone(reference.passed)}>
-              {reference.detail ?? (reference.passed ? "reference passes" : "reference failed")}
+              {referenceLabel}
             </ReviewChip>
           ) : null}
           {harness ? (

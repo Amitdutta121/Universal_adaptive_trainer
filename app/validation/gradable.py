@@ -11,8 +11,6 @@ parses, an explanation is present, ...).
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.assessment.specs import Unmarkable
 from app.domain.questions import Question, QuestionCheck
 from app.errors import CodeExecutionUnavailableError
@@ -22,10 +20,6 @@ from graders import ExecutorError, SpecError, get_grader
 
 CHECK_NAME = "gradable"
 _DETAIL = "Question can be graded"
-#: A content field the question's reference answer lives in, passed to a grader whose spec
-#: accepts one so ``check_spec`` can confirm it scores full marks. Grading a student never
-#: needs it, so grading plans leave it out.
-_REFERENCE_FIELD = "reference_solution"
 
 
 def check_gradable(question: Question, content: dict) -> list[QuestionCheck]:
@@ -58,9 +52,8 @@ def check_gradable(question: Question, content: dict) -> list[QuestionCheck]:
     except KeyError:
         return [_failed(f"No grader is built for {plan.capability!r}.")]
 
-    spec = _with_reference(plan.spec, content, grader)
     try:
-        issues = grader.check_spec(spec)
+        issues = grader.check_spec(plan.spec)
     except SpecError as error:
         return [_failed(str(error))]
     except ExecutorError as error:
@@ -73,15 +66,6 @@ def check_gradable(question: Question, content: dict) -> list[QuestionCheck]:
         evidence = "\n".join(f"{issue.code}: {issue.message}" for issue in issues)
         return [_failed(evidence)]
     return [make_check(CHECK_NAME, True, _DETAIL)]
-
-
-def _with_reference(spec: dict[str, Any], content: dict, grader: object) -> dict[str, Any]:
-    model = getattr(grader, "spec_model", None)
-    fields = getattr(model, "model_fields", {})
-    reference = content.get(_REFERENCE_FIELD)
-    if _REFERENCE_FIELD in fields and _REFERENCE_FIELD not in spec and isinstance(reference, str):
-        return {**spec, _REFERENCE_FIELD: reference}
-    return spec
 
 
 def _failed(evidence: str) -> QuestionCheck:

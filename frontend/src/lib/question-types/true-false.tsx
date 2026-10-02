@@ -1,7 +1,6 @@
 "use client";
 
 import { ReviewChip } from "@/app/courses/[courseId]/review/components/review-primitives";
-import { checkByName } from "@/app/courses/[courseId]/review/review-utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -69,7 +68,6 @@ function TrueFalseReview({ content, submittedAnswer }: ReviewContentProps) {
 }
 
 function TrueFalseAuthoringReview({ detail }: AuthoringReviewProps) {
-  const checks = detail.validation_checks;
   const content = detail.content ?? {};
   const correct = typeof content.correct_answer === "boolean" ? content.correct_answer : null;
   return (
@@ -85,7 +83,7 @@ function TrueFalseAuthoringReview({ detail }: AuthoringReviewProps) {
             <ReviewChip tone={correct === false ? "ok" : "muted"}>False</ReviewChip>
             <Separator orientation="vertical" className="hidden h-4 sm:block" />
             <span className="text-[var(--review-muted)] text-xs">
-              {checkByName(checks, "tf_boolean_answer")?.passed
+              {typeof correct === "boolean"
                 ? "boolean answer recorded"
                 : "answer missing"}
             </span>
