@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * The books library: import a document, and manage what is already imported.
+ * The books library: manage what is already imported, and import more through
+ * the "Import book" modal in the header.
  *
  * Server state — the list, the guide, every mutation — belongs to TanStack Query
  * in `lib/api/queries.ts`. What this component owns is what the browser owns: the
@@ -11,9 +12,11 @@
  */
 
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
+import { Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,15 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useBookDocumentGuide, useBooks } from "@/lib/api/queries";
+import { useBooks } from "@/lib/api/queries";
 import type { BookSummary } from "@/lib/api/types";
 import { pluralise } from "@/lib/display";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
 import { BookDeleteDialog } from "./components/book-delete-dialog";
 import { BookEditDialog } from "./components/book-edit-dialog";
-import { BookUploadCard } from "./components/book-upload-card";
+import { BookImportDialog } from "./components/book-import-dialog";
 import { BooksTable } from "./components/books-table";
-import { DocumentGuideCard } from "./components/document-guide-card";
 
 const STATUS_FILTERS = ["all", "imported", "partial"] as const;
 
@@ -58,9 +60,9 @@ export function BooksScreen() {
 
   const [editing, setEditing] = useState<BookSummary | null>(null);
   const [deleting, setDeleting] = useState<BookSummary | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const books = useBooks();
-  const guide = useBookDocumentGuide();
 
   const visible = useMemo(() => {
     const all = books.data?.books ?? [];
@@ -74,11 +76,16 @@ export function BooksScreen() {
 
   return (
     <>
-      <PageHeader title={section.label} summary={section.summary} />
-
-      <BookUploadCard guide={guide.data} />
-
-      <DocumentGuideCard guide={guide.data} isPending={guide.isPending} error={guide.error} />
+      <PageHeader
+        title={section.label}
+        summary={section.summary}
+        actions={
+          <Button size="sm" onClick={() => setImportOpen(true)}>
+            <Upload />
+            Import book
+          </Button>
+        }
+      />
 
       <Card>
         <CardContent className="space-y-4">
@@ -121,7 +128,7 @@ export function BooksScreen() {
             total === 0 ? (
               <EmptyState
                 title="No books have been imported yet"
-                hint="Copy the prompt above, have an assistant turn your textbook into a document, then import it."
+                hint="Use Import book to add a PDF or a book document."
               />
             ) : (
               <EmptyState
@@ -137,6 +144,7 @@ export function BooksScreen() {
         </CardContent>
       </Card>
 
+      <BookImportDialog open={importOpen} onOpenChange={setImportOpen} />
       {/* Keyed so the form remounts with the values of whichever row was chosen. */}
       <BookEditDialog
         key={`edit-${editing?.id ?? "none"}`}
