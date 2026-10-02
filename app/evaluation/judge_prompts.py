@@ -25,10 +25,10 @@ import hashlib
 
 from sqlalchemy.orm import Session
 
-from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.enums import JudgeMetricId
-from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
+from app.evaluation.prompts import rubric_version_for, system_prompts_for
 from app.persistence.repositories import JudgePromptRepository
+from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 #: Hex characters of the digest kept in the version name. Short enough to read in
 #: a table, wide enough that two prompt sets will not collide in one bank.
@@ -36,27 +36,30 @@ _FINGERPRINT_CHARS = 8
 
 
 def resolve_system_prompts(
-    session: Session, *, subject: str = LEGACY_SUBJECT
+    session: Session, *, profile: SubjectProfile = PYTHON_PROFILE
 ) -> dict[JudgeMetricId, str]:
     """The system prompt each judge runs for this subject: its override, else the shipped one."""
+    shipped = system_prompts_for(profile)
     overrides = {
         row.metric: row.system_prompt
-        for row in JudgePromptRepository(session).list_all(subject=subject)
+        for row in JudgePromptRepository(session).list_all(subject=profile.storage_key)
     }
-    return {metric: overrides.get(metric, SYSTEM_PROMPT_FOR[metric]) for metric in JudgeMetricId}
+    return {metric: overrides.get(metric, shipped[metric]) for metric in JudgeMetricId}
 
 
-def effective_rubric_version(session: Session, *, subject: str = LEGACY_SUBJECT) -> str:
+def effective_rubric_version(session: Session, *, profile: SubjectProfile = PYTHON_PROFILE) -> str:
     """Name the panel in force, so two panels can never share a name.
 
-    An untouched installation returns :data:`RUBRIC_VERSION` unchanged -- there is
-    no edit, so claiming a modified judge would be a lie about provenance. Any
-    override appends a fingerprint of all four prompts.
+    An untouched Intro Python installation returns :data:`RUBRIC_VERSION` unchanged -- there is
+    no edit, so claiming a modified judge would be a lie about provenance. Another subject's
+    shipped panel is named by :func:`rubric_version_for`; any override appends a fingerprint of
+    all four prompts.
     """
-    prompts = resolve_system_prompts(session, subject=subject)
-    if all(prompts[metric] == SYSTEM_PROMPT_FOR[metric] for metric in JudgeMetricId):
-        return RUBRIC_VERSION
-    return f"{RUBRIC_VERSION}+{fingerprint(prompts)}"
+    prompts = resolve_system_prompts(session, profile=profile)
+    base = rubric_version_for(profile)
+    if prompts == system_prompts_for(profile):
+        return base
+    return f"{base}+{fingerprint(prompts)}"
 
 
 def fingerprint(prompts: dict[JudgeMetricId, str]) -> str:
@@ -75,6 +78,8 @@ def fingerprint(prompts: dict[JudgeMetricId, str]) -> str:
     return digest.hexdigest()[:_FINGERPRINT_CHARS]
 
 
-def is_edited(session: Session, metric: JudgeMetricId, *, subject: str = LEGACY_SUBJECT) -> bool:
+def is_edited(
+    session: Session, metric: JudgeMetricId, *, profile: SubjectProfile = PYTHON_PROFILE
+) -> bool:
     """Whether this judge is running professor-edited text for this subject."""
-    return JudgePromptRepository(session).get(metric, subject=subject) is not None
+    return JudgePromptRepository(session).get(metric, subject=profile.storage_key) is not None

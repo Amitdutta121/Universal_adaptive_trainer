@@ -32,6 +32,7 @@ from app.feedback import ReviewOutcome, route_review_outcome, submit_review
 from app.generation.prompts import base_type_instruction
 from app.persistence.repositories import JudgePromptRepository, ProfessorReviewRepository
 from app.personalization import refresh_type_instruction
+from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_version
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
     ReasonCount,
@@ -87,10 +88,12 @@ def create_review(session: DbSession, question_id: int, payload: ReviewRequest) 
     # lesson belongs to each, and dropping either would waste half the evidence
     # the professor just produced.
     settings = get_settings()
+    # The lesson belongs to the reviewed question's own subject (ADR-056).
+    profile = profile_for_version(session, review.question.curriculum_version_id)
     if outcome.calls_for_instruction_refresh and settings.generator_learning_enabled:
-        _relearn_for(session, outcome, review.question.question_type, result.outcome)
+        _relearn_for(session, outcome, review.question.question_type, result.outcome, profile)
     if outcome.calls_for_judge_repair and settings.judge_learning_enabled:
-        _relearn_judges(session, outcome, result.outcome)
+        _relearn_judges(session, outcome, result.outcome, profile)
     return result
 
 
@@ -107,7 +110,12 @@ def _record_error(outcome: ReviewOutcome, reported: ReviewOutcomeOut, detail: st
     reported.refresh_error = combined
 
 
-def _relearn_judges(session: DbSession, outcome: ReviewOutcome, reported: ReviewOutcomeOut) -> None:
+def _relearn_judges(
+    session: DbSession,
+    outcome: ReviewOutcome,
+    reported: ReviewOutcomeOut,
+    profile: SubjectProfile = PYTHON_PROFILE,
+) -> None:
     """Relearn each judge this review contradicted (ADR-039).
 
     The judge half of the routing. Only the judges named on the outcome are
@@ -128,12 +136,12 @@ def _relearn_judges(session: DbSession, outcome: ReviewOutcome, reported: Review
     refreshed: list[JudgeMetricId] = []
     errors: list[str] = []
     for metric in outcome.attributed_metrics:
-        existing = repository.get(metric)
+        existing = repository.get(metric, subject=profile.storage_key)
         if existing is not None and not existing.learned:
             logger.info("Judge %s is hand-written; leaving it alone.", metric.value)
             continue
         try:
-            if refresh_judge_prompt(session, metric) is not None:
+            if refresh_judge_prompt(session, metric, profile=profile) is not None:
                 refreshed.append(metric)
         except (AdaptiveTrainerError, OSError) as exc:
             session.rollback()
@@ -152,6 +160,7 @@ def _relearn_for(
     outcome: ReviewOutcome,
     question_type: QuestionType | None,
     reported: ReviewOutcomeOut,
+    profile: SubjectProfile = PYTHON_PROFILE,
 ) -> None:
     """Relearn one type's instruction because the professor did not accept it.
 
@@ -177,6 +186,7 @@ def _relearn_for(
             session,
             question_type,
             base_instruction=base_type_instruction(question_type),
+            subject=profile.storage_key,
         )
     except (AdaptiveTrainerError, OSError) as exc:
         session.rollback()

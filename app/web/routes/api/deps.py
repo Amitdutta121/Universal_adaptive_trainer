@@ -12,6 +12,7 @@ from app.assessment.catalog import TYPES_BY_ID, course_question_types
 from app.errors import DomainRuleError, NotFoundError
 from app.persistence.database import get_session
 from app.persistence.repositories import CourseRepository
+from app.subjects import SubjectProfile, profile_for_course_id
 
 #: Request-scoped database session.
 DbSession = Annotated[Session, Depends(get_session)]
@@ -39,6 +40,15 @@ def _course_scope(
 #: ``None`` means unscoped -- every course -- which is what callers outside the
 #: Studio (scripts, the existing test suite) get by not sending the header.
 CourseScope = Annotated[int | None, Depends(_course_scope)]
+
+
+def _course_profile(session: DbSession, course: CourseScope) -> SubjectProfile:
+    """The subject profile of the request's course; Intro Python when it names none."""
+    return profile_for_course_id(session, course)
+
+
+#: What prompts, judge edits and learned instructions in this request follow (ADR-056).
+CourseProfile = Annotated[SubjectProfile, Depends(_course_profile)]
 
 
 def ensure_question_types_allowed(

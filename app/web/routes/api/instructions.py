@@ -19,7 +19,8 @@ from app.personalization import (
     reviews_for_type,
 )
 from app.question_types import implemented_types
-from app.web.routes.api.deps import DbSession
+from app.subjects import SubjectProfile
+from app.web.routes.api.deps import CourseProfile, DbSession
 from app.web.routes.api.schemas import (
     TypeInstructionListResponse,
     TypeInstructionOut,
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/instructions", tags=["instructions"])
 
 def _out(
     session: DbSession,
+    profile: SubjectProfile,
     question_type: QuestionType,
     *,
     row: TypeInstructionRow | None = None,
@@ -43,33 +45,40 @@ def _out(
         rules=[str(rule.get("rule", "")) for rule in (row.rules if row else [])],
         learned=row is not None,
         review_count=row.review_count if row else 0,
-        available_reviews=len(reviews_for_type(session, question_type)),
+        available_reviews=len(
+            reviews_for_type(session, question_type, subject=profile.storage_key)
+        ),
         updated_at=row.updated_at or row.created_at if row else None,
     )
 
 
 @router.get("", response_model=TypeInstructionListResponse)
-def list_instructions(session: DbSession) -> TypeInstructionListResponse:
+def list_instructions(session: DbSession, profile: CourseProfile) -> TypeInstructionListResponse:
     """Every built question type, with whatever has been learned for it.
 
     Types with nothing learned are listed too, carrying the shipped instruction
     and a review count -- that is how a professor sees which types have enough
     feedback to be worth refreshing.
     """
-    stored = {row.question_type: row for row in TypeInstructionRepository(session).list_all()}
+    stored = {
+        row.question_type: row
+        for row in TypeInstructionRepository(session).list_all(subject=profile.storage_key)
+    }
     return TypeInstructionListResponse(
         instructions=[
-            _out(session, question_type, row=stored.get(question_type))
+            _out(session, profile, question_type, row=stored.get(question_type))
             for question_type in implemented_types()
         ]
     )
 
 
 @router.delete("/{question_type}", response_model=TypeInstructionOut)
-def delete_instruction(session: DbSession, question_type: QuestionType) -> TypeInstructionOut:
+def delete_instruction(
+    session: DbSession, question_type: QuestionType, profile: CourseProfile
+) -> TypeInstructionOut:
     """Delete one learned row so this type falls back to its shipped instruction."""
     repository = TypeInstructionRepository(session)
-    if not repository.delete(question_type):
+    if not repository.delete(question_type, subject=profile.storage_key):
         raise NotFoundError(
             f"The {question_type.value} type is already using its shipped instruction.",
             detail="There is no learned instruction row to delete.",
@@ -77,6 +86,7 @@ def delete_instruction(session: DbSession, question_type: QuestionType) -> TypeI
     session.commit()
     return _out(
         session,
+        profile,
         question_type,
         instruction_text=base_type_instruction(question_type),
     )
@@ -85,6 +95,7 @@ def delete_instruction(session: DbSession, question_type: QuestionType) -> TypeI
 @router.delete("/{question_type}/rules/{rule_index}", response_model=TypeInstructionOut)
 def delete_rule(
     session: DbSession,
+    profile: CourseProfile,
     question_type: QuestionType,
     rule_index: int,
 ) -> TypeInstructionOut:
@@ -95,6 +106,7 @@ def delete_rule(
             question_type,
             rule_index=rule_index,
             base_instruction=base_type_instruction(question_type),
+            subject=profile.storage_key,
         )
     except Exception:
         session.rollback()
@@ -103,20 +115,24 @@ def delete_rule(
     if row is None:
         return _out(
             session,
+            profile,
             question_type,
             instruction_text=base_type_instruction(question_type),
         )
-    return _out(session, question_type, row=row)
+    return _out(session, profile, question_type, row=row)
 
 
 @router.post("/{question_type}/refresh", response_model=TypeInstructionRefreshResponse)
-def refresh(session: DbSession, question_type: QuestionType) -> TypeInstructionRefreshResponse:
+def refresh(
+    session: DbSession, question_type: QuestionType, profile: CourseProfile
+) -> TypeInstructionRefreshResponse:
     """Re-learn one type's instruction from its reviews. Requires a configured LLM."""
     try:
         row = refresh_type_instruction(
             session,
             question_type,
             base_instruction=base_type_instruction(question_type),
+            subject=profile.storage_key,
         )
     except Exception:
         session.rollback()

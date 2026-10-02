@@ -37,12 +37,13 @@ from app.domain.enums import JudgeMetricId, QuadrantCell
 from app.domain.feedback import REJECTION_REASON_LABELS, professor_edits
 from app.domain.questions import Question
 from app.errors import AdaptiveTrainerError
-from app.evaluation.prompts import SYSTEM_PROMPT_FOR, build_user_prompt
+from app.evaluation.prompts import build_user_prompt, system_prompt_for
 from app.evaluation.schema import RESPONSE_MODEL_FOR
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import JudgePromptRow, ReviewOutcomeRow
 from app.persistence.repositories import JudgePromptRepository, ReviewOutcomeRepository
 from app.subjects import PYTHON_PROFILE, SubjectProfile
+from app.subjects.resolve import key_of_version, storage_keys_by_version
 
 logger = logging.getLogger(__name__)
 
@@ -165,15 +166,47 @@ def _serialize(metric: JudgeMetricId, rows: list[ReviewOutcomeRow]) -> str:
     return json.dumps(cases, separators=(",", ":"))
 
 
-def disagreements_for(session: Session, metric: JudgeMetricId) -> list[ReviewOutcomeRow]:
-    """The cases this judge may learn from: its own faults, minus the held-out third."""
-    return ReviewOutcomeRepository(session).list_disagreements_for(
-        metric, include_held_out=False, limit=DISAGREEMENT_LIMIT
+#: Rows read before keeping one subject's: enough that a mixed bank still yields a full sample.
+_SUBJECT_SCAN = 1000
+
+
+def _of_subject(
+    session: Session, rows: list[ReviewOutcomeRow], profile: SubjectProfile, limit: int
+) -> list[ReviewOutcomeRow]:
+    """Only the rows whose question belongs to this subject's courses (ADR-056)."""
+    keys = storage_keys_by_version(
+        session,
+        {
+            row.question.curriculum_version_id
+            for row in rows
+            if row.question is not None and row.question.curriculum_version_id is not None
+        },
     )
+    kept = [
+        row
+        for row in rows
+        if row.question is not None
+        and key_of_version(keys, row.question.curriculum_version_id) == profile.storage_key
+    ]
+    return kept[:limit]
+
+
+def disagreements_for(
+    session: Session, metric: JudgeMetricId, *, profile: SubjectProfile = PYTHON_PROFILE
+) -> list[ReviewOutcomeRow]:
+    """What this judge may learn from: its faults in this subject, minus the held-out third."""
+    rows = ReviewOutcomeRepository(session).list_disagreements_for(
+        metric, include_held_out=False, limit=_SUBJECT_SCAN
+    )
+    return _of_subject(session, rows, profile, DISAGREEMENT_LIMIT)
 
 
 def agreements_for(
-    session: Session, metric: JudgeMetricId, *, limit: int
+    session: Session,
+    metric: JudgeMetricId,
+    *,
+    limit: int,
+    profile: SubjectProfile = PYTHON_PROFILE,
 ) -> list[ReviewOutcomeRow]:
     """Cases this judge got *right*, as a counterweight to its failures.
 
@@ -185,9 +218,9 @@ def agreements_for(
     rows = ReviewOutcomeRepository(session).list_in_cells(
         [QuadrantCell.CONFIRMED_GOOD, QuadrantCell.CONFIRMED_BAD],
         include_held_out=False,
-        limit=limit,
+        limit=_SUBJECT_SCAN,
     )
-    return rows[:limit]
+    return _of_subject(session, rows, profile, limit)
 
 
 def score_prompt(
@@ -244,6 +277,7 @@ def refresh_judge_prompt(
     metric: JudgeMetricId,
     *,
     client: StructuredLLMClient | None = None,
+    profile: SubjectProfile = PYTHON_PROFILE,
 ) -> JudgePromptRow | None:
     """Re-learn one judge's prompt from the questions it got wrong.
 
@@ -257,7 +291,8 @@ def refresh_judge_prompt(
     hand-edited judge check :attr:`JudgePromptRow.learned` first.
     """
     settings = get_settings()
-    rows = disagreements_for(session, metric)
+    rows = disagreements_for(session, metric, profile=profile)
+    shipped = system_prompt_for(metric, profile)
     if len(rows) < settings.judge_repair_min_disagreements:
         logger.info(
             "Only %s disagreement(s) for %s; %s needed. Prompt left unchanged.",
@@ -268,19 +303,19 @@ def refresh_judge_prompt(
         return None
 
     repository = JudgePromptRepository(session)
-    existing = repository.get(metric)
+    existing = repository.get(metric, subject=profile.storage_key)
     current = [
         LearnedJudgeRule.model_validate(rule) for rule in (existing.rules if existing else [])
     ]
-    incumbent = existing.system_prompt if existing else SYSTEM_PROMPT_FOR[metric]
-    kept = agreements_for(session, metric, limit=len(rows))
+    incumbent = existing.system_prompt if existing else shipped
+    kept = agreements_for(session, metric, limit=len(rows), profile=profile)
 
     llm = client or get_structured_client()
     learned = llm.complete_structured(
-        system=SYSTEM,
+        system=system_for(profile),
         prompt=(
             f"Reviewer: {metric.value}\n\n"
-            f"The instruction it currently follows:\n{SYSTEM_PROMPT_FOR[metric]}\n\n"
+            f"The instruction it currently follows:\n{shipped}\n\n"
             f"Rules already learned:\n{json.dumps([r.model_dump() for r in current], indent=2)}\n\n"
             f"Cases where it disagreed with the professor ({len(rows)}):\n"
             f"{_serialize(metric, rows)}\n\n"
@@ -291,14 +326,17 @@ def refresh_judge_prompt(
         response_model=LearnedJudgeRules,
     )
 
-    candidate = render_judge_prompt(SYSTEM_PROMPT_FOR[metric], learned.rules)
-    verdict = _gate(session, metric, incumbent, candidate, client=llm, settings=settings)
+    candidate = render_judge_prompt(shipped, learned.rules)
+    verdict = _gate(
+        session, metric, incumbent, candidate, client=llm, settings=settings, profile=profile
+    )
     if not verdict.accepted:
         logger.info("Rewritten %s judge refused: %s", metric.value, verdict.detail)
         return None
 
     row = repository.save(
         metric,
+        subject=profile.storage_key,
         system_prompt=candidate,
         note=f"Learned from {len(rows)} disagreement(s). {verdict.detail}",
         rules=[rule.model_dump() for rule in learned.rules],
@@ -333,6 +371,7 @@ def _gate(
     *,
     client: StructuredLLMClient,
     settings: Settings,
+    profile: SubjectProfile = PYTHON_PROFILE,
 ) -> GateVerdict:
     """Adopt a rewritten judge only if it does not lose on the held-out pairs.
 
@@ -352,8 +391,11 @@ def _gate(
     if not settings.judge_repair_gate_enabled:
         return GateVerdict(accepted=True, detail="Gate disabled; adopted unscored.")
 
-    pairs = ReviewOutcomeRepository(session).list_held_out(
-        limit=settings.judge_repair_scoring_pairs
+    pairs = _of_subject(
+        session,
+        ReviewOutcomeRepository(session).list_held_out(limit=_SUBJECT_SCAN),
+        profile,
+        settings.judge_repair_scoring_pairs,
     )
     if len(pairs) < settings.judge_repair_min_scoring_pairs:
         return GateVerdict(

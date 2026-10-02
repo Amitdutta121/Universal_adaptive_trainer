@@ -25,7 +25,6 @@ import json
 import logging
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.assessment.catalog import LEGACY_SUBJECT
@@ -34,12 +33,11 @@ from app.domain.feedback import REJECTION_REASON_LABELS, professor_edits
 from app.errors import NotFoundError
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import (
-    CourseRow,
-    CurriculumVersionRow,
     ProfessorReviewRow,
     TypeInstructionRow,
 )
 from app.persistence.repositories import ProfessorReviewRepository, TypeInstructionRepository
+from app.subjects.resolve import key_of_version, storage_keys_by_version
 
 logger = logging.getLogger(__name__)
 
@@ -124,31 +122,15 @@ def _serialize(reviews: list[ProfessorReviewRow]) -> str:
     return json.dumps(entries, separators=(",", ":"))
 
 
-def _subject_by_curriculum(session: Session, version_ids: set[int]) -> dict[int, str]:
-    """The subject of the course each curriculum version belongs to.
-
-    A version with no course, or a course that never recorded a subject, is
-    absent here and so counts as the legacy subject -- which is what every such
-    row was built for.
-    """
-    if not version_ids:
-        return {}
-    stmt = (
-        select(CurriculumVersionRow.id, CourseRow.subject)
-        .join(CourseRow, CourseRow.id == CurriculumVersionRow.course_id)
-        .where(CurriculumVersionRow.id.in_(version_ids), CourseRow.subject.is_not(None))
-    )
-    return dict(session.execute(stmt).tuples().all())
-
-
 def reviews_for_type(
     session: Session, question_type: QuestionType, *, subject: str = LEGACY_SUBJECT
 ) -> list[ProfessorReviewRow]:
     """Reviews of this subject's questions of this type, newest first, capped at the limit.
 
-    A question's subject is its course's, reached through the curriculum version
-    it was generated against. Filtering here is what keeps a Physics professor's
-    reviews out of the rules a Python course learns, and the other way round.
+    A question's subject is its course's storage key (``SubjectProfile.storage_key``: the preset,
+    or ``custom:<course id>``), reached through the curriculum version it was generated against.
+    Filtering here is what keeps a Physics professor's reviews out of the rules a Python course
+    learns, and the other way round.
     """
     reviews = ProfessorReviewRepository(session).list_with_questions(limit=500)
     of_type = [
@@ -156,7 +138,7 @@ def reviews_for_type(
         for review in reviews
         if review.question is not None and review.question.question_type is question_type
     ]
-    subjects = _subject_by_curriculum(
+    keys = storage_keys_by_version(
         session,
         {
             review.question.curriculum_version_id
@@ -167,7 +149,7 @@ def reviews_for_type(
     matching = [
         review
         for review in of_type
-        if subjects.get(review.question.curriculum_version_id, LEGACY_SUBJECT) == subject
+        if key_of_version(keys, review.question.curriculum_version_id) == subject
     ]
     return matching[:REVIEW_LIMIT]
 

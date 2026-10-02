@@ -48,6 +48,19 @@ class SubjectProfile:
     has_code_types: bool
     #: The course's question types, in catalogue ids.
     question_types: tuple[str, ...] = ()
+    #: The course this was read from (``None`` for :data:`PYTHON_PROFILE`).
+    course_id: int | None = None
+
+    @property
+    def storage_key(self) -> str:
+        """The ``subject`` key professor edits and learned rules are stored under (ADR-056).
+
+        A preset is shared by every course using it; a custom subject is one course's own, so
+        two custom courses (say "LLMs" and "Art history") never pool what was learned.
+        """
+        if self.subject_id == "custom" and self.course_id is not None:
+            return f"custom:{self.course_id}"
+        return self.subject_id
 
     @property
     def code_language(self) -> str | None:
@@ -67,7 +80,10 @@ class CourseLike(Protocol):
 
 
 def _profile(
-    subject_id: str, question_types: tuple[str, ...], course_name: str | None = None
+    subject_id: str,
+    question_types: tuple[str, ...],
+    course_name: str | None = None,
+    course_id: int | None = None,
 ) -> SubjectProfile:
     if subject_id in _WORDING:
         phrase, name = _WORDING[subject_id]
@@ -80,6 +96,7 @@ def _profile(
         name=name,
         has_code_types=any(type_id in CODE_TYPES for type_id in question_types),
         question_types=question_types,
+        course_id=course_id,
     )
 
 
@@ -102,4 +119,4 @@ def profile_for(course: CourseLike) -> SubjectProfile:
     if subject_id not in SUBJECTS_BY_ID:
         subject_id = "custom"
     types = tuple(course_question_types(subject_id, course.question_types))
-    return _profile(subject_id, types, course.name)
+    return _profile(subject_id, types, course.name, getattr(course, "id", None))

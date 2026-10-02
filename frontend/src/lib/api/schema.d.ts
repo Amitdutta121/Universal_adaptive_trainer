@@ -923,7 +923,7 @@ export interface paths {
         };
         /**
          * List Judge Prompts
-         * @description All four judges, each with the text it runs and the text it shipped with.
+         * @description All four judges of this course's subject: the text each runs and the text it shipped with.
          */
         get: operations["list_judge_prompts_api_judge_prompts_get"];
         put?: never;
@@ -6125,7 +6125,9 @@ export interface operations {
     list_instructions_api_instructions_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6140,12 +6142,23 @@ export interface operations {
                     "application/json": components["schemas"]["TypeInstructionListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     delete_instruction_api_instructions__question_type__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_type: components["schemas"]["QuestionType"];
             };
@@ -6176,7 +6189,9 @@ export interface operations {
     delete_rule_api_instructions__question_type__rules__rule_index__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_type: components["schemas"]["QuestionType"];
                 rule_index: number;
@@ -6208,7 +6223,9 @@ export interface operations {
     refresh_api_instructions__question_type__refresh_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_type: components["schemas"]["QuestionType"];
             };
@@ -6239,7 +6256,9 @@ export interface operations {
     list_judge_prompts_api_judge_prompts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6254,12 +6273,23 @@ export interface operations {
                     "application/json": components["schemas"]["JudgePromptListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     save_judge_prompt_api_judge_prompts__metric__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 metric: components["schemas"]["JudgeMetricId"];
             };
@@ -6294,7 +6324,9 @@ export interface operations {
     revert_judge_prompt_api_judge_prompts__metric__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 metric: components["schemas"]["JudgeMetricId"];
             };
@@ -6325,7 +6357,9 @@ export interface operations {
     refresh_api_judge_prompts__metric__refresh_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 metric: components["schemas"]["JudgeMetricId"];
             };
@@ -7243,7 +7277,9 @@ export interface operations {
     submit_batch_run_api_evaluation_batch_runs_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };

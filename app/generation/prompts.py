@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 
 from app.domain.enums import QuestionType
-from app.generation.principles import COMMON_SYSTEM
+from app.generation.principles import common_system
 from app.generation.spec import MAX_CLAIMED_SUBTOPICS, QuestionSpec
 from app.persistence.models import CurriculumVersionRow
+from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 CLASSIFICATION_INSTRUCTION = f"""Classify your own question.
 Choose the one topic it belongs to and set topic_id to that topic's numeric id.
@@ -82,6 +83,7 @@ def build_prompt(
     taxonomy: str,
     type_instruction: str | None = None,
     instructor_feedback: str | None = None,
+    profile: SubjectProfile = PYTHON_PROFILE,
 ) -> tuple[str, str]:
     """Build the shared system instruction and one format-specific user prompt.
 
@@ -128,4 +130,4 @@ Use this section text as the grounding source:
 --- taxonomy ---
 {taxonomy}
 --- end taxonomy ---"""
-    return COMMON_SYSTEM, user
+    return common_system(profile), user

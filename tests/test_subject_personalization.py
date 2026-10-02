@@ -7,6 +7,7 @@ which is exactly today's behaviour.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,7 +18,12 @@ from sqlalchemy.orm import Session
 from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.enums import Difficulty, JudgeMetricId, QuestionType, ReviewDecision
 from app.evaluation.judge_prompts import effective_rubric_version, is_edited, resolve_system_prompts
-from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
+from app.evaluation.prompts import (
+    RUBRIC_VERSION,
+    SYSTEM_PROMPT_FOR,
+    rubric_version_for,
+    system_prompts_for,
+)
 from app.feedback import submit_review
 from app.persistence.models import (
     CourseRow,
@@ -38,6 +44,13 @@ from app.personalization import (
     refresh_type_instruction,
     reviews_for_type,
 )
+from app.subjects import PYTHON_PROFILE, profile_for
+
+#: Storage key -> the profile of a course on that subject (no course id: presets are shared).
+PROFILES = {
+    LEGACY_SUBJECT: PYTHON_PROFILE,
+    "physics": profile_for(SimpleNamespace(name="Physics", subject="physics", question_types=None)),
+}
 
 PHYSICS = "physics"
 METRIC = JudgeMetricId.ISSUES
@@ -95,7 +108,7 @@ def _reviewed_question(session: Session, *, subject: str | None, comment: str) -
 class TestJudgePrompts:
     def test_defaults_are_unchanged_for_the_legacy_subject(self, session: Session) -> None:
         assert effective_rubric_version(session) == RUBRIC_VERSION
-        assert effective_rubric_version(session, subject=LEGACY_SUBJECT) == RUBRIC_VERSION
+        assert effective_rubric_version(session, profile=PYTHON_PROFILE) == RUBRIC_VERSION
         assert resolve_system_prompts(session) == dict(SYSTEM_PROMPT_FOR)
 
     def test_an_override_without_a_subject_is_stored_as_the_legacy_subject(
@@ -118,12 +131,13 @@ class TestJudgePrompts:
         assert repository.get(METRIC, subject=owner) is not None
         assert repository.get(METRIC, subject=other) is None
         assert repository.list_all(subject=other) == []
-        assert resolve_system_prompts(session, subject=owner)[METRIC] == "EDITED"
-        assert resolve_system_prompts(session, subject=other) == dict(SYSTEM_PROMPT_FOR)
-        assert effective_rubric_version(session, subject=owner) != RUBRIC_VERSION
-        assert effective_rubric_version(session, subject=other) == RUBRIC_VERSION
-        assert is_edited(session, METRIC, subject=owner)
-        assert not is_edited(session, METRIC, subject=other)
+        mine, theirs = PROFILES[owner], PROFILES[other]
+        assert resolve_system_prompts(session, profile=mine)[METRIC] == "EDITED"
+        assert resolve_system_prompts(session, profile=theirs) == system_prompts_for(theirs)
+        assert effective_rubric_version(session, profile=mine) != rubric_version_for(mine)
+        assert effective_rubric_version(session, profile=theirs) == rubric_version_for(theirs)
+        assert is_edited(session, METRIC, profile=mine)
+        assert not is_edited(session, METRIC, profile=theirs)
 
     def test_each_subject_keeps_its_own_revision_and_delete(self, session: Session) -> None:
         repository = JudgePromptRepository(session)

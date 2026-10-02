@@ -34,6 +34,7 @@ from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import CurriculumVersionRow
 from app.persistence.repositories import TypeInstructionRepository
+from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_course_id
 
 if TYPE_CHECKING:
     from app.generation import GenerationRequest
@@ -65,7 +66,7 @@ class BaseQuestionGenerator:
         return DESCRIPTOR
 
     def _type_instruction(
-        self, question_type: QuestionType
+        self, question_type: QuestionType, profile: SubjectProfile = PYTHON_PROFILE
     ) -> tuple[str | None, dict[str, object]]:
         """The instruction to send, and the stamp naming it (ADR-033, ADR-040).
 
@@ -79,7 +80,7 @@ class BaseQuestionGenerator:
         refresh must not later appear to have used the newer instruction.
         """
         row = (
-            TypeInstructionRepository(self._session).get(question_type)
+            TypeInstructionRepository(self._session).get(question_type, subject=profile.storage_key)
             if self._session is not None
             else None
         )
@@ -153,7 +154,13 @@ class BaseQuestionGenerator:
         section = self._retrieval.get_section(section_id)
         source = self._retrieval.section_source(section_id)
         citation = source.citation()
-        type_instruction, instruction_stamp = self._type_instruction(spec.question_type)
+        # The course's subject decides the system text and whose learned instruction applies.
+        profile = (
+            profile_for_course_id(self._session, version.course_id)
+            if self._session is not None
+            else PYTHON_PROFILE
+        )
+        type_instruction, instruction_stamp = self._type_instruction(spec.question_type, profile)
         system, prompt = build_prompt(
             spec,
             section_text=section.text,
@@ -161,6 +168,7 @@ class BaseQuestionGenerator:
             taxonomy=render_taxonomy(version),
             type_instruction=type_instruction,
             instructor_feedback=instructor_feedback,
+            profile=profile,
         )
         client = self._client or get_structured_client()
 

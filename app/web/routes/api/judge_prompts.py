@@ -20,10 +20,11 @@ from app.domain.enums import JudgeMetricId
 from app.errors import NotFoundError
 from app.evaluation.judge_learning import disagreements_for, refresh_judge_prompt
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
-from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
+from app.evaluation.prompts import rubric_version_for, system_prompt_for
 from app.persistence.models import JudgePromptRow
 from app.persistence.repositories import JudgePromptRepository
-from app.web.routes.api.deps import DbSession
+from app.subjects import SubjectProfile
+from app.web.routes.api.deps import CourseProfile, DbSession
 from app.web.routes.api.schemas import (
     JudgePromptListResponse,
     JudgePromptOut,
@@ -38,13 +39,18 @@ router = APIRouter(prefix="/judge-prompts", tags=["judge-prompts"])
 
 
 def _out(
-    metric: JudgeMetricId, row: JudgePromptRow | None, *, available: int = 0
+    metric: JudgeMetricId,
+    row: JudgePromptRow | None,
+    profile: SubjectProfile,
+    *,
+    available: int = 0,
 ) -> JudgePromptOut:
+    shipped = system_prompt_for(metric, profile)
     return JudgePromptOut(
         metric=metric,
         label=metric.value.replace("_", " "),
-        system_prompt=row.system_prompt if row else SYSTEM_PROMPT_FOR[metric],
-        shipped_prompt=SYSTEM_PROMPT_FOR[metric],
+        system_prompt=row.system_prompt if row else shipped,
+        shipped_prompt=shipped,
         edited=row is not None,
         learned=row.learned if row else False,
         rules=[str(rule.get("rule", "")) for rule in (row.rules if row else [])],
@@ -57,22 +63,30 @@ def _out(
 
 
 @router.get("", response_model=JudgePromptListResponse)
-def list_judge_prompts(session: DbSession) -> JudgePromptListResponse:
-    """All four judges, each with the text it runs and the text it shipped with."""
-    stored = {row.metric: row for row in JudgePromptRepository(session).list_all()}
+def list_judge_prompts(session: DbSession, profile: CourseProfile) -> JudgePromptListResponse:
+    """All four judges of this course's subject: the text each runs and the text it shipped with."""
+    stored = {
+        row.metric: row
+        for row in JudgePromptRepository(session).list_all(subject=profile.storage_key)
+    }
     return JudgePromptListResponse(
         prompts=[
-            _out(metric, stored.get(metric), available=len(disagreements_for(session, metric)))
+            _out(
+                metric,
+                stored.get(metric),
+                profile,
+                available=len(disagreements_for(session, metric, profile=profile)),
+            )
             for metric in JudgeMetricId
         ],
-        rubric_version=effective_rubric_version(session),
-        shipped_rubric_version=RUBRIC_VERSION,
+        rubric_version=effective_rubric_version(session, profile=profile),
+        shipped_rubric_version=rubric_version_for(profile),
     )
 
 
 @router.put("/{metric}", response_model=JudgePromptSaveResponse)
 def save_judge_prompt(
-    session: DbSession, metric: JudgeMetricId, payload: JudgePromptRequest
+    session: DbSession, metric: JudgeMetricId, payload: JudgePromptRequest, profile: CourseProfile
 ) -> JudgePromptSaveResponse:
     """Replace one judge's system prompt, and re-name the panel.
 
@@ -80,18 +94,21 @@ def save_judge_prompt(
     is a separate, explicit act (ADR-030) -- rewriting stored verdicts here would
     destroy the very pairs the repair is supposed to be scored against.
     """
-    before = effective_rubric_version(session)
+    before = effective_rubric_version(session, profile=profile)
     text = payload.system_prompt.strip()
     try:
         row = JudgePromptRepository(session).save(
-            metric, system_prompt=text, note=(payload.note or "").strip() or None
+            metric,
+            subject=profile.storage_key,
+            system_prompt=text,
+            note=(payload.note or "").strip() or None,
         )
     except Exception:
         session.rollback()
         raise
     session.commit()
 
-    after = effective_rubric_version(session)
+    after = effective_rubric_version(session, profile=profile)
     logger.info(
         "Judge %s edited (revision %s). Rubric version %s -> %s.",
         metric.value,
@@ -100,57 +117,66 @@ def save_judge_prompt(
         after,
     )
     return JudgePromptSaveResponse(
-        prompt=_out(metric, row),
+        prompt=_out(metric, row, profile),
         rubric_version=after,
         rubric_version_changed=after != before,
     )
 
 
 @router.delete("/{metric}", response_model=JudgePromptSaveResponse)
-def revert_judge_prompt(session: DbSession, metric: JudgeMetricId) -> JudgePromptSaveResponse:
+def revert_judge_prompt(
+    session: DbSession, metric: JudgeMetricId, profile: CourseProfile
+) -> JudgePromptSaveResponse:
     """Drop one override so the judge runs its shipped prompt again."""
-    before = effective_rubric_version(session)
+    before = effective_rubric_version(session, profile=profile)
     repository = JudgePromptRepository(session)
-    if not repository.delete(metric):
+    if not repository.delete(metric, subject=profile.storage_key):
         raise NotFoundError(
             f"The {metric.value} judge is already running its shipped prompt.",
             detail="There is no override to revert.",
         )
     session.commit()
 
-    after = effective_rubric_version(session)
+    after = effective_rubric_version(session, profile=profile)
     logger.info("Judge %s reverted. Rubric version %s -> %s.", metric.value, before, after)
     return JudgePromptSaveResponse(
-        prompt=_out(metric, None),
+        prompt=_out(metric, None, profile),
         rubric_version=after,
         rubric_version_changed=after != before,
     )
 
 
-def current_prompts(session: DbSession) -> dict[JudgeMetricId, str]:
+def current_prompts(session: DbSession, profile: SubjectProfile) -> dict[JudgeMetricId, str]:
     """The prompt set in force, for callers that need the text rather than the API shape."""
-    return resolve_system_prompts(session)
+    return resolve_system_prompts(session, profile=profile)
 
 
 @router.post("/{metric}/refresh", response_model=JudgePromptRefreshResponse)
-def refresh(session: DbSession, metric: JudgeMetricId) -> JudgePromptRefreshResponse:
+def refresh(
+    session: DbSession, metric: JudgeMetricId, profile: CourseProfile
+) -> JudgePromptRefreshResponse:
     """Re-learn one judge's prompt from the questions it got wrong (ADR-039).
 
     The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
     the disagreements this judge is named in, minus the held-out third, so the
     reserved questions stay available to score the result.
     """
-    before = effective_rubric_version(session)
+    before = effective_rubric_version(session, profile=profile)
     try:
-        row = refresh_judge_prompt(session, metric)
+        row = refresh_judge_prompt(session, metric, profile=profile)
     except Exception:
         session.rollback()
         raise
 
-    available = len(disagreements_for(session, metric))
+    available = len(disagreements_for(session, metric, profile=profile))
     if row is None:
         return JudgePromptRefreshResponse(
-            prompt=_out(metric, JudgePromptRepository(session).get(metric), available=available),
+            prompt=_out(
+                metric,
+                JudgePromptRepository(session).get(metric, subject=profile.storage_key),
+                profile,
+                available=available,
+            ),
             rubric_version=before,
             rubric_version_changed=False,
             learned=False,
@@ -158,9 +184,9 @@ def refresh(session: DbSession, metric: JudgeMetricId) -> JudgePromptRefreshResp
             evidence_count=0,
         )
 
-    after = effective_rubric_version(session)
+    after = effective_rubric_version(session, profile=profile)
     return JudgePromptRefreshResponse(
-        prompt=_out(metric, row, available=available),
+        prompt=_out(metric, row, profile, available=available),
         rubric_version=after,
         rubric_version_changed=after != before,
         learned=True,

@@ -2302,3 +2302,30 @@ The oracle runs code with its own frozen copy of the old runner (`tests/frozen_r
 and formula graders exist but no question type uses them yet (the app cannot generate or map
 them), so they stay "Coming soon". AI rubric grading (`semantic.source_grounded`) is not built.
 
+
+## ADR-056 — The course's subject decides prompts, judge panels and what is learned
+
+**Status:** accepted. Phase 2, S1–S3 of `docs/GENERIC_ASSESSMENT_MILESTONES.md`.
+
+**Context.** Every prompt said "introductory-Python", and judge edits and learned instructions
+were global. A Physics or custom course would be generated and judged as Python, and a lesson
+from one course's professor would rewrite another subject's generator.
+
+**Decision.**
+- A `SubjectProfile` (`app/subjects/`) is built from the course: its subject preset, its question
+  types, whether any of them runs code. Generator, judge and judge-learning prompts are functions
+  of it; code-only wording and issue codes appear only for code types. The Python profile
+  reproduces the shipped prompts byte for byte (`tests/golden/python_prompts.json`).
+- Professor judge edits and learned type instructions are stored per **storage key**: the preset
+  id (`intro_python`, `physics`, ...), shared by every course on that preset, or
+  `custom:<course id>` for a custom subject, which is one course's own. Learning reads only
+  reviews and judge outcomes of questions under the same key.
+- Each subject's shipped judge panel has its own rubric version (`rubric_version_for`), so
+  calibration never pools two subjects' judges; an edit appends a fingerprint as before.
+- The subject is found from the question's curriculum version → course, or from the request's
+  `X-Course-Id`. No course means Intro Python, which is what every row was before courses.
+- A bank re-judge records one rubric version, so it covers one course's questions (all of them
+  when no course is named, as before).
+
+**Consequences.** Physics questions are generated and judged with Physics prompts; Python courses
+are unchanged. Existing edits and learned instructions belong to `intro_python` (migration 0004).

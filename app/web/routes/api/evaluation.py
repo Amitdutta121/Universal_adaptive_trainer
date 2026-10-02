@@ -22,7 +22,7 @@ from app.persistence.repositories import (
     QuestionEvaluationRepository,
     QuestionRepository,
 )
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession
 from app.web.routes.api.schemas import (
     BatchRunListResponse,
     EvaluationHistoryEntry,
@@ -44,7 +44,7 @@ router = APIRouter(tags=["evaluation"])
     status_code=status.HTTP_202_ACCEPTED,
 )
 def submit_batch_run(
-    session: DbSession, payload: SubmitBatchRunRequest | None = None
+    session: DbSession, course: CourseScope, payload: SubmitBatchRunRequest | None = None
 ) -> SubmitBatchRunResponse:
     """Submit the eligible question bank for re-judging.
 
@@ -53,7 +53,7 @@ def submit_batch_run(
     """
     request = payload or SubmitBatchRunRequest()
     try:
-        result = submit_bank_rerun(session, question_ids=request.question_ids)
+        result = submit_bank_rerun(session, question_ids=request.question_ids, course_id=course)
     except Exception:
         session.rollback()
         raise

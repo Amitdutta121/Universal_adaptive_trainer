@@ -356,7 +356,7 @@ def test_a_missed_review_teaches_the_generator_and_the_judge(
     judge_calls: list[str] = []
     monkeypatch.setattr(
         "app.web.routes.api.feedback.refresh_judge_prompt",
-        lambda _session, metric: judge_calls.append(metric.value) or object(),
+        lambda _session, metric, **_kw: judge_calls.append(metric.value) or object(),
     )
     question = _question(session, evaluation=_evaluation(JudgeGate.APPROVED))
 
@@ -378,7 +378,8 @@ def test_a_false_alarm_teaches_only_the_judge(
 ) -> None:
     """The professor approved it, so the generator did nothing wrong."""
     monkeypatch.setattr(
-        "app.web.routes.api.feedback.refresh_judge_prompt", lambda _session, _metric: object()
+        "app.web.routes.api.feedback.refresh_judge_prompt",
+        lambda _session, _metric, **_kw: object(),
     )
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 

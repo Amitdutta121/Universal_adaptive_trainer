@@ -34,6 +34,7 @@ from app.evaluation.schema import (
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.repositories import CurriculumRepository
+from app.subjects import profile_for_version
 
 JUDGE_MAX_ATTEMPTS = 3
 
@@ -149,10 +150,19 @@ class PedagogicalJudge:
         # Temperature 0: a judge is an instrument, and E1 measured the provider
         # default flipping 20% of verdicts between runs (ADR-042).
         self._client = client or get_structured_client(temperature=get_settings().judge_temperature)
-        # Resolved once per judge, not per metric: all four answers belong to one
-        # panel, and re-reading between them could straddle a professor's edit.
-        self._prompts = resolve_system_prompts(session)
-        self._rubric_version = effective_rubric_version(session)
+        # Resolved once per judge and subject, not per metric: all four answers belong to
+        # one panel, and re-reading between them could straddle a professor's edit.
+        self._panels: dict[str, tuple[dict[JudgeMetricId, str], str]] = {}
+
+    def _panel(self, question: Question) -> tuple[dict[JudgeMetricId, str], str]:
+        """The prompts and rubric version for the subject of this question's course."""
+        profile = profile_for_version(self._session, question.curriculum_version_id)
+        if profile.storage_key not in self._panels:
+            self._panels[profile.storage_key] = (
+                resolve_system_prompts(self._session, profile=profile),
+                effective_rubric_version(self._session, profile=profile),
+            )
+        return self._panels[profile.storage_key]
 
     def evaluate(self, question: Question) -> PedagogicalEvaluation:
         """Return one evaluation, with a failed judge recorded rather than raised.
@@ -161,6 +171,7 @@ class PedagogicalJudge:
         the metrics that did come back and reviews it anyway.
         """
         model = self._client.description
+        prompts, rubric_version = self._panel(question)
         try:
             context = build_judge_context(self._session, question)
         except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
@@ -169,22 +180,23 @@ class PedagogicalJudge:
                 [failed_metric(metric, detail=detail) for metric in JudgeMetricId],
                 question_id=question.id,
                 judge_model=model,
-                rubric_version=self._rubric_version,
+                rubric_version=rubric_version,
             )
 
-        metrics = [self._run_metric(metric, context, question) for metric in JudgeMetricId]
+        metrics = [
+            self._run_metric(metric, context, question, prompts[metric]) for metric in JudgeMetricId
+        ]
         return evaluation_from_metrics(
             metrics,
             question_id=question.id,
             judge_model=model,
-            rubric_version=self._rubric_version,
+            rubric_version=rubric_version,
         )
 
     def _run_metric(
-        self, metric: JudgeMetricId, context: JudgeContext, question: Question
+        self, metric: JudgeMetricId, context: JudgeContext, question: Question, system: str
     ) -> MetricResult:
         """One judge, retried on transport and shape failures alike."""
-        system = self._prompts[metric]
         prompt = build_user_prompt(metric, context)
         last_detail = "unknown"
         for _ in range(JUDGE_MAX_ATTEMPTS):
