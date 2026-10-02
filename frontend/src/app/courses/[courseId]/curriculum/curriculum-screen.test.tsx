@@ -41,6 +41,8 @@ vi.mock("./components/version-edit-dialog", () => ({ VersionEditDialog: () => nu
 vi.mock("./components/version-delete-dialog", () => ({ VersionDeleteDialog: () => null }));
 vi.mock("@/lib/api/queries", () => ({
   curriculumVersionQuery: (id: number) => ({ queryKey: ["version", id] }),
+  // The builder modal still reads it.
+  useApprovedCurriculum: () => ({ data: undefined, isPending: false, error: null }),
   useCurriculumVersions: () => ({
     data: {
       versions: [summary(2, "Newer"), summary(1, "Older")],
