@@ -206,11 +206,18 @@ export function PdfPageViewer({
   // selectedSectionId and onVisibleSectionChange are read, not watched — this
   // fires on scroll, and should not also fire when the outline's own selection
   // changes (that would loop).
+  // Only a page the reader actually reached counts: with no document loaded (a JSON book has no
+  // PDF) currentPage sits at 1, and re-reporting it whenever the rows refetch -- e.g. after a
+  // question is generated -- yanked the outline back to the first section and closed the
+  // question dialog.
+  const reportedPage = useRef<number | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
+    if (numPages === null || reportedPage.current === currentPage) return;
+    reportedPage.current = currentPage;
     const implied = sectionForPage(anchors, currentPage);
     if (implied !== null && implied !== selectedSectionId) onVisibleSectionChange(implied);
-  }, [currentPage, anchors]);
+  }, [currentPage, anchors, numPages]);
 
   const scrollToPage = (page: number, behavior: ScrollBehavior = "smooth") => {
     slotRefs.current.get(page)?.scrollIntoView({ behavior, block: "start" });

@@ -1418,13 +1418,33 @@ export interface paths {
         };
         /**
          * Student Progress
-         * @description Measured mastery, weakness and history for one learner.
-         *
-         *     Only what has been scored appears. State rows are created on first touch
-         *     (ADR-041), so a subtopic nobody has been asked about is absent rather than
-         *     shown at a starting value it was never actually assigned.
+         * @description Measured mastery, weakness and history for one learner (instructor view).
          */
         get: operations["student_progress_api_students__student_id__progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Training Session Progress
+         * @description The learner's own progress, for the student page.
+         *
+         *     Keyed by the run, like every other student-page call (``/next``, ``/answer``): the student
+         *     has no instructor login, so ``/students/{id}/progress`` answered 401 and the page's progress
+         *     sidebar never loaded.
+         */
+        get: operations["training_session_progress_api_training_sessions__training_session_id__progress_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1536,6 +1556,30 @@ export interface paths {
         };
         /** Get Attempt */
         get: operations["get_attempt_api_attempts__attempt_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attempts/{attempt_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Attempt
+         * @description The answered question with its answer key, for the student's result card.
+         *
+         *     Only once *this* attempt has been answered: before that the key would answer the question
+         *     being asked. The student page used the instructor-only ``/questions/{id}`` and never got past
+         *     "Loading the correct answer".
+         */
+        get: operations["review_attempt_api_attempts__attempt_id__review_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7020,6 +7064,37 @@ export interface operations {
             };
         };
     };
+    training_session_progress_api_training_sessions__training_session_id__progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentProgressOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_training_sessions_api_training_sessions_get: {
         parameters: {
             query: {
@@ -7199,6 +7274,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttemptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_attempt_api_attempts__attempt_id__review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionDetail"];
                 };
             };
             /** @description Validation Error */

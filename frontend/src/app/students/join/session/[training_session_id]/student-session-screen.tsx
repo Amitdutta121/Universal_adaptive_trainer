@@ -32,11 +32,11 @@ import {
 import { ApiError } from "@/lib/api/client";
 import {
   useAnswerAttempt,
+  useAttemptReview,
   useEndTrainingSession,
   useNextQuestion,
-  useQuestion,
-  useStudentProgress,
   useTrainingSession,
+  useTrainingSessionProgress,
 } from "@/lib/api/queries";
 import type {
   AnsweredOut,
@@ -45,7 +45,10 @@ import type {
   ServedQuestionOut,
   StudentProgressOut,
 } from "@/lib/api/types";
-import { questionTypeUI } from "@/lib/question-types/registry";
+import {
+  questionTypeUI,
+  questionTypeLabel as registryTypeLabel,
+} from "@/lib/question-types/registry";
 import { CodeAnswerInput } from "@/lib/question-types/text-answer";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +76,10 @@ function resultIcon(score: number) {
 // Explains why a served question's difficulty doesn't match the student's
 // mastery: the set simply had nothing at the requested difficulty for this
 // subtopic, so the engine fell back rather than serving nothing at all.
+function article(word: string) {
+  return /^[aeiou]/i.test(word) ? "an" : "a";
+}
+
 function fallbackNotice(question: ServedQuestionOut) {
   if (!question.fallback_used) return null;
   return (
@@ -80,8 +87,9 @@ function fallbackNotice(question: ServedQuestionOut) {
       <AlertCircle />
       <AlertTitle>Difficulty fallback used</AlertTitle>
       <AlertDescription>
-        Your measured mastery called for a <strong>{question.requested_difficulty}</strong>{" "}
-        question, but this set only had a <strong>{question.served_difficulty}</strong> one
+        Your measured mastery called for {article(question.requested_difficulty)}{" "}
+        <strong>{question.requested_difficulty}</strong> question, but this set only had{" "}
+        {article(question.served_difficulty)} <strong>{question.served_difficulty}</strong> one
         available for this subtopic.
       </AlertDescription>
     </Alert>
@@ -96,9 +104,9 @@ function learnerDate(value: string) {
   }).format(new Date(value));
 }
 
-// "output_prediction" -> "output prediction" for display.
+// The registry's display name ("Numeric response"), the same label the Studio shows.
 function questionTypeLabel(questionType: ServedQuestionOut["question_type"]) {
-  return questionType ? questionType.replace(/_/g, " ") : "";
+  return questionType ? registryTypeLabel(questionType) : "";
 }
 
 // Same tone bucketing as `scoreTone`, but for a past attempt that may still
@@ -255,7 +263,7 @@ function PastQuestionSheet({
               <Badge variant="outline">Attempt #{attempt.id}</Badge>
               <Badge variant="outline">{attempt.served_difficulty}</Badge>
               {attempt.question_type ? (
-                <Badge variant="outline" className="capitalize">
+                <Badge variant="outline">
                   {questionTypeLabel(attempt.question_type)}
                 </Badge>
               ) : null}
@@ -624,7 +632,7 @@ function ProgressSidebar({ progress }: { progress: StudentProgressOut }) {
 export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId: number }) {
   const router = useRouter();
   const session = useTrainingSession(trainingSessionId);
-  const progress = useStudentProgress(session.data?.student_id ?? null, {
+  const progress = useTrainingSessionProgress(trainingSessionId, {
     enabled: session.data !== undefined,
   });
   const endTrainingSession = useEndTrainingSession();
@@ -641,12 +649,12 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   const currentQuestion = useNextQuestion(trainingSessionId, {
     enabled: session.data?.ended_at === null && result === null,
   });
-  const selectedPastQuestion = useQuestion(selectedPastAttempt?.question_id ?? null, {
-    enabled: selectedPastAttempt !== null,
+  const selectedPastQuestion = useAttemptReview(selectedPastAttempt?.id ?? null, {
+    enabled: selectedPastAttempt !== null && selectedPastAttempt.score !== null,
   });
   // The just-answered question's full detail (answer key, reference
   // solution), fetched only once there is a result to show it alongside.
-  const answeredQuestion = useQuestion(result?.question_id ?? null, {
+  const answeredQuestion = useAttemptReview(result?.attempt_id ?? null, {
     enabled: result !== null,
   });
 
@@ -886,7 +894,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                     {currentQuestion.data.question_type ? (
                       <Badge
                         variant="outline"
-                        className="rounded-full bg-background/80 px-3 py-1 capitalize"
+                        className="rounded-full bg-background/80 px-3 py-1"
                       >
                         {questionTypeLabel(currentQuestion.data.question_type)}
                       </Badge>

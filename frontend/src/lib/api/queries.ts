@@ -101,6 +101,9 @@ export const qk = {
     detail: (trainingSessionId: number) =>
       ["training-sessions", "detail", trainingSessionId] as const,
     next: (trainingSessionId: number) => ["training-sessions", "next", trainingSessionId] as const,
+    progress: (trainingSessionId: number) =>
+      ["training-sessions", "progress", trainingSessionId] as const,
+    review: (attemptId: number) => ["training-sessions", "review", attemptId] as const,
   },
   evaluation: {
     all: ["evaluation"] as const,
@@ -1165,6 +1168,35 @@ export const useNextQuestion = (trainingSessionId: number | null, { enabled = tr
       ),
   });
 
+/** The learner's own progress, keyed by their run (no instructor login on the student page). */
+export const useTrainingSessionProgress = (
+  trainingSessionId: number | null,
+  { enabled = true } = {},
+) =>
+  useQuery({
+    queryKey: qk.trainingSessions.progress(trainingSessionId ?? 0),
+    enabled: enabled && trainingSessionId !== null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/training-sessions/{training_session_id}/progress", {
+          params: { path: { training_session_id: trainingSessionId as number } },
+        }),
+      ),
+  });
+
+/** An answered attempt's question with its answer key, for the student's result card. */
+export const useAttemptReview = (attemptId: number | null, { enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.trainingSessions.review(attemptId ?? 0),
+    enabled: enabled && attemptId !== null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/attempts/{attempt_id}/review", {
+          params: { path: { attempt_id: attemptId as number } },
+        }),
+      ),
+  });
+
 export function useAnswerAttempt() {
   const client = useQueryClient();
   return useMutation({
@@ -1181,6 +1213,9 @@ export function useAnswerAttempt() {
       });
       client.invalidateQueries({
         queryKey: qk.trainingSessions.next(result.training_session_id),
+      });
+      client.invalidateQueries({
+        queryKey: qk.trainingSessions.progress(result.training_session_id),
       });
       client.invalidateQueries({ queryKey: qk.students.all });
     },

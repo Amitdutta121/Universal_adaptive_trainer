@@ -508,3 +508,35 @@ class TestTheAnswerIsNeverPublished:
             {"id": "head", "text": "for value in items:", "indent": 0},
         ]
         assert "correct_order" not in body
+
+
+class TestStudentPageWithoutInstructorLogin:
+    """The student page has no instructor session; its calls must not need one."""
+
+    def test_the_student_sees_their_progress_and_answered_key_without_logging_in(
+        self, settings, session: Session, client: TestClient
+    ) -> None:
+        set_id = _bank(session, question_type=QuestionType.MULTIPLE_CHOICE)
+        student_id = _enrol(client)
+        run_id = _start(client, student_id, set_id)
+
+        from app.main import create_app
+
+        with TestClient(create_app(settings)) as public:
+            served = public.get(f"/api/training-sessions/{run_id}/next").json()
+            attempt_id = served["attempt_id"]
+            # Before answering, the key stays hidden.
+            assert public.get(f"/api/attempts/{attempt_id}/review").status_code == 422
+
+            answered = public.post(f"/api/attempts/{attempt_id}/answer", json={"answer": "1"})
+            assert answered.status_code == 200, answered.text
+
+            review = public.get(f"/api/attempts/{attempt_id}/review")
+            assert review.status_code == 200, review.text
+            assert review.json()["content"]["correct_option_index"] == 1
+
+            progress = public.get(f"/api/training-sessions/{run_id}/progress")
+            assert progress.status_code == 200, progress.text
+            assert progress.json()["answered"] == 1
+            # The instructor route stays instructor-only.
+            assert public.get(f"/api/students/{student_id}/progress").status_code == 401

@@ -52,6 +52,7 @@ from app.web.routes.api.schemas import (
     ClassWeaknessCellOut,
     ClassWeaknessStudentOut,
     CreateStudentRequest,
+    QuestionDetail,
     QuestionSetOut,
     ResumeStudentRequest,
     ServedQuestionOut,
@@ -188,9 +189,7 @@ def list_students(
     stats = attempts.stats_by_student()
     now = datetime.now(UTC)
     allowed_ids = (
-        TrainingSessionRepository(session).student_ids_for_curriculum_version(
-            curriculum_version_id
-        )
+        TrainingSessionRepository(session).student_ids_for_curriculum_version(curriculum_version_id)
         if curriculum_version_id is not None
         else None
     )
@@ -386,6 +385,23 @@ def get_student(session: DbSession, student_id: int) -> StudentOut:
     dependencies=[Depends(current_active_user)],
 )
 def student_progress(session: DbSession, student_id: int) -> StudentProgressOut:
+    """Measured mastery, weakness and history for one learner (instructor view)."""
+    return _progress(session, student_id)
+
+
+@router.get("/training-sessions/{training_session_id}/progress", response_model=StudentProgressOut)
+def training_session_progress(session: DbSession, training_session_id: int) -> StudentProgressOut:
+    """The learner's own progress, for the student page.
+
+    Keyed by the run, like every other student-page call (``/next``, ``/answer``): the student
+    has no instructor login, so ``/students/{id}/progress`` answered 401 and the page's progress
+    sidebar never loaded.
+    """
+    run = TrainingSessionRepository(session).get(training_session_id)
+    return _progress(session, run.student_id)
+
+
+def _progress(session: DbSession, student_id: int) -> StudentProgressOut:
     """Measured mastery, weakness and history for one learner.
 
     Only what has been scored appears. State rows are created on first touch
@@ -542,6 +558,25 @@ def answer_attempt(session: DbSession, attempt_id: int, payload: AnswerRequest) 
 @router.get("/attempts/{attempt_id}", response_model=AttemptOut)
 def get_attempt(session: DbSession, attempt_id: int) -> AttemptOut:
     return AttemptOut.from_row(StudentAttemptRepository(session).get(attempt_id))
+
+
+@router.get("/attempts/{attempt_id}/review", response_model=QuestionDetail)
+def review_attempt(session: DbSession, attempt_id: int) -> QuestionDetail:
+    """The answered question with its answer key, for the student's result card.
+
+    Only once *this* attempt has been answered: before that the key would answer the question
+    being asked. The student page used the instructor-only ``/questions/{id}`` and never got past
+    "Loading the correct answer".
+    """
+    attempt = StudentAttemptRepository(session).get(attempt_id)
+    if attempt.score is None:
+        raise DomainRuleError(
+            "Answer the question first.",
+            detail=f"Attempt {attempt_id} has not been answered, so its answer key is not shown.",
+        )
+    from app.web.routes.api.questions import get_question
+
+    return get_question(session, attempt.question_id)
 
 
 @router.post("/training-sessions/{training_session_id}/end", response_model=TrainingSessionOut)
