@@ -12,7 +12,7 @@
  * Opening a row never asks anything and never touches work left unsaved elsewhere: each taxonomy
  * has its own slot in browser storage, and what is kept there is offered back on the page.
  *
- * Server state — the list, the approved version, every mutation — belongs to TanStack Query in
+ * Server state — the list and every mutation — belongs to TanStack Query in
  * `lib/api/queries.ts`. What this component owns is what the browser owns: the search box, the
  * status filter, whether the builder is open and whether it holds changes that closing would throw
  * away, and which row a dialog is open for.
@@ -48,11 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  curriculumVersionQuery,
-  useApprovedCurriculum,
-  useCurriculumVersions,
-} from "@/lib/api/queries";
+import { curriculumVersionQuery, useCurriculumVersions } from "@/lib/api/queries";
 import type { CurriculumVersionSummary } from "@/lib/api/types";
 import { formatTimestamp, pluralise } from "@/lib/display";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
@@ -63,7 +59,6 @@ import {
 } from "./builder/taxonomy-builder";
 import { draftFromVersion, emptyDraft } from "./builder/taxonomy-draft";
 import { clearDraft, loadDrafts, type SavedDraft } from "./builder/taxonomy-draft-storage";
-import { ApprovedVersionCard } from "./components/approved-version-card";
 import { DraftWithAiDialog, type TaxonomyDraft } from "./components/draft-with-ai-dialog";
 import { CurriculumVersionsTable } from "./components/curriculum-versions-table";
 import { TaxonomyImportDialog } from "./components/taxonomy-import-dialog";
@@ -155,7 +150,6 @@ export function CurriculumScreen() {
   const [deleting, setDeleting] = useState<CurriculumVersionSummary | null>(null);
 
   const versions = useCurriculumVersions();
-  const approved = useApprovedCurriculum();
 
   const approvedVersionId = versions.data?.approved_version_id;
 
@@ -264,12 +258,6 @@ export function CurriculumScreen() {
           onClick={() => void open(null)}
         />
       </div>
-
-      <ApprovedVersionCard
-        approved={approved.data}
-        isPending={approved.isPending}
-        error={approved.error}
-      />
 
       {editor
         ? null

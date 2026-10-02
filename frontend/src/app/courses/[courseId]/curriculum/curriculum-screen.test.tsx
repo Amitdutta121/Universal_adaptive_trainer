@@ -39,7 +39,6 @@ vi.mock("@/components/page-header", () => ({ PageHeader: () => <h1>Curriculum</h
 vi.mock("./components/taxonomy-import-dialog", () => ({ TaxonomyImportDialog: () => null }));
 vi.mock("./components/version-edit-dialog", () => ({ VersionEditDialog: () => null }));
 vi.mock("./components/version-delete-dialog", () => ({ VersionDeleteDialog: () => null }));
-vi.mock("./components/approved-version-card", () => ({ ApprovedVersionCard: () => null }));
 vi.mock("@/lib/api/queries", () => ({
   curriculumVersionQuery: (id: number) => ({ queryKey: ["version", id] }),
   useCurriculumVersions: () => ({
@@ -52,7 +51,6 @@ vi.mock("@/lib/api/queries", () => ({
     isError: false,
     isSuccess: true,
   }),
-  useApprovedCurriculum: () => ({ data: undefined, isPending: false, error: null }),
   useActivateCurriculumVersion: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useTaxonomyDocumentGuide: () => ({
     data: { schema_version: "1", fields: [] },
