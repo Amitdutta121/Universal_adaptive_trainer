@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Import questions · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .drop { border: 1.5px dashed var(--hairline-2); border-radius: var(--radius); background: var(--muted); }
+    .drop.over { border-color: var(--primary); background: var(--accent); }
+    .step-btn { display: flex; align-items: flex-start; gap: 0.6rem; text-align: left; padding: 0.6rem 0.75rem; border-radius: 0.6rem; border: 1px solid var(--border); background: var(--card); width: 100%; }
+    .step-btn[aria-current="step"] { border-color: var(--primary); }
+    .step-btn:disabled { cursor: default; }
+    .imp-prompt { max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-low td:first-child { box-shadow: inset 3px 0 0 var(--warn-solid); }
+    .imp-code { font-family: var(--font-mono); font-size: 0.7rem; line-height: 1.35; color: var(--muted-foreground); white-space: pre; max-width: 17rem; max-height: 5.5rem; overflow: hidden; margin-top: 0.2rem; }
+    fieldset:disabled { opacity: 0.6; }
+  </style>
+</head>
+<!-- G6 · Import questions: upload a Canvas / QTI / CSV export, map to subtopics, run checks and judges, land in review as Imported. -->
+<body data-scope="course" data-nav="import" data-title="Import questions">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Import questions</h1>
+        <p class="text-sm text-muted-foreground max-w-3xl">Bring in questions from last year's quizzes. Each one is mapped to a subtopic, checked and judged like a generated question, then waits in the review queue marked <span class="pill tone-muted">Imported</span>.</p>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <a class="btn" data-variant="outline" href="jobs.html">Past imports in Jobs</a>
+      </div>
+    </div>
+
+    <!-- Statistics: no approved taxonomy, nothing to map to -->
+    <template x-if="blocked">
+      <div class="alert" data-variant="destructive">
+        <i data-lucide="circle-alert"></i>
+        <h2>Import is blocked until a taxonomy is approved</h2>
+        <section>
+          <p>Each imported question is mapped to a subtopic of the active taxonomy. This course has none yet: the AI draft from OpenIntro Statistics (8 topics, 29 subtopics) is waiting for your review.</p>
+          <p class="mt-2"><a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a></p>
+        </section>
+      </div>
+    </template>
+
+    <!-- Steps -->
+    <ol class="grid gap-2 md:grid-cols-4">
+      <template x-for="(s, i) in STEPS" :key="s.title">
+        <li>
+          <button type="button" class="step-btn" :aria-current="step === i && !blocked ? 'step' : null" :disabled="i >= step || busy" @click="step = i">
+            <span class="grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold" :class="i < step ? 'tone-ok' : i === step && !blocked ? 'tone-accent' : 'tone-muted'" x-text="i < step ? '✓' : i + 1"></span>
+            <span class="min-w-0">
+              <span class="block text-sm font-medium" :class="i > step && 'text-muted-foreground'" x-text="s.title"></span>
+              <span class="block text-xs text-muted-foreground truncate" x-text="stepNote(i)"></span>
+            </span>
+          </button>
+        </li>
+      </template>
+    </ol>
+
+    <!-- ============ 1. Upload ============ -->
+    <section class="card" x-show="step === 0">
+      <header>
+        <h2>1. Upload</h2>
+        <p>One file per import. Nothing is added to the bank until the last step.</p>
+      </header>
+      <section>
+        <fieldset class="grid gap-5" :disabled="blocked || busy">
+          <div class="grid gap-2">
+            <div class="text-sm font-medium">Format</div>
+            <div class="grid gap-2 md:grid-cols-3">
+              <template x-for="f in FORMATS" :key="f.id">
+                <label class="flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="format === f.id ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                  <input type="radio" class="input mt-0.5" name="format" :value="f.id" x-model="format" @change="file = null">
+                  <span class="grid gap-0.5">
+                    <span class="text-sm font-medium" x-text="f.label"></span>
+                    <span class="font-mono text-xs text-muted-foreground" x-text="f.ext"></span>
+                    <span class="text-xs text-muted-foreground" x-text="f.hint"></span>
+                  </span>
+                </label>
+              </template>
+            </div>
+          </div>
+
+          <div class="grid gap-2" x-show="format === 'csv'">
+            <div class="flex items-center gap-2">
+              <div class="text-sm font-medium">CSV columns</div>
+              <button type="button" class="btn ml-auto" data-variant="outline" data-size="sm" @click="Mock.toast('Downloaded question-import-template.csv (header row and 3 example rows)')"><i data-lucide="download"></i>Download template</button>
+            </div>
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th class="w-48">Column</th><th>What goes in it</th></tr></thead>
+                <tbody>
+                  <template x-for="c in G.csvColumns" :key="c[0]">
+                    <tr><td class="font-mono text-xs" x-text="c[0]"></td><td class="text-sm text-muted-foreground whitespace-normal" x-text="c[1]"></td></tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="grid gap-2">
+            <label class="drop grid place-items-center gap-1 px-4 py-7 text-center cursor-pointer" :class="over && 'over'"
+                   @dragover.prevent="over = true" @dragleave="over = false" @drop.prevent="over = false; pick($event.dataTransfer.files[0])">
+              <i data-lucide="file-up" class="size-6 text-muted-foreground"></i>
+              <span class="text-sm font-medium" x-text="file ? file.name : 'Drop a file here, or click to choose'"></span>
+              <span class="text-xs text-muted-foreground" x-text="file ? `${file.size} · ${file.detail}` : `${fmt.ext}, up to 200 MB`"></span>
+              <input type="file" class="sr-only" :accept="fmt.accept" @change="pick($event.target.files[0])">
+            </label>
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="button" class="btn" data-variant="link" data-size="sm" x-show="!file" @click="pick(null)">Use a sample file</button>
+              <p class="text-xs text-muted-foreground" x-show="format === 'canvas'">In Canvas: Settings › Export course content › Quizzes. New Quizzes exports as QTI; pick QTI for those.</p>
+            </div>
+          </div>
+
+          <p class="text-xs text-muted-foreground">Moving the whole course to a new term? <a class="underline" :href="Mock.link('copy-course.html')">Copy the course instead</a>; it brings the taxonomy, approved questions and schedule along.</p>
+        </fieldset>
+      </section>
+      <footer class="flex items-center gap-3">
+        <button type="button" class="btn" :disabled="!file || blocked || busy" @click="parse()">
+          <span x-show="!busy">Read the file</span><span x-show="busy">Reading…</span>
+        </button>
+        <span class="text-xs text-muted-foreground" x-show="busy">Unpacking the export and reading 10 quizzes…</span>
+      </footer>
+    </section>
+
+    <!-- ============ 2. Parsing result ============ -->
+    <section class="card" x-show="step === 1">
+      <header>
+        <h2>2. What's in the file</h2>
+        <p x-text="`${F.name} · ${F.course} · ${F.quizzes} quizzes`"></p>
+      </header>
+      <section class="grid gap-5">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="rounded-lg border p-3">
+            <div class="text-xs text-muted-foreground">Questions found</div>
+            <div class="text-2xl font-display font-semibold" x-text="F.found"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${F.quizzes} quizzes and check-ins`"></div>
+          </div>
+          <div class="rounded-lg border p-3">
+            <div class="text-xs text-muted-foreground">Supported types</div>
+            <div class="text-2xl font-display font-semibold" x-text="F.supported"></div>
+            <div class="text-xs text-muted-foreground" x-text="F.by_type.map((t) => `${t[2]} ${t[0].split(' → ')[0].toLowerCase()}`).join(' · ')"></div>
+          </div>
+          <div class="rounded-lg border p-3">
+            <div class="text-xs text-muted-foreground">Unsupported</div>
+            <div class="text-2xl font-display font-semibold" x-text="F.unsupported"></div>
+            <div class="text-xs text-muted-foreground">Skipped: essay and file upload</div>
+          </div>
+          <div class="rounded-lg border p-3">
+            <div class="text-xs text-muted-foreground">Exact duplicates</div>
+            <div class="text-2xl font-display font-semibold" x-text="F.duplicates"></div>
+            <div class="text-xs text-muted-foreground">Already in this course's bank</div>
+          </div>
+        </div>
+
+        <p class="text-sm"><span class="text-muted-foreground">Type mapping:</span> Canvas multiple choice and true / false keep their type. Fill in the blank questions whose prompt has code become <span class="font-medium">Output prediction</span> (19); the student types the exact printed output.</p>
+
+        <div class="grid gap-5 lg:grid-cols-2">
+          <div class="grid gap-2 content-start">
+            <div class="text-sm font-medium">Unsupported, will be skipped (5)</div>
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th>Where</th><th>Type</th><th>Question</th></tr></thead>
+                <tbody>
+                  <template x-for="u in G.unsupported" :key="u.where">
+                    <tr>
+                      <td class="text-xs whitespace-nowrap" x-text="u.where"></td>
+                      <td><span class="pill tone-muted" x-text="u.kind"></span></td>
+                      <td class="text-xs text-muted-foreground whitespace-normal" x-text="u.prompt"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-xs text-muted-foreground">Essays and file uploads need a human grader; keep them in Canvas.</p>
+          </div>
+          <div class="grid gap-2 content-start">
+            <div class="text-sm font-medium">Exact duplicates of questions in the bank (3)</div>
+            <div class="table-container">
+              <table class="table">
+                <thead><tr><th>Where</th><th>Already in the bank as</th></tr></thead>
+                <tbody>
+                  <template x-for="d in G.duplicates" :key="d.where">
+                    <tr>
+                      <td class="text-xs whitespace-nowrap" x-text="d.where"></td>
+                      <td class="text-xs whitespace-normal">
+                        <a class="font-mono hover:underline" :href="Mock.link('question.html', { id: d.existing })" x-text="`#${d.existing}`"></a>
+                        <span class="pill" :class="Mock.tone(MOCK.question(d.existing).status)" x-text="Mock.label(MOCK.question(d.existing).status)"></span>
+                        <div class="text-muted-foreground mt-0.5" x-text="MOCK.question(d.existing).prompt.split('\n')[0].replaceAll('`', '')"></div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div class="grid gap-1.5 text-sm">
+              <label class="flex items-center gap-2"><input type="radio" class="input" name="dup" :value="true" :checked="skipDup" @change="skipDup = true">Skip them; keep the bank's copy</label>
+              <label class="flex items-center gap-2"><input type="radio" class="input" name="dup" :value="false" :checked="!skipDup" @change="skipDup = false">Import them anyway, flagged as possible duplicates</label>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-xs text-muted-foreground" x-text="`Canvas item analysis is in the export for ${F.with_stats} of ${F.supported} questions (${F.course}, ${F.students_with_stats} students). It is used to guess difficulty in the next step.`"></p>
+      </section>
+      <footer class="flex gap-2">
+        <button type="button" class="btn" data-variant="outline" @click="step = 0">Back</button>
+        <button type="button" class="btn" @click="step = 2" x-text="`Continue: map ${toImport} questions`"></button>
+      </footer>
+    </section>
+
+    <!-- ============ 3. Map to subtopics ============ -->
+    <section class="card gap-0 py-0" x-show="step === 2">
+      <header class="py-5 border-b">
+        <h2>3. Map to subtopics</h2>
+        <p x-text="`The AI suggested a subtopic of ${version.label} for each question. Low-confidence rows are listed first; confirm or change them before you continue. Difficulty comes from last year's results where Canvas has them.`"></p>
+      </header>
+      <div class="flex flex-wrap items-center gap-2 px-6 py-3 border-b text-sm">
+        <span class="pill tone-warn" x-text="`${lowPending} low confidence to confirm`" x-show="lowPending"></span>
+        <span class="pill tone-ok" x-show="!lowPending">Low-confidence rows confirmed</span>
+        <span class="pill tone-muted" x-text="`${conf.medium} medium`"></span>
+        <span class="pill tone-muted" x-text="`${conf.high} high`"></span>
+        <span class="text-muted-foreground" x-text="`${confirmedCount} of ${toImport} confirmed`"></span>
+        <button type="button" class="btn ml-auto" data-variant="outline" data-size="sm" :disabled="highAccepted" @click="acceptHigh()" x-text="highAccepted ? `All ${conf.high} high-confidence accepted` : `Accept all high-confidence (${conf.high})`"></button>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Question</th>
+              <th>Type</th>
+              <th>Subtopic</th>
+              <th>Confidence</th>
+              <th>Difficulty</th>
+              <th class="w-28"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr :class="r.confidence === 'low' && !r.confirmed && 'row-low'">
+                <td>
+                  <div class="text-xs text-muted-foreground" x-text="r.where"></div>
+                  <div class="imp-prompt text-sm" :title="`${r.prompt}\n\nAnswer: ${r.answer}`" x-text="r.prompt.split('\n\n')[0].replaceAll('`', '')"></div>
+                  <div class="imp-code" x-show="r.prompt.includes('\n\n')" x-text="r.prompt.split('\n\n').slice(1).join('\n')"></div>
+                </td>
+                <td class="text-xs whitespace-nowrap">
+                  <div x-text="MOCK.question_types[r.type].label"></div>
+                  <div class="text-muted-foreground" x-show="r.canvas !== MOCK.question_types[r.type].label" x-text="`was ${r.canvas}`"></div>
+                </td>
+                <td class="text-xs">
+                  <select class="select h-8 w-52 text-xs" :aria-label="`Subtopic for ${r.where}`" @change="setSub(r, $event.target.value)">
+                    <template x-for="t in taxonomy" :key="t.id">
+                      <optgroup :label="t.name">
+                        <template x-for="s in t.subtopics" :key="s.id">
+                          <option :value="s.name" :selected="s.name === r.subtopic" x-text="s.name"></option>
+                        </template>
+                      </optgroup>
+                    </template>
+                  </select>
+                  <div class="text-muted-foreground mt-1 max-w-52 whitespace-normal" x-show="r.why && !r.changed" x-text="r.why"></div>
+                  <div class="text-muted-foreground mt-1" x-show="r.changed" x-text="`Changed from ${r.suggested}`"></div>
+                </td>
+                <td><span class="pill" :class="{ low: 'tone-warn', medium: 'tone-muted', high: 'tone-ok' }[r.confidence]" x-text="r.confidence"></span></td>
+                <td class="text-xs">
+                  <select class="select h-8 w-28 text-xs" :aria-label="`Difficulty for ${r.where}`" @change="r.difficulty = $event.target.value; r.diffChanged = true">
+                    <template x-for="d in ['easy','medium','hard']" :key="d"><option :value="d" :selected="d === r.difficulty" x-text="d"></option></template>
+                  </select>
+                  <div class="text-muted-foreground mt-1 whitespace-normal max-w-44" x-text="r.diffChanged ? 'Set by you' : r.p != null ? `${Math.round(r.p * 100)}% of last year's students got it right` : 'No Canvas stats; AI estimate'"></div>
+                </td>
+                <td class="text-right">
+                  <span class="pill tone-ok" x-show="r.confirmed">Confirmed</span>
+                  <button type="button" class="btn" data-variant="outline" data-size="sm" x-show="!r.confirmed" @click="r.confirmed = true">Accept</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="px-6 py-3 border-t text-sm text-muted-foreground" x-text="`+ ${conf.high - rows.filter((r) => r.confidence === 'high').length} more high-confidence rows${highAccepted ? ', accepted' : ''}. Filter by subtopic in the review queue after import.`"></div>
+      <!-- TODO(real): the mock shows 12 of the rows; the real table pages through all of them. -->
+      <footer class="flex flex-wrap items-center gap-2 py-4 border-t">
+        <button type="button" class="btn" data-variant="outline" @click="step = 1">Back</button>
+        <button type="button" class="btn" :disabled="lowPending > 0" @click="step = 3">Continue: run checks and judges</button>
+        <span class="text-xs text-muted-foreground" x-show="lowPending" x-text="`Confirm or change the ${lowPending} low-confidence row${lowPending === 1 ? '' : 's'} first. Medium rows can be fixed during review.`"></span>
+      </footer>
+    </section>
+
+    <!-- ============ 4. Checks and judges ============ -->
+    <section class="card" x-show="step === 3">
+      <header>
+        <h2>4. Run checks and judges</h2>
+        <p x-text="`${toImport} questions. The same checks and judges as generated questions, except Generatability: imported questions don't cite a book section.`"></p>
+      </header>
+      <section class="grid gap-4">
+        <template x-if="phase === 'ready'">
+          <div class="grid gap-3">
+            <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-sm">
+              <dt class="text-muted-foreground">Checks</dt><dd>Schema, answer key present and consistent</dd>
+              <dt class="text-muted-foreground">Judges</dt><dd>Issues, Subtopic fit, Difficulty</dd>
+              <dt class="text-muted-foreground">Estimated cost</dt><dd class="font-mono text-xs self-center" x-text="`${Mock.usd(cost)} (${toImport} × 3 judge calls)`"></dd>
+              <dt class="text-muted-foreground">Lands in</dt><dd>Review queue, marked Imported. Nothing reaches students until you approve it.</dd>
+            </dl>
+          </div>
+        </template>
+        <template x-if="phase === 'running'">
+          <div class="grid gap-3">
+            <ol class="grid gap-2 text-sm">
+              <template x-for="(s, i) in RUN" :key="s">
+                <li class="flex items-center gap-2">
+                  <span class="grid size-5 place-items-center rounded-full text-[10px] font-semibold" :class="i < runStep ? 'tone-ok' : i === runStep ? 'tone-accent' : 'tone-muted'" x-text="i < runStep ? '✓' : i + 1"></span>
+                  <span :class="i > runStep && 'text-muted-foreground'" x-text="s"></span>
+                </li>
+              </template>
+            </ol>
+            <div class="progress" role="progressbar" :aria-valuenow="Math.round(runStep / RUN.length * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.min(100, runStep / RUN.length * 100)}%` }"></span></div>
+            <p class="text-xs text-muted-foreground">Runs as an Import questions job. You can leave this page; it keeps running and appears in <a class="underline" href="jobs.html">Jobs</a>.</p>
+          </div>
+        </template>
+        <template x-if="phase === 'done'">
+          <div class="grid gap-4">
+            <div class="alert">
+              <i data-lucide="circle-check"></i>
+              <h2 x-text="`${passed} passed checks → review queue, marked Imported`"></h2>
+              <section>
+                <p x-text="`Judges flagged ${flagged} of them; you'll see the notes in review. Subtopics you confirmed here are kept. The job is in Jobs as Import questions · ${F.name}.`"></p>
+                <p class="mt-2 flex gap-2">
+                  <a class="btn" data-size="sm" :href="Mock.link('review.html', { source: 'imported' })" x-text="`Review ${passed} imported`"></a>
+                  <a class="btn" data-variant="outline" data-size="sm" href="jobs.html">Open Jobs</a>
+                </p>
+              </section>
+            </div>
+            <div class="grid gap-2">
+              <div class="text-sm font-medium">3 failed checks (answer key missing)</div>
+              <div class="table-container">
+                <table class="table">
+                  <thead><tr><th>Where</th><th>Question</th><th>Check</th></tr></thead>
+                  <tbody>
+                    <template x-for="f in G.failedChecks" :key="f.where">
+                      <tr>
+                        <td class="text-xs whitespace-nowrap" x-text="f.where"></td>
+                        <td class="text-sm whitespace-normal" x-text="f.prompt"></td>
+                        <td class="text-xs whitespace-normal"><span class="pill tone-critical font-mono">answer_consistency</span> <span class="text-muted-foreground" x-text="f.detail"></span></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <p class="text-xs text-muted-foreground">They are in the bank as Failed checks. Add the answer key there and they move to the review queue. <a class="underline" :href="Mock.link('questions.html', { status: 'validation_failed' })">Open in the question bank</a></p>
+            </div>
+            <p class="text-xs text-muted-foreground" x-text="`Not imported: ${F.unsupported} unsupported${skipDup ? `, ${F.duplicates} exact duplicates` : ''}.`"></p>
+          </div>
+        </template>
+      </section>
+      <footer class="flex gap-2">
+        <button type="button" class="btn" data-variant="outline" x-show="phase === 'ready'" @click="step = 2">Back</button>
+        <button type="button" class="btn" x-show="phase === 'ready'" @click="run()"><i data-lucide="play"></i>Run checks and judges</button>
+        <button type="button" class="btn" data-variant="outline" x-show="phase === 'done'" @click="reset()">Import another file</button>
+      </footer>
+    </section>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-content.js"></script>
+  <script src="assets/data-c9-c13.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const G = MOCK.gContent;
+      const F = G.importFile;
+      const blocked = !c.taxonomy.length;
+      const FORMATS = [
+        { id: "canvas", label: "Canvas quiz export", ext: ".imscc or .zip", accept: ".imscc,.zip", hint: "Course export or one quiz, from Canvas Classic Quizzes." },
+        { id: "qti", label: "QTI 1.2 / 2.1", ext: ".zip", accept: ".zip,.xml", hint: "From Canvas New Quizzes, Moodle, Blackboard or D2L." },
+        { id: "csv", label: "CSV", ext: ".csv", accept: ".csv", hint: "One row per question. Use the template." },
+      ];
+      const SAMPLES = {
+        canvas: { name: F.name, size: F.size, detail: `${F.detail}` },
+        qti: { name: "cs135-fall2025-qti.zip", size: "2.9 MB", detail: "QTI 2.1, 84 questions" },
+        csv: { name: "cs135-quiz-bank.csv", size: "41 KB", detail: "84 rows" },
+      };
+      const freshRows = () => G.rows.map((r) => ({
+        ...r, suggested: r.subtopic, changed: false, confirmed: false, diffChanged: false,
+        difficulty: G.difficultyFromP(r.p) || "easy",
+      }));
+      const startStep = Math.min(3, Math.max(0, Number(Mock.param("step") || 1) - 1));
+      return {
+        course: c, G, F, blocked, FORMATS,
+        version: c.taxonomy_versions.find((v) => v.active) || {},
+        taxonomy: c.taxonomy,
+        STEPS: [{ title: "Upload" }, { title: "Parsing result" }, { title: "Map to subtopics" }, { title: "Checks and judges" }],
+        RUN: ["Deterministic checks", "Issues judge", "Subtopic fit judge", "Difficulty judge", "Add to the review queue"],
+        step: blocked ? 0 : startStep, format: "canvas", file: !blocked && startStep > 0 ? SAMPLES.canvas : null,
+        over: false, busy: false, skipDup: true, rows: freshRows(), highAccepted: false,
+        phase: startStep === 3 && Mock.param("run") === "done" ? "done" : "ready", runStep: 0,
+        get fmt() { return FORMATS.find((f) => f.id === this.format); },
+        get toImport() { return F.supported - (this.skipDup ? F.duplicates : 0); },
+        get conf() { return { low: F.confidence.low, medium: F.confidence.medium, high: this.toImport - F.confidence.low - F.confidence.medium }; },
+        get lowPending() { return this.rows.filter((r) => r.confidence === "low" && !r.confirmed).length; },
+        get confirmedCount() {
+          const hiddenHigh = this.conf.high - this.rows.filter((r) => r.confidence === "high").length;
+          return this.rows.filter((r) => r.confirmed).length + (this.highAccepted ? hiddenHigh : 0);
+        },
+        get passed() { return this.toImport - G.failedChecks.length; },
+        get flagged() { return Math.round(this.passed * 0.14); }, // TODO(real): judge verdicts
+        get cost() { return this.toImport * 3 * MOCK.pricing.judge_call_usd; },
+        stepNote(i) {
+          if (blocked) return ["Canvas, QTI or CSV", "What the file holds", "AI suggests, you confirm", "Then the review queue"][i];
+          if (i === 0) return this.file ? this.file.name : "Canvas, QTI or CSV";
+          if (i === 1) return this.step > 1 ? `${this.toImport} to import · ${F.unsupported + (this.skipDup ? F.duplicates : 0)} skipped` : `${F.found} found`;
+          if (i === 2) return this.step > 2 ? `${this.confirmedCount} confirmed` : "AI suggests, you confirm";
+          return this.phase === "done" ? `${this.passed} to review · ${G.failedChecks.length} failed` : "Then the review queue";
+        },
+        pick(f) {
+          this.file = f ? { name: f.name, size: `${(f.size / 1048576).toFixed(1)} MB`, detail: "84 questions" } : SAMPLES[this.format];
+        },
+        parse() {
+          this.busy = true;
+          setTimeout(() => { this.busy = false; this.step = 1; }, 1200);
+        },
+        setSub(r, name) {
+          r.subtopic = name; r.changed = name !== r.suggested; r.confirmed = true;
+        },
+        acceptHigh() {
+          this.rows.filter((r) => r.confidence === "high").forEach((r) => (r.confirmed = true));
+          this.highAccepted = true;
+          Mock.toast(`Accepted ${this.conf.high} high-confidence subtopics`);
+        },
+        run() {
+          this.phase = "running"; this.runStep = 0; this.busy = true;
+          const tick = () => {
+            this.runStep++;
+            if (this.runStep < this.RUN.length) return setTimeout(tick, 650);
+            this.busy = false; this.phase = "done";
+            Mock.toast(`${this.passed} imported questions are in the review queue`);
+          };
+          setTimeout(tick, 650);
+        },
+        reset() {
+          Object.assign(this, { step: 0, file: null, skipDup: true, rows: freshRows(), highAccepted: false, phase: "ready", runStep: 0 });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coverage · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .cov td, .cov th { padding: 0.3rem 0.5rem; }
+    .cell { display: block; text-align: center; border-radius: 0.35rem; font-size: 0.75rem; font-variant-numeric: tabular-nums; padding: 0.15rem 0; font-weight: 500; }
+    .swatch { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 0.2rem; vertical-align: -1px; }
+  </style>
+</head>
+<!-- C8 · Coverage: topic-first grid of approved questions per subtopic × difficulty vs the target; generate for gaps (F4). -->
+<body data-scope="course" data-nav="coverage" data-title="Coverage">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Coverage</h1>
+        <p class="text-sm text-muted-foreground mt-1" x-text="`Approved questions per subtopic and difficulty. Each cell needs ${target}.`"></p>
+      </div>
+    </div>
+
+    <!-- No approved taxonomy -->
+    <template x-if="!topics.length">
+      <div class="card"><section class="py-12 text-center grid gap-2 justify-items-center">
+        <span class="grid size-10 place-items-center rounded-full tone-warn"><i data-lucide="network" class="size-5"></i></span>
+        <p class="font-medium">Approve a taxonomy first</p>
+        <p class="text-sm text-muted-foreground max-w-lg">Coverage counts approved questions for each subtopic of the active taxonomy. This course has an AI-drafted taxonomy waiting for your review; once you approve it, every subtopic appears here with its gaps.</p>
+        <a class="btn mt-2" :href="Mock.link(course.taxonomy_draft ? 'taxonomy-draft.html' : 'taxonomy.html')" x-text="course.taxonomy_draft ? 'Review the AI draft' : 'Go to Taxonomy'"></a>
+      </section></div>
+    </template>
+
+    <template x-if="topics.length">
+      <div class="grid gap-6">
+        <!-- Summary -->
+        <section class="card">
+          <section class="flex flex-wrap items-center gap-x-8 gap-y-3">
+            <div><div class="text-xs text-muted-foreground">Cells at target</div><div class="text-2xl font-display font-semibold tabular-nums" x-text="`${totals.ready} / ${totals.cells}`"></div></div>
+            <div><div class="text-xs text-muted-foreground">Covered</div><div class="text-2xl font-display font-semibold tabular-nums" x-text="`${Math.round(totals.ready / totals.cells * 100)}%`"></div></div>
+            <div><div class="text-xs text-muted-foreground">Empty cells</div><div class="text-2xl font-display font-semibold tabular-nums" style="color:var(--critical-solid)" x-text="totals.empty"></div></div>
+            <div><div class="text-xs text-muted-foreground">Below target</div><div class="text-2xl font-display font-semibold tabular-nums" style="color:var(--warn-solid)" x-text="totals.thin"></div></div>
+            <div><div class="text-xs text-muted-foreground">Questions still needed</div><div class="text-2xl font-display font-semibold tabular-nums" x-text="totals.needed"></div></div>
+            <div class="ml-auto grid gap-2 text-xs text-muted-foreground">
+              <div class="flex flex-wrap gap-3">
+                <span><span class="swatch tone-critical"></span> none</span>
+                <span><span class="swatch tone-warn"></span> below target</span>
+                <span><span class="swatch tone-ok"></span> at target</span>
+                <span>“+n” = generated, awaiting review</span>
+              </div>
+              <label class="flex items-center gap-2 justify-end"><input type="checkbox" class="input" x-model="gapsOnly"> Only topics with gaps</label>
+            </div>
+          </section>
+        </section>
+
+        <template x-if="justApproved">
+          <div class="alert">
+            <i data-lucide="circle-check"></i>
+            <h2>Taxonomy approved. Every cell starts empty.</h2>
+            <section>Generate for gaps topic by topic. Generated questions go to the review queue; only questions you approve count here.</section>
+          </div>
+        </template>
+
+        <!-- Topic cards -->
+        <section class="grid gap-4 xl:grid-cols-2">
+          <template x-for="t in shownTopics" :key="t.id">
+            <div class="card gap-3 py-4">
+              <header class="flex items-start gap-3 px-4">
+                <div class="min-w-0">
+                  <h2 class="truncate" x-text="t.name"></h2>
+                  <p class="text-xs text-muted-foreground" x-text="`${st(t).approved}/${t.subtopics.length * 3 * target} approved · ${st(t).gapCells} of ${t.subtopics.length * 3} cells below target`"></p>
+                </div>
+                <div class="ml-auto shrink-0">
+                  <template x-if="t.run && t.run.phase === 'running'">
+                    <span class="btn pointer-events-none" data-variant="outline" data-size="sm"><i data-lucide="loader" class="animate-spin"></i><span x-text="`Generating… ${t.run.progress}%`"></span></span>
+                  </template>
+                  <template x-if="!t.run || t.run.phase !== 'running'">
+                    <button type="button" class="btn" data-variant="outline" data-size="sm" :disabled="!st(t).gapCells" @click="ask(t)" x-text="st(t).gapCells ? `Generate for gaps (${st(t).gapCells} cells)` : 'Nothing to generate'"></button>
+                  </template>
+                </div>
+              </header>
+              <div class="px-4">
+                <table class="table cov">
+                  <thead><tr><th>Subtopic</th><th class="w-20 text-center">Easy</th><th class="w-20 text-center">Medium</th><th class="w-20 text-center">Hard</th></tr></thead>
+                  <tbody>
+                    <template x-for="s in t.subtopics" :key="s.id">
+                      <tr>
+                        <td class="text-sm" x-text="s.name"></td>
+                        <template x-for="d in DIFFS" :key="d">
+                          <td>
+                            <span class="cell" :class="tone(s.cells[d])" :title="`${s.name} · ${d}: ${s.cells[d]} approved of ${target}${s.pending[d] ? `, ${s.pending[d]} awaiting review` : ''}`">
+                              <span x-text="`${s.cells[d]}/${target}`"></span><span class="font-normal opacity-80" x-show="s.pending[d]" x-text="` +${s.pending[d]}`"></span>
+                            </span>
+                          </td>
+                        </template>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <template x-if="t.run && t.run.phase === 'running' && t.run.external">
+                <p class="px-4 text-xs text-muted-foreground">Started by <span x-text="t.run.by"></span> <span x-text="t.run.started"></span>. <a class="underline" href="jobs.html">View in Jobs</a></p>
+              </template>
+              <template x-if="t.run && t.run.phase === 'done'">
+                <div class="mx-4 rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center gap-2" style="background:var(--muted)">
+                  <span x-text="t.run.summary"></span>
+                  <a class="font-medium underline underline-offset-4 ml-auto" :href="Mock.link('review.html')">Review these</a>
+                </div>
+              </template>
+            </div>
+          </template>
+        </section>
+        <p class="text-sm text-muted-foreground text-center" x-show="!shownTopics.length">Every topic is at target.</p>
+      </div>
+    </template>
+
+    <!-- Generate confirmation -->
+    <dialog x-ref="confirm" class="dialog" aria-labelledby="gen-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="gen-title" x-text="pending ? `Generate for gaps in ${pending.name}?` : ''"></h2>
+          <p>Questions are generated from the book sections for each subtopic, checked and judged, then sent to the review queue. Nothing reaches students until you approve it.</p>
+        </header>
+        <section class="grid gap-2 text-sm" x-show="pending">
+          <div class="flex justify-between border-b py-1.5"><span class="text-muted-foreground">Cells below target</span><span class="tabular-nums" x-text="pending?.gapCells"></span></div>
+          <div class="flex justify-between border-b py-1.5"><span class="text-muted-foreground">Questions to generate</span><span class="tabular-nums" x-text="pending?.needed"></span></div>
+          <div class="flex justify-between border-b py-1.5"><span class="text-muted-foreground">Estimated cost</span><span class="tabular-nums" x-text="pending ? `≈ ${Mock.usd(pending.needed * MOCK.cost_per_question_usd)}` : ''"></span></div>
+          <div class="flex justify-between py-1.5"><span class="text-muted-foreground">Budget left this month</span><span class="tabular-nums" x-text="Mock.usd(MOCK.usage.cap_usd - MOCK.usage.spent_usd)"></span></div>
+          <p class="text-xs text-muted-foreground">Runs as a background job. You can leave this page; progress shows in Jobs.</p>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.confirm.close()">Cancel</button>
+          <button type="button" class="btn" @click="run()" x-text="pending ? `Generate ${pending.needed} questions` : ''"></button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const target = c.coverage_target;
+      const DIFFS = ["easy", "medium", "hard"];
+      // ?approved=1 on the statistics course = arriving right after approving the AI draft.
+      const justApproved = !c.taxonomy.length && Mock.param("approved") === "1" && !!c.taxonomy_draft;
+      const source = c.taxonomy.length ? c.taxonomy : justApproved ? c.taxonomy_draft : [];
+      const running = MOCK.jobs.find((j) => j.course === c.id && j.status === "running" && j.kind === "Generate for gaps");
+      const topics = source.map((t) => ({
+        id: t.id, name: t.name, run: null,
+        subtopics: t.subtopics.filter((s) => s.draft_state !== "discarded").map((s) => ({
+          id: s.id, name: s.name,
+          cells: { ...(MOCK.coverage[s.id] && c.taxonomy.length ? MOCK.coverage[s.id] : { easy: 0, medium: 0, hard: 0 }) },
+          pending: { easy: 0, medium: 0, hard: 0 },
+        })),
+      }));
+      if (running) {
+        const t = topics.find((x) => running.detail.startsWith(x.name));
+        if (t) t.run = { phase: "running", progress: Math.round(running.progress * 100), external: true, by: running.by, started: running.started };
+      }
+      const stats = (t) => {
+        let approved = 0, gapCells = 0, needed = 0;
+        t.subtopics.forEach((s) => DIFFS.forEach((d) => {
+          approved += Math.min(s.cells[d], target);
+          const have = s.cells[d] + s.pending[d];
+          if (have < target) { gapCells++; needed += target - have; }
+        }));
+        return { approved, gapCells, needed };
+      };
+      return {
+        course: c, target, DIFFS, justApproved, gapsOnly: false, pending: null,
+        topics,
+        st: stats,
+        get shownTopics() { return this.topics.filter((t) => !this.gapsOnly || stats(t).gapCells); },
+        get totals() {
+          let cells = 0, ready = 0, empty = 0, thin = 0, needed = 0;
+          this.topics.forEach((t) => t.subtopics.forEach((s) => DIFFS.forEach((d) => {
+            cells++;
+            const v = s.cells[d];
+            if (v >= target) ready++; else if (v === 0) empty++; else thin++;
+            if (v < target) needed += target - v;
+          })));
+          return { cells, ready, empty, thin, needed };
+        },
+        tone(v) { return v >= target ? "tone-ok" : v === 0 ? "tone-critical" : "tone-warn"; },
+        ask(t) { this.pending = { ...stats(t), name: t.name, ref: t }; this.$refs.confirm.showModal(); },
+        run() {
+          const t = this.pending.ref;
+          this.$refs.confirm.close();
+          const needed = this.pending.needed, cells = this.pending.gapCells;
+          t.run = { phase: "running", progress: 5 };
+          Mock.toast(`Generate for gaps started: ${t.name}, ${cells} cells. It's in Jobs.`);
+          const timer = setInterval(() => {
+            t.run.progress = Math.min(100, t.run.progress + 19);
+            if (t.run.progress < 100) return;
+            clearInterval(timer);
+            // Fill the gaps as "awaiting review"; approved counts don't change until review.
+            t.subtopics.forEach((s) => DIFFS.forEach((d) => {
+              const have = s.cells[d] + s.pending[d];
+              if (have < target) s.pending[d] += target - have;
+            }));
+            const dups = Math.floor(needed / 7);
+            const failed = needed > 10 ? 1 : 0;
+            t.run = { phase: "done", summary: `${needed - failed} generated · ${dups} possible duplicate${dups === 1 ? "" : "s"}${failed ? ` · ${failed} failed checks` : ""} · sent to review queue` };
+            Mock.toast(`${t.name}: ${needed - failed} questions sent to the review queue`);
+          }, 650);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

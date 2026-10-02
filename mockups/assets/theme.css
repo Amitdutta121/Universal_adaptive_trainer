@@ -1,0 +1,140 @@
+/*
+ * Theme for the mockup. Tokens copied from frontend/src/app/globals.css (:root and .dark)
+ * so Basecoat components render in the real app's palette. If the app theme changes,
+ * copy the two blocks again; nothing else here depends on the values.
+ */
+
+:root {
+  --paper: #f4f6f6;
+  --surface: #ffffff;
+  --surface-2: #ecefef;
+  --surface-3: #e4e9e8;
+  --ink: #131a1c;
+  --ink-2: #3d4a4d;
+  --muted-ink: #6b797c;
+  --hairline: #dbe0e0;
+  --hairline-2: #c7cfcf;
+  --accent-solid: #2e6f6a;
+  --accent-text: #1d4a47;
+  --accent-wash: #dceae8;
+  --ok-solid: #2f7d57;
+  --ok-wash: #d9ede3;
+  --warn-solid: #b06b14;
+  --warn-wash: #f5e8d1;
+  --critical-solid: #b4531f;
+  --critical-wash: #f6e1d5;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent-solid);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--muted-ink);
+  --accent: var(--accent-wash);
+  --accent-foreground: var(--accent-text);
+  --destructive: var(--critical-solid);
+  --border: var(--hairline);
+  --input: var(--hairline);
+  --ring: color-mix(in oklch, var(--accent-solid) 45%, white);
+  --chart-1: #8ab8d4;
+  --chart-2: #6f908a;
+  --chart-3: #d8a64a;
+  --chart-4: #b56c52;
+  --chart-5: #829092;
+  --radius: 0.85rem;
+  --sidebar: #eef2f1;
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--accent-solid);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--surface);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: color-mix(in oklch, var(--accent-solid) 45%, white);
+
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-display: "Archivo", var(--font-sans);
+}
+
+.dark {
+  --paper: #0d1214;
+  --surface: #151c1e;
+  --surface-2: #1d2528;
+  --surface-3: #263033;
+  --ink: #e7ecec;
+  --ink-2: #b4c0c1;
+  --muted-ink: #7e8d8f;
+  --hairline: #26312f;
+  --hairline-2: #35423f;
+  --accent-solid: #66b8b0;
+  --accent-text: #9ad6d0;
+  --accent-wash: #17322f;
+  --ok-solid: #5cb786;
+  --ok-wash: #163126;
+  --warn-solid: #d7a548;
+  --warn-wash: #392c16;
+  --critical-solid: #e5924f;
+  --critical-wash: #3c2518;
+  --primary-foreground: #0d1214;
+  --input: var(--hairline-2);
+  --ring: color-mix(in oklch, var(--accent-solid) 55%, black);
+  --sidebar: #12181a;
+  --sidebar-primary-foreground: #0d1214;
+  --sidebar-accent: var(--surface-2);
+}
+
+html { font-family: var(--font-sans); }
+body { background: var(--background); color: var(--foreground); }
+h1, h2, .font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
+code, pre, .font-mono { font-family: var(--font-mono); }
+
+/* Status tones used by badges and cells across pages (same meaning as the app). */
+.tone-ok { background: var(--ok-wash); color: var(--ok-solid); }
+.tone-warn { background: var(--warn-wash); color: var(--warn-solid); }
+.tone-critical { background: var(--critical-wash); color: var(--critical-solid); }
+.tone-accent { background: var(--accent-wash); color: var(--accent-text); }
+.tone-muted { background: var(--surface-2); color: var(--muted-ink); }
+
+/* Small pill for inline status; Basecoat's .badge is used where a full badge fits. */
+.pill {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.05rem 0.5rem; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 500; line-height: 1.4; white-space: nowrap;
+}
+
+/* Page shell created by layout.js. */
+.mock-shell { display: flex; min-height: 100vh; }
+.mock-main { flex: 1; min-width: 0; }
+.mock-topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 0.75rem;
+  height: 3.25rem; padding: 0 1.25rem;
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--border);
+}
+.mock-content { max-width: 80rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+.mock-banner {
+  font-size: 0.72rem; text-align: center; padding: 0.2rem;
+  background: var(--warn-wash); color: var(--warn-solid);
+}
+.mock-toast-host { position: fixed; right: 1rem; bottom: 1rem; z-index: 60; display: grid; gap: 0.5rem; }
+.mock-toast {
+  background: var(--ink); color: var(--paper); border-radius: 0.6rem;
+  padding: 0.6rem 0.9rem; font-size: 0.85rem; box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
+}
+.sidebar .mock-step {
+  margin-left: auto; font-size: 0.65rem; padding: 0 0.4rem; border-radius: 999px;
+}
+[x-cloak] { display: none !important; }
+
+/* Tailwind's preflight makes borders currentColor; the app uses the hairline token. */
+*, ::before, ::after { border-color: var(--border); }
+.sidebar .mock-brand, .sidebar .mock-user { display:flex !important; flex-direction:row !important; justify-content:flex-start !important; text-align:left !important; }
+.sidebar .mock-course-head { display:block !important; text-align:left !important; }

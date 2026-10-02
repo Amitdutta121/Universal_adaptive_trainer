@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign up · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- A2 · Sign up (professor). Sign up -> verify-email.html -> courses.html. -->
+<body data-scope="public" data-title="Sign up">
+  <main x-data="page()" x-cloak class="mx-auto w-full max-w-md px-5 py-12">
+    <form class="card" @submit.prevent="submit()" novalidate>
+      <header>
+        <h2>Create your account</h2>
+        <p>For instructors. Students don't need an account; they join a class with a code.</p>
+      </header>
+      <section class="grid gap-4">
+        <div role="group" class="field" :data-invalid="errors.name ? '' : null">
+          <label for="name">Full name</label>
+          <input id="name" type="text" x-model="name" autocomplete="name" placeholder="Maya Chen" :aria-invalid="!!errors.name">
+          <p role="alert" x-show="errors.name" x-text="errors.name"></p>
+        </div>
+        <div role="group" class="field" :data-invalid="errors.email ? '' : null">
+          <label for="email">School email</label>
+          <input id="email" type="email" x-model="email" autocomplete="email" placeholder="you@university.edu" :aria-invalid="!!errors.email">
+          <p role="alert" x-show="errors.email" x-html="errors.email"></p>
+        </div>
+        <div role="group" class="field">
+          <label for="inst">Institution <span class="font-normal text-muted-foreground">(optional)</span></label>
+          <input id="inst" type="text" x-model="institution" placeholder="University of Nevada, Reno">
+        </div>
+        <div role="group" class="field" :data-invalid="errors.password ? '' : null">
+          <label for="pw">Password</label>
+          <input id="pw" type="password" x-model="password" autocomplete="new-password" :aria-invalid="!!errors.password">
+          <p x-show="!errors.password">At least 10 characters.</p>
+          <p role="alert" x-show="errors.password" x-text="errors.password"></p>
+        </div>
+        <label class="flex items-start gap-2 text-sm">
+          <input type="checkbox" class="input mt-0.5" x-model="terms">
+          <span>I agree to the terms of use and understand that generated questions are sent to a language model provider.</span>
+        </label>
+        <p class="text-sm" style="color:var(--destructive)" x-show="errors.terms" x-text="errors.terms"></p>
+      </section>
+      <footer class="grid gap-3">
+        <button type="submit" class="btn w-full" :disabled="busy" x-text="busy ? 'Creating account…' : 'Create account'"></button>
+        <p class="text-center text-sm text-muted-foreground">Already have an account? <a class="underline underline-offset-4" href="login.html">Log in</a></p>
+      </footer>
+    </form>
+    <p class="mt-4 text-center text-xs text-muted-foreground">Mockup: <span class="font-mono">maya.chen@example.edu</span> shows the "already registered" error.</p>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      return {
+        name: "", email: "", institution: "", password: "", terms: false, errors: {}, busy: false,
+        submit() {
+          const e = {};
+          if (!this.name.trim()) e.name = "Enter your name.";
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.email.trim())) e.email = "Enter a valid email address.";
+          else if (MOCK.users.some((u) => u.email === this.email.trim().toLowerCase()))
+            e.email = 'An account with this email already exists. <a class="underline" href="login.html">Log in</a> or <a class="underline" href="reset-password.html">reset your password</a>.';
+          if (this.password.length < 10) e.password = `Use at least 10 characters (${this.password.length} so far).`;
+          if (!this.terms) e.terms = "Accept the terms to continue.";
+          this.errors = e;
+          if (Object.keys(e).length) return;
+          this.busy = true;
+          setTimeout(() => { location.href = `verify-email.html?email=${encodeURIComponent(this.email.trim())}`; }, 600);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

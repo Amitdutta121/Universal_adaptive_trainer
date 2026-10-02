@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Students · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* Mastery cells: fixed width so 12 topic columns stay compact and aligned. */
+    .mcell { display:inline-grid; place-items:center; width:2.4rem; height:1.6rem; border-radius:0.35rem; font-family:var(--font-mono); font-size:0.72rem; font-weight:500; }
+    .mcell.none { background:transparent; color:var(--muted-foreground); border:1px dashed var(--border); }
+    .roster th.topic { padding-left:0.2rem; padding-right:0.2rem; text-align:center; font-size:0.7rem; font-weight:500; line-height:1.1; white-space:normal; width:2.8rem; }
+    .roster td.topic { padding-left:0.2rem; padding-right:0.2rem; text-align:center; }
+    .sort-btn { display:inline-flex; align-items:center; gap:0.2rem; }
+  </style>
+</head>
+<!-- D3 · Students: roster with per-topic mastery, at-risk flags, CSV export, reset/remove (F7). -->
+<body data-scope="course" data-nav="students" data-title="Students">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Students</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl">Every enrolled learner's adaptive-training progress: topic mastery, activity and sessions. Mastery is the engine's estimate that a student knows the topic (0–100%).</p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="all.length">
+        <button type="button" class="btn" data-variant="outline" @click="exportCsv()"><i data-lucide="download"></i>Export CSV</button>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <template x-if="!all.length">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="users"></i></span>
+          <h2 class="font-semibold">No students yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md">Students appear here after they join a class with its code or link. This course has no class yet, because it has no frozen question set.</p>
+          <a class="btn mt-2" data-size="sm" :href="Mock.link('classes.html')">Go to classes</a>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="all.length">
+      <div class="grid gap-6">
+        <!-- Class summary -->
+        <section class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Students</div>
+            <div class="text-2xl font-display font-semibold" x-text="scoped.length"></div>
+            <div class="text-xs text-muted-foreground" x-text="classFilter === 'all' ? `${classes.length} classes` : className(classFilter)"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Avg. mastery</div>
+            <div class="text-2xl font-display font-semibold" x-text="Mock.pct(summary.avg)"></div>
+            <div class="text-xs text-muted-foreground">over topics practised</div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Active this week</div>
+            <div class="text-2xl font-display font-semibold" x-text="`${summary.active} / ${scoped.length}`"></div>
+            <div class="text-xs text-muted-foreground">since Sep 24</div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">At risk</div>
+            <div class="text-2xl font-display font-semibold" x-text="summary.risk"></div>
+            <button type="button" class="text-xs text-left hover:underline" style="color:var(--primary)" @click="riskOnly = !riskOnly" x-text="riskOnly ? 'Show everyone' : 'Show only these'"></button>
+          </div>
+          <div class="card p-4 gap-1 col-span-2 lg:col-span-1">
+            <div class="text-xs text-muted-foreground">Weakest topics</div>
+            <ul class="grid gap-0.5 text-sm">
+              <template x-for="w in summary.weakest" :key="w.id">
+                <li class="flex gap-2"><span class="truncate" x-text="w.name"></span><span class="ml-auto font-mono" x-text="Mock.pct(w.avg)"></span></li>
+              </template>
+            </ul>
+          </div>
+        </section>
+
+        <!-- Roster -->
+        <section class="card">
+          <header class="flex flex-wrap items-center gap-3">
+            <div>
+              <h2>Roster</h2>
+              <p x-text="`${rows.length} of ${scoped.length} students shown`"></p>
+            </div>
+            <div class="ml-auto flex flex-wrap items-center gap-2">
+              <input class="input w-48" type="search" placeholder="Search students" aria-label="Search students" x-model="q">
+              <select class="select" aria-label="Filter by class" x-model="classFilter">
+                <option value="all">All classes</option>
+                <template x-for="k in classes" :key="k.id"><option :value="k.id" :selected="k.id === classFilter" x-text="k.name"></option></template>
+              </select>
+              <select class="select" aria-label="Sort" x-model="sort">
+                <option value="mastery_asc">Mastery: lowest first</option>
+                <option value="mastery_desc">Mastery: highest first</option>
+                <option value="active_desc">Last active: most recent</option>
+                <option value="active_asc">Last active: longest ago</option>
+                <option value="name">Name</option>
+              </select>
+              <label class="label gap-2 text-sm font-normal"><input type="checkbox" class="input" x-model="riskOnly">At risk only</label>
+            </div>
+          </header>
+          <section class="p-0">
+            <div class="table-container overflow-x-auto">
+              <table class="table roster">
+                <thead>
+                  <tr>
+                    <th class="pl-6 min-w-[12rem]">Student</th>
+                    <th class="text-end">
+                      <button type="button" class="sort-btn" @click="sort = sort === 'mastery_asc' ? 'mastery_desc' : 'mastery_asc'">Mastery <span class="text-muted-foreground" x-text="sort === 'mastery_asc' ? '↑' : sort === 'mastery_desc' ? '↓' : ''"></span></button>
+                    </th>
+                    <template x-for="t in topics" :key="t.id">
+                      <th class="topic" :title="t.name" x-text="t.short"></th>
+                    </template>
+                    <th class="text-end">Sessions</th>
+                    <th>
+                      <button type="button" class="sort-btn" @click="sort = sort === 'active_desc' ? 'active_asc' : 'active_desc'">Last active <span class="text-muted-foreground" x-text="sort === 'active_desc' ? '↓' : sort === 'active_asc' ? '↑' : ''"></span></button>
+                    </th>
+                    <th class="pr-6"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="s in rows" :key="s.id">
+                    <tr>
+                      <td class="pl-6">
+                        <div class="flex items-center gap-2">
+                          <a class="font-medium hover:underline" :href="Mock.link('student.html', { id: s.id })" x-text="s.name"></a>
+                          <span class="pill tone-critical" x-show="risk(s).length" :title="risk(s).join('; ')">At risk</span>
+                          <span class="pill tone-muted" x-show="s.reset">Run reset</span>
+                        </div>
+                        <div class="text-xs text-muted-foreground" x-text="`${s.email} · ${shortClass(s.class_id)}`"></div>
+                      </td>
+                      <td class="text-end font-mono text-sm" x-text="Mock.pct(s.avg_mastery)"></td>
+                      <template x-for="t in topics" :key="t.id">
+                        <td class="topic">
+                          <span class="mcell" :class="cellClass(s.mastery[t.id])" :title="`${t.name}: ${s.mastery[t.id] ? Mock.pct(s.mastery[t.id]) : 'not practised yet'}`" x-text="s.mastery[t.id] ? Math.round(s.mastery[t.id] * 100) : '–'"></span>
+                        </td>
+                      </template>
+                      <td class="text-end font-mono text-sm" x-text="s.sessions"></td>
+                      <td class="text-sm whitespace-nowrap">
+                        <span x-text="fmtDate(s.last_active)"></span>
+                        <span class="block text-xs text-muted-foreground" x-text="ago(s.last_active)"></span>
+                      </td>
+                      <td class="pr-6 text-end whitespace-nowrap">
+                        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" title="Reset run" aria-label="Reset run" @click="ask('reset', s)"><i data-lucide="rotate-ccw"></i></button>
+                        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" title="Remove from class" aria-label="Remove from class" @click="ask('remove', s)"><i data-lucide="user-minus"></i></button>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr x-show="!rows.length">
+                    <td :colspan="topics.length + 5" class="py-10 text-center text-sm text-muted-foreground">No matching students. Loosen the search or filters to see more learners.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <footer class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span class="inline-flex items-center gap-1"><span class="mcell tone-critical">32</span> below 45%: served easy questions</span>
+            <span class="inline-flex items-center gap-1"><span class="mcell tone-warn">64</span> 45–84%: medium</span>
+            <span class="inline-flex items-center gap-1"><span class="mcell tone-ok">91</span> 85% and up: hard</span>
+            <span class="inline-flex items-center gap-1"><span class="mcell none">–</span> not practised yet</span>
+            <span class="ml-auto" x-text="`At risk: average mastery below 50%, no practice in 14 days${current ? ', or ' + current.name.split(':')[0] + ' not started' : ''}. Hover the tag for the reason.`"></span>
+          </footer>
+        </section>
+      </div>
+    </template>
+
+    <!-- Confirm dialog (reset / remove) -->
+    <dialog x-ref="confirm" class="dialog" aria-labelledby="confirm-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="confirm-title" x-text="pending.kind === 'reset' ? `Reset ${pending.s?.name}'s run?` : `Remove ${pending.s?.name}?`"></h2>
+          <p x-show="pending.kind === 'reset'">Their mastery and subtopic weakness go back to the starting values and their next session starts a new run. Past attempts stay in the history and in CSV exports.</p>
+          <p x-show="pending.kind === 'remove'" x-text="`Removes them from ${className(pending.s?.class_id)} and deletes their sessions, attempts and mastery. This can't be undone. They can join again with the code${pending.s && isRestricted(pending.s.class_id) ? ' only if their email stays on the allowed list' : ''}.`"></p>
+        </header>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" :data-variant="pending.kind === 'remove' ? 'destructive' : null" @click="confirmAction()" x-text="pending.kind === 'reset' ? 'Reset run' : 'Remove student'"></button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-teach.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    // Short column headers for the topic heatmap; full name is in the tooltip.
+    const SHORT = {
+      "Values and types": "Values", "Variables and expressions": "Vars", "Conditionals": "If", "Loops": "Loops",
+      "Functions": "Func", "Strings": "Str", "Lists": "Lists", "Dictionaries": "Dict", "Tuples and sets": "Tuple",
+      "Files": "Files", "Exceptions": "Except", "Classes": "Class",
+    };
+    const DAY = 86400000;
+    const daysAgo = (d) => Math.round((new Date(MOCK.today) - new Date(d)) / DAY);
+
+    function page() {
+      const c = Mock.course;
+      const classes = MOCK.classes.filter((k) => k.course === c.id);
+      const pClass = Mock.param("class");
+      const current = MOCK.assignments.find((a) => a.course === c.id && a.status === "open");
+      return {
+        course: c, current,
+        classes,
+        topics: c.taxonomy.map((t) => ({ id: t.id, name: t.name, short: SHORT[t.name] || t.name.slice(0, 6) })),
+        all: MOCK.students.filter((s) => s.course === c.id).map((s) => ({ ...s, mastery: { ...s.mastery }, reset: false })),
+        q: "",
+        classFilter: classes.some((k) => k.id === pClass) ? pClass : "all",
+        sort: "mastery_asc",
+        riskOnly: false,
+        pending: { kind: null, s: null },
+
+        get scoped() { return this.all.filter((s) => this.classFilter === "all" || s.class_id === this.classFilter); },
+        get rows() {
+          const q = this.q.trim().toLowerCase();
+          const rows = this.scoped.filter((s) => (!q || s.name.toLowerCase().includes(q) || s.email.includes(q)) && (!this.riskOnly || this.risk(s).length));
+          const m = (s) => s.avg_mastery ?? -1;
+          const by = {
+            mastery_asc: (a, b) => m(a) - m(b), mastery_desc: (a, b) => m(b) - m(a),
+            active_desc: (a, b) => b.last_active.localeCompare(a.last_active), active_asc: (a, b) => a.last_active.localeCompare(b.last_active),
+            name: (a, b) => a.name.localeCompare(b.name),
+          }[this.sort];
+          return rows.sort(by);
+        },
+        get summary() {
+          const s = this.scoped;
+          const vals = s.map((x) => x.avg_mastery).filter((v) => v != null);
+          const weakest = this.topics.map((t) => {
+            const v = s.map((x) => x.mastery[t.id]).filter((x) => x > 0);
+            return { id: t.id, name: t.name, avg: v.length >= 3 ? v.reduce((a, b) => a + b, 0) / v.length : null };
+          }).filter((t) => t.avg != null).sort((a, b) => a.avg - b.avg).slice(0, 3);
+          return {
+            avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
+            active: s.filter((x) => daysAgo(x.last_active) <= 6).length,
+            risk: s.filter((x) => this.risk(x).length).length,
+            weakest,
+          };
+        },
+        risk(s) {
+          const r = [];
+          if (s.avg_mastery != null && s.avg_mastery < 0.5) r.push(`average mastery ${Mock.pct(s.avg_mastery)}`);
+          if (daysAgo(s.last_active) >= 14) r.push(`no practice in ${daysAgo(s.last_active)} days`);
+          // Phase 2: this week's assignment not started (no room for a Week 5 column at 1440 px).
+          const res = current && (MOCK.assignment_results[s.id] || {})[current.id];
+          if (res && res.state === "not_started") r.push(`hasn't started ${current.name} (due ${this.fmtDate(res.extension || current.due)})`);
+          return r;
+        },
+        cellClass(v) { return !v ? "none" : v < 0.45 ? "tone-critical" : v < 0.85 ? "tone-warn" : "tone-ok"; },
+        className(id) { return (this.classes.find((k) => k.id === id) || {}).name || ""; },
+        shortClass(id) { return this.className(id).split(" (")[0]; },
+        isRestricted(id) { return (this.classes.find((k) => k.id === id) || {}).restrict_roster; },
+        fmtDate(d) { return new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); },
+        ago(d) { const n = daysAgo(d); return n === 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`; },
+
+        ask(kind, s) { this.pending = { kind, s }; this.$refs.confirm.showModal(); },
+        confirmAction() {
+          const { kind, s } = this.pending;
+          if (kind === "reset") {
+            Object.keys(s.mastery).forEach((k) => { s.mastery[k] = 0; });
+            s.avg_mastery = null; s.reset = true;
+            Mock.toast(`${s.name}'s run was reset. Their next session starts fresh.`);
+          } else {
+            this.all = this.all.filter((x) => x.id !== s.id);
+            Mock.toast(`${s.name} removed from ${this.shortClass(s.class_id)}`);
+          }
+          this.$refs.confirm.close();
+        },
+
+        exportCsv() {
+          const esc = (v) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+          const head = ["name", "email", "class", "avg_mastery", ...this.topics.map((t) => `mastery: ${t.name}`), "sessions", "attempts", "last_active", "at_risk"];
+          const lines = this.rows.map((s) => [
+            s.name, s.email, this.className(s.class_id), s.avg_mastery ?? "",
+            ...this.topics.map((t) => (s.mastery[t.id] ? s.mastery[t.id] : "")),
+            s.sessions, s.attempts, s.last_active, this.risk(s).join("; "),
+          ].map(esc).join(","));
+          const csv = [head.map(esc).join(","), ...lines].join("\r\n");
+          const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+          const a = document.createElement("a");
+          const scope = this.classFilter === "all" ? "all-classes" : this.shortClass(this.classFilter).toLowerCase().replace(/\s+/g, "-");
+          a.href = url; a.download = `${c.code.replace(/\s+/g, "")}-students-${scope}-${MOCK.today}.csv`;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          Mock.toast(`Exported ${this.rows.length} students (as filtered)`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Course overview · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- C1 · Course overview: the setup checklist is the guided course-creation flow (F5). Once
+     students can practise (a set is frozen and a class is open), it becomes the in-term home:
+     this week's assignment, what the class got wrong, reports waiting; the checklist collapses. -->
+<body data-scope="course" data-nav="course" data-title="Overview">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="sample ? 'Sample · Prof. Example · made-up class' : `${course.code} · ${course.term}`"></p>
+        <h1 class="text-2xl font-semibold" x-text="course.name"></h1>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <a class="btn" data-variant="outline" :href="Mock.link('settings.html')">Course settings</a>
+        <a class="btn" :href="Mock.link(next.file)" x-text="next.cta"></a>
+      </div>
+    </div>
+
+    <!-- Key numbers -->
+    <section class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <template x-for="n in numbers" :key="n.label">
+        <div class="card p-4 gap-1">
+          <div class="text-xs text-muted-foreground" x-text="n.label"></div>
+          <div class="text-2xl font-display font-semibold" x-text="n.value"></div>
+        </div>
+      </template>
+    </section>
+
+    <!-- In term: this week -->
+    <template x-if="term">
+      <section class="grid lg:grid-cols-3 gap-6">
+        <div class="card lg:col-span-2">
+          <header>
+            <h2>This week</h2>
+            <p x-text="`Week ${term.week.week} of 15 (from ${term.weekLabel}): ${term.week.title} · students can practise ${term.released} of ${course.taxonomy.length} topics`"></p>
+          </header>
+          <section class="grid gap-5">
+            <div class="grid gap-2" x-show="term.due">
+              <div class="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <a class="font-medium hover:underline" :href="Mock.link('assignment.html', { id: term.due?.id })" x-text="term.due?.name"></a>
+                <span class="text-muted-foreground" x-text="`due ${term.dueLabel}`"></span>
+                <a class="ml-auto text-xs hover:underline" :href="Mock.link('gradebook.html')">Gradebook</a>
+              </div>
+              <div class="flex h-2 overflow-hidden rounded-full" style="background:var(--muted)">
+                <div :style="{ background: 'var(--ok-solid)', width: `${term.counts.done / term.total * 100}%` }"></div>
+                <div :style="{ background: 'var(--warn-solid)', width: `${term.counts.in_progress / term.total * 100}%` }"></div>
+              </div>
+              <div class="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
+                <span x-text="`${term.counts.done} done`"></span>
+                <span x-text="`${term.counts.in_progress} in progress`"></span>
+                <span x-text="`${term.counts.not_started} not started`"></span>
+              </div>
+            </div>
+            <div class="grid gap-1 border-t pt-4" style="border-color:var(--border)" x-show="term.top">
+              <div class="text-xs text-muted-foreground">Most common mistake this week</div>
+              <div class="text-sm"><span class="font-medium" x-text="term.top?.subtopic"></span> <span class="text-muted-foreground" x-text="`· ${term.top?.topic}`"></span></div>
+              <p class="text-sm" x-text="`${Math.round(term.top?.top_wrong_share * 100)}% answered “${term.top?.top_wrong}”. ${term.top?.reading}`"></p>
+              <a class="text-sm hover:underline" :href="Mock.link('insights.html')" x-text="`See all ${term.misconceptions} in Insights`"></a>
+            </div>
+          </section>
+        </div>
+        <div class="card">
+          <header><h2>Waiting for you</h2></header>
+          <section>
+            <ul class="grid gap-3 text-sm">
+              <li class="flex items-center gap-2"><span class="pill tone-warn" x-text="term.reports"></span><a class="hover:underline" :href="Mock.link('reports.html')">student reports about questions</a></li>
+              <li class="flex items-center gap-2"><span class="pill tone-warn" x-text="course.numbers.awaiting_review"></span><a class="hover:underline" :href="Mock.link('review.html')">questions awaiting review</a></li>
+              <li class="flex items-center gap-2"><span class="pill tone-muted" x-text="term.drafts"></span><a class="hover:underline" :href="Mock.link('assignments.html')">assignment drafts to publish</a></li>
+              <li class="flex items-center gap-2"><span class="pill tone-accent" x-text="term.extensions"></span><a class="hover:underline" :href="Mock.link('gradebook.html')">extensions active this week</a></li>
+            </ul>
+          </section>
+        </div>
+      </section>
+    </template>
+
+    <!-- Setup checklist (collapsed to one line once the course is running) -->
+    <div class="card py-3" x-show="term && !showSetup">
+      <section class="flex flex-wrap items-center gap-3 text-sm">
+        <span class="font-medium">Course setup</span>
+        <span class="text-muted-foreground" x-text="`${doneCount} of ${steps.length} steps done · ${steps.filter((s) => s.state !== 'done').map((s) => s.title.toLowerCase()).join(', ')} still in progress`"></span>
+        <button type="button" class="btn ml-auto" data-variant="ghost" data-size="sm" @click="showSetup = true">Show checklist</button>
+      </section>
+    </div>
+    <section class="card" x-show="!term || showSetup">
+      <header>
+        <h2>Course setup</h2>
+        <p x-text="`${doneCount} of ${steps.length} steps done. Students can practise once a question set is published to a class.`"></p>
+      </header>
+      <section class="p-0">
+        <ol class="divide-y" style="border-color:var(--border)">
+          <template x-for="(s, i) in steps" :key="s.key">
+            <li class="flex items-start gap-4 px-6 py-4">
+              <span class="grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold" :class="Mock.tone(s.state)" x-text="s.state === 'done' ? '✓' : i + 1"></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium" x-text="s.title"></span>
+                  <span class="pill" :class="Mock.tone(s.state)" x-text="Mock.label(s.state)"></span>
+                </div>
+                <p class="text-sm text-muted-foreground" x-text="s.detail"></p>
+              </div>
+              <a class="btn shrink-0" data-variant="outline" data-size="sm" :href="Mock.link(s.file)" x-text="s.state === 'in_progress' ? 'Continue' : 'Open'"></a>
+            </li>
+          </template>
+        </ol>
+      </section>
+    </section>
+
+    <section class="grid md:grid-cols-2 gap-6">
+      <div class="card">
+        <header><h2>Running now</h2><p>Background work for this course.</p></header>
+        <section class="grid gap-3">
+          <template x-for="j in jobs" :key="j.id">
+            <div class="grid gap-1">
+              <div class="flex text-sm"><span class="font-medium" x-text="j.kind"></span><span class="ml-auto text-muted-foreground" x-text="j.started"></span></div>
+              <div class="text-xs text-muted-foreground" x-text="j.detail"></div>
+              <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${j.progress * 100}%` }"></div></div>
+            </div>
+          </template>
+          <p class="text-sm text-muted-foreground" x-show="!jobs.length">Nothing running.</p>
+        </section>
+      </div>
+      <div class="card">
+        <header><h2>Needs your attention</h2></header>
+        <section>
+          <ul class="grid gap-2 text-sm">
+            <template x-for="a in attention" :key="a.text">
+              <li class="flex items-center gap-2"><span class="pill" :class="a.tone" x-text="a.tag"></span><a class="hover:underline" :href="Mock.link(a.file)" x-text="a.text"></a></li>
+            </template>
+          </ul>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const n = c.numbers;
+      const STEPS = [
+        ["materials", "Add course material", "Upload the textbook(s) the questions are generated from.", "materials.html", ((n) => `${n} book${n === 1 ? '' : 's'} imported`)(MOCK.books.filter((b) => b.course === c.id).length)],
+        ["taxonomy", "Define the taxonomy", "Topics and subtopics students are assessed on. Draft it with AI, import it, or build it by hand.", "taxonomy.html", null],
+        ["coverage", "Fill coverage gaps", `Every subtopic needs ${c.coverage_target} approved questions at each difficulty.`, "coverage.html", `${n.coverage_pct}% covered`],
+        ["review", "Review generated questions", "Approve, edit or reject. Your decisions also teach the generator and calibrate the judges.", "review.html", `${n.awaiting_review} awaiting review`],
+        ["question_set", "Freeze a question set", "A frozen set is what students practise from; later edits don't change it.", "question-sets.html", null],
+        ["classes", "Open a class", "Share a join code or link with students.", "classes.html", null],
+      ];
+      const steps = STEPS.map(([key, title, detail, file, extra]) => ({
+        key, title, file, state: c.setup[key], detail: extra ? `${detail} · ${extra}` : detail,
+      }));
+      const nextStep = steps.find((s) => s.state !== "done");
+      // In term once students can practise. TODO(real): from the term schedule and class state.
+      const sched = MOCK.schedule[c.id];
+      const running = sched && c.setup.question_set === "done" && c.setup.classes === "done";
+      const fmt = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      let term = null;
+      if (running) {
+        const week = sched.weeks.find((w) => w.week === sched.current_week);
+        const due = MOCK.assignments.find((a) => a.course === c.id && a.status === "open");
+        const counts = { done: 0, in_progress: 0, not_started: 0 };
+        MOCK.students.filter((st) => st.course === c.id).forEach((st) => {
+          const r = MOCK.assignment_results[st.id][due.id];
+          if (r.state === "done" || r.state === "late") counts.done++; else if (r.state === "in_progress") counts.in_progress++; else counts.not_started++;
+        });
+        const ins = MOCK.insights[c.id];
+        term = {
+          week, weekLabel: new Date(`${week.starts}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          released: new Set(MOCK.releasedTopics(c.id)).size,
+          due, dueLabel: fmt(due.due), counts, total: counts.done + counts.in_progress + counts.not_started,
+          top: ins.misconceptions[0], misconceptions: ins.misconceptions.length,
+          reports: MOCK.reports.filter((r) => r.status === "open" && MOCK.question(r.question_id).course === c.id).length,
+          drafts: MOCK.assignments.filter((a) => a.course === c.id && a.status === "draft").length,
+          extensions: MOCK.extensions.filter((e) => MOCK.assignment(e.assignment)?.id === due.id).length,
+        };
+      }
+      return {
+        term, showSetup: false, sample: Mock.param("sample") === "1",
+        course: c,
+        steps,
+        doneCount: steps.filter((s) => s.state === "done").length,
+        next: term ? { file: "insights.html", cta: "This week's insights" }
+          : nextStep ? { file: nextStep.file, cta: `Continue: ${nextStep.title}` } : { file: "students.html", cta: "View students" },
+        numbers: [
+          { label: "Questions", value: n.questions },
+          { label: "Approved", value: n.approved },
+          { label: "Awaiting review", value: n.awaiting_review },
+          { label: "Students", value: n.students },
+          { label: "Avg. mastery", value: Mock.pct(n.avg_mastery) },
+        ],
+        jobs: MOCK.jobs.filter((j) => j.course === c.id && j.status === "running"),
+        attention: c.id === "python"
+          ? [
+              ...(term ? [] : [{ tag: "Review", tone: "tone-warn", text: `${n.awaiting_review} questions awaiting review`, file: "review.html" }]),
+              { tag: "Job failed", tone: "tone-critical", text: "Judge re-run stopped after 17 of 42 (rate limit)", file: "jobs.html" },
+              { tag: "Alignment", tone: "tone-accent", text: "Difficulty judge agrees with you only 67% of the time", file: "alignment.html" },
+            ]
+          : c.id === "biology"
+          ? [{ tag: "Coverage", tone: "tone-accent", text: "Cell division opens Monday with 2 approved questions; generate before then", file: "coverage.html" }]
+          : [{ tag: "Taxonomy", tone: "tone-warn", text: "AI-drafted taxonomy is waiting for your approval", file: "taxonomy-draft.html" }],
+      };
+    }
+  </script>
+</body>
+</html>

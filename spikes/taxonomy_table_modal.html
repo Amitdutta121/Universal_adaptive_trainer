@@ -1,0 +1,375 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taxonomy: table + big builder modal</title>
+
+<style>
+  /* Tokens copied from frontend/src/app/globals.css so this reads as the real app. */
+  :root {
+    --paper:#f4f6f6; --surface:#fff; --surface-2:#ecefef; --surface-3:#e4e9e8;
+    --ink:#131a1c; --ink-2:#3d4a4d; --muted-ink:#6b797c; --hairline:#dbe0e0; --hairline-2:#c7cfcf;
+    --accent-solid:#2e6f6a; --accent-text:#1d4a47; --accent-wash:#dceae8;
+    --ok-solid:#2f7d57; --warn-solid:#b06b14; --warn-wash:#f5e8d1; --critical-solid:#b4531f; --critical-wash:#f6e1d5;
+    --shadow-panel:0 1px 2px rgb(19 26 28/.06),0 8px 18px -8px rgb(19 26 28/.2),0 28px 56px -28px rgb(19 26 28/.34);
+    --radius:.85rem;
+    --font-sans:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    --font-head:"Archivo","IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+    --font-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --paper:#0d1214; --surface:#151c1e; --surface-2:#1d2528; --surface-3:#263033;
+    --ink:#e7ecec; --ink-2:#b4c0c1; --muted-ink:#7e8d8f; --hairline:#26312f; --hairline-2:#35423f;
+    --accent-solid:#66b8b0; --accent-text:#9ad6d0; --accent-wash:#17322f;
+    --ok-solid:#5cb786; --warn-solid:#d7a548; --warn-wash:#392c16; --critical-solid:#e5924f; --critical-wash:#3c2518;
+    --shadow-panel:0 1px 2px rgb(0 0 0/.45),0 8px 18px -8px rgb(0 0 0/.5),0 28px 56px -28px rgb(0 0 0/.8);
+  } }
+  *{box-sizing:border-box} body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 var(--font-sans);-webkit-font-smoothing:antialiased}
+  h1,h2,h3{font-family:var(--font-head);margin:0} p{margin:0}
+  button,input,textarea{font:inherit;color:inherit}
+  :is(button,input,textarea,[tabindex]):focus-visible{outline:2px solid var(--accent-solid);outline-offset:1px}
+
+  .note{max-width:1180px;margin:0 auto;padding:18px 20px 0;font-size:13px;color:var(--muted-ink)} .note b{color:var(--ink)}
+  .note kbd{font:11.5px var(--font-mono);padding:0 5px;border:1px solid var(--hairline-2);border-bottom-width:2px;border-radius:4px;background:var(--surface);color:var(--ink-2)}
+  .page{max-width:1180px;margin:14px auto 60px;padding:0 20px}
+  .frame{border:1px solid var(--hairline-2);border-radius:var(--radius);background:var(--paper);overflow:hidden;box-shadow:var(--shadow-panel)}
+  .frame-bar{display:flex;gap:6px;align-items:center;padding:8px 12px;background:var(--surface-2);border-bottom:1px solid var(--hairline)}
+  .frame-bar i{width:9px;height:9px;border-radius:50%;background:var(--hairline-2)} .frame-bar span{margin-left:8px;font:12px var(--font-mono);color:var(--muted-ink)}
+  .inner{padding:20px 24px 28px;display:flex;flex-direction:column;gap:18px}
+  .head{display:flex;align-items:flex-start;gap:12px} .head h1{font-size:1.5rem} .head .sub{color:var(--muted-ink);font-size:13.5px;margin-top:4px;max-width:60ch}
+  .head .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .card{background:var(--surface);border:1px solid var(--hairline);border-radius:12px}
+  .active-card{padding:12px 16px;font-size:14px;display:flex;gap:10px;align-items:flex-start} .active-card .muted{color:var(--muted-ink);font-size:13px}
+  .tools{display:flex;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--hairline)} .tools .in{max-width:260px}
+
+  /* atoms */
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:1px solid var(--hairline-2);background:var(--surface);cursor:pointer;font-size:13.5px;font-weight:500;white-space:nowrap}
+  .btn:hover:not(:disabled){background:var(--surface-2)} .btn.primary{background:var(--accent-solid);border-color:var(--accent-solid);color:#fff} .btn.primary:hover{filter:brightness(1.08)}
+  @media (prefers-color-scheme:dark){.btn.primary{color:#0d1214}}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--ink-2)} .btn.ghost:hover{background:var(--surface-2)} .btn.sm{padding:4px 9px;font-size:12.5px} .btn:disabled{opacity:.45;cursor:default}
+  .ico{display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:0;background:transparent;border-radius:6px;cursor:pointer;color:var(--muted-ink);line-height:1;font-size:14px}
+  .ico:hover:not(:disabled){background:var(--surface-3);color:var(--ink)} .ico:disabled{opacity:.3;cursor:default} .ico.del:hover:not(:disabled){color:var(--critical-solid)}
+  .in{width:100%;padding:7px 10px;border:1px solid var(--hairline-2);border-radius:8px;background:var(--surface)} .in::placeholder{color:var(--muted-ink)}
+  .in.quiet{border-color:transparent;background:transparent} .in.quiet:hover{border-color:var(--hairline)} .in.quiet:focus{background:var(--surface);border-color:var(--hairline-2)}
+  textarea.in{resize:vertical;min-height:64px}
+  .field{display:flex;flex-direction:column;gap:4px} .field>label,.lbl{font-size:12px;font-weight:500;color:var(--ink-2);display:flex;justify-content:space-between}
+  .cnt{font:11px var(--font-mono);color:var(--muted-ink);font-weight:400}
+  .badge{display:inline-block;font-size:11.5px;font-weight:500;padding:1px 9px;border-radius:999px;border:1px solid var(--hairline-2);background:var(--surface-2);color:var(--ink-2)}
+  .badge.active{background:var(--accent-wash);border-color:color-mix(in srgb,var(--accent-solid) 40%,transparent);color:var(--accent-text)}
+  .pill{font:11.5px var(--font-mono);padding:0 7px;border-radius:999px;background:var(--surface-2);border:1px solid var(--hairline);color:var(--ink-2)}
+  .hint{font-size:12.5px;color:var(--muted-ink)}
+
+  /* the table: the main view */
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:12.5px;font-weight:600;color:var(--muted-ink);padding:10px 16px;border-bottom:1px solid var(--hairline)}
+  td{padding:12px 16px;border-top:1px solid var(--hairline);font-size:14px;vertical-align:middle}
+  thead tr:first-child th{border-top:0} tbody tr:first-child td{border-top:0}
+  th.r,td.r{text-align:right} td.muted{color:var(--muted-ink);font-size:13.5px} td.name{font-weight:500}
+  #tbl tbody tr{cursor:pointer} #tbl tbody tr:hover{background:var(--surface-2)}
+  .rowact{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+  .empty{padding:36px;text-align:center;color:var(--muted-ink)}
+
+  /* modals */
+  .overlay{position:fixed;inset:0;background:rgb(10 14 15/.55);display:none;align-items:center;justify-content:center;padding:2vh 2vw;z-index:50}
+  .overlay.open{display:flex} .overlay.top{z-index:60}
+  .modal{background:var(--surface);border:1px solid var(--hairline-2);border-radius:var(--radius);box-shadow:var(--shadow-panel);display:flex;flex-direction:column;max-height:96vh;min-height:0}
+  .modal.big{width:min(96vw,1600px);height:min(92vh,940px)} .modal.small{width:min(94vw,520px)}
+  .m-head{display:flex;gap:14px;align-items:flex-start;padding:16px 20px;border-bottom:1px solid var(--hairline)}
+  .m-head h2{font-size:1.15rem} .m-head .kick{font-size:12px;color:var(--muted-ink);margin-bottom:2px} .m-head .grow{flex:1;min-width:0}
+  .namein{font-family:var(--font-head);font-size:1.25rem;font-weight:600;border:1px solid transparent;background:transparent;padding:2px 6px;margin-left:-6px;border-radius:8px;width:min(100%,560px)}
+  .namein:hover{border-color:var(--hairline)} .namein:focus{border-color:var(--hairline-2);background:var(--surface)}
+  .m-body{padding:16px 20px;overflow:auto;min-height:0;flex:1;display:flex;flex-direction:column;gap:12px}
+  .m-foot{display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--hairline);background:color-mix(in srgb,var(--surface-2) 50%,transparent);border-radius:0 0 var(--radius) var(--radius)}
+  .m-foot .sum{margin-right:auto;font-size:13px;color:var(--muted-ink)} .m-foot .sum b{color:var(--ink)}
+  .banner{padding:9px 12px;border-radius:10px;border:1px solid;font-size:13px}
+  .banner.err{background:var(--critical-wash);border-color:color-mix(in srgb,var(--critical-solid) 40%,transparent)}
+
+  /* inside the big modal: the builder design (outline with search on the left, detail on the right) */
+  .ws{display:grid;grid-template-columns:minmax(300px,340px) minmax(0,1fr);gap:14px;flex:1;min-height:0}
+  @media (max-width:860px){.ws{grid-template-columns:1fr}}
+  .pane{border:1px solid var(--hairline);border-radius:12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .pane-h{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 14px;border-bottom:1px solid var(--hairline);min-height:44px}
+  .pane-h h3{font-size:.95rem} .pane-h .sp{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .search{padding:10px 12px 0;position:relative} .search .in{padding-left:30px;padding-right:28px} .search .mag{position:absolute;left:22px;top:20px;color:var(--muted-ink);font-size:14px;pointer-events:none} .search .clr{position:absolute;right:16px;top:17px}
+  .smeta{padding:4px 14px 4px;font-size:12px;color:var(--muted-ink);min-height:22px}
+  .tree-scroll{overflow:auto;flex:1;min-height:0;padding:2px 8px 8px}
+  .tree,.tree ul{list-style:none;margin:0;padding:0} .tree ul{margin-left:18px;padding-left:6px;border-left:1px solid var(--hairline)} .tree li{margin:1px 0}
+  .orow{display:flex;align-items:center;gap:4px;padding:4px 6px;border-radius:8px;border:1px solid transparent;cursor:pointer}
+  .orow:hover{background:var(--surface-2)} .orow[aria-selected=true]{background:var(--accent-wash);border-color:color-mix(in srgb,var(--accent-solid) 35%,transparent);color:var(--accent-text)}
+  .orow .chev{width:18px;text-align:center;color:var(--muted-ink);font-size:10px;flex:none;border-radius:4px} .orow .chev:hover{background:var(--surface-3)} .orow .chev.none{visibility:hidden}
+  .orow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .orow.t .nm{font-weight:600} .orow.s .nm{font-size:14px} .orow .nm.empty2{font-style:italic;color:var(--muted-ink)}
+  .orow.s::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--hairline-2);flex:none;margin:0 4px 0 2px} .orow.s[aria-selected=true]::before{background:var(--accent-solid)}
+  .warn-dot{width:7px;height:7px;border-radius:50%;background:var(--warn-solid);flex:none}
+  .rm{flex:none;width:22px;height:22px;padding:0;display:inline-grid;place-items:center;border:0;border-radius:6px;background:transparent;color:var(--muted-ink);cursor:pointer;opacity:0;font-size:12px}
+  .orow:hover .rm,.orow:focus .rm,.orow:focus-within .rm{opacity:1} .rm:hover{background:var(--critical-wash);color:var(--critical-solid)}
+  .addrow{display:flex;align-items:center;gap:6px;padding:3px 8px;margin:2px 0 4px;border:0;background:transparent;color:var(--muted-ink);font-size:12.5px;border-radius:6px;cursor:pointer} .addrow:hover{color:var(--accent-text);background:var(--surface-2)}
+  .tree-foot{padding:6px 10px;border-top:1px solid var(--hairline);display:flex;gap:8px}
+  .none-found{padding:26px 14px;text-align:center;color:var(--muted-ink);font-size:13px}
+  mark{background:var(--warn-wash);color:inherit;border-radius:3px;padding:0 1px;box-shadow:0 0 0 1px color-mix(in srgb,var(--warn-solid) 30%,transparent)}
+  .tag{font:10.5px var(--font-mono);color:var(--muted-ink);border:1px solid var(--hairline);border-radius:999px;padding:0 6px;flex:none}
+  .detail{overflow:auto;flex:1;min-height:0;padding:14px;display:flex;flex-direction:column;gap:14px}
+  .trail{font-size:12.5px;color:var(--muted-ink)} .trail b{color:var(--ink);font-weight:600}
+  .tbl-wrap{border:1px solid var(--hairline);border-radius:8px;overflow:hidden}
+  .sub-t th{padding:7px 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:color-mix(in srgb,var(--surface-2) 50%,transparent)}
+  .sub-t td{padding:3px 4px;vertical-align:top} .sub-t td .in{padding:5px 8px} .sub-t tr.selrow td{background:var(--accent-wash)}
+  .sub-t td.a{width:96px;white-space:nowrap;text-align:right;padding-top:4px}
+  .empty-t{padding:16px;text-align:center;color:var(--muted-ink);font-size:13px}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:90;background:var(--ink);color:var(--paper);padding:9px 12px 9px 16px;border-radius:10px;font-size:13.5px;display:none;gap:12px;align-items:center;box-shadow:var(--shadow-panel)}
+  .toast.show{display:flex} .toast button{border:0;border-radius:6px;padding:3px 10px;cursor:pointer;background:color-mix(in srgb,var(--paper) 20%,transparent);color:var(--paper);font-weight:600}
+  pre.json{font:12.5px/1.55 var(--font-mono);background:var(--surface-2);border:1px solid var(--hairline);border-radius:10px;padding:12px;margin:0;overflow:auto;max-height:52vh;white-space:pre}
+</style>
+
+<div class="note">
+  <b>Mock, not wired.</b> Click a row (or <b>Preview</b>) to open the big modal, which now holds the same builder we settled on:
+  outline with search on the left, the selected topic on the right. Try search, hover a row for its ✕, <kbd>Del</kbd>, <kbd>Ctrl</kbd>+<kbd>Z</kbd>, <kbd>/</kbd>, and <b>＋ New taxonomy</b>.
+</div>
+
+<div class="page"><div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>/curriculum</span></div>
+  <div class="inner">
+    <div class="head">
+      <div><h1>Curriculum</h1><p class="sub">Build a Topic → Subtopic taxonomy, or import one you already have. The active taxonomy is what questions and coverage use.</p></div>
+      <div class="right"><button class="btn">⇪ Import</button></div>
+    </div>
+    <div class="card active-card"><span>✓</span><div><div><b><u id="activeName"></u></b> is the active taxonomy</div><div class="muted" id="activeMeta"></div></div></div>
+    <div class="card" style="overflow:hidden">
+      <div class="tools">
+        <input class="in" placeholder="Search by name" id="q" aria-label="Search taxonomies by name">
+        <span style="color:var(--muted-ink);font-size:13px" id="count"></span>
+        <button class="btn primary" style="margin-left:auto" id="newBtn">＋ New taxonomy</button>
+      </div>
+      <table id="tbl">
+        <thead><tr><th style="width:52px">#</th><th>Name</th><th>Status</th><th class="r">Topics</th><th class="r">Subtopics</th><th>Source</th><th>Created</th><th>Made active</th><th style="width:170px"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div></div>
+
+<div class="overlay" id="bigOv" role="dialog" aria-modal="true" aria-label="Taxonomy"><div class="modal big" id="big"></div></div>
+<div class="overlay top" id="smallOv" role="dialog" aria-modal="true"><div class="modal small" id="small"></div></div>
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = v => String(v ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let uid = 100; const id = () => "n" + (++uid);
+const T = (name, description, subs) => ({ id: id(), name, description, subs: subs.map(s => ({ id: id(), name: s[0], description: s[1] || "" })) });
+const LIM = { name: 300, desc: 2000, label: 200 };            // would come from /curriculum/document-guide
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+let versions = [
+  { id: 3, label: "Introductory Python (sample)", source: "Built or imported", created: "Sep 23, 2026, 11:00 PM", madeActive: "Sep 23, 2026, 11:00 PM", topics: [
+      T("Variables", "Creating names, assigning values, and understanding types.", [["Assignment and rebinding", "Using = to bind a name to a value."], ["Basic types", "int, float, str and bool."], ["Type conversion"]]),
+      T("Loops", "Repeating actions with for and while loops.", [["for loops over sequences", "Iterating over strings, lists and other iterables."], ["while loops", "Repeating while a condition holds."]]),
+      T("Functions", "", [["Defining and calling"], ["Return values"]])] },
+  { id: 2, label: "Data Structures", source: "Built or imported", created: "Sep 22, 2026, 4:10 PM", madeActive: "Sep 22, 2026, 4:10 PM", topics: [
+      T("Lists", "Ordered, mutable sequences.", [["Indexing and slicing"], ["List methods"]]),
+      T("Dictionaries", "", [["Keys and values"], ["Iterating a dict"]]),
+      T("Sets", "", [["Membership"], ["Union and intersection"]])] },
+  { id: 1, label: "Web Basics", source: "Built or imported", created: "Sep 20, 2026, 9:30 AM", madeActive: "Sep 20, 2026, 9:30 AM", topics: [
+      T("HTML", "Structure of a page.", [["Elements and attributes"], ["Forms"]]),
+      T("CSS", "", [["Selectors"], ["Layout with flexbox", "One-dimensional layout."]])] },
+];
+let activeId = 3;
+const counts = v => ({ t: v.topics.length, s: v.topics.reduce((n, t) => n + t.subs.length, 0) });
+
+/* ============================ the table (the main view) ============================ */
+function renderTable() {
+  const q = $("#q").value.trim().toLowerCase();
+  const shown = versions.filter(v => v.label.toLowerCase().includes(q));
+  $("#count").textContent = shown.length === versions.length ? plural(versions.length, "version") : `${shown.length} of ${plural(versions.length, "version")}`;
+  const a = versions.find(v => v.id === activeId); $("#activeName").textContent = a.label; $("#activeMeta").textContent = `${plural(counts(a).t, "topic")} · ${plural(counts(a).s, "subtopic")} · active since ${a.madeActive}`;
+  $("#tbl tbody").innerHTML = shown.length ? shown.map(v => { const c = counts(v); return `<tr data-id="${v.id}" tabindex="0">
+      <td class="muted">${v.id}</td><td class="name">${esc(v.label)}</td>
+      <td><span class="badge ${v.id === activeId ? "active" : ""}">${v.id === activeId ? "active" : "replaced"}</span></td>
+      <td class="r">${c.t}</td><td class="r">${c.s}</td><td class="muted">${esc(v.source)}</td><td class="muted">${esc(v.created)}</td><td class="muted">${esc(v.madeActive)}</td>
+      <td><div class="rowact"><button class="btn sm" data-prev="${v.id}">Preview</button><button class="ico" aria-label="Actions">⋯</button></div></td></tr>`; }).join("")
+    : `<tr><td colspan="9" class="empty">No taxonomy matches “${esc(q)}”.</td></tr>`;
+}
+$("#q").addEventListener("input", renderTable);
+$("#tbl tbody").addEventListener("click", e => { const tr = e.target.closest("tr[data-id]"); if (tr && !e.target.closest(".ico")) openBig(+tr.dataset.id); });
+$("#tbl tbody").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-id]"); if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openBig(+tr.dataset.id); } });
+$("#newBtn").onclick = () => openBig(null);
+
+/* ============================ the big modal: the builder ============================ */
+let draft, origin, base, sel, collapsed, query, undoStack, problem, focusAfter;
+const sig = d => JSON.stringify(d), dirty = () => sig(draft) !== base;
+const topic = tid => draft.topics.find(x => x.id === tid);
+const sizes = () => ({ t: draft.topics.length, s: draft.topics.reduce((n, x) => n + x.subs.length, 0) });
+
+function openBig(vid) {
+  const v = vid == null ? null : versions.find(x => x.id === vid);
+  origin = v; draft = v ? { name: v.label + " (copy)", topics: JSON.parse(sig(v.topics)) } : { name: "", topics: [] };
+  base = sig(draft); sel = { t: draft.topics[0]?.id ?? null, s: null }; collapsed = new Set(); query = ""; undoStack = []; problem = null; focusAfter = v ? "tree" : "name";
+  $("#bigOv").classList.add("open"); renderBig();
+}
+function requestClose() { if (!dirty()) return closeBig(); smallConfirm("Discard your changes?", "This taxonomy has changes that are not saved. Closing throws them away.", "Discard changes", closeBig, "Keep editing"); }
+function closeBig() { $("#bigOv").classList.remove("open"); closeSmall(); $("#toast").classList.remove("show"); }
+
+/* what the tree shows for a search: a matching topic keeps its subtopics, otherwise only matching ones */
+function view() {
+  const q = query.trim().toLowerCase(), hit = o => (o.name || "").toLowerCase().includes(q) || (o.description || "").toLowerCase().includes(q);
+  return draft.topics.map(t => { if (!q) return { t, subs: t.subs }; const self = hit(t), kids = t.subs.filter(hit); return (self || kids.length) ? { t, subs: self ? t.subs : kids } : null; }).filter(Boolean);
+}
+const mark = (text, fb) => { const q = query.trim(); if (!text) return `<span>${esc(fb)}</span>`; if (!q) return esc(text); const k = text.toLowerCase().indexOf(q.toLowerCase()); return k < 0 ? esc(text) : esc(text.slice(0, k)) + "<mark>" + esc(text.slice(k, k + q.length)) + "</mark>" + esc(text.slice(k + q.length)); };
+const descOnly = o => { const q = query.trim().toLowerCase(); return q && !(o.name || "").toLowerCase().includes(q) && (o.description || "").toLowerCase().includes(q); };
+const flat = () => { const f = []; view().forEach(({ t, subs }) => { f.push({ t: t.id, s: null }); if (query.trim() || !collapsed.has(t.id)) subs.forEach(s => f.push({ t: t.id, s: s.id })); }); return f; };
+
+function treeHtml() {
+  const rows = view(), searching = !!query.trim();
+  if (!rows.length) return draft.topics.length ? `<div class="none-found">Nothing matches “${esc(query.trim())}”.</div>` : `<div class="none-found">No topics yet. Use “Add topic” to start.</div>`;
+  return `<ul class="tree" role="tree" aria-label="Taxonomy outline">` + rows.map(({ t, subs }) => {
+    const open = searching || !collapsed.has(t.id), on = sel.t === t.id && sel.s === null;
+    return `<li role="none"><div class="orow t" role="treeitem" aria-level="1" aria-expanded="${open}" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-t="${t.id}">
+        <span class="chev ${t.subs.length && !searching ? "" : "none"}" data-chev="${t.id}" aria-hidden="true">${open ? "▾" : "▸"}</span>
+        <span class="nm ${t.name ? "" : "empty2"}">${mark(t.name, "Untitled topic")}</span>${descOnly(t) ? '<span class="tag">desc</span>' : ""}${t.subs.length ? "" : '<span class="warn-dot" title="Needs at least one subtopic"></span>'}
+        <span class="pill">${t.subs.length}</span><button class="rm" tabindex="-1" data-act="rm" data-t="${t.id}" aria-label="Remove topic ${esc(t.name)}" title="Remove topic">✕</button></div>
+      ${open ? `<ul role="group">${subs.map(s => { const son = sel.t === t.id && sel.s === s.id; return `<li role="none"><div class="orow s" role="treeitem" aria-level="2" aria-selected="${son}" tabindex="${son ? 0 : -1}" data-t="${t.id}" data-s="${s.id}">
+          <span class="nm ${s.name ? "" : "empty2"}">${mark(s.name, "Untitled subtopic")}</span>${descOnly(s) ? '<span class="tag">desc</span>' : ""}<button class="rm" tabindex="-1" data-act="rm" data-t="${t.id}" data-s="${s.id}" aria-label="Remove subtopic ${esc(s.name)}" title="Remove subtopic">✕</button></div></li>`; }).join("")}
+        ${searching ? "" : `<li role="none"><button class="addrow" data-act="addSub" data-t="${t.id}">＋ Add subtopic</button></li>`}</ul>` : ""}</li>`;
+  }).join("") + `</ul>`;
+}
+function metaHtml() { const q = query.trim(); if (!q) return "Search names and descriptions. Press / to focus."; const rows = view(); const n = rows.reduce((c, { t, subs }) => c + (mark_hit(t) ? 1 : 0) + subs.filter(mark_hit).length, 0); return `<b>${n}</b> ${n === 1 ? "match" : "matches"} in ${plural(rows.length, "topic")}`; }
+const mark_hit = o => { const q = query.trim().toLowerCase(); return (o.name || "").toLowerCase().includes(q) || (o.description || "").toLowerCase().includes(q); };
+
+function detailHtml() {
+  const t = topic(sel.t);
+  if (!t) return `<div class="detail"><div class="empty">This taxonomy is empty. Add a topic to begin.<br><button class="btn sm" style="margin-top:10px" data-act="addTopic">＋ Add topic</button></div></div>`;
+  const i = draft.topics.indexOf(t), sub = t.subs.find(x => x.id === sel.s);
+  return `<div class="pane-h"><h3 style="font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-ink);font-family:var(--font-sans);font-weight:600">Topic ${i + 1} of ${draft.topics.length}</h3>
+      <div class="sp"><button class="ico" data-act="mvT" data-d="-1" ${i === 0 ? "disabled" : ""} aria-label="Move topic up">↑</button><button class="ico" data-act="mvT" data-d="1" ${i === draft.topics.length - 1 ? "disabled" : ""} aria-label="Move topic down">↓</button><button class="ico del" data-act="rm" data-t="${t.id}" aria-label="Remove topic">🗑</button></div></div>
+    <div class="detail">
+      <div class="trail" id="trail">${trail()}</div>
+      <div class="field"><label for="tn"><span>Topic name</span><span class="cnt" id="tnc">${t.name.length}/${LIM.name}</span></label><input class="in" id="tn" data-f="tname" value="${esc(t.name)}" maxlength="${LIM.name}" placeholder="e.g. Loops"></div>
+      <div class="field"><label for="td"><span>Description <span class="hint">(optional)</span></span><span class="cnt">${t.description.length}/${LIM.desc}</span></label><textarea class="in" id="td" data-f="tdesc" rows="2" maxlength="${LIM.desc}">${esc(t.description)}</textarea></div>
+      <div><div class="lbl" style="margin-bottom:6px"><span>Subtopics in this topic</span><span class="cnt">${t.subs.length}</span></div>
+        <div class="tbl-wrap">${t.subs.length ? `<table class="sub-t"><thead><tr><th style="width:38%">Name</th><th>Description</th><th></th></tr></thead><tbody>${t.subs.map((s, j) => `<tr class="${sub && sub.id === s.id ? "selrow" : ""}">
+            <td><input class="in quiet" id="sn-${s.id}" data-f="sname" data-s="${s.id}" value="${esc(s.name)}" maxlength="${LIM.name}" placeholder="Subtopic name" aria-label="Subtopic ${j + 1} name"></td>
+            <td><input class="in quiet" data-f="sdesc" data-s="${s.id}" value="${esc(s.description)}" maxlength="${LIM.desc}" placeholder="Optional" aria-label="Subtopic ${j + 1} description"></td>
+            <td class="a"><button class="ico" data-act="mvS" data-s="${s.id}" data-d="-1" ${j === 0 ? "disabled" : ""} aria-label="Move subtopic up">↑</button><button class="ico" data-act="mvS" data-s="${s.id}" data-d="1" ${j === t.subs.length - 1 ? "disabled" : ""} aria-label="Move subtopic down">↓</button><button class="ico del" data-act="rm" data-t="${t.id}" data-s="${s.id}" aria-label="Remove subtopic">✕</button></td></tr>`).join("")}</tbody></table>`
+          : `<div class="empty-t">This topic has no subtopics yet. A topic needs at least one.</div>`}</div>
+        <button class="btn ghost sm" style="margin-top:6px" data-act="addSub" data-t="${t.id}">＋ Add subtopic</button></div></div>`;
+}
+const trail = () => { const t = topic(sel.t); if (!t) return ""; const s = t.subs.find(x => x.id === sel.s); return `<span>${esc(draft.name || "Untitled")}</span> › <b>${esc(t.name || "Untitled topic")}</b>${s ? ` › <b>${esc(s.name || "Untitled subtopic")}</b>` : ""}`; };
+const footHtml = () => { const { t, s } = sizes(); return `<span class="sum"><b>${plural(t, "topic")}</b> · <b>${plural(s, "subtopic")}</b>${dirty() ? " · unsaved changes" : ""}</span>
+  <button class="btn" data-act="preview">Preview JSON</button><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="save">${origin ? "Save as new version" : "Save taxonomy"}</button>`; };
+const renderTree = () => { $("#tree").innerHTML = treeHtml(); $("#smeta").innerHTML = metaHtml(); $("#clr").hidden = !query; $("#undoBtn").disabled = !undoStack.length; $("#undoBtn").innerHTML = "↶ Undo" + (undoStack.length ? ` <span class="pill">${undoStack.length}</span>` : ""); $(".m-foot").innerHTML = footHtml(); };
+
+function renderBig() {
+  $("#big").innerHTML = `
+    <div class="m-head"><div class="grow"><div class="kick">${origin ? `Editing a copy of “${esc(origin.label)}” — saving creates a new version and leaves it unchanged` : "New taxonomy"}</div>
+        <input class="namein" id="nameIn" value="${esc(draft.name)}" maxlength="${LIM.label}" placeholder="Taxonomy name, e.g. Introductory Python, Fall 2026" aria-label="Taxonomy name"></div>
+      ${origin ? `<span class="badge ${origin.id === activeId ? "active" : ""}">${origin.id === activeId ? "active" : "replaced"}</span>` : ""}
+      <button class="ico" data-act="close" aria-label="Close" style="font-size:18px">✕</button></div>
+    <div class="m-body"><div id="bn">${problem ? `<div class="banner err" role="alert"><b>Not ready to save.</b> ${esc(problem)}</div>` : ""}</div>
+      <div class="ws">
+        <div class="pane"><div class="pane-h"><h3>Outline</h3><div class="sp"><button class="btn sm" id="undoBtn" data-act="undo" disabled>↶ Undo</button><button class="btn sm" data-act="addTopic">＋ Add topic</button></div></div>
+          <div class="search"><span class="mag">⌕</span><input class="in" id="search" type="search" placeholder="Search topics and subtopics" value="${esc(query)}" aria-label="Search the outline" autocomplete="off"><button class="ico clr" id="clr" data-act="clr" aria-label="Clear search" ${query ? "" : "hidden"}>✕</button></div>
+          <div class="smeta" id="smeta"></div><div class="tree-scroll" id="tree"></div>
+          <div class="tree-foot"><button class="btn ghost sm" data-act="expand">Expand all</button><button class="btn ghost sm" data-act="collapse">Collapse all</button></div></div>
+        <div class="pane" id="detail"></div></div></div>
+    <div class="m-foot"></div>`;
+  $("#detail").innerHTML = detailHtml(); renderTree();
+  const f = focusAfter; focusAfter = null;
+  if (f === "name") $("#nameIn")?.focus(); else if (f === "topic") $("#tn")?.focus(); else if (f === "sub") $(`#sn-${sel.s}`)?.focus(); else if (f === "tree") $('#tree [aria-selected="true"]')?.focus();
+}
+const rerenderDetail = () => { $("#detail").innerHTML = detailHtml(); renderTree(); };
+
+/* typing: update state and the labels around it, never the field being typed in */
+$("#bigOv").addEventListener("input", e => {
+  const f = e.target.dataset.f, v = e.target.value;
+  if (e.target.id === "nameIn") { draft.name = v; problem = null; $("#bn").innerHTML = ""; $("#trail") && ($("#trail").innerHTML = trail()); $(".m-foot").innerHTML = footHtml(); return; }
+  if (e.target.id === "search") { query = v; renderTree(); return; }
+  if (!f) return; const t = topic(sel.t); problem = null; $("#bn").innerHTML = "";
+  if (f === "tname") { t.name = v; $("#tnc").textContent = `${v.length}/${LIM.name}`; } else if (f === "tdesc") t.description = v;
+  else if (f === "sname") t.subs.find(x => x.id === e.target.dataset.s).name = v; else if (f === "sdesc") t.subs.find(x => x.id === e.target.dataset.s).description = v;
+  $("#trail").innerHTML = trail(); renderTree();
+});
+$("#bigOv").addEventListener("focusin", e => { const f = e.target.dataset?.f; if ((f === "sname" || f === "sdesc") && sel.s !== e.target.dataset.s) { sel = { t: sel.t, s: e.target.dataset.s }; $$("#tree .orow").forEach(r => r.setAttribute("aria-selected", String(r.dataset.t === sel.t && r.dataset.s === sel.s))); $$("#detail tr").forEach(r => r.classList.remove("selrow")); e.target.closest("tr")?.classList.add("selrow"); $("#trail").innerHTML = trail(); } });
+$("#bigOv").addEventListener("mousedown", e => { if (e.target === $("#bigOv")) requestClose(); });
+$("#bigOv").addEventListener("click", e => {
+  const c = e.target.closest("[data-chev]"); if (c) { const k = c.dataset.chev; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); e.stopPropagation(); return renderTree(); }
+  const b = e.target.closest("[data-act]");
+  if (b) { e.stopPropagation(); return act(b); }
+  const r = e.target.closest("#tree .orow"); if (r) { sel = { t: r.dataset.t, s: r.dataset.s ?? null }; focusAfter = sel.s ? "sub" : "tree"; rerenderDetail(); const f = focusAfter; focusAfter = null; if (f === "sub") $(`#sn-${sel.s}`)?.focus(); else $('#tree [aria-selected="true"]')?.focus(); }
+});
+function act(b) {
+  const a = b.dataset.act, t = topic(b.dataset.t || sel.t);
+  if (a === "close") requestClose(); else if (a === "save") save(); else if (a === "preview") previewModal(); else if (a === "undo") restore();
+  else if (a === "addTopic") { const n = { id: id(), name: "", description: "", subs: [] }; query = ""; draft.topics.push(n); sel = { t: n.id, s: null }; problem = null; focusAfter = "topic"; renderBig(); }
+  else if (a === "addSub") { const s = { id: id(), name: "", description: "" }; query = ""; t.subs.push(s); collapsed.delete(t.id); sel = { t: t.id, s: s.id }; problem = null; focusAfter = "sub"; renderBig(); }
+  else if (a === "rm") remove(b.dataset.t, b.dataset.s ?? null);
+  else if (a === "mvT") { const i = draft.topics.indexOf(topic(sel.t)), d = +b.dataset.d; [draft.topics[i + d], draft.topics[i]] = [draft.topics[i], draft.topics[i + d]]; rerenderDetail(); }
+  else if (a === "mvS") { const t2 = topic(sel.t), i = t2.subs.findIndex(x => x.id === b.dataset.s), d = +b.dataset.d; [t2.subs[i + d], t2.subs[i]] = [t2.subs[i], t2.subs[i + d]]; sel.s = b.dataset.s; rerenderDetail(); }
+  else if (a === "expand") { collapsed.clear(); renderTree(); } else if (a === "collapse") { draft.topics.forEach(x => collapsed.add(x.id)); sel.s = null; rerenderDetail(); }
+  else if (a === "clr") { query = ""; $("#search").value = ""; $("#search").focus(); renderTree(); }
+}
+
+/* removal is immediate and undoable: toast, header Undo, Ctrl+Z */
+let toastTimer;
+function toast(msg, withUndo) { $("#toastMsg").textContent = msg; $("#toastUndo").style.display = withUndo ? "" : "none"; $("#toast").classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 10000); }
+$("#toastUndo").onclick = () => { restore(); };
+function remove(tid, sid) {
+  const t = topic(tid); let e;
+  if (!sid) { const i = draft.topics.indexOf(t); draft.topics.splice(i, 1); e = { kind: "t", i, item: t, msg: `Removed topic “${t.name || "Untitled"}”${t.subs.length ? ` and its ${plural(t.subs.length, "subtopic")}` : ""}` }; sel = { t: draft.topics[Math.min(i, draft.topics.length - 1)]?.id ?? null, s: null }; }
+  else { const i = t.subs.findIndex(x => x.id === sid), s = t.subs[i]; t.subs.splice(i, 1); e = { kind: "s", t: tid, i, item: s, msg: `Removed subtopic “${s.name || "Untitled"}”` }; sel = { t: tid, s: t.subs[Math.min(i, t.subs.length - 1)]?.id ?? null }; }
+  undoStack.push(e); problem = null; focusAfter = "tree"; renderBig(); toast(e.msg, true);
+}
+function restore() {
+  const e = undoStack.pop(); if (!e) return;
+  if (e.kind === "t") { draft.topics.splice(Math.min(e.i, draft.topics.length), 0, e.item); sel = { t: e.item.id, s: null }; }
+  else { const t = topic(e.t); if (!t) return; t.subs.splice(Math.min(e.i, t.subs.length), 0, e.item); collapsed.delete(t.id); sel = { t: t.id, s: e.item.id }; }
+  focusAfter = "tree"; renderBig(); toast("Restored", false);
+}
+
+/* keyboard: the outline's navigation, plus / and Ctrl+Z while the builder is open */
+$("#bigOv").addEventListener("keydown", e => {
+  if (e.target.id === "search") {
+    if (e.key === "Escape") { e.stopPropagation(); query = ""; e.target.value = ""; renderTree(); }
+    else if ((e.key === "ArrowDown" || e.key === "Enter") && flat().length) { e.preventDefault(); const f = flat()[0]; sel = { t: f.t, s: f.s }; focusAfter = "tree"; rerenderDetail(); $('#tree [aria-selected="true"]')?.focus(); }
+    return;
+  }
+  if (e.key === "Escape" && !$("#smallOv").classList.contains("open") && !e.target.closest("input,textarea")) return requestClose();
+  const row = e.target.closest("#tree .orow"); if (!row) return;
+  const list = flat(), at = list.findIndex(x => x.t === sel.t && x.s === sel.s);
+  const go = n => { if (n < 0 || n >= list.length) return; sel = { t: list[n].t, s: list[n].s }; rerenderDetail(); $('#tree [aria-selected="true"]')?.focus(); };
+  if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); return remove(sel.t, sel.s); }
+  if (e.key === "ArrowDown") { e.preventDefault(); go(at + 1); } else if (e.key === "ArrowUp") { e.preventDefault(); go(at - 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); if (sel.s) { sel.s = null; rerenderDetail(); $('#tree [aria-selected="true"]')?.focus(); } else if (!query.trim()) { collapsed.add(sel.t); renderTree(); $('#tree [aria-selected="true"]')?.focus(); } }
+  else if (e.key === "ArrowRight") { e.preventDefault(); if (!sel.s && collapsed.has(sel.t)) { collapsed.delete(sel.t); renderTree(); $('#tree [aria-selected="true"]')?.focus(); } else if (!sel.s && topic(sel.t).subs.length) go(at + 1); }
+  else if (e.key === "Enter" && sel.s) { e.preventDefault(); $(`#sn-${sel.s}`)?.focus(); }
+});
+document.addEventListener("keydown", e => {
+  if (!$("#bigOv").classList.contains("open") || $("#smallOv").classList.contains("open") || e.target.closest("input,textarea")) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); restore(); }
+  else if (e.key === "/") { e.preventDefault(); $("#search").focus(); }
+});
+
+/* save: finished-checks like the real builder, then the "replace the active taxonomy" confirm */
+function save() {
+  problem = !draft.name.trim() ? "Give this taxonomy a name." : !draft.topics.length ? "Add at least one topic." : (() => { const t = draft.topics.find(x => !x.name.trim()) ? "A topic has no name." : null; if (t) return t; const n = draft.topics.find(x => !x.subs.length); if (n) return `“${n.name}” has no subtopics. Every topic needs at least one.`; return draft.topics.some(x => x.subs.some(s => !s.name.trim())) ? "A subtopic has no name." : null; })();
+  $("#bn").innerHTML = problem ? `<div class="banner err" role="alert"><b>Not ready to save.</b> ${esc(problem)}</div>` : "";
+  if (problem) return;
+  const a = versions.find(v => v.id === activeId);
+  smallConfirm("Make this the active taxonomy?", `Saving creates a new version and makes it the active taxonomy, the one that question generation and coverage use. “${a.label}” is active now and will be replaced; its questions and your students' progress stay with it.`, "Save and make active", () => {
+    const nv = { id: Math.max(...versions.map(v => v.id)) + 1, label: draft.name.trim(), source: "Built or imported", created: "Just now", madeActive: "Just now", topics: JSON.parse(sig(draft.topics)) };
+    versions.unshift(nv); activeId = nv.id; base = sig(draft); closeBig(); renderTable(); toast(`Saved “${nv.label}” — now the active taxonomy`, false);
+  }, "Cancel");
+}
+
+/* small modals stacked above the big one: only confirmations and the JSON preview */
+function openSmall(html) { $("#small").innerHTML = html; $("#smallOv").classList.add("open"); setTimeout(() => $("#small .primary, #small #cancel")?.focus(), 30); }
+function closeSmall() { $("#smallOv").classList.remove("open"); }
+$("#smallOv").addEventListener("mousedown", e => { if (e.target === $("#smallOv")) closeSmall(); });
+$("#smallOv").addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); closeSmall(); } });
+function smallConfirm(title, body, yes, onYes, no) {
+  openSmall(`<div class="m-head"><h2>${esc(title)}</h2></div><div class="m-body"><p style="color:var(--ink-2);font-size:14px">${esc(body)}</p></div><div class="m-foot"><span class="sum"></span><button class="btn" id="no">${esc(no)}</button><button class="btn primary" id="yes">${esc(yes)}</button></div>`);
+  $("#no").onclick = closeSmall; $("#yes").onclick = () => { closeSmall(); onYes(); };
+}
+function previewModal() {
+  const doc = { schema_version: "1", label: draft.name.trim(), topics: draft.topics.map(t => ({ name: t.name, description: t.description, subtopics: t.subs.map(s => ({ name: s.name, description: s.description })) })) };
+  openSmall(`<div class="m-head"><div class="grow"><h2>Taxonomy document</h2><div class="kick">Exactly what will be sent. The server still validates it in full.</div></div><button class="ico" id="x" aria-label="Close">✕</button></div><div class="m-body"><pre class="json">${esc(JSON.stringify(doc, null, 2))}</pre></div><div class="m-foot"><span class="sum"></span><button class="btn" id="cancel">Close</button></div>`);
+  $("#x").onclick = $("#cancel").onclick = closeSmall;
+}
+renderTable();
+</script>

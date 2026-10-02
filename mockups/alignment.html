@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alignment · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .spark line, .chart line { stroke: var(--border); stroke-width: 1; }
+    .spark polyline, .chart polyline { fill: none; stroke: var(--primary); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .spark circle, .chart circle { fill: var(--primary); stroke: var(--card); stroke-width: 2; }
+    .chart text { fill: var(--muted-foreground); font-size: 11px; font-family: var(--font-sans); }
+    .chart .hit { fill: transparent; stroke: none; }
+    .split { display: flex; height: 0.5rem; border-radius: 999px; overflow: hidden; gap: 2px; background: var(--card); }
+  </style>
+</head>
+<!-- C13 · Alignment (F9): judge-vs-professor agreement, judge prompts, learned rules, approval trend. -->
+<body data-scope="course" data-nav="alignment" data-title="Alignment">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Alignment</h1>
+        <p class="text-sm text-muted-foreground">How often the judges agree with your reviews, and what the generator has learned from them.</p>
+      </div>
+      <div class="ml-auto flex items-center gap-2 text-sm">
+        <span class="text-muted-foreground">Judge panel</span><span class="pill tone-accent font-mono" x-text="rubric"></span>
+      </div>
+    </div>
+
+    <!-- What agreement means -->
+    <div class="card py-4">
+      <section class="grid gap-2 text-sm md:grid-cols-[1fr_auto] md:items-center">
+        <p>
+          <span class="font-medium">Agreement</span> is the share of your first reviews where a judge's verdict matched your decision:
+          it flagged a question you rejected or edited, or passed one you approved.
+          <span x-show="enough" x-text="`Based on ${reviews} reviews in this course.`"></span>
+          Judges are advisory; below 75%, read that judge's flags as hints rather than evidence.
+        </p>
+        <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('review.html')">Review queue</a>
+      </section>
+    </div>
+
+    <!-- Not enough reviews (statistics) -->
+    <template x-if="!enough">
+      <div class="card">
+        <section class="grid place-items-center gap-3 py-10 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="scale"></i></span>
+          <div class="font-medium">Not enough reviews yet</div>
+          <p class="text-sm text-muted-foreground max-w-md" x-text="`Agreement is shown once you have reviewed ${minReviews} questions; this course has ${reviews}. You can read and edit the judges' prompts below in the meantime.`"></p>
+        </section>
+      </div>
+    </template>
+
+    <!-- Judges -->
+    <section class="grid gap-4 xl:grid-cols-2">
+      <template x-for="j in judges" :key="j.id">
+        <div class="card">
+          <header>
+            <h2 class="flex items-center gap-2"><span x-text="j.label"></span><span class="pill ml-auto font-normal" :class="j.edited ? 'tone-accent' : 'tone-muted'" x-text="j.edited ? 'edited' : 'shipped'"></span></h2>
+            <p x-text="j.summary"></p>
+          </header>
+          <section class="grid gap-4">
+            <template x-if="enough">
+              <div class="grid gap-3">
+                <div class="flex items-end gap-4">
+                  <div>
+                    <div class="text-3xl font-display font-semibold" x-text="Mock.pct(j.agreement)"></div>
+                    <div class="text-xs text-muted-foreground" x-text="`agree with you · ${j.delta >= 0 ? '+' : ''}${j.delta} pts since ${weeks[weeks.length - j.trend.length]}`"></div>
+                  </div>
+                  <svg class="spark ml-auto" width="160" height="44" viewBox="0 0 160 44" role="img" :aria-label="`${j.label} agreement by week: ${j.trend.map((v) => Mock.pct(v)).join(', ')}`" x-html="sparkSvg(j)"></svg>
+                </div>
+                <div class="grid gap-1.5">
+                  <div class="split" :title="`${j.agreed} agreed, ${j.d.flagged_you_approved} flagged but you approved, ${j.d.passed_you_rejected} passed but you rejected`">
+                    <span :style="`flex:${j.agreed};background:var(--primary)`"></span>
+                    <span :style="`flex:${j.d.flagged_you_approved};background:var(--warn-solid)`"></span>
+                    <span :style="`flex:${j.d.passed_you_rejected};background:var(--critical-solid)`"></span>
+                  </div>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full" style="background:var(--primary)"></span><span x-text="`${j.agreed} agreed`"></span></span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full" style="background:var(--warn-solid)"></span><span x-text="`${j.d.flagged_you_approved} flagged, you approved`"></span></span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full" style="background:var(--critical-solid)"></span><span x-text="`${j.d.passed_you_rejected} passed, you rejected`"></span></span>
+                  </div>
+                </div>
+                <p class="text-xs flex items-center gap-1.5" style="color:var(--warn-solid)" x-show="j.agreement < 0.75">
+                  <i data-lucide="triangle-alert" class="size-3.5"></i>
+                  <span x-text="`Below 75%: it mostly flags questions you approve. Re-learning from its ${j.d.new_since_learned} newest disagreements, or editing its prompt, usually helps.`"></span>
+                </p>
+              </div>
+            </template>
+            <template x-if="!enough">
+              <p class="text-sm text-muted-foreground" x-text="`Agreement: needs ${minReviews} reviews (${reviews} so far).`"></p>
+            </template>
+
+            <!-- Prompt -->
+            <div class="grid gap-2" x-show="j.open">
+              <div class="flex items-center">
+                <label :for="`p-${j.id}`" class="text-sm font-medium">System prompt</label>
+                <button type="button" class="btn ml-auto" data-variant="ghost" data-size="sm" :disabled="j.draft === shipped[j.id]" @click="j.draft = shipped[j.id]">Use shipped text</button>
+              </div>
+              <textarea :id="`p-${j.id}`" class="textarea font-mono text-xs leading-5" rows="7" x-model="j.draft"></textarea>
+              <p class="text-xs text-muted-foreground">Saving replaces the whole prompt and renames the panel. Existing evaluations are left alone; re-judging the bank under the new prompt is a separate job.</p>
+            </div>
+          </section>
+          <footer class="flex flex-wrap gap-2">
+            <template x-if="!j.open">
+              <button type="button" class="btn" data-variant="outline" data-size="sm" @click="j.draft = j.prompt; j.open = true"><i data-lucide="file-text"></i>View prompt</button>
+            </template>
+            <template x-if="j.open">
+              <div class="flex gap-2">
+                <button type="button" class="btn" data-size="sm" :disabled="j.draft.trim() === j.prompt.trim() || !j.draft.trim()" @click="savePrompt(j)">Save prompt</button>
+                <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="j.open = false">Close</button>
+              </div>
+            </template>
+            <button type="button" class="btn" data-variant="outline" data-size="sm" x-show="enough && j.d.new_since_learned" :disabled="j.learning" @click="relearn(j)">
+              <span :class="j.learning ? 'animate-spin' : ''" class="inline-flex"><i data-lucide="refresh-cw"></i></span>
+              <span x-text="j.learning ? 'Re-learning…' : `Re-learn from ${j.d.new_since_learned} new disagreements`"></span>
+            </button>
+            <span class="ml-auto self-center text-xs text-muted-foreground" x-show="enough && !j.d.new_since_learned">Up to date</span>
+          </footer>
+        </div>
+      </template>
+
+      <!-- Rubric grader: calibrated against the professor's own grading (rubrics.html, assets/data-rubrics.js). -->
+      <div class="card">
+        <header>
+          <h2 class="flex items-center gap-2"><span>Rubric grader</span><span class="pill ml-auto font-normal" :class="rg.counts ? 'tone-ok' : 'tone-warn'" x-text="rg.counts ? 'Counts toward grades' : 'Practice only'"></span></h2>
+          <p x-text="`Grades written explanations criterion by criterion against rubrics you approve. ${rubricQs.length} written question${rubricQs.length === 1 ? '' : 's'}, ${rubricQs.filter((x) => x.status !== 'approved').length} rubric${rubricQs.filter((x) => x.status !== 'approved').length === 1 ? '' : 's'} awaiting approval.`"></p>
+        </header>
+        <section class="grid gap-4">
+          <div class="flex items-end gap-4">
+            <div>
+              <div class="text-3xl font-display font-semibold" x-text="Mock.pct(rg.agreement)"></div>
+              <div class="text-xs text-muted-foreground" x-text="rg.criteria ? `agree with you · ${rg.agreed} of ${rg.criteria} criteria` : 'agreement shows once you grade answers'"></div>
+            </div>
+            <div class="ml-auto grid gap-1 text-right">
+              <div class="font-mono text-sm" x-text="`${rg.graded} of ${rg.needed}`"></div>
+              <div class="text-xs text-muted-foreground">answers graded by you</div>
+            </div>
+          </div>
+          <div class="grid gap-1.5">
+            <div class="relative h-2 rounded-full" style="background:var(--muted)">
+              <div class="absolute inset-y-0 left-0 rounded-full" :style="{ width: `${(rg.agreement || 0) * 100}%`, background: rg.agreement >= rg.bar ? 'var(--ok-solid)' : 'var(--warn-solid)' }"></div>
+              <div class="absolute -inset-y-1 w-0.5" :style="{ left: `${rg.bar * 100}%`, background: 'var(--foreground)' }" :title="`Bar ${Mock.pct(rg.bar)}`"></div>
+            </div>
+            <div class="flex text-xs text-muted-foreground"><span>Agreement per criterion</span><span class="ml-auto" x-text="`bar ${Mock.pct(rg.bar)}, ${rg.needed} answers`"></span></div>
+          </div>
+          <p class="text-sm" x-text="rg.counts ? `Calibrated: rubric grades count toward grades. If your spot-checks pull agreement below ${Mock.pct(rg.bar)}, it goes back to practice only.` : rg.graded < rg.needed ? `Practice only until ${Mock.pct(rg.bar)} over ${rg.needed} answers: students get feedback, grades don't change. ${rg.needed - rg.graded} more to grade.` : `Practice only: agreement is below ${Mock.pct(rg.bar)}.`"></p>
+          <p class="text-xs flex items-center gap-1.5" style="color:var(--critical-solid)" x-show="rubricFlags"><i data-lucide="shield-alert" class="size-3.5"></i><span x-text="`${rubricFlags} answer${rubricFlags === 1 ? '' : 's'} flagged: injection attempts or gradings that disagree.`"></span></p>
+        </section>
+        <footer class="flex flex-wrap gap-2">
+          <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('rubrics.html')"><i data-lucide="file-pen-line"></i>Open rubrics</a>
+          <span class="ml-auto self-center text-xs text-muted-foreground" x-text="`${MOCK.TOOL_CATALOG.rubric.name} ${MOCK.TOOL_CATALOG.rubric.version}`"></span>
+        </footer>
+      </div>
+    </section>
+
+    <!-- Approval-rate trend + duplicate threshold -->
+    <section class="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" x-show="enough">
+      <div class="card">
+        <header>
+          <h2>First-review approval rate</h2>
+          <p x-text="`Share of generated questions you approved without edits, per week: ${Mock.pct(approval[0])} → ${Mock.pct(approval[approval.length - 1])}. It rises as learned rules take effect.`"></p>
+        </header>
+        <section>
+          <svg class="chart w-full" style="aspect-ratio:560/170;height:auto" viewBox="0 0 560 170" role="img" :aria-label="`Approval rate by week: ${approval.map((v, i) => `${weeks[i]} ${Mock.pct(v)}`).join(', ')}`" x-html="chartSvg()"></svg>
+        </section>
+      </div>
+      <div class="card">
+        <header>
+          <h2>Duplicate flag</h2>
+          <p>When a new question is flagged as a possible duplicate.</p>
+        </header>
+        <section class="grid gap-2 text-sm">
+          <div class="text-3xl font-display font-semibold" x-text="dup.value.toFixed(2)"></div>
+          <p class="text-muted-foreground" x-text="`Similarity threshold, calibrated on ${dup.calibrated_on} approved and rejected questions. ${dup.too_similar_rejections} of your rejections used “Too similar to another question”; all of them were above it.`"></p>
+          <a class="text-sm underline" :href="Mock.link('questions.html', { dup: '1' })">See flagged questions</a>
+        </section>
+      </div>
+    </section>
+
+    <!-- Learned rules -->
+    <div class="card gap-0 py-0">
+      <header class="p-6 pb-4">
+        <h2>Learned rules</h2>
+        <p>Rules the generator follows, distilled from reasons and comments you gave repeatedly. Each applies to one question type; disable one to stop using it without deleting it.</p>
+      </header>
+      <template x-if="!rules.length">
+        <p class="px-6 pb-6 text-sm text-muted-foreground">No learned rules yet. A rule is proposed once the same rejection reason shows up in at least 3 reviews of one question type.</p>
+      </template>
+      <template x-if="rules.length">
+        <div class="table-container">
+          <table class="table">
+            <thead><tr><th>Rule</th><th>Type</th><th>Learned from</th><th>Created</th><th class="w-20">Enabled</th><th class="w-20"></th></tr></thead>
+            <tbody>
+              <template x-for="r in rules" :key="r.id">
+                <tr :style="r.enabled ? '' : 'opacity:0.6'">
+                  <td class="whitespace-normal min-w-80">
+                    <span class="text-sm" x-show="!r.editing" x-text="r.text"></span>
+                    <textarea class="textarea text-sm" rows="3" x-show="r.editing" x-model="r.draft" :aria-label="`Edit rule ${r.id}`"></textarea>
+                  </td>
+                  <td class="text-xs whitespace-nowrap" x-text="MOCK.question_types[r.type].label"></td>
+                  <td class="text-xs whitespace-nowrap">
+                    <a class="underline" :href="Mock.link('questions.html', { status: 'rejected', type: r.type })" x-text="`${r.from_reviews} reviews`"></a>
+                    <div class="text-muted-foreground" x-text="MOCK.alignment.rule_reasons[r.id]"></div>
+                  </td>
+                  <td class="font-mono text-xs whitespace-nowrap" x-text="r.created"></td>
+                  <td><input type="checkbox" role="switch" class="input" :checked="r.enabled" @change="toggle(r)" :aria-label="`Enable rule ${r.id}`"></td>
+                  <td class="whitespace-nowrap">
+                    <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="!r.editing" @click="r.draft = r.text; r.editing = true">Edit</button>
+                    <button type="button" class="btn" data-size="sm" x-show="r.editing" :disabled="!r.draft.trim()" @click="r.text = r.draft.trim(); r.editing = false; Mock.toast('Rule saved; used from the next generation run')">Save</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c9-c13.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/data-rubrics.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const A = MOCK.alignment;
+      const mine = A.course === c.id;
+      const reviews = mine ? A.judges[0].reviews : 0;
+      const enough = reviews >= A.min_reviews;
+      const shipped = { ...MOCK.judge_prompts };
+      let rev = Number(A.rubric_version.slice(1));
+      return {
+        course: c, reviews, enough, minReviews: A.min_reviews, shipped,
+        // Rubric grader calibration (assets/data-rubrics.js).
+        rg: MOCK.rubricCalibration(c.id), rubricQs: MOCK.rubrics[c.id]?.questions || [],
+        rubricFlags: (MOCK.rubrics[c.id]?.questions || []).filter((x) => x.status === "approved").flatMap((x) => x.answers).filter((a) => a.injection || (a.ai2 && !a.prof)).length,
+        // Mutation-test results exist only for a course with approved questions (python in the mock).
+        health: MOCK.verifier_health[c.id] || null,
+        profile: MOCK.profile(c.id), gate: MOCK.profile(c.id).gate, bars: MOCK.BARS,
+        get levelsOn() {
+          const on = [["Proven", "mutation_proven"], ["Supported", "mutation_supported"]].map(([l, k]) => [l, this.gate[k] >= this.bars[k]]);
+          const off = on.filter(([, ok]) => !ok).map(([l]) => l);
+          return off.length ? `${off.join(" and ")} withdrawn from ${this.profile.label} until the rate is back above the bar.` : `Both levels stay on for ${this.profile.label}.`;
+        },
+        weak: (MOCK.verifier_health[c.id]?.rows || []).filter((r) => (r.proven ?? 1) < 0.9 || (r.supported ?? 1) < 0.9).map((r) => r.mutation.toLowerCase()),
+        pct1: (x) => `${(x * 100).toFixed(1).replace(/\.0$/, "")}%`,
+        fmtDate: (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        rubric: A.rubric_version, weeks: A.week_labels,
+        approval: A.approval_rate_trend, dup: A.duplicate_threshold,
+        judges: MOCK.judges.map((j) => {
+          const a = A.judges.find((x) => x.id === j.id);
+          const d = { ...A.disagreements[j.id] };
+          return {
+            ...j, ...a, d, agreed: a.reviews - d.flagged_you_approved - d.passed_you_rejected,
+            delta: Math.round((a.trend[a.trend.length - 1] - a.trend[0]) * 100),
+            prompt: shipped[j.id], draft: "", open: false, edited: false, learning: false,
+          };
+        }),
+        rules: mine ? A.learned_rules.map((r) => ({ ...r, editing: false, draft: "" })) : [],
+        // Each sparkline is scaled to its own range (min − 5 pts … max + 2 pts); the big number carries the level.
+        sparkPts(t) {
+          const n = t.length, lo = Math.min(...t) - 0.05, hi = Math.max(...t) + 0.02;
+          return t.map((v, i) => [8 + (i * 144) / (n - 1), +(40 - ((v - lo) / (hi - lo)) * 34).toFixed(1)]);
+        },
+        // SVG is built as a string: Alpine's <template x-for> can't render inside <svg>.
+        sparkSvg(j) {
+          const pts = this.sparkPts(j.trend);
+          const off = this.weeks.length - j.trend.length;
+          return `<line x1="0" y1="43" x2="160" y2="43"></line><polyline points="${pts.map((p) => p.join(",")).join(" ")}"></polyline>` +
+            pts.map((p, k) => `<circle cx="${p[0]}" cy="${p[1]}" r="3.5"><title>${this.weeks[off + k]}: ${Mock.pct(j.trend[k])}</title></circle>`).join("");
+        },
+        chartSvg() {
+          const a = this.approval, w = this.weeks;
+          let h = [0, 0.25, 0.5, 0.75, 1].map((g) => `<line x1="40" y1="${this.cy(g)}" x2="550" y2="${this.cy(g)}"></line><text x="32" y="${this.cy(g) + 4}" text-anchor="end">${g * 100}%</text>`).join("");
+          h += `<polyline points="${a.map((v, i) => `${this.cx(i)},${this.cy(v)}`).join(" ")}"></polyline>`;
+          h += a.map((v, i) => `<circle cx="${this.cx(i)}" cy="${this.cy(v)}" r="4"></circle>` +
+            `<rect class="hit" x="${this.cx(i) - 30}" y="0" width="60" height="150"><title>${w[i]}: ${Mock.pct(v)} approved on first review</title></rect>` +
+            `<text x="${this.cx(i)}" y="166" text-anchor="middle">${w[i]}</text>` +
+            (i === 0 || i === a.length - 1 ? `<text x="${this.cx(i)}" y="${this.cy(v) - 10}" text-anchor="middle" style="fill:var(--foreground)">${Mock.pct(v)}</text>` : "")).join("");
+          return h;
+        },
+        cx(i) { return 70 + (i * 450) / (this.approval.length - 1); },
+        cy(v) { return 145 - v * 130; },
+        savePrompt(j) {
+          j.prompt = j.draft; j.edited = j.prompt.trim() !== shipped[j.id].trim(); j.open = false;
+          this.rubric = `r${++rev}`;
+          Mock.toast(`Saved the ${j.label} judge. The panel now answers under ${this.rubric}.`);
+        },
+        relearn(j) {
+          j.learning = true;
+          setTimeout(() => {
+            const n = j.d.new_since_learned;
+            j.learning = false; j.d.new_since_learned = 0; j.edited = true;
+            this.rubric = `r${++rev}`;
+            Mock.toast(`Re-learned the ${j.label} judge from ${n} disagreements. Held-out agreement ${Mock.pct(j.agreement)} → ${Mock.pct(j.agreement + 0.06)}.`);
+          }, 1400);
+        },
+        toggle(r) { r.enabled = !r.enabled; Mock.toast(r.enabled ? "Rule enabled for the next generation run" : "Rule disabled; the generator stops using it"); },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -22,6 +22,15 @@ Then open the route directly. No login, no backend needed.
 | Route | What it is |
 | --- | --- |
 | [`/experiments/student`](http://localhost:3000/experiments/student) | The student-facing adaptive practice flow: welcome → question → result → summary, with a progress panel. All questions, scoring and mastery numbers are mock data generated in the browser. |
+| [`/experiments/tutorials`](http://localhost:3000/experiments/tutorials) | The student-facing tutorial reader: course outline, a tutorial with runnable-looking code, callouts, self-checks and source notes. Content, outputs and book pages are hand-written mock data. |
+| [`/experiments/tutorials-cards`](http://localhost:3000/experiments/tutorials-cards) | Tutorial variant A: one idea per card, about 8 cards, keyboard paging, a one-question check at the end. |
+| [`/experiments/tutorials-trace`](http://localhost:3000/experiments/tutorials-trace) | Tutorial variant B: step through a loop line by line with live variables, then predict a result. |
+| [`/experiments/tutorials-inline`](http://localhost:3000/experiments/tutorials-inline) | Tutorial variant C: no tutorial page; a wrong answer opens a short refresher drawer aimed at the misconception picked. |
+| [`/experiments/tutorials-sheet`](http://localhost:3000/experiments/tutorials-sheet) | Tutorial variant D: a one-screen cheat sheet with an interactive number line for `range()`. |
+| [`/experiments/tutorials-predict`](http://localhost:3000/experiments/tutorials-predict) | Tutorial variant E: predict what the code prints, see the real result, one line of insight. |
+| [`/experiments/tutorials-deck`](http://localhost:3000/experiments/tutorials-deck) | Final variant F: short decks for five topics (conditionals, while, functions, lists, recursion), each with a step-through simulator recorded from real Python, predict-first, and a faded completion. |
+| [`/experiments/course-capabilities`](http://localhost:3000/experiments/course-capabilities) | The professor's course capabilities setup: pick a subject preset, enable grading capabilities, see which question types they allow. Four versions behind a switcher (`?v=a` guided setup, `?v=b` live matrix, `?v=c` settings table, `?v=d` pick question types). Registry and course state are mock data in `mock-capabilities.ts`. |
+| [`/experiments/tutorials-practice`](http://localhost:3000/experiments/tutorials-practice) | Final variant G: practice-first across the same five topics; a wrong answer climbs a help ladder ending in an editable simulator backed by a small TypeScript Python interpreter checked against CPython. |
 
 ## `/experiments/student` layout
 

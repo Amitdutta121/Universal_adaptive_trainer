@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Course settings · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- E1 · Course settings: general, checking tools (assets/data-tools.js), collaborators (F2), LMS / LTI 1.3 (F11), danger zone. -->
+<body data-scope="course" data-nav="settings" data-title="Course settings">
+  <main x-data="page()" x-cloak class="grid gap-6 max-w-4xl">
+    <div>
+      <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.term}`"></p>
+      <h1 class="text-2xl font-semibold">Course settings</h1>
+    </div>
+
+    <div class="alert" x-show="archived">
+      <i data-lucide="archive"></i>
+      <h2>This course is archived</h2>
+      <section>It's hidden from My courses and students can't practise. Everything is kept.</section>
+      <footer><button type="button" class="btn" data-variant="outline" data-size="sm" @click="archived = false; Mock.toast('Course restored')">Restore course</button></footer>
+    </div>
+
+    <div class="tabs w-full" id="settings-tabs">
+      <nav role="tablist" aria-orientation="horizontal" class="w-full">
+        <template x-for="t in tabs" :key="t.id">
+          <button type="button" role="tab" :id="`tab-${t.id}`" :aria-controls="`panel-${t.id}`" :aria-selected="tab === t.id ? 'true' : 'false'" :tabindex="tab === t.id ? 0 : -1" @click="setTab(t.id)" x-text="t.label"></button>
+        </template>
+      </nav>
+
+      <!-- General -->
+      <div role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="-1" :hidden="tab !== 'general'">
+        <form class="card" @submit.prevent="saveGeneral()">
+          <header><h2>General</h2><p>How the course appears to you, co-instructors and students.</p></header>
+          <section class="grid md:grid-cols-[1fr_10rem_10rem] gap-4">
+            <div role="group" class="field"><label for="g-name">Name</label><input class="input" id="g-name" x-model="general.name"></div>
+            <div role="group" class="field"><label for="g-code">Code</label><input class="input" id="g-code" x-model="general.code"></div>
+            <div role="group" class="field">
+              <label for="g-term">Term</label>
+              <select class="select w-full" id="g-term" x-model="general.term"><option>Fall 2026</option><option>Spring 2027</option><option>Summer 2027</option></select>
+            </div>
+            <div role="group" class="field md:col-span-3">
+              <label for="g-target">Coverage target</label>
+              <div class="flex items-center gap-2 text-sm"><input class="input w-20" id="g-target" type="number" min="1" max="5" x-model.number="general.target"> approved questions per subtopic, at each difficulty</div>
+            </div>
+          </section>
+          <footer class="border-t pt-4 flex"><button class="btn ml-auto" type="submit">Save</button></footer>
+        </form>
+        <div class="card mt-4">
+          <section class="flex items-center gap-6">
+            <div class="grow">
+              <div class="font-medium text-sm">Archive this course</div>
+              <p class="text-sm text-muted-foreground">At the end of term. Hides it from My courses and stops practice; questions, sets and mastery are kept and can be copied into next term's course.</p>
+            </div>
+            <button type="button" class="btn shrink-0" data-variant="outline" @click="archive()" :disabled="archived" x-text="archived ? 'Archived' : 'Archive course'"></button>
+          </section>
+          <section class="flex items-center gap-6 border-t pt-4">
+            <div class="grow">
+              <div class="font-medium text-sm">Copy this course to a new term</div>
+              <p class="text-sm text-muted-foreground">Starts Spring 2027 or Fall 2027 from this course: taxonomy, approved questions, schedule shifted to the new dates, assignments and judge rules. Students and attempts stay here.</p>
+            </div>
+            <a class="btn shrink-0" data-variant="outline" :href="Mock.link('copy-course.html')">Copy to a new term</a>
+          </section>
+        </div>
+      </div>
+
+      <!-- Checking tools (assets/data-tools.js). ?tab=subject is kept as an alias. -->
+      <div role="tabpanel" id="panel-tools" aria-labelledby="tab-tools" tabindex="-1" :hidden="tab !== 'tools'">
+        <section class="card gap-0 py-0">
+          <header class="px-6 pt-5 pb-4 grid gap-1">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2>Checking tools</h2>
+              <span class="text-sm text-muted-foreground" x-text="`${tools.filter((t) => t.state === 'on' && t.selftest.ok).length} on · ${tools.filter((t) => t.state === 'paused').length} paused`"></span>
+              <button type="button" class="btn ml-auto" data-size="sm" @click="openAdd()"><i data-lucide="plus"></i>Add a tool</button>
+            </div>
+            <p class="text-sm text-muted-foreground">How this course can check answers. The generator may write any question one of these tools can check, and every question records the tool and version that checked it.</p>
+            <p class="text-xs text-muted-foreground" x-text="`Subject: ${subjectLabel}. A label only; it suggested the starting tools.`"></p>
+          </header>
+          <div class="table-container border-t">
+            <table class="table text-sm">
+              <thead><tr><th class="pl-6">Tool</th><th>Checks</th><th>Version</th><th>Questions using it</th><th>State</th><th class="pr-6"></th></tr></thead>
+              <tbody>
+                <template x-for="t in tools" :key="t.id">
+                  <tr :class="t.state !== 'on' && 'opacity-70'">
+                    <td class="pl-6 align-top">
+                      <div class="font-medium" x-text="t.name"></div>
+                      <div class="text-xs text-muted-foreground whitespace-normal" x-text="t.note || `Added ${fmtDate(t.added)} by ${t.by}`"></div>
+                    </td>
+                    <td class="align-top whitespace-normal max-w-sm">
+                      <div class="text-xs text-muted-foreground" x-text="t.checks"></div>
+                      <template x-if="t.calibration">
+                        <div class="mt-1 text-xs">
+                          <span :style="{ color: t.calibration.counts ? 'var(--ok-solid)' : 'var(--warn-solid)' }" x-text="calibrationText(t.calibration)"></span>
+                          <a class="underline underline-offset-4 ml-1" :href="Mock.link('rubrics.html')" x-text="t.calibration.counts ? 'Rubrics' : 'Calibrate'"></a>
+                        </div>
+                      </template>
+                    </td>
+                    <td class="align-top"><span class="font-mono text-xs" x-text="t.version"></span> <span class="pill ml-1" :class="trust(t.level).tone" x-text="t.level"></span></td>
+                    <td class="align-top font-mono text-xs" x-text="t.uses || '0'"></td>
+                    <td class="align-top whitespace-normal">
+                      <span x-show="t.selftest.ok" class="pill" :class="{ on: 'tone-ok', paused: 'tone-warn', retired: 'tone-muted' }[t.state]" x-text="{ on: 'On', paused: 'Paused', retired: 'Retired' }[t.state]"></span>
+                      <span x-show="!t.selftest.ok" class="text-xs" style="color:var(--critical-solid)" x-text="`Unavailable: ${t.selftest.error}`"></span>
+                    </td>
+                    <td class="pr-6 text-right align-top">
+                      <button type="button" class="btn" data-size="sm" data-variant="outline" x-show="t.state === 'on'" @click="pause(t)">Pause</button>
+                      <button type="button" class="btn" data-size="sm" data-variant="outline" x-show="t.state === 'paused'" @click="turnOn(t)">Turn on</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <footer class="border-t px-6 py-3 text-xs text-muted-foreground">There's no delete. Pausing a tool stops new questions using it; the questions it already checked stay valid. Version changes are kept in each tool's history. A tool that turns out to be wrong is retired by an admin, and its questions are flagged for review.</footer>
+        </section>
+
+        <form class="card mt-4" @submit.prevent="savePolicy()">
+          <section class="grid gap-2">
+            <label for="s-minlevel" class="text-sm font-medium">Minimum check for graded assignments</label>
+            <div class="flex flex-wrap items-center gap-3">
+              <select class="select w-56" id="s-minlevel" x-model="minLevel">
+                <template x-for="l in TRUST_ORDER" :key="l"><option :value="l" x-text="l" :selected="l === minLevel"></option></template>
+              </select>
+              <button class="btn" data-variant="outline" type="submit">Save</button>
+            </div>
+            <p class="text-sm text-muted-foreground" x-text="policyText"></p>
+          </section>
+        </form>
+      </div>
+
+      <!-- Collaborators -->
+      <div role="tabpanel" id="panel-collaborators" aria-labelledby="tab-collaborators" tabindex="-1" :hidden="tab !== 'collaborators'">
+        <div class="card py-0 gap-0">
+          <header class="px-6 pt-5 pb-3 grid gap-1">
+            <h2>Collaborators</h2>
+            <p class="text-sm text-muted-foreground" x-text="`People who can work on ${course.code}. They see only this course, not your others.`"></p>
+          </header>
+          <div class="table-container">
+            <table class="table">
+              <thead><tr><th>Name</th><th>Email</th><th class="w-56">Role</th><th class="text-end"></th></tr></thead>
+              <tbody>
+                <template x-for="p in people" :key="p.email">
+                  <tr>
+                    <td><div class="flex items-center gap-2">
+                      <span class="grid size-7 place-items-center rounded-full text-xs font-medium" :class="p.pending ? 'tone-muted' : 'tone-accent'" x-text="p.initials"></span>
+                      <span class="font-medium" x-text="p.name"></span><span class="text-xs text-muted-foreground" x-show="p.id === me.id">(you)</span>
+                      <span class="pill tone-warn" x-show="p.pending">Invited, pending</span><span class="text-xs text-muted-foreground" x-show="p.invited" x-text="p.invited ? `sent ${fmtDate(p.invited)}` : ''"></span>
+                    </div></td>
+                    <td x-text="p.email"></td>
+                    <td>
+                      <span x-show="p.role === 'owner'">Owner</span>
+                      <select class="select w-full" x-show="p.role !== 'owner'" x-model="p.role" @change="Mock.toast(`${p.name} is now ${roleLabel(p.role)}`)" :aria-label="`Role for ${p.name}`">
+                        <template x-for="r in roles" :key="r.id"><option :value="r.id" x-text="r.label" :selected="r.id === p.role"></option></template>
+                      </select>
+                    </td>
+                    <td class="text-end whitespace-nowrap"><button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="p.pending" @click="Mock.toast(`Invitation re-sent to ${p.email}`)">Resend</button><button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="p.role !== 'owner'" @click="remove(p)" x-text="p.pending ? 'Revoke' : 'Remove'"></button></td>
+                  </tr>
+                </template>
+                <tr x-show="people.length === 1"><td colspan="4" class="text-sm text-muted-foreground py-4">Only you so far. Invite a co-instructor or a TA below.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <form class="grid md:grid-cols-[1fr_12rem_auto] items-end gap-3 border-t px-6 py-4" @submit.prevent="invite()">
+            <div role="group" class="field" :data-invalid="inviteError ? '' : null">
+              <label for="c-email">Invite by email</label>
+              <input class="input" id="c-email" type="email" placeholder="colleague@example.edu" x-model="inviteEmail" :aria-invalid="!!inviteError">
+              <p role="alert" x-show="inviteError" x-text="inviteError"></p>
+            </div>
+            <div role="group" class="field">
+              <label for="c-role">Role</label>
+              <select class="select w-full" id="c-role" x-model="inviteRole"><template x-for="r in roles" :key="r.id"><option :value="r.id" x-text="r.label" :selected="r.id === inviteRole"></option></template></select>
+            </div>
+            <button class="btn" type="submit"><i data-lucide="send"></i>Send invite</button>
+          </form>
+          <div class="border-t px-6 pt-4 pb-2 grid gap-1">
+            <h3 class="text-sm font-semibold">What each role can do</h3>
+            <p class="text-sm text-muted-foreground">Everyone sees only this course. The owner can't be changed here; transfer ownership from the owner's account.</p>
+          </div>
+          <div class="table-container">
+            <table class="table text-sm">
+              <thead>
+                <tr>
+                  <th class="w-32">Area</th><th>Permission</th>
+                  <template x-for="r in matrixRoles" :key="r.id">
+                    <th class="text-center w-28"><div x-text="r.label"></div><div class="text-xs font-normal text-muted-foreground" x-text="`${countRole(r.id)} ${countRole(r.id) === 1 ? 'person' : 'people'}`"></div></th>
+                  </template>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(row, i) in permissions" :key="row[1]">
+                  <tr>
+                    <td class="text-muted-foreground align-top" x-text="i === 0 || permissions[i - 1][0] !== row[0] ? row[0] : ''"></td>
+                    <td x-text="row[1]"></td>
+                    <template x-for="(ok, k) in row[2]" :key="k">
+                      <td class="text-center">
+                        <span x-show="ok" class="inline-flex" style="color:var(--ok-solid)" :aria-label="`${matrixRoles[k].label}: allowed`"><i data-lucide="check" class="size-4"></i></span>
+                        <span x-show="!ok" class="text-muted-foreground" :aria-label="`${matrixRoles[k].label}: not allowed`">—</span>
+                      </td>
+                    </template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <dl class="border-t px-6 py-4 grid gap-2 text-sm">
+            <template x-for="r in roles" :key="r.id"><div class="flex gap-2"><dt class="font-medium w-32 shrink-0" x-text="r.label"></dt><dd class="text-muted-foreground" x-text="r.detail"></dd></div></template>
+          </dl>
+        </div>
+      </div>
+
+      <!-- LMS -->
+      <div role="tabpanel" id="panel-lms" aria-labelledby="tab-lms" tabindex="-1" :hidden="tab !== 'lms'">
+        <div class="card">
+          <header>
+            <div class="flex items-center gap-2"><h2>Connect to your LMS (LTI 1.3)</h2><span class="pill tone-muted">Coming later</span></div>
+            <p>Students launch the course from Canvas or Moodle and sign in through it; a mastery or completion score goes back to the gradebook. Until then, students join with the class code.</p>
+          </header>
+          <section class="grid gap-6">
+            <div class="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="LMS">
+              <template x-for="p in platforms" :key="p.id">
+                <label class="flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="platform === p.id ? 'border-color:var(--primary);background:var(--accent)' : ''">
+                  <input type="radio" class="input mt-0.5" name="platform" :value="p.id" x-model="platform">
+                  <span class="grid gap-0.5"><span class="text-sm font-medium" x-text="p.label"></span><span class="text-xs text-muted-foreground" x-text="p.where"></span></span>
+                </label>
+              </template>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6">
+              <fieldset class="fieldset" disabled>
+                <legend>From your LMS admin</legend>
+                <p x-text="`Created when the admin registers a developer key / tool in ${platformObj.label}.`"></p>
+                <template x-for="f in adminFields" :key="f.id">
+                  <div role="group" class="field" data-disabled>
+                    <label :for="`lti-${f.id}`" x-text="f.label"></label>
+                    <input class="input font-mono text-xs" :id="`lti-${f.id}`" :placeholder="f.example[platform]" disabled>
+                  </div>
+                </template>
+              </fieldset>
+              <fieldset class="fieldset">
+                <legend>Give these to your admin</legend>
+                <p>This tool's endpoints for the registration.</p>
+                <template x-for="f in toolFields" :key="f.id">
+                  <div role="group" class="field">
+                    <label :for="`tool-${f.id}`" x-text="f.label"></label>
+                    <div class="flex gap-1">
+                      <input class="input font-mono text-xs" :id="`tool-${f.id}`" :value="f.value" readonly>
+                      <button type="button" class="btn" data-variant="outline" data-size="icon" :aria-label="`Copy ${f.label}`" @click="Mock.toast(`Copied ${f.label}`)"><i data-lucide="copy"></i></button>
+                    </div>
+                  </div>
+                </template>
+              </fieldset>
+            </div>
+
+            <div role="group" class="field" data-disabled>
+              <label for="lti-grade">Grade passback</label>
+              <select class="select w-80" id="lti-grade" disabled><option>Average mastery across topics (0–100)</option><option>Question set completion</option></select>
+              <p>One column in the gradebook, updated after each practice session (LTI Assignment and Grade Services).</p>
+            </div>
+          </section>
+          <footer class="border-t pt-4 flex items-center gap-2">
+            <span class="text-xs text-muted-foreground">LTI support is on the roadmap (F11). Tell us which LMS you use and we'll let you know.</span>
+            <button type="button" class="btn ml-auto" data-variant="outline" @click="Mock.toast(`Thanks, we'll email you when ${platformObj.label} is supported`)">Notify me</button>
+            <button type="button" class="btn" disabled>Connect</button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- Danger zone -->
+      <div role="tabpanel" id="panel-danger" aria-labelledby="tab-danger" tabindex="-1" :hidden="tab !== 'danger'">
+        <div class="card" style="border-color:color-mix(in oklch, var(--destructive) 45%, var(--border))">
+          <header><h2>Danger zone</h2><p>Only the owner can do these.</p></header>
+          <section class="grid gap-0 divide-y">
+            <div class="flex items-center gap-6 pb-4">
+              <div class="grow">
+                <div class="font-medium text-sm">Archive course</div>
+                <p class="text-sm text-muted-foreground">Hides it and stops practice. Reversible; nothing is deleted.</p>
+              </div>
+              <button type="button" class="btn shrink-0" data-variant="outline" @click="archive()" :disabled="archived" x-text="archived ? 'Archived' : 'Archive'"></button>
+            </div>
+            <div class="flex items-center gap-6 pt-4">
+              <div class="grow">
+                <div class="font-medium text-sm">Delete course</div>
+                <p class="text-sm text-muted-foreground" x-text="deleteSummary"></p>
+              </div>
+              <button type="button" class="btn shrink-0" data-variant="destructive" @click="confirmText = ''; $refs.del.showModal()">Delete course</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add a tool: the catalogue entries not yet in this course -->
+    <dialog x-ref="add" class="dialog" aria-labelledby="add-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-2xl">
+        <header>
+          <h2 id="add-title">Add a checking tool</h2>
+          <p>Adding a tool lets the generator write the question formats it can check. It can't be deleted later, only paused.</p>
+        </header>
+        <section class="grid gap-2 max-h-[60vh] overflow-y-auto">
+          <template x-for="c0 in addable" :key="c0.id">
+            <div class="flex items-start gap-3 rounded-md border px-3 py-2.5 text-sm">
+              <div class="flex-1 min-w-0 grid gap-0.5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium" x-text="c0.name"></span>
+                  <span class="font-mono text-xs text-muted-foreground" x-text="c0.version"></span>
+                  <span class="pill" :class="trust(c0.level).tone" x-text="c0.level"></span>
+                </div>
+                <div class="text-xs text-muted-foreground" x-text="c0.checks"></div>
+                <div class="text-xs">
+                  <span class="text-muted-foreground">Formats:</span>
+                  <template x-for="(f, i) in c0.formats" :key="f"><span :class="newFormats(c0).includes(f) ? 'font-medium' : 'text-muted-foreground'" x-text="FORMAT_LABEL[f] + (i < c0.formats.length - 1 ? ', ' : '')"></span></template>
+                  <span class="text-muted-foreground" x-text="newFormats(c0).length ? `(${newFormats(c0).length} new to this course)` : '(all already checkable here)'"></span>
+                </div>
+                <div class="text-xs" style="color:var(--critical-solid)" x-show="!c0.selftest.ok" x-text="`Unavailable: self-test failed ${c0.selftest.at}: ${c0.selftest.error}`"></div>
+              </div>
+              <button type="button" class="btn shrink-0" data-size="sm" data-variant="outline" :disabled="!c0.selftest.ok || tools.some((t) => t.id === c0.id)" @click="addTool(c0)" x-text="tools.some((t) => t.id === c0.id) ? 'Added' : 'Add'"></button>
+            </div>
+          </template>
+        </section>
+        <footer><button type="button" class="btn" data-variant="outline" @click="$refs.add.close()">Done</button></footer>
+      </div>
+    </dialog>
+
+    <dialog x-ref="del" class="dialog" aria-labelledby="del-title" aria-describedby="del-desc" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="del-title" x-text="`Delete ${course.code}?`"></h2>
+          <p id="del-desc" x-text="`${deleteSummary} This can't be undone.`"></p>
+        </header>
+        <section>
+          <div role="group" class="field">
+            <label for="del-confirm">Type <span class="font-mono font-medium" x-text="course.code"></span> to confirm</label>
+            <input class="input" id="del-confirm" x-model="confirmText" autocomplete="off">
+          </div>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.del.close()">Cancel</button>
+          <button type="button" class="btn" data-variant="destructive" :disabled="confirmText.trim() !== course.code" @click="deleteCourse()">Delete permanently</button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-term.js"></script>
+  <script src="assets/data-b.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const TABS = [
+        { id: "general", label: "General" }, { id: "tools", label: "Checking tools" },
+        { id: "collaborators", label: "Collaborators" }, { id: "lms", label: "LMS" }, { id: "danger", label: "Danger zone" },
+      ];
+      const askedTab = Mock.param("tab") === "subject" ? "tools" : Mock.param("tab"); // old links used ?tab=subject
+      const initialTab = TABS.some((t) => t.id === askedTab) ? askedTab : "general";
+      const user = (id) => MOCK.users.find((u) => u.id === id);
+      const counts = MOCK.course_counts[c.id];
+      // Trust each tool's check gives, strongest first. Same labels and tones as MOCK.LEVELS.
+      const TRUST = { Computed: "proven", Quoted: "supported", "Rubric-graded": "rubric", "AI-reviewed only": "judged" };
+      const TRUST_ORDER = ["Computed", "Quoted", "Rubric-graded", "AI-reviewed only"];
+      const courseQs = MOCK.questions.filter((q) => q.course === c.id);
+      const usesOf = (id) => courseQs.filter((q) => MOCK.checkedBy(q)?.tool === id).length;
+      const bookCount = MOCK.books.filter((b) => b.course === c.id).length || counts.books;
+      return {
+        course: c,
+        me: MOCK.me,
+        tabs: TABS,
+        tab: initialTab,
+        archived: false,
+        general: { name: c.name, code: c.code, term: c.term, target: c.coverage_target },
+        tools: MOCK.toolsFor(c.id).map((t) => ({ ...t, uses: usesOf(t.id) })),
+        addable: [],
+        TRUST_ORDER, FORMAT_LABEL: MOCK.FORMAT_LABEL,
+        subjectLabel: MOCK.profile(c.subject).label,
+        // TODO(real): per-course policy; assignments can raise it (MOCK.assignment_min_level).
+        minLevel: "Quoted",
+        roles: MOCK.course_roles,
+        matrixRoles: [{ id: "owner", label: "Owner" }, ...MOCK.course_roles],
+        permissions: MOCK.role_permissions,
+        people: [
+          { ...user(c.owner), role: "owner" },
+          ...c.collaborators.map((id) => ({ ...user(id), role: "co_instructor" })),
+          ...MOCK.term_collaborators.filter((p) => p.course === c.id).map((p) => ({ ...p })),
+        ],
+        inviteEmail: "",
+        inviteRole: "ta",
+        inviteError: "",
+        platforms: [
+          { id: "canvas", label: "Canvas", where: "Admin › Developer Keys › + LTI Key" },
+          { id: "moodle", label: "Moodle", where: "Site administration › Plugins › External tool › Manage tools" },
+        ],
+        platform: "canvas",
+        adminFields: [
+          { id: "issuer", label: "Issuer (platform ID)", example: { canvas: "https://canvas.instructure.com", moodle: "https://moodle.example.edu" } },
+          { id: "client", label: "Client ID", example: { canvas: "10000000000123", moodle: "aB3xY9kLmN2pQ7r" } },
+          { id: "deployment", label: "Deployment ID", example: { canvas: "123:8865aa05b4b79b64a91a86042e43af5ea8ae79eb", moodle: "1" } },
+          { id: "auth", label: "Authorization (OIDC) URL", example: { canvas: "https://sso.canvaslms.com/api/lti/authorize_redirect", moodle: "https://moodle.example.edu/mod/lti/auth.php" } },
+          { id: "token", label: "Access token URL", example: { canvas: "https://sso.canvaslms.com/login/oauth2/token", moodle: "https://moodle.example.edu/mod/lti/token.php" } },
+          { id: "jwks", label: "Platform keyset (JWKS) URL", example: { canvas: "https://sso.canvaslms.com/api/lti/security/jwks", moodle: "https://moodle.example.edu/mod/lti/certs.php" } },
+        ],
+        toolFields: [
+          { id: "login", label: "Login initiation URL", value: MOCK.lti_tool.login_url },
+          { id: "redirect", label: "Redirect URI", value: MOCK.lti_tool.redirect_uri },
+          { id: "jwks", label: "Tool keyset (JWKS) URL", value: MOCK.lti_tool.jwks_url },
+          { id: "target", label: "Target link URI", value: MOCK.lti_tool.target_link_uri + c.id },
+        ],
+        confirmText: "",
+        deleteSummary: c.numbers.questions
+          ? `Deletes ${bookCount} books, the taxonomy, ${c.numbers.questions} questions, ${MOCK.question_sets.filter((q) => q.course === c.id).length} question sets, ${MOCK.classes.filter((k) => k.course === c.id).length} classes and the mastery history of ${c.numbers.students} students.`
+          : `Deletes ${bookCount} book and the draft taxonomy. The course has no questions or students yet.`,
+        trust(level) { return MOCK.LEVELS[TRUST[level]] || MOCK.LEVELS.judged; },
+        calibrationText(k) {
+          if (k.counts) return `Counts toward grades: agrees with you ${Mock.pct(k.agreement)} on ${k.graded} graded; needs ${Mock.pct(k.bar)}.`;
+          if (!k.graded) return `Practice only: grade ${k.needed} answers yourself to calibrate it; needs ${Mock.pct(k.bar)} agreement.`;
+          return `Practice only: agrees with you ${Mock.pct(k.agreement)} on ${k.graded} of ${k.needed} graded; needs ${Mock.pct(k.bar)}.`;
+        },
+        get policyText() {
+          const rank = (l) => TRUST_ORDER.indexOf(l);
+          const below = this.tools.filter((t) => t.state !== "retired" && rank(t.level) > rank(this.minLevel)).map((t) => t.name);
+          const rub = this.tools.find((t) => t.id === "rubric" && t.calibration && !t.calibration.counts);
+          let s = `Questions checked by a tool below ${this.minLevel} stay available for practice but can't go in a graded assignment.`;
+          if (below.length) s += ` Here that leaves out questions checked by the ${below.join(" and the ")}.`;
+          if (rub && rank("Rubric-graded") <= rank(this.minLevel)) s += " Rubric-graded questions also need the Rubric grader to pass calibration first.";
+          return s;
+        },
+        openAdd() {
+          this.addable = Object.values(MOCK.TOOL_CATALOG).filter((c0) => !this.tools.some((t) => t.id === c0.id)).map((c0) => ({ ...c0 }));
+          this.$refs.add.showModal();
+        },
+        // Formats a catalogue tool would let the generator ask that this course can't ask yet.
+        newFormats(c0) { return c0.formats.filter((f) => !this.tools.some((t) => t.state === "on" && t.formats.includes(f))); },
+        addTool(c0) {
+          this.tools.push({ ...c0, state: "on", added: MOCK.today, by: this.me.name, uses: 0 });
+          Mock.toast(`${c0.name} ${c0.version} added. New questions can use it; it can be paused later but not deleted.`);
+        },
+        pause(t) { t.state = "paused"; Mock.toast(`${t.name} paused. No new questions will use it; its ${t.uses} questions stay valid.`); },
+        turnOn(t) { t.state = "on"; Mock.toast(`${t.name} is on again.`); },
+        savePolicy() { Mock.toast(`Saved: graded assignments need questions checked at ${this.minLevel} or stronger`); },
+        get platformObj() { return this.platforms.find((p) => p.id === this.platform); },
+        setTab(id) {
+          this.tab = id;
+          const u = new URL(location.href); u.searchParams.set("tab", id); history.replaceState(null, "", u);
+        },
+        countRole(id) { return this.people.filter((p) => p.role === id).length; },
+        fmtDate(iso) { const [, m, d] = iso.split("-").map(Number); return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]} ${d}`; },
+        roleLabel(id) { return (this.roles.find((r) => r.id === id) || {}).label || id; },
+        saveGeneral() { Mock.toast("Course details saved"); },
+        archive() { this.archived = true; Mock.toast(`${c.code} archived`); },
+        invite() {
+          const email = this.inviteEmail.trim().toLowerCase();
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { this.inviteError = "Enter a valid email address."; return; }
+          if (this.people.some((p) => p.email === email)) { this.inviteError = "Already on this course."; return; }
+          this.inviteError = "";
+          const local = email.split("@")[0];
+          this.people.push({ email, name: local, initials: local.slice(0, 2).toUpperCase(), role: this.inviteRole, pending: true });
+          this.inviteEmail = "";
+          Mock.toast(`Invitation to ${c.code} sent to ${email}`);
+        },
+        remove(p) {
+          this.people = this.people.filter((x) => x !== p);
+          Mock.toast(p.pending ? `Invitation to ${p.email} revoked` : `${p.name} removed from ${c.code}`);
+        },
+        deleteCourse() {
+          this.$refs.del.close();
+          Mock.toast(`${c.code} deleted`);
+          setTimeout(() => { location.href = "courses.html"; }, 900);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

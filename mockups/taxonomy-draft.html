@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review AI draft · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .row-flagged { background: var(--warn-wash); }
+    .row-flagged td:first-child { box-shadow: inset 3px 0 0 var(--warn-solid); }
+    .row-discarded td { color: var(--muted-ink); }
+    .row-discarded .name { text-decoration: line-through; }
+    .row-topic td { background: var(--muted); }
+  </style>
+</head>
+<!-- C7 · Review an AI-drafted taxonomy (F6): the model proposes, the professor decides every row and approves. -->
+<body data-scope="course" data-nav="taxonomy" data-title="Review AI draft">
+  <main x-data="page()" x-cloak class="grid gap-5">
+    <a class="text-sm text-muted-foreground hover:underline inline-flex items-center gap-1 w-fit" :href="Mock.link('taxonomy.html')"><i data-lucide="arrow-left" class="size-3"></i>Taxonomy</a>
+
+    <template x-if="!topics.length">
+      <div class="card"><section class="py-12 text-center">
+        <p class="font-medium">No AI draft to review in this course</p>
+        <p class="text-sm text-muted-foreground mt-1" x-text="`${course.name} already has an active taxonomy. Start a new draft from the Taxonomy page if you want the AI to propose one from a book.`"></p>
+        <a class="btn mt-3" data-variant="outline" :href="Mock.link('taxonomy.html')">Go to Taxonomy</a>
+      </section></div>
+    </template>
+
+    <template x-if="topics.length">
+      <div class="grid gap-5">
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-2xl font-semibold" x-text="version.label"></h1>
+              <span class="pill" :class="approved ? 'tone-ok' : 'tone-warn'" x-text="approved ? 'Approved · active' : 'Under review'"></span>
+            </div>
+            <p class="text-sm text-muted-foreground" x-text="`Drafted with AI on ${version.created} from ${book.title} (${book.chapters} chapters).`"></p>
+          </div>
+          <div class="ml-auto flex gap-2" x-show="!approved">
+            <a class="btn" data-variant="outline" x-show="!fresh" :href="Mock.link('taxonomy-builder.html', { version: version.id })">Open in builder</a>
+            <button type="button" class="btn" :disabled="!canApprove" @click="$refs.approve.showModal()" :title="canApprove ? '' : blocker">Approve taxonomy</button>
+          </div>
+        </div>
+
+        <template x-if="!approved">
+          <div class="alert">
+            <i data-lucide="user-check"></i>
+            <h2>You decide the curriculum. The AI only proposes.</h2>
+            <section>Accept, edit or discard every topic and subtopic. Nothing here is used for generation, coverage or students until you approve the whole taxonomy. You can still change it afterwards in the builder.</section>
+          </div>
+        </template>
+        <template x-if="approved">
+          <div class="alert">
+            <i data-lucide="circle-check"></i>
+            <h2 x-text="`${newLabel} is now the active taxonomy: ${kept.topics} topics, ${kept.subs} subtopics`"></h2>
+            <section>
+              <p>Coverage now measures against it, and questions can be generated for its subtopics. The next step is filling coverage gaps.</p>
+              <div class="flex gap-2 mt-2">
+                <a class="btn" data-size="sm" :href="Mock.link('coverage.html', { approved: '1' })">Go to coverage</a>
+                <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('taxonomy.html', { approved: '1' })">View versions</a>
+              </div>
+            </section>
+          </div>
+        </template>
+
+        <!-- Counters + bulk -->
+        <section class="card">
+          <section class="flex flex-wrap items-center gap-x-5 gap-y-3">
+            <template x-for="k in COUNTERS" :key="k[0]">
+              <button type="button" class="text-left" @click="filter = filter === k[0] ? 'all' : k[0]">
+                <div class="text-xs text-muted-foreground" x-text="k[1]"></div>
+                <div class="text-xl font-display font-semibold tabular-nums" :style="filter === k[0] ? 'color:var(--primary)' : ''" x-text="counts[k[0]]"></div>
+              </button>
+            </template>
+            <div class="ml-auto flex flex-wrap items-center gap-2" x-show="!approved">
+              <select class="select" x-model="filter" aria-label="Show rows">
+                <option value="all">All rows</option>
+                <option value="open">Needs a decision</option>
+                <option value="flagged">Flagged</option>
+                <option value="discarded">Discarded</option>
+              </select>
+              <button type="button" class="btn" data-variant="outline" :disabled="!highOpen" @click="acceptHigh()" x-text="`Accept all high-confidence (${highOpen})`"></button>
+            </div>
+          </section>
+          <footer class="text-sm text-muted-foreground" x-show="!approved">
+            <span x-text="blocker || 'Every row is decided. Approve to make this the active taxonomy.'"></span>
+          </footer>
+        </section>
+
+        <!-- Rows -->
+        <section class="card p-0 overflow-hidden">
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr><th class="pl-6">Topic / subtopic</th><th class="w-28">AI confidence</th><th class="w-48">Drafted from</th><th class="w-24">Decision</th><th class="pr-6"></th></tr>
+              </thead>
+              <tbody>
+                <template x-for="r in visibleRows" :key="r.key">
+                  <tr :class="{ 'row-topic': r.kind === 'topic', 'row-flagged': r.state === 'flagged', 'row-discarded': r.state === 'discarded' }">
+                    <td class="pl-6 whitespace-normal" :class="r.kind === 'sub' && 'pl-12'">
+                      <template x-if="editing !== r.key">
+                        <div>
+                          <div class="name" :class="r.kind === 'topic' ? 'font-semibold' : 'font-medium'" x-text="r.name"></div>
+                          <div class="text-xs text-muted-foreground" x-show="r.original" x-text="`AI proposed: ${r.original}`"></div>
+                          <div class="text-xs text-muted-foreground" x-show="r.kind === 'sub' && r.description" x-text="r.description"></div>
+                          <div class="text-xs mt-1 flex items-start gap-1" style="color:var(--warn-solid)" x-show="r.note && r.state === 'flagged'"><span><i data-lucide="flag" class="size-3"></i></span><span x-text="r.note"></span></div>
+                        </div>
+                      </template>
+                      <template x-if="editing === r.key">
+                        <div class="grid gap-2 max-w-lg">
+                          <input class="input" type="text" x-model="draftName" :aria-label="`Name for ${r.name}`" @keydown.enter="saveEdit(r)" @keydown.escape="editing = null">
+                          <textarea class="textarea text-sm" rows="2" x-show="r.kind === 'sub'" x-model="draftDesc" aria-label="Description"></textarea>
+                          <div class="flex gap-2">
+                            <button type="button" class="btn" data-size="sm" @click="saveEdit(r)">Save and accept</button>
+                            <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="editing = null">Cancel</button>
+                          </div>
+                        </div>
+                      </template>
+                    </td>
+                    <td><span class="pill" :class="CONF_TONE[r.confidence]" x-text="r.confidence"></span></td>
+                    <td class="text-xs text-muted-foreground" x-text="r.source"></td>
+                    <td><span class="pill" :class="Mock.tone(r.state === 'edited' ? 'accepted' : r.state)" x-text="STATE_LABEL[r.state]"></span></td>
+                    <td class="pr-6">
+                      <div class="flex justify-end items-center gap-1 whitespace-nowrap" x-show="!approved && editing !== r.key">
+                        <template x-if="r.state !== 'discarded' && r.state !== 'accepted' && r.state !== 'edited'">
+                          <button type="button" class="btn" data-size="sm" @click="setState(r, 'accepted')">Accept</button>
+                        </template>
+                        <template x-if="r.state !== 'discarded'">
+                          <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :aria-label="`Edit ${r.name}`" title="Edit" @click="startEdit(r)"><i data-lucide="pencil"></i></button>
+                        </template>
+                        <template x-if="r.state !== 'discarded'">
+                          <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :aria-label="`Discard ${r.name}`" title="Discard" @click="discard(r)"><i data-lucide="x"></i></button>
+                        </template>
+                        <template x-if="r.state === 'discarded'">
+                          <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="setState(r, 'proposed')" :disabled="r.kind === 'sub' && topicOf(r).state === 'discarded'">Restore</button>
+                        </template>
+                        <template x-if="r.state === 'accepted' || r.state === 'edited'">
+                          <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="setState(r, 'proposed')" title="Undo the decision">Undo</button>
+                        </template>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p class="px-6 py-8 text-center text-sm text-muted-foreground" x-show="!visibleRows.length">No rows match this filter.</p>
+        </section>
+      </div>
+    </template>
+
+    <!-- Approve confirmation -->
+    <dialog x-ref="approve" class="dialog" aria-labelledby="approve-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="approve-title">Approve this taxonomy?</h2>
+          <p>It becomes the active taxonomy for this course: coverage is measured against it and questions are generated for its subtopics.</p>
+        </header>
+        <section class="grid gap-1 text-sm">
+          <p x-text="`${kept.topics} topics and ${kept.subs} subtopics will be used (${counts.edited} edited by you).`"></p>
+          <p class="text-muted-foreground" x-text="`${counts.discarded} discarded rows are kept in the draft's history, not in the taxonomy.`"></p>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.approve.close()">Cancel</button>
+          <button type="button" class="btn" @click="approve()">Approve and make active</button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const book = MOCK.books.find((b) => b.id === Mock.param("book") && b.course === c.id) || MOCK.books.find((b) => b.course === c.id) || { title: "the book", chapters: 0 };
+      // ?draft=d2: a draft just started from the Taxonomy page of a course that has no stored draft.
+      // TODO(real): approximated from the course's current taxonomy, every row proposed.
+      const fresh = !c.taxonomy_draft && Mock.param("draft") === "d2";
+      const CONF = ["high", "high", "medium", "high", "low"];
+      let k = 0;
+      const draft = c.taxonomy_draft || (fresh ? c.taxonomy.slice(0, 8).map((t) => ({
+        ...t, draft_state: "proposed", source: `${book.title}`,
+        subtopics: t.subtopics.map((s) => ({ ...s, draft_state: "proposed", confidence: CONF[k++ % CONF.length] })),
+      })) : []);
+      const version = fresh
+        ? { id: "d2", label: `AI draft from ${book.title}`, created: MOCK.today }
+        : c.taxonomy_versions.find((v) => v.status === "under_review") || c.taxonomy_versions[0];
+      const rows = [];
+      draft.forEach((t) => {
+        const subs = t.subtopics;
+        const high = subs.filter((s) => s.confidence === "high").length;
+        // Topic confidence is derived from its subtopics (TODO(real): the drafter should report it).
+        const topicConf = high * 2 >= subs.length ? "high" : subs.some((s) => s.confidence === "low") ? "low" : "medium";
+        rows.push({ key: t.id, kind: "topic", topic: t.id, name: t.name, description: "", original: "", confidence: topicConf,
+          state: t.draft_state, source: MOCK.draft_source_sections[t.name] || t.source, note: "" });
+        subs.forEach((s) => rows.push({ key: `s${s.id}`, kind: "sub", topic: t.id, name: s.name, description: s.description, original: "",
+          confidence: s.confidence, state: s.draft_state, source: MOCK.draft_source_sections[t.name] || t.source, note: MOCK.draft_notes[s.name] || "" }));
+      });
+      return {
+        course: c, version, book, rows, fresh,
+        newLabel: fresh ? `v${c.taxonomy_versions.length + 1}` : "v1",
+        topics: draft,
+        filter: "all", editing: null, draftName: "", draftDesc: "", approved: false,
+        COUNTERS: [["accepted", "Accepted"], ["edited", "Edited"], ["open", "Needs a decision"], ["flagged", "Flagged"], ["discarded", "Discarded"]],
+        STATE_LABEL: { accepted: "Accepted", edited: "Edited", proposed: "Proposed", flagged: "Flagged", discarded: "Discarded" },
+        CONF_TONE: { high: "tone-ok", medium: "tone-muted", low: "tone-critical" },
+        get counts() {
+          const n = (st) => this.rows.filter((r) => r.state === st).length;
+          return { accepted: n("accepted"), edited: n("edited"), open: n("proposed") + n("flagged"), flagged: n("flagged"), discarded: n("discarded") };
+        },
+        get kept() {
+          const k = this.rows.filter((r) => r.state === "accepted" || r.state === "edited");
+          return { topics: k.filter((r) => r.kind === "topic").length, subs: k.filter((r) => r.kind === "sub").length };
+        },
+        get highOpen() { return this.rows.filter((r) => r.state === "proposed" && r.confidence === "high").length; },
+        get blocker() {
+          const open = this.counts.open;
+          if (open) return `${open} row${open === 1 ? " is" : "s are"} still proposed or flagged. Decide each one to approve.`;
+          const empty = this.rows.find((r) => r.kind === "topic" && r.state !== "discarded"
+            && !this.rows.some((s) => s.kind === "sub" && s.topic === r.topic && s.state !== "discarded"));
+          if (empty) return `“${empty.name}” has no subtopics left. Restore one or discard the topic.`;
+          if (!this.kept.topics) return "Accept at least one topic.";
+          return "";
+        },
+        get canApprove() { return !this.blocker && !this.approved; },
+        get visibleRows() {
+          const f = this.filter;
+          if (f === "all") return this.rows;
+          const want = (r) => (f === "open" ? r.state === "proposed" || r.state === "flagged" : r.state === f);
+          // Keep the parent topic row visible for context.
+          return this.rows.filter((r) => want(r) || (r.kind === "topic" && this.rows.some((s) => s.topic === r.topic && s.kind === "sub" && want(s))));
+        },
+        topicOf(r) { return this.rows.find((x) => x.kind === "topic" && x.topic === r.topic); },
+        setState(r, st) {
+          if (st === "proposed") {
+            if (r.original) { r.name = r.original; r.original = ""; }
+            r.state = r.note ? "flagged" : "proposed";
+          } else r.state = st;
+          if (st === "proposed" && r.kind === "topic") {
+            this.rows.filter((s) => s.kind === "sub" && s.topic === r.topic && s.state === "discarded" && s.byTopic).forEach((s) => { s.state = s.note ? "flagged" : "proposed"; s.byTopic = false; });
+          }
+        },
+        discard(r) {
+          r.state = "discarded";
+          if (r.kind === "topic") {
+            this.rows.filter((s) => s.kind === "sub" && s.topic === r.topic && s.state !== "discarded").forEach((s) => { s.state = "discarded"; s.byTopic = true; });
+            Mock.toast(`Discarded “${r.name}” and its subtopics. Restore brings them back.`);
+          }
+        },
+        startEdit(r) { this.editing = r.key; this.draftName = r.name; this.draftDesc = r.description; },
+        saveEdit(r) {
+          const name = this.draftName.trim();
+          if (!name) return Mock.toast("A name is required");
+          if (name !== r.name || this.draftDesc !== r.description) {
+            if (!r.original && name !== r.name) r.original = r.name;
+            r.name = name; r.description = this.draftDesc; r.state = "edited";
+          } else r.state = "accepted";
+          this.editing = null;
+        },
+        acceptHigh() {
+          const n = this.highOpen;
+          this.rows.forEach((r) => { if (r.state === "proposed" && r.confidence === "high") r.state = "accepted"; });
+          Mock.toast(`Accepted ${n} high-confidence rows. Medium, low and flagged rows still need you.`);
+        },
+        approve() {
+          this.$refs.approve.close();
+          this.approved = true; this.filter = "all";
+          this.rows = this.rows.filter((r) => r.state !== "discarded");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          Mock.toast(`Approved. ${this.newLabel} is now the active taxonomy for ${c.code}.`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

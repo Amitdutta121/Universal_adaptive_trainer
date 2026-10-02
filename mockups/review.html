@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review queue · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* Question surface (QView in assets/data-c9-c13.js); same block in question.html. */
+    .qv-text { white-space: pre-wrap; line-height: 1.6; }
+    .qv-code { font-family: var(--font-mono); font-size: 0.85em; background: var(--muted); border-radius: 0.3rem; padding: 0.05rem 0.3rem; }
+    .qv-pre { font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; background: var(--muted); border-radius: 0.5rem; padding: 0.75rem 0.9rem; margin-top: 0.75rem; overflow-x: auto; white-space: pre; }
+    .qv-blank { background: var(--warn-wash); color: var(--warn-solid); border-radius: 0.2rem; }
+    .qv-label { margin-top: 0.75rem; font-size: 0.72rem; color: var(--muted-foreground); }
+    .qv-options { display: grid; gap: 0.5rem; margin-top: 0.9rem; }
+    .qv-options li, .qv-blocks li { display: flex; align-items: center; gap: 0.6rem; border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.55rem 0.75rem; font-size: 0.9rem; background: var(--card); }
+    .qv-letter { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; background: var(--muted); color: var(--muted-foreground); flex-shrink: 0; }
+    .qv-letter.qv-ok { background: var(--ok-wash); color: var(--ok-solid); }
+    .qv-blocks { display: grid; gap: 0.35rem; margin-top: 0.4rem; }
+    .qv-blocks li { font-family: var(--font-mono); font-size: 0.8rem; padding: 0.4rem 0.6rem; }
+    .qv-blocks svg { width: 0.9rem; height: 0.9rem; color: var(--muted-foreground); }
+    .qv-input { margin-top: 0.75rem; border: 1px dashed var(--border); border-radius: 0.5rem; padding: 0.55rem 0.75rem; font-size: 0.8rem; color: var(--muted-foreground); }
+    .qv-editor { font-family: var(--font-mono); }
+    .qv-label:first-child, .qv-pre:first-child { margin-top: 0; }
+  </style>
+  <style>
+    .kbd { display: inline-grid; place-items: center; min-width: 1.25rem; height: 1.25rem; padding: 0 0.3rem; border: 1px solid var(--border); border-radius: 0.3rem; font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted-foreground); background: var(--card); }
+    .btn .kbd { background: transparent; color: inherit; border-color: color-mix(in oklch, currentColor 35%, transparent); }
+    .review-bar { position: sticky; bottom: 0; z-index: 5; background: color-mix(in oklch, var(--background) 92%, transparent); backdrop-filter: blur(6px); border-top: 1px solid var(--border); margin: 0 -1.25rem; padding: 0.75rem 1.25rem; }
+    .judge-row { border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.6rem 0.75rem; }
+    .judge-row[data-v="flag"] { border-color: color-mix(in oklch, var(--warn-solid) 45%, var(--border)); }
+  </style>
+</head>
+<!-- C12 · Review queue: one question at a time, student surface next to checks and judge verdicts. -->
+<body data-scope="course" data-nav="review" data-title="Review queue">
+  <main x-data="page()" x-cloak class="grid gap-5" @keydown.window="key($event)">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Review queue</h1>
+        <p class="text-sm text-muted-foreground">Read the question as a student sees it, then approve, edit or reject it.</p>
+      </div>
+      <div class="ml-auto flex items-center gap-2" x-show="current">
+        <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('question.html', { id: current?.id })">Open detail page <i data-lucide="external-link"></i></a>
+      </div>
+    </div>
+
+    <!-- Statistics: nothing generated yet -->
+    <template x-if="!total">
+      <div class="card">
+        <section class="grid place-items-center gap-3 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="clipboard-check"></i></span>
+          <div class="font-medium">Nothing to review yet</div>
+          <p class="text-sm text-muted-foreground max-w-md">Questions land here after they pass the deterministic checks. This course has no questions: generation is blocked until the taxonomy is approved.</p>
+          <a class="btn" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="total">
+      <div class="grid gap-5">
+        <!-- Progress -->
+        <div class="card py-4">
+          <section class="grid gap-2">
+            <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+              <span class="font-medium" x-text="current ? `Question ${idx + 1} of ${total}` : `All ${total} reviewed`"></span>
+              <span class="text-muted-foreground" x-text="`${done.length} reviewed · ${total - done.length} left`"></span>
+              <span class="ml-auto text-xs text-muted-foreground" x-show="done.length" x-text="`This session: ${tally.approve} approved · ${tally.edit} edited · ${tally.reject} rejected · ${skipped} skipped`"></span>
+            </div>
+            <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full transition-all" :style="{ background: 'var(--primary)', width: `${done.length / total * 100}%` }"></div></div>
+          </section>
+        </div>
+
+        <!-- What the last decision did -->
+        <template x-if="outcome">
+          <div class="alert" :data-variant="outcome.bad ? 'destructive' : null">
+            <i data-lucide="scale"></i>
+            <h2 x-text="outcome.title"></h2>
+            <section x-text="outcome.text"></section>
+          </div>
+        </template>
+
+        <!-- Done -->
+        <template x-if="!current">
+          <div class="card">
+            <section class="grid place-items-center gap-3 py-12 text-center">
+              <span class="grid size-10 place-items-center rounded-full tone-ok"><i data-lucide="check"></i></span>
+              <div class="font-medium">Nothing left to review</div>
+              <p class="text-sm text-muted-foreground max-w-md" x-text="`Every question in the queue has a verdict: ${tally.approve} approved, ${tally.edit} edited, ${tally.reject} rejected. Approved questions now count towards coverage and can go into a question set.`"></p>
+              <div class="flex gap-2">
+                <a class="btn" :href="Mock.link('coverage.html')">See coverage</a>
+                <a class="btn" data-variant="outline" :href="Mock.link('alignment.html')">See judge agreement</a>
+                <button type="button" class="btn" data-variant="ghost" x-show="skipped" @click="restart()" x-text="`Go back to ${skipped} skipped`"></button>
+              </div>
+            </section>
+          </div>
+        </template>
+
+        <template x-if="current">
+          <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <!-- Left: the question -->
+            <div class="grid gap-5 content-start min-w-0">
+              <div class="card">
+                <header>
+                  <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span class="font-mono" x-text="`#${current.id}`"></span>
+                    <span class="pill tone-muted" x-text="MOCK.question_types[current.type].label"></span>
+                    <span class="pill tone-muted" x-text="current.difficulty"></span>
+                    <span class="text-muted-foreground" x-text="`${current.topic} · ${current.subtopic}`"></span>
+                    <span class="pill tone-warn" x-show="dupes.length"><i data-lucide="copy" class="size-3"></i>Possible duplicate</span>
+                  </div>
+                  <h2 class="mt-1">What the student sees</h2>
+                </header>
+                <section x-show="mode !== 'edit'"><div x-html="QView.student(current)"></div></section>
+                <section x-show="mode === 'edit'" class="grid gap-3">
+                  <div role="group" class="field">
+                    <label for="e-prompt">Prompt</label>
+                    <textarea id="e-prompt" class="textarea font-mono text-sm" rows="6" x-model="draft.prompt" x-ref="editBox"></textarea>
+                  </div>
+                  <div role="group" class="field" x-show="current.answer_text">
+                    <label for="e-answer">Answer / expected output</label>
+                    <textarea id="e-answer" class="textarea font-mono text-sm" rows="2" x-model="draft.answer_text"></textarea>
+                  </div>
+                </section>
+              </div>
+
+              <div class="card">
+                <header><h2>Answer</h2></header>
+                <section class="grid gap-3">
+                  <div x-html="QView.answer(current)"></div>
+                  <template x-if="kc.wrong.length">
+                    <div class="grid gap-1.5 border-t pt-3">
+                      <div class="text-xs text-muted-foreground" x-text="kc.tagged ? 'Mistakes behind the wrong options (tagged after writing)' : 'Mistakes behind the wrong options (not tagged yet)'"></div>
+                      <template x-for="w in kc.wrong" :key="w.letter">
+                        <div class="grid grid-cols-[1.5rem_minmax(0,16rem)_minmax(0,1fr)] items-center gap-2 text-sm">
+                          <span class="qv-letter" x-text="w.letter"></span>
+                          <span class="truncate" x-text="w.text" :title="w.text"></span>
+                          <span class="text-xs text-muted-foreground" x-text="w.why || '—'"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                  <div class="text-sm flex flex-wrap items-center gap-2 border-t pt-3">
+                    <span class="text-muted-foreground">Source</span>
+                    <a class="inline-flex items-center gap-1 hover:underline" :href="Mock.link('section.html', QView.sourceParams(current) || {})"><i data-lucide="book-open" class="size-3.5"></i><span x-text="`${current.source.book} · ${current.source.section}`"></span></a>
+                  </div>
+                </section>
+              </div>
+
+              <!-- Reject reasons -->
+              <div class="card" x-show="mode === 'reject'" style="border-color:var(--critical-solid)">
+                <header>
+                  <h2>Why are you rejecting?</h2>
+                  <p x-text="dupes.length ? 'Pre-selected because this looks like a duplicate. At least one reason is required.' : 'At least one reason is required.'"></p>
+                </header>
+                <section class="grid gap-4">
+                  <div class="grid gap-2 sm:grid-cols-2">
+                    <template x-for="r in reasons" :key="r[0]">
+                      <label class="flex items-center gap-2 text-sm">
+                        <input type="checkbox" class="input" :value="r[0]" x-model="rej.reasons"><span x-text="r[1]"></span>
+                      </label>
+                    </template>
+                  </div>
+                  <div role="group" class="field">
+                    <label for="rej-note">What should change? <span class="text-muted-foreground font-normal">(optional)</span></label>
+                    <textarea id="rej-note" class="textarea" rows="2" placeholder="e.g. The distractors are too obvious; make them plausible misconceptions." x-model="rej.note"></textarea>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <!-- Right: evidence -->
+            <div class="grid gap-5 content-start">
+              <!-- Answer-key evidence (MOCK.verification via keyCheck); full version on question.html -->
+              <div class="card">
+                <header>
+                  <h2>Answer key check</h2>
+                </header>
+                <section class="grid gap-2 text-sm">
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span class="text-muted-foreground">Checked by</span>
+                    <span class="font-medium" x-text="kc.cb.name"></span>
+                    <span class="font-mono text-xs" x-text="kc.cb.version"></span>
+                    <span class="pill ml-auto" :class="kc.failed ? 'tone-critical' : kc.tone" :title="kc.meaning" x-text="kc.failed ? 'Check failed' : kc.cb.level"></span>
+                  </div>
+                  <p :style="kc.v.note ? { color: kc.failed ? 'var(--critical-solid)' : 'var(--warn-solid)' } : {}" x-text="kc.summary"></p>
+                  <details class="group" x-show="kc.program || kc.v.quotes">
+                    <summary class="cursor-pointer text-xs text-muted-foreground hover:text-foreground" x-text="kc.program ? `Show the ${kc.programLabel.toLowerCase()}` : 'Show the quote and solvers'"></summary>
+                    <div class="grid gap-2 pt-2">
+                      <template x-if="kc.program">
+                        <div class="grid gap-2">
+                          <pre class="qv-pre" x-text="kc.program"></pre>
+                          <div class="grid grid-cols-[4rem_1fr] gap-x-2 gap-y-1 text-xs items-baseline">
+                            <template x-if="kc.output != null || kc.result"><span class="text-muted-foreground" x-text="kc.output != null ? 'Output' : 'Result'"></span></template>
+                            <template x-if="kc.output != null || kc.result"><code class="font-mono break-words" x-text="kc.output ?? kc.result"></code></template>
+                            <span class="text-muted-foreground">Key</span><code class="font-mono break-words" x-text="kc.key"></code>
+                            <template x-if="kc.tests"><span class="text-muted-foreground">Tests</span></template>
+                            <template x-if="kc.tests"><span x-text="`${kc.tests} of ${kc.tests} passed`"></span></template>
+                          </div>
+                        </div>
+                      </template>
+                      <template x-if="!kc.program && kc.v.quotes">
+                        <div class="grid gap-2">
+                          <template x-for="(qt, i) in kc.v.quotes" :key="i">
+                            <figure class="grid gap-1">
+                              <blockquote class="border-l-2 pl-3" x-text="`“${qt.text}”`"></blockquote>
+                              <figcaption class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><span x-text="qt.section"></span><span class="pill" :class="qt.found ? 'tone-ok' : 'tone-critical'" x-text="qt.found ? 'found word for word' : 'not found in the section'"></span></figcaption>
+                            </figure>
+                          </template>
+                          <p class="text-xs" x-text="`${kc.v.solvers.agree} of ${kc.v.solvers.total} blind solvers chose the same answer (${kc.v.solvers.models}).`"></p>
+                        </div>
+                      </template>
+                    </div>
+                  </details>
+                  <p class="flex items-center gap-1.5 border-t pt-2 text-xs text-muted-foreground"><i data-lucide="pin" class="size-3.5 shrink-0"></i><span x-text="`Pinned: re-checks use ${kc.cb.name} ${kc.cb.version}.`"></span></p>
+                </section>
+              </div>
+
+              <div class="card">
+                <header>
+                  <h2>Advisory judges</h2>
+                  <p>Advisory only; your decision is the authority. A computed or quoted answer is evidence; the AI reviewers' verdicts are opinions.</p>
+                </header>
+                <section class="grid gap-2">
+                  <template x-for="j in judges" :key="j.id">
+                    <div class="judge-row" :data-v="j.verdict">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-medium" x-text="j.label"></span>
+                        <span class="pill ml-auto" :class="Mock.tone(j.verdict)" x-text="j.verdict"></span>
+                      </div>
+                      <p class="mt-1 text-xs text-muted-foreground" x-text="j.note"></p>
+                    </div>
+                  </template>
+                </section>
+              </div>
+
+              <div class="card">
+                <header><h2>Deterministic checks</h2></header>
+                <section>
+                  <ul class="grid gap-1.5 text-sm">
+                    <template x-for="c in checks" :key="c.name">
+                      <li class="flex items-center gap-2">
+                        <span class="font-mono text-xs" x-text="c.name"></span>
+                        <span class="pill ml-auto" :class="c.result === 'n/a' ? 'tone-muted' : Mock.tone(c.result)" x-text="c.result === 'pass' ? 'passed' : c.result === 'fail' ? 'failed' : 'n/a'"></span>
+                      </li>
+                    </template>
+                  </ul>
+                </section>
+              </div>
+
+              <div class="card" x-show="dupes.length">
+                <header><h2>Possible duplicate</h2></header>
+                <section class="grid gap-2">
+                  <template x-for="d in dupes" :key="d.q.id">
+                    <a class="grid gap-1 rounded-lg border p-3 hover:bg-muted" :href="Mock.link('question.html', { id: d.q.id })" target="_blank">
+                      <div class="flex items-center gap-2 text-xs">
+                        <span class="font-mono" x-text="`#${d.q.id}`"></span>
+                        <span class="pill" :class="Mock.tone(d.q.status)" x-text="Mock.label(d.q.status)"></span>
+                        <span class="ml-auto font-mono text-muted-foreground" x-text="`similarity ${d.score}`"></span>
+                      </div>
+                      <div class="text-sm" x-text="d.q.prompt.split('\n')[0].replaceAll('`', '')"></div>
+                    </a>
+                  </template>
+                </section>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Action bar -->
+        <div class="review-bar" x-show="current">
+          <div class="flex flex-wrap items-center gap-2">
+            <template x-if="mode === 'view'">
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="btn" @click="decide('approve')"><i data-lucide="check"></i>Approve <span class="kbd">A</span></button>
+                <button type="button" class="btn" data-variant="outline" @click="startEdit()"><i data-lucide="pencil"></i>Edit <span class="kbd">E</span></button>
+                <button type="button" class="btn" data-variant="outline" @click="startReject()"><i data-lucide="x"></i>Reject <span class="kbd">R</span></button>
+                <button type="button" class="btn" data-variant="ghost" @click="skip()">Skip <span class="kbd">S</span></button>
+              </div>
+            </template>
+            <template x-if="mode === 'reject'">
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="btn" data-variant="destructive" :disabled="!rej.reasons.length" @click="decide('reject')">Reject and continue <span class="kbd">Enter</span></button>
+                <button type="button" class="btn" data-variant="ghost" @click="mode = 'view'">Cancel <span class="kbd">Esc</span></button>
+                <span class="text-xs text-muted-foreground" x-show="!rej.reasons.length">Reject stays disabled until you choose at least one reason.</span>
+              </div>
+            </template>
+            <template x-if="mode === 'edit'">
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="btn" :disabled="!draftChanged" @click="decide('edit')">Save and approve <span class="kbd">Ctrl Enter</span></button>
+                <button type="button" class="btn" data-variant="ghost" @click="mode = 'view'">Cancel <span class="kbd">Esc</span></button>
+                <span class="text-xs text-muted-foreground" x-show="!draftChanged">Change the prompt or answer to save an edit.</span>
+              </div>
+            </template>
+            <p class="ml-auto max-w-md text-xs text-muted-foreground">Each decision is saved as a review. Reasons you give repeatedly become generator rules, and where a judge disagreed with you it counts against that judge's agreement. <a class="underline" :href="Mock.link('alignment.html')">Alignment</a></p>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c9-c13.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    // Answer-key evidence for one question, from MOCK.verification(q). Same helper in question.html and review.html.
+    // TODO(real): MOCK.verification stores the question stem as the "program" for choice and coding
+    // questions; keyCheck rebuilds a plausible solution program from the stem for display only.
+    function keyCheck(q) {
+      const v = MOCK.verification(q);
+      if (!v) return null;
+      const L = MOCK.LEVELS[v.level];
+      const LET = "ABCDEFGH";
+      const key = q.type === "multiple_choice" ? `${LET[q.answer]} · ${q.options[q.answer]}`
+        : q.type === "true_false" ? (q.answer ? "True" : "False") : q.answer_text;
+      // TODO(real): reference solutions for the coding template (stored with the question in the real app).
+      const REF = {
+        count_words: "def count_words(text):\n    counts = {}\n    for w in text.split():\n        counts[w] = counts.get(w, 0) + 1\n    return counts",
+        letter_counts: "def letter_counts(word):\n    counts = {}\n    for ch in word:\n        counts[ch] = counts.get(ch, 0) + 1\n    return counts",
+        most_common: "def most_common(words):\n    return max(set(words), key=words.count)",
+        invert: "def invert(d):\n    return {v: k for k, v in d.items()}",
+        histogram: "def histogram(nums):\n    counts = {}\n    for n in nums:\n        counts[n] = counts.get(n, 0) + 1\n    return counts",
+      };
+      const choiceProgram = () => {
+        const [stem, code] = [q.prompt.split("\n\n")[0], q.prompt.split("\n\n").slice(1).join("\n\n")];
+        if (/\bwhich (expression|condition)/i.test(stem)) {
+          const setup = stem.match(/^For (\w+ = [^,]+),/);
+          return `${setup ? setup[1] + "\n" : ""}for expr in [${q.options.map((o) => JSON.stringify(o)).join(", ")}]:\n    print(expr, eval(expr))`;
+        }
+        if (/^Which (line|statement|call)/.test(stem)) return null;
+        const frags = [...stem.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+        if (frags.some((f) => /:$|^return\b|^with\b/.test(f))) return null;
+        const lines = [];
+        const setup = stem.match(/when (\w+ = [^?]+)\?/);
+        if (setup) lines.push(setup[1]);
+        if (code) lines.push(code);
+        frags.forEach((f) => lines.push(/=(?!=)|^print\(/.test(f.replace(/[=!<>]=/g, "")) ? f : `print(${f})`));
+        const shown = stem.match(/What does (print\(\w+\)) show/);
+        if (shown) lines.push(shown[1]);
+        return lines.length ? lines.join("\n") : null;
+      };
+      const out = { v, L, key, failed: !!v.failed, program: null, programLabel: "Solution program", output: null, tests: null };
+      if (v.level === "proven") {
+        const t = q.type;
+        if (q.solution_program) { out.program = q.solution_program; out.result = v.output; out.picks = q.type === "multiple_choice" ? LET[q.answer] : (q.answer ? "True" : "False"); }
+        else if (t === "output_prediction") { out.program = v.program; out.output = v.output; }
+        else if (t === "code_completion") { out.program = v.program.replace("____", q.answer_text); out.programLabel = "Program with the keyed answer filled in"; }
+        else if (t === "debugging") {
+          const fix = (q.answer_text || "").match(/Add `(.+)` inside the loop/);
+          out.program = fix ? `${v.program}\n    ${fix[1]}` : v.program; out.programLabel = fix ? "Program with the keyed fix" : "Program before the keyed fix";
+        }
+        else if (t === "parsons") { out.program = q.lines.join("\n"); out.programLabel = "Lines in the keyed order"; }
+        else if (t === "coding") { const fn = (q.prompt.match(/^Write (\w+)\(/) || [])[1]; out.program = REF[fn] || null; out.programLabel = "Reference solution"; }
+        else { out.program = q.type === "multiple_choice" ? choiceProgram() : null; out.picks = q.type === "multiple_choice" ? LET[q.answer] : (q.answer ? "True" : "False"); out.result = out.program ? v.output : null; }
+        if (["code_completion", "debugging", "coding", "parsons", "output_prediction"].includes(t) && v.tests) out.tests = v.tests;
+      }
+      // One line of evidence, for the compact view in review.html.
+      out.summary = out.failed || v.note ? v.note
+        : v.level === "proven" ? (out.output != null ? `The solution program printed ${out.output}, which matches the key.`
+          : out.picks ? (out.program ? `Running the program picks ${q.type === "true_false" ? out.picks : "option " + out.picks}, the keyed answer.` : q.type === "true_false" ? `The statement was run in the sandbox and came out ${out.picks}, as keyed.` : `Each option was run in the sandbox; only ${out.picks} behaves as the stem says.`)
+          : `The keyed answer passed ${v.tests} of ${v.tests} tests in the sandbox.`)
+        : v.solvers ? `Quoted word for word from ${v.quotes[0].section}; ${v.solvers.agree} of ${v.solvers.total} blind solvers chose the key.` : L.detail;
+      out.wrong = q.type === "multiple_choice" ? q.options.map((o, i) => ({ letter: LET[i], text: o, why: v.misconceptions?.[i] || null })).filter((_, i) => i !== q.answer) : [];
+      out.tagged = !!v.misconceptions;
+      // The tool and version that checked the key; the trust label comes from the tool (MOCK.checkedBy).
+      out.cb = MOCK.checkedBy(q);
+      const TL = Object.values(MOCK.LEVELS).find((l) => l.label === out.cb.level) || L;
+      out.tone = TL.tone;
+      out.meaning = out.failed ? "The key check failed, so the question stopped before review."
+        : v.level === "judged" && v.solvers ? "The quote was found, but the blind solvers split, so only the judge panel stands behind the key."
+        : TL.detail;
+      return out;
+    }
+
+    function page() {
+      const c = Mock.course;
+      const queue = c.id === "python" ? MOCK.review_queue.map((id) => MOCK.question(id))
+        : MOCK.questions.filter((q) => q.course === c.id && q.status === "validation_passed");
+      const TEST_TYPES = ["code_completion", "debugging", "coding"];
+      const label = (k) => MOCK.rejection_reasons.find((r) => r[0] === k)[1];
+      return {
+        course: c, queue, total: queue.length,
+        idx: 0, done: [], skippedIds: [], mode: "view", outcome: null,
+        tally: { approve: 0, edit: 0, reject: 0 },
+        draft: { prompt: "", answer_text: "" }, rej: { reasons: [], note: "" },
+        get skipped() { return this.skippedIds.length; },
+        get current() { return this.queue[this.idx] || null; },
+        get kc() { return this.current ? keyCheck(this.current) : null; },
+        get dupes() { return this.current ? MOCK.duplicates(this.current).map((d) => ({ q: MOCK.question(d.question_id), score: d.score })) : []; },
+        get judges() {
+          const q = this.current;
+          return q ? MOCK.judges.map((j) => ({ ...j, verdict: q.judges[j.id], note: MOCK.judge_note(q, j.id) })) : [];
+        },
+        get checks() {
+          const q = this.current;
+          return q ? Object.entries(q.checks).map(([name, result]) => ({ name, result })) : [];
+        },
+        get reasons() {
+          const t = this.current?.type;
+          return MOCK.rejection_reasons.filter(([k]) =>
+            (k !== "poor_distractors" || t === "multiple_choice") &&
+            (!["incorrect_tests", "poor_tests"].includes(k) || TEST_TYPES.includes(t)));
+        },
+        get draftChanged() {
+          const q = this.current;
+          return q && (this.draft.prompt !== q.prompt || (this.draft.answer_text || "") !== (q.answer_text || ""));
+        },
+        startEdit() {
+          this.draft = { prompt: this.current.prompt, answer_text: this.current.answer_text || "" };
+          this.mode = "edit";
+          this.$nextTick(() => this.$refs.editBox?.focus());
+        },
+        startReject() {
+          this.rej = { reasons: this.dupes.length ? ["too_similar_repetitive"] : [], note: "" };
+          this.mode = "reject";
+        },
+        // What the decision means for the judges (the real API returns a calibration "cell").
+        explain(decision, q) {
+          const flagged = MOCK.judges.filter((j) => q.judges[j.id] === "flag").map((j) => j.label);
+          const list = flagged.join(" and ");
+          if (decision === "reject") {
+            return flagged.length
+              ? { bad: false, title: "Confirmed bad", text: `The ${list} judge${flagged.length > 1 ? "s" : ""} flagged it too. The reason${this.rej.reasons.length > 1 ? "s" : ""} (${this.rej.reasons.map(label).join(", ")}) ${this.rej.reasons.length > 1 ? "are" : "is"} added to the evidence the generator learns rules from.` }
+              : { bad: true, title: "Missed", text: `Every judge passed a question you rejected. This counts against their agreement and is available for them to re-learn from.` };
+          }
+          const verb = decision === "edit" ? "edited and approved" : "approved";
+          return flagged.length
+            ? { bad: true, title: "False alarm", text: `You ${verb} a question the ${list} judge${flagged.length > 1 ? "s" : ""} flagged. This counts against ${flagged.length > 1 ? "their" : "its"} agreement.` }
+            : { bad: false, title: "Confirmed good", text: `All four judges passed it and you ${verb} it.${decision === "edit" ? " Your edit is kept as a new version; the original stays in history." : ""}` };
+        },
+        decide(decision) {
+          const q = this.current;
+          if (!q) return;
+          if (decision === "reject" && !this.rej.reasons.length) return;
+          if (decision === "edit" && !this.draftChanged) return;
+          this.outcome = this.explain(decision, q);
+          this.tally[decision]++;
+          this.done.push(q.id);
+          this.skippedIds = this.skippedIds.filter((id) => id !== q.id);
+          Mock.toast(`#${q.id} ${decision === "approve" ? "approved" : decision === "edit" ? "edited and approved" : "rejected"}`);
+          this.advance();
+        },
+        skip() {
+          if (!this.skippedIds.includes(this.current.id)) this.skippedIds.push(this.current.id);
+          this.outcome = null;
+          this.advance();
+        },
+        advance() {
+          this.mode = "view";
+          // Next undecided item after the current one; skipped items come back at the end.
+          const n = this.queue.findIndex((q, i) => i > this.idx && !this.done.includes(q.id) && !this.skippedIds.includes(q.id));
+          this.idx = n >= 0 ? n : this.queue.length;
+          window.scrollTo({ top: 0 });
+        },
+        restart() {
+          const first = this.queue.findIndex((q) => !this.done.includes(q.id));
+          this.skippedIds = [];
+          this.idx = first >= 0 ? first : this.queue.length;
+          this.outcome = null;
+        },
+        key(e) {
+          if (!this.current) return;
+          const typing = ["TEXTAREA", "INPUT", "SELECT"].includes(e.target.tagName) && e.target.type !== "checkbox";
+          if (e.key === "Escape") { this.mode = "view"; return; }
+          if (this.mode === "edit") { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.decide("edit"); } return; }
+          if (this.mode === "reject") { if (e.key === "Enter" && !typing) { e.preventDefault(); this.decide("reject"); } return; }
+          if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+          const k = e.key.toLowerCase();
+          if (k === "a") this.decide("approve");
+          else if (k === "e") { e.preventDefault(); this.startEdit(); }
+          else if (k === "r") this.startReject();
+          else if (k === "s") this.skip();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

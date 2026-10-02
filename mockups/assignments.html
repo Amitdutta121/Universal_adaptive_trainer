@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assignments · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- G2 · Assignments: graded practice. Each one has a scope (topics), a goal, dates and points, and can send grades to the LMS. -->
+<body data-scope="course" data-nav="assignments" data-title="Assignments">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Assignments</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl">Practice that counts toward the grade. A student earns the points by reaching the goal on the topics in scope; partial progress earns partial credit.</p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="rows.length">
+        <a class="btn" data-variant="outline" :href="Mock.link('gradebook.html')">Gradebook</a>
+        <a class="btn" :href="Mock.link('assignment.html', { new: 1 })"><i data-lucide="plus"></i>New assignment</a>
+      </div>
+    </div>
+
+    <!-- Empty state (statistics): no taxonomy means no schedule and nothing to assign. -->
+    <template x-if="!rows.length">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="calendar-check"></i></span>
+          <h2 class="font-semibold">No assignments yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md">An assignment is built from scheduled topics, and this course has no approved taxonomy to schedule yet. Approve the AI-drafted taxonomy, map its topics to weeks on Schedule, then create assignments here.</p>
+          <div class="flex gap-2 mt-2">
+            <a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review the drafted taxonomy</a>
+            <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('schedule.html')">Schedule</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="rows.length">
+      <div class="card">
+        <header>
+          <h2 x-text="`${rows.length} assignments`"></h2>
+          <p x-text="`Practice is ${totalPoints} points in total; set its weight in your syllabus or LMS. ${enrolled} students enrolled across ${sectionCount} sections.`"></p>
+        </header>
+        <section class="p-0">
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="pl-6">Assignment</th>
+                  <th>Scope</th>
+                  <th>Goal</th>
+                  <th>Open – due</th>
+                  <th class="text-end">Points</th>
+                  <th>Status</th>
+                  <th title="Done on time or late / enrolled">Completed</th>
+                  <th class="pr-6">LMS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="a in rows" :key="a.id">
+                  <tr>
+                    <td class="pl-6 whitespace-normal min-w-[11rem]"><a class="font-medium hover:underline" :href="Mock.link('assignment.html', { id: a.id })" x-text="a.name"></a></td>
+                    <td class="text-sm whitespace-normal min-w-[9rem] max-w-[12rem]"><div class="line-clamp-2" :title="a.topicNames.join(', ')" x-text="a.scope"></div></td>
+                    <td class="text-sm whitespace-nowrap" x-text="goal(a)"></td>
+                    <td class="text-sm whitespace-nowrap">
+                      <span x-text="`${fmt(a.opens)} – ${fmt(a.due, true)}`"></span>
+                      <div class="text-xs text-muted-foreground" x-text="a.late.days ? `late ${a.late.days}d, −${Math.round(a.late.penalty * 100)}%` : 'no late work'"></div>
+                    </td>
+                    <td class="text-end font-mono text-sm" x-text="a.points"></td>
+                    <td><span class="pill" :class="statusTone(a.status)" x-text="statusLabel(a.status)"></span></td>
+                    <td class="whitespace-nowrap">
+                      <template x-if="a.status === 'open' || a.status === 'closed'">
+                        <div>
+                          <div class="inline-flex items-center gap-2">
+                            <span class="h-1.5 w-12 rounded-full" style="background:var(--muted)"><span class="block h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${100 * a.done / enrolled}%` }"></span></span>
+                            <span class="font-mono text-sm" x-text="`${a.done}/${enrolled}`"></span>
+                          </div>
+                          <div class="text-xs text-muted-foreground" x-show="a.late_n" x-text="`incl. ${a.late_n} late`"></div>
+                        </div>
+                      </template>
+                      <span class="text-sm text-muted-foreground" x-show="a.status !== 'open' && a.status !== 'closed'">—</span>
+                    </td>
+                    <td class="pr-6 text-sm whitespace-nowrap">
+                      <span x-show="a.lms && a.lms.synced" x-text="a.lms && a.lms.synced ? `Synced to Canvas ${fmt(a.lms.synced.slice(0, 10))}` : ''"></span>
+                      <span style="color:var(--warn-solid)" x-show="a.lms && !a.lms.synced" title="Grades go to Canvas after the due date">Not synced</span>
+                      <span class="text-muted-foreground" x-show="!a.lms" title="Grades stay in the gradebook">—</span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <footer class="text-xs text-muted-foreground">
+          <span>Completed counts students who reached the goal, on time or within the late window. Excused students count as completed. Per-student status and extensions are in the <a class="underline underline-offset-4" :href="Mock.link('gradebook.html')">gradebook</a>.</span>
+        </footer>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-plan.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const students = MOCK.students.filter((s) => s.course === c.id);
+      const topicName = (id) => (c.taxonomy.find((t) => t.id === id) || {}).name || id;
+      const weeks = MOCK.plan.topicWeeks(c.id);
+      const rows = MOCK.assignments.filter((a) => a.course === c.id).map((a) => {
+        const res = students.map((s) => MOCK.assignment_results[s.id][a.id]);
+        const topicNames = a.topics.map(topicName);
+        const ws = a.topics.map((t) => weeks[t]).filter(Boolean);
+        const lo = Math.min(...ws), hi = Math.max(...ws);
+        return {
+          ...a, topicNames,
+          // Long scopes read better as a week range.
+          scope: a.topics.length > 3 ? `Weeks ${lo}–${hi}: ${a.topics.length} topics` : topicNames.join(", "),
+          done: res.filter((r) => ["done", "late", "excused"].includes(r.state)).length,
+          late_n: res.filter((r) => r.state === "late").length,
+        };
+      });
+      return {
+        course: c,
+        rows,
+        enrolled: students.length,
+        sectionCount: MOCK.classes.filter((k) => k.course === c.id).length,
+        totalPoints: rows.reduce((n, a) => n + a.points, 0),
+        fmt(d, weekday) {
+          return new Date(d + "T12:00").toLocaleDateString("en-US", weekday ? { weekday: "short", month: "short", day: "numeric" } : { month: "short", day: "numeric" });
+        },
+        goal(a) { return a.goal.type === "mastery" ? `${Math.round(a.goal.target * 100)}% on each topic` : `${a.goal.n} questions`; },
+        statusTone(s) { return { closed: "tone-muted", open: "tone-ok", draft: "tone-warn", scheduled: "tone-accent" }[s]; },
+        statusLabel(s) { return { closed: "Closed", open: "Open", draft: "Draft", scheduled: "Scheduled" }[s]; },
+      };
+    }
+  </script>
+</body>
+</html>

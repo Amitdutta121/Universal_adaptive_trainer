@@ -1,0 +1,517 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Four Taxonomy Builders</title>
+
+<style>
+  /* Tokens copied from frontend/src/app/globals.css so these read as the real app. */
+  :root {
+    --paper: #f4f6f6; --surface: #fff; --surface-2: #ecefef; --surface-3: #e4e9e8;
+    --ink: #131a1c; --ink-2: #3d4a4d; --muted-ink: #6b797c;
+    --hairline: #dbe0e0; --hairline-2: #c7cfcf;
+    --accent-solid: #2e6f6a; --accent-text: #1d4a47; --accent-wash: #dceae8;
+    --ok-solid: #2f7d57; --ok-wash: #d9ede3;
+    --warn-solid: #b06b14; --warn-wash: #f5e8d1;
+    --critical-solid: #b4531f; --critical-wash: #f6e1d5;
+    --shadow-soft: 0 1px 2px rgb(19 26 28 / .05), 0 10px 30px -20px rgb(19 26 28 / .35);
+    --radius: .85rem;
+    --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-head: "Archivo", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0d1214; --surface: #151c1e; --surface-2: #1d2528; --surface-3: #263033;
+      --ink: #e7ecec; --ink-2: #b4c0c1; --muted-ink: #7e8d8f;
+      --hairline: #26312f; --hairline-2: #35423f;
+      --accent-solid: #66b8b0; --accent-text: #9ad6d0; --accent-wash: #17322f;
+      --ok-solid: #5cb786; --ok-wash: #163126;
+      --warn-solid: #d7a548; --warn-wash: #392c16;
+      --critical-solid: #e5924f; --critical-wash: #3c2518;
+      --shadow-soft: 0 1px 2px rgb(0 0 0 / .4), 0 10px 30px -20px rgb(0 0 0 / .9);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
+  h1, h2, h3 { font-family: var(--font-head); margin: 0; text-wrap: balance; }
+  p { margin: 0; }
+  button, input, textarea { font: inherit; color: inherit; }
+  :is(button, input, textarea, [tabindex]):focus-visible { outline: 2px solid var(--accent-solid); outline-offset: 1px; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 48px 20px 96px; display: flex; flex-direction: column; gap: 56px; }
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted-ink); }
+  .lede { color: var(--ink-2); max-width: 70ch; }
+  .note { font-size: 13px; color: var(--muted-ink); max-width: 74ch; }
+  .masthead { display: flex; flex-direction: column; gap: 12px; }
+  .masthead h1 { font-size: clamp(1.8rem, 4vw, 2.5rem); line-height: 1.1; letter-spacing: -.01em; }
+
+  /* ---- variant section chrome ---------------------------------------- */
+  .variant { display: flex; flex-direction: column; gap: 14px; }
+  .variant-head { display: flex; flex-direction: column; gap: 6px; }
+  .variant-head h2 { font-size: 1.3rem; }
+  .pc { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .pc { grid-template-columns: 1fr; } }
+  .pc ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+  .pc .lbl { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .pc .pro .lbl { color: var(--ok-solid); } .pc .con .lbl { color: var(--critical-solid); }
+
+  /* ---- the app frame the mock sits inside ---------------------------- */
+  .frame { border: 1px solid var(--hairline-2); border-radius: var(--radius); background: var(--paper); box-shadow: var(--shadow-soft); overflow: hidden; }
+  .frame-bar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--hairline); }
+  .frame-bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--hairline-2); }
+  .frame-bar span { margin-left: 8px; font: 12px var(--font-mono); color: var(--muted-ink); }
+  .page { padding: 20px 22px 0; }
+  .crumbs { font-size: 12px; color: var(--muted-ink); margin-bottom: 6px; }
+  .page h3 { font-size: 1.35rem; letter-spacing: -.005em; }
+  .page-sub { color: var(--muted-ink); font-size: 13px; margin-top: 2px; }
+  .body { padding: 16px 22px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* ---- form atoms ---------------------------------------------------- */
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field > label, .lbl-s { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .in { width: 100%; padding: 7px 10px; border: 1px solid var(--hairline-2); border-radius: 8px; background: var(--surface); }
+  .in::placeholder { color: var(--muted-ink); }
+  .in.quiet { border-color: transparent; background: transparent; padding-left: 4px; }
+  .in.quiet:hover { border-color: var(--hairline); } .in.quiet:focus { background: var(--surface); border-color: var(--hairline-2); }
+  textarea.in { resize: vertical; min-height: 34px; }
+  .count { font-size: 11px; color: var(--muted-ink); text-align: right; font-family: var(--font-mono); }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--hairline-2); background: var(--surface); cursor: pointer; font-size: 13.5px; font-weight: 500; white-space: nowrap; }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent-solid); border-color: var(--accent-solid); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  @media (prefers-color-scheme: dark) { .btn.primary { color: #0d1214; } }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+  .btn.ghost:hover { background: var(--surface-2); }
+  .btn.sm { padding: 3px 8px; font-size: 12.5px; }
+  .ico { padding: 4px 6px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted-ink); line-height: 1; }
+  .ico:hover { background: var(--surface-3); color: var(--ink); }
+  .ico.del:hover { color: var(--critical-solid); }
+  .grip { cursor: grab; color: var(--hairline-2); user-select: none; letter-spacing: -2px; }
+  .idx { font: 12px var(--font-mono); color: var(--muted-ink); min-width: 1.6em; }
+  .pill { font: 11.5px var(--font-mono); padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--hairline); }
+
+  .savebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 22px; border-top: 1px solid var(--hairline); background: var(--surface); }
+  .savebar .sum { margin-right: auto; font-size: 13px; color: var(--ink-2); }
+  .savebar .sum b { font-weight: 600; color: var(--ink); }
+  .draft { font-size: 12px; color: var(--muted-ink); }
+
+  .banner { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid; font-size: 13px; }
+  .banner.err { background: var(--critical-wash); border-color: color-mix(in srgb, var(--critical-solid) 40%, transparent); }
+  .banner.warn { background: var(--warn-wash); border-color: color-mix(in srgb, var(--warn-solid) 40%, transparent); }
+  .banner b { font-weight: 600; } .banner code { font: 12px var(--font-mono); }
+
+  /* ---- A: inline tree ------------------------------------------------ */
+  .tcard { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; }
+  .tcard-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: color-mix(in srgb, var(--surface-2) 60%, transparent); border-bottom: 1px solid var(--hairline); border-radius: 10px 10px 0 0; }
+  .tcard-head .in { font-weight: 600; }
+  .srow { display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 30px; border-top: 1px solid var(--hairline); }
+  .srow:first-child { border-top: 0; }
+  .srow .in.name { flex: 0 1 40%; } .srow .in.desc { flex: 1; color: var(--ink-2); font-size: 13px; }
+  .addrow { padding: 6px 10px 8px 34px; }
+  .tdesc { padding: 4px 10px 6px 30px; }
+
+  /* ---- B: master / detail ------------------------------------------- */
+  .md { display: grid; grid-template-columns: 270px 1fr; gap: 14px; }
+  @media (max-width: 760px) { .md { grid-template-columns: 1fr; } }
+  .pane { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; }
+  .pane-h { padding: 9px 12px; border-bottom: 1px solid var(--hairline); display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted-ink); }
+  .tl { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+  .tl button { width: 100%; text-align: left; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; }
+  .tl button:hover { background: var(--surface-2); }
+  .tl button[aria-current="true"] { background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent-solid) 35%, transparent); color: var(--accent-text); }
+  .tl .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .tbl { width: 100%; border-collapse: collapse; }
+  .tbl th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-ink); padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+  .tbl td { padding: 4px 6px; border-top: 1px solid var(--hairline); vertical-align: middle; }
+  .tbl tr:first-child td { border-top: 0; }
+  .detail-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* ---- C: outline text ---------------------------------------------- */
+  .oc { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .oc { grid-template-columns: 1fr; } }
+  .outline { width: 100%; min-height: 330px; font: 13.5px/1.7 var(--font-mono); tab-size: 2; white-space: pre; padding: 12px; border: 0; background: transparent; resize: vertical; }
+  .outline:focus { outline: none; }
+  .prev-tree { padding: 12px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+  .prev-tree .tp { font-weight: 600; } .prev-tree ul { margin: 2px 0 0; padding-left: 18px; color: var(--ink-2); }
+  .prev-tree .d { color: var(--muted-ink); font-size: 12.5px; }
+  .issue { font-size: 12.5px; color: var(--warn-solid); }
+
+  /* ---- D: board ------------------------------------------------------ */
+  .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+  .col { flex: 0 0 240px; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .col-h { display: flex; align-items: center; gap: 4px; }
+  .col-h .in { font-weight: 600; background: transparent; border-color: transparent; }
+  .col-h .in:hover { border-color: var(--hairline-2); }
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 9px; display: flex; flex-direction: column; gap: 2px; box-shadow: var(--shadow-soft); }
+  .card .r { display: flex; gap: 6px; align-items: flex-start; }
+  .card .cn { font-weight: 500; flex: 1; font-size: 14px; }
+  .card .cd { font-size: 12.5px; color: var(--muted-ink); padding-left: 22px; }
+  .card.lift { transform: rotate(1.5deg); border-color: var(--accent-solid); box-shadow: 0 10px 24px -10px rgb(19 26 28 / .4); }
+  .ghost-card { border: 1.5px dashed var(--hairline-2); border-radius: 8px; height: 34px; }
+  .colnew { flex: 0 0 200px; border: 1.5px dashed var(--hairline-2); border-radius: 10px; padding: 14px; color: var(--muted-ink); text-align: center; cursor: pointer; background: transparent; }
+
+  /* ---- shared pieces ------------------------------------------------- */
+  .modal { max-width: 460px; background: var(--surface); border: 1px solid var(--hairline-2); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 18px -8px rgb(19 26 28 / .25), 0 28px 56px -28px rgb(19 26 28 / .4); }
+  .modal h3 { font-size: 1.05rem; }
+  .modal .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .json { font: 12.5px/1.55 var(--font-mono); background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 10px; padding: 12px; white-space: pre; overflow: auto; margin: 0; color: var(--ink-2); }
+  .shared-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Curriculum · manual taxonomy maker · mock, not wired</div>
+    <h1>Four ways to build a taxonomy by hand</h1>
+    <p class="lede">
+      All four end in the same place: the builder assembles one taxonomy document and sends it through the existing
+      <code>POST /curriculum/versions</code>. So what differs is only how a professor types and rearranges a
+      Topic → Subtopic tree. Variants A–C are live enough to click and type into; D is static.
+    </p>
+    <p class="note">
+      Shared across every variant, and shown once at the bottom: a draft that autosaves, a rejection banner using the
+      backend's own message, the "this replaces the live taxonomy" confirm, and a read-only JSON preview.
+      Limits shown (300 / 2000) are the ones <code>/curriculum/document-guide</code> would supply.
+    </p>
+  </header>
+
+  <!-- ===================================================================== -->
+  <section class="variant" id="a">
+    <div class="variant-head">
+      <div class="eyebrow">Variant A</div>
+      <h2>Inline outline editor</h2>
+      <p class="lede">The version-detail tree, but every name is an input. One column, everything visible, no modes.</p>
+    </div>
+    <div class="pc">
+      <div class="pro"><div class="lbl">Good for</div><ul><li>Smallest build; near-copy of <code>curriculum-tree.tsx</code></li><li>Reads like the page it will become</li><li>Best on a phone or narrow window</li></ul></div>
+      <div class="con"><div class="lbl">Weak at</div><ul><li>Long taxonomies become a long scroll</li><li>Moving a subtopic to another topic is cut/paste, not a drag</li></ul></div>
+    </div>
+    <div class="frame" id="frameA"></div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="variant" id="b">
+    <div class="variant-head">
+      <div class="eyebrow">Variant B</div>
+      <h2>Topic list + detail pane</h2>
+      <p class="lede">Topics down the left, the selected topic's description and subtopic table on the right. Same shape as a settings screen.</p>
+    </div>
+    <div class="pc">
+      <div class="pro"><div class="lbl">Good for</div><ul><li>Scales to 15+ topics; only one topic's inputs on screen at once</li><li>Left rail doubles as an outline and a reorder list</li><li>Table makes many subtopics fast to tab through</li></ul></div>
+      <div class="con"><div class="lbl">Weak at</div><ul><li>Can't see the whole tree in one glance</li><li>Two panes need a stacked layout under ~760px</li></ul></div>
+    </div>
+    <div class="frame" id="frameB"></div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="variant" id="c">
+    <div class="variant-head">
+      <div class="eyebrow">Variant C</div>
+      <h2>Type an outline, see the tree</h2>
+      <p class="lede">
+        No form at all: one line per item, indent for subtopics, <code>—</code> before an optional description.
+        The right side is the parsed result. This is the paste-from-notes path made first-class.
+      </p>
+    </div>
+    <div class="pc">
+      <div class="pro"><div class="lbl">Good for</div><ul><li>Fastest way to enter 40 subtopics from a syllabus</li><li>Paste a bullet list straight from a doc</li><li>Reorder by moving lines</li></ul></div>
+      <div class="con"><div class="lbl">Weak at</div><ul><li>Introduces a second input format the app must define and parse</li><li>Least discoverable; a professor has to learn the syntax</li><li>Long descriptions get awkward on one line</li></ul></div>
+    </div>
+    <div class="frame" id="frameC"></div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="variant" id="d">
+    <div class="variant-head">
+      <div class="eyebrow">Variant D · static</div>
+      <h2>Board: topics as columns</h2>
+      <p class="lede">Each topic is a column, each subtopic a card you drag between columns. Best when the job is <em>restructuring</em> rather than typing.</p>
+    </div>
+    <div class="pc">
+      <div class="pro"><div class="lbl">Good for</div><ul><li>Moving a subtopic to another topic is one drag</li><li>Grouping and regrouping feels natural</li></ul></div>
+      <div class="con"><div class="lbl">Weak at</div><ul><li>Worst for typing many items; each card is a small form</li><li>8+ topics means horizontal scrolling</li><li>Needs dnd-kit cross-container drag plus a keyboard alternative: the heaviest build</li></ul></div>
+    </div>
+    <div class="frame" id="frameD"></div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="variant" id="shared">
+    <div class="variant-head">
+      <div class="eyebrow">Shared by all four</div>
+      <h2>Rejection, confirm, and JSON preview</h2>
+      <p class="lede">These do not depend on which editor wins.</p>
+    </div>
+    <div class="shared-grid">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="lbl-s">Backend rejection (nothing typed is lost)</div>
+        <div class="banner err" role="alert">
+          <div>
+            <b>The taxonomy document did not satisfy the schema.</b><br>
+            <code>topics.1.subtopics.1.name: duplicate subtopic name 'while loops'</code>
+          </div>
+        </div>
+        <div class="lbl-s" style="margin-top:6px">Autosaved draft</div>
+        <div class="banner warn">
+          <div><b>Unsaved draft restored</b> from this browser, 4 minutes ago. <button class="btn sm" style="margin-left:6px">Discard draft</button></div>
+        </div>
+      </div>
+
+      <div class="modal" role="dialog" aria-label="Confirm save">
+        <h3>Replace the live taxonomy?</h3>
+        <p class="note" style="max-width:none">
+          Saving creates a new version and makes it the one questions and coverage use. The current one,
+          <b>Introductory Python</b> (v3, 4 topics · 11 subtopics), becomes Replaced.
+        </p>
+        <p class="note" style="max-width:none">
+          Questions and student measurements already recorded stay attached to the old version.
+        </p>
+        <div class="row"><button class="btn">Cancel</button><button class="btn primary">Save as new version</button></div>
+      </div>
+
+      <div>
+        <div class="lbl-s" style="margin-bottom:6px">Preview: exactly what will be sent</div>
+<pre class="json">{
+  "schema_version": "1",
+  "label": "Introductory Python",
+  "topics": [
+    {
+      "name": "Variables",
+      "description": "Creating names, assigning values…",
+      "subtopics": [
+        { "name": "Assignment and rebinding", "description": "" }
+      ]
+    }
+  ]
+}</pre>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* One sample document; each variant clones it so they can be edited independently. */
+const SAMPLE = {
+  label: "Introductory Python",
+  topics: [
+    { name: "Variables", desc: "Creating names, assigning values, and understanding types.",
+      subs: [ { name: "Assignment and rebinding", desc: "Using = to bind a name to a value and reassign it later." },
+              { name: "Basic types", desc: "Working with int, float, str, and bool values." } ] },
+    { name: "Loops", desc: "Repeating actions with for and while loops.",
+      subs: [ { name: "for loops over sequences", desc: "Iterating over strings, lists, and other iterables." },
+              { name: "while loops", desc: "Repeating while a condition remains true." } ] },
+    { name: "Functions", desc: "",
+      subs: [ { name: "Defining and calling", desc: "" } ] },
+  ],
+};
+const clone = () => JSON.parse(JSON.stringify(SAMPLE));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const totals = st => ({ t: st.topics.length, s: st.topics.reduce((n, t) => n + t.subs.length, 0) });
+
+function chrome(inner, st, foot) {
+  const { t, s } = totals(st);
+  return `
+    <div class="frame-bar"><i></i><i></i><i></i><span>/curriculum/new</span></div>
+    <div class="page">
+      <div class="crumbs">Curriculum / Build manually</div>
+      <h3>New taxonomy</h3>
+      <p class="page-sub">Build a Topic → Subtopic taxonomy by hand. Saving creates a new version.</p>
+    </div>
+    <div class="body">
+      <div class="field" style="max-width:420px">
+        <label>Version label</label>
+        <input class="in" data-k="label" value="${esc(st.label)}" maxlength="200">
+      </div>
+      ${inner}
+    </div>
+    <div class="savebar">
+      <span class="sum"><b>${t}</b> ${t === 1 ? "topic" : "topics"} · <b>${s}</b> ${s === 1 ? "subtopic" : "subtopics"}
+        <span class="draft"> · draft saved</span></span>
+      ${foot || ""}
+      <button class="btn ghost">Preview JSON</button>
+      <button class="btn primary">Save as new version…</button>
+    </div>`;
+}
+
+/* ---------- A ---------- */
+const A = clone();
+function renderA() {
+  const el = document.getElementById("frameA");
+  const inner = `<div style="display:flex;flex-direction:column;gap:12px">
+    ${A.topics.map((t, i) => `
+      <div class="tcard">
+        <div class="tcard-head">
+          <span class="grip" title="Drag to reorder">⋮⋮</span><span class="idx">${i + 1}</span>
+          <input class="in quiet" data-t="${i}" data-k="name" value="${esc(t.name)}" placeholder="Topic name" maxlength="300" aria-label="Topic ${i + 1} name">
+          <span class="pill">${t.subs.length}</span>
+          <button class="ico" data-act="up" data-t="${i}" aria-label="Move up">↑</button>
+          <button class="ico" data-act="down" data-t="${i}" aria-label="Move down">↓</button>
+          <button class="ico del" data-act="delt" data-t="${i}" aria-label="Delete topic">✕</button>
+        </div>
+        <div class="tdesc"><input class="in quiet" data-t="${i}" data-k="desc" value="${esc(t.desc)}" placeholder="Topic description (optional)" style="font-size:13px;color:var(--ink-2)"></div>
+        ${t.subs.map((s, j) => `
+          <div class="srow">
+            <span class="grip">⋮⋮</span>
+            <input class="in quiet name" data-t="${i}" data-s="${j}" data-k="name" value="${esc(s.name)}" placeholder="Subtopic name" maxlength="300" aria-label="Subtopic name">
+            <input class="in quiet desc" data-t="${i}" data-s="${j}" data-k="desc" value="${esc(s.desc)}" placeholder="Description (optional)" aria-label="Subtopic description">
+            <button class="ico del" data-act="dels" data-t="${i}" data-s="${j}" aria-label="Delete subtopic">✕</button>
+          </div>`).join("")}
+        <div class="addrow"><button class="btn ghost sm" data-act="adds" data-t="${i}">+ Add subtopic</button></div>
+      </div>`).join("")}
+    <div><button class="btn" data-act="addt">+ Add topic</button></div>
+  </div>
+  <div class="banner err" role="alert">
+    <div><b>Rejected:</b> <code>topics.1.subtopics.1.name: duplicate subtopic name 'while loops'</code> — shown here only when the backend says so.</div>
+  </div>`;
+  el.innerHTML = chrome(inner, A);
+}
+document.getElementById("frameA").addEventListener("input", e => {
+  const d = e.target.dataset; if (!d.k) return;
+  const o = d.k === "label" ? A : d.s !== undefined ? A.topics[d.t].subs[d.s] : A.topics[d.t];
+  if (d.k === "label") A.label = e.target.value; else o[d.k] = e.target.value;
+});
+document.getElementById("frameA").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const i = +b.dataset.t, j = +b.dataset.s, a = b.dataset.act;
+  if (a === "adds") A.topics[i].subs.push({ name: "", desc: "" });
+  if (a === "addt") A.topics.push({ name: "", desc: "", subs: [{ name: "", desc: "" }] });
+  if (a === "dels") A.topics[i].subs.splice(j, 1);
+  if (a === "delt") A.topics.splice(i, 1);
+  if (a === "up" && i > 0) [A.topics[i - 1], A.topics[i]] = [A.topics[i], A.topics[i - 1]];
+  if (a === "down" && i < A.topics.length - 1) [A.topics[i + 1], A.topics[i]] = [A.topics[i], A.topics[i + 1]];
+  renderA();
+});
+
+/* ---------- B ---------- */
+const B = clone(); let bSel = 0;
+function renderB() {
+  const el = document.getElementById("frameB");
+  const t = B.topics[bSel];
+  const inner = `<div class="md">
+    <div class="pane">
+      <div class="pane-h">Topics <button class="btn sm" style="margin-left:auto;text-transform:none;letter-spacing:0" data-act="addt">+ Add</button></div>
+      <ul class="tl">
+        ${B.topics.map((x, i) => `<li><button data-act="sel" data-t="${i}" ${i === bSel ? 'aria-current="true"' : ""}>
+          <span class="grip">⋮⋮</span><span class="nm">${esc(x.name || "Untitled topic")}</span><span class="pill">${x.subs.length}</span></button></li>`).join("")}
+      </ul>
+    </div>
+    ${t ? `<div class="pane">
+      <div class="pane-h">Topic ${bSel + 1} of ${B.topics.length}
+        <span style="margin-left:auto;display:flex;gap:2px">
+          <button class="ico" data-act="up" aria-label="Move topic up">↑</button>
+          <button class="ico" data-act="down" aria-label="Move topic down">↓</button>
+          <button class="ico del" data-act="delt" aria-label="Delete topic">✕</button></span></div>
+      <div class="detail-body">
+        <div class="field"><label>Name</label><input class="in" data-k="name" value="${esc(t.name)}" maxlength="300"></div>
+        <div class="field"><label>Description <span style="color:var(--muted-ink)">(optional)</span></label>
+          <textarea class="in" data-k="desc" rows="2" maxlength="2000">${esc(t.desc)}</textarea></div>
+        <div>
+          <div class="lbl-s" style="margin-bottom:4px">Subtopics</div>
+          <div style="border:1px solid var(--hairline);border-radius:8px;overflow:hidden">
+          <table class="tbl"><thead><tr><th style="width:26px"></th><th style="width:38%">Name</th><th>Description</th><th style="width:36px"></th></tr></thead><tbody>
+            ${t.subs.map((s, j) => `<tr>
+              <td><span class="grip">⋮⋮</span></td>
+              <td><input class="in quiet" data-s="${j}" data-k="name" value="${esc(s.name)}" placeholder="Subtopic name" aria-label="Subtopic name"></td>
+              <td><input class="in quiet" data-s="${j}" data-k="desc" value="${esc(s.desc)}" placeholder="Optional" aria-label="Subtopic description"></td>
+              <td><button class="ico del" data-act="dels" data-s="${j}" aria-label="Delete subtopic">✕</button></td></tr>`).join("")}
+          </tbody></table></div>
+          <button class="btn ghost sm" style="margin-top:6px" data-act="adds">+ Add subtopic</button>
+        </div>
+      </div></div>` : `<div class="pane"><div class="detail-body"><p class="note">No topics yet. Add one.</p></div></div>`}
+  </div>`;
+  el.innerHTML = chrome(inner, B);
+}
+document.getElementById("frameB").addEventListener("input", e => {
+  const d = e.target.dataset; if (!d.k) return;
+  if (d.k === "label") { B.label = e.target.value; return; }
+  const o = d.s !== undefined ? B.topics[bSel].subs[d.s] : B.topics[bSel];
+  o[d.k] = e.target.value;
+  if (d.k === "name" && d.s === undefined) { // keep the rail in sync without re-rendering (and losing focus)
+    const nm = document.querySelectorAll("#frameB .tl .nm")[bSel]; if (nm) nm.textContent = e.target.value || "Untitled topic";
+  }
+});
+document.getElementById("frameB").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const a = b.dataset.act, j = +b.dataset.s;
+  if (a === "sel") bSel = +b.dataset.t;
+  if (a === "addt") { B.topics.push({ name: "", desc: "", subs: [{ name: "", desc: "" }] }); bSel = B.topics.length - 1; }
+  if (a === "adds") B.topics[bSel].subs.push({ name: "", desc: "" });
+  if (a === "dels") B.topics[bSel].subs.splice(j, 1);
+  if (a === "delt") { B.topics.splice(bSel, 1); bSel = Math.max(0, bSel - 1); }
+  if (a === "up" && bSel > 0) { [B.topics[bSel - 1], B.topics[bSel]] = [B.topics[bSel], B.topics[bSel - 1]]; bSel--; }
+  if (a === "down" && bSel < B.topics.length - 1) { [B.topics[bSel + 1], B.topics[bSel]] = [B.topics[bSel], B.topics[bSel + 1]]; bSel++; }
+  renderB();
+});
+
+/* ---------- C ---------- */
+const C_TEXT = `Variables — Creating names, assigning values, and understanding types.
+  Assignment and rebinding — Using = to bind a name to a value.
+  Basic types — int, float, str, and bool.
+Loops
+  for loops over sequences
+  while loops
+Functions
+  Defining and calling`;
+function parseOutline(text) {
+  const topics = [], issues = [];
+  text.split("\n").forEach((raw, n) => {
+    if (!raw.trim()) return;
+    const indented = /^(\s{2,}|\t)/.test(raw);
+    const [name, ...rest] = raw.trim().split(" — ");
+    const item = { name: name.trim(), desc: rest.join(" — ").trim() };
+    if (!indented) topics.push({ ...item, subs: [] });
+    else if (!topics.length) issues.push(`Line ${n + 1}: a subtopic needs a topic above it.`);
+    else topics[topics.length - 1].subs.push(item);
+  });
+  topics.forEach(t => { if (!t.subs.length) issues.push(`“${t.name}” has no subtopics yet — every topic needs at least one.`); });
+  return { topics, issues };
+}
+function renderC() {
+  const el = document.getElementById("frameC");
+  const inner = `<div class="oc">
+    <div class="pane">
+      <div class="pane-h">Outline <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400">indent = subtopic · “ — ” = description</span></div>
+      <textarea class="outline" id="cText" spellcheck="false" aria-label="Taxonomy outline">${esc(C_TEXT)}</textarea>
+    </div>
+    <div class="pane">
+      <div class="pane-h">Parsed result <span id="cCount" class="pill" style="margin-left:auto"></span></div>
+      <div class="prev-tree" id="cPrev"></div>
+    </div>
+  </div>`;
+  el.innerHTML = chrome(inner, { label: SAMPLE.label, topics: [] });
+  const upd = () => {
+    const { topics, issues } = parseOutline(document.getElementById("cText").value);
+    const s = topics.reduce((n, t) => n + t.subs.length, 0);
+    document.getElementById("cCount").textContent = `${topics.length} topics · ${s} subtopics`;
+    const sum = el.querySelector(".savebar .sum"); if (sum) sum.innerHTML = `<b>${topics.length}</b> topics · <b>${s}</b> subtopics <span class="draft"> · draft saved</span>`;
+    document.getElementById("cPrev").innerHTML =
+      topics.map(t => `<div><div class="tp">${esc(t.name)}${t.desc ? ` <span class="d">— ${esc(t.desc)}</span>` : ""}</div>
+        <ul>${t.subs.map(x => `<li>${esc(x.name)}${x.desc ? ` <span class="d">— ${esc(x.desc)}</span>` : ""}</li>`).join("")}</ul></div>`).join("")
+      + issues.map(i => `<div class="issue">⚠ ${esc(i)}</div>`).join("");
+  };
+  el.querySelector("#cText").addEventListener("input", upd); upd();
+}
+
+/* ---------- D (static) ---------- */
+function renderD() {
+  const el = document.getElementById("frameD");
+  const cols = clone().topics;
+  const inner = `<div class="board">
+    ${cols.map((t, i) => `<div class="col">
+      <div class="col-h"><input class="in" value="${esc(t.name)}" aria-label="Topic name"><button class="ico del" aria-label="Delete topic">✕</button></div>
+      ${t.subs.map((s, j) => `
+        ${i === 1 && j === 1 ? "" : ""}
+        <div class="card ${i === 0 && j === 1 ? "lift" : ""}"><div class="r"><span class="grip">⋮⋮</span><span class="cn">${esc(s.name)}</span><button class="ico" aria-label="Edit">✎</button></div>${s.desc ? `<div class="cd">${esc(s.desc)}</div>` : ""}</div>`).join("")}
+      ${i === 1 ? `<div class="ghost-card" title="drop target"></div>` : ""}
+      <button class="btn ghost sm" style="align-self:flex-start">+ Add subtopic</button>
+    </div>`).join("")}
+    <button class="colnew">+ Add topic</button>
+  </div>
+  <p class="note">“Basic types” is mid-drag from Variables into Loops. A topic's own description is one click away on the column header (not drawn).</p>`;
+  el.innerHTML = chrome(inner, { label: SAMPLE.label, topics: cols });
+}
+
+renderA(); renderB(); renderC(); renderD();
+</script>

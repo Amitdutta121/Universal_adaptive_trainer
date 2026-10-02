@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generate · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .choice { border: 1px solid var(--border); border-radius: 999px; padding: 0.3rem 0.8rem; font-size: 0.85rem; background: var(--card); }
+    .choice[aria-pressed="true"] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+    .choice:disabled { opacity: 0.5; cursor: not-allowed; }
+    .sec { display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; padding: 0.35rem 0.6rem; border-radius: 0.45rem; font-size: 0.85rem; }
+    .sec:hover { background: var(--muted); }
+    .sec[aria-current="true"] { background: var(--accent); color: var(--accent-foreground); }
+    .fig-label { font-size: 0.68rem; color: var(--muted-foreground); }
+    .fig-value { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+    fieldset:disabled { opacity: 0.6; }
+  </style>
+</head>
+<!-- C9 · Generate: one section at a time (Single) or a spec sheet run as a background job (Bulk). -->
+<body data-scope="course" data-nav="generate" data-title="Generate">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Generate questions</h1>
+        <p class="text-sm text-muted-foreground">Questions are generated from your book sections, checked, judged, and then wait in the review queue for you.</p>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <a class="btn" data-variant="outline" :href="Mock.link('coverage.html')">Show coverage</a>
+      </div>
+    </div>
+
+    <!-- Taxonomy the run is grounded in -->
+    <template x-if="!blocked">
+      <div class="card py-4">
+        <section class="grid gap-0.5 text-sm">
+          <div><span class="text-muted-foreground">Generating against</span> <span class="font-medium" x-text="version.label"></span> <span class="text-muted-foreground" x-text="`· ${version.topics} topics, ${version.subtopics} subtopics · active taxonomy`"></span></div>
+          <div class="text-xs text-muted-foreground">Topic and subtopic are inferred from the section during generation, then checked against this taxonomy by the Subtopic fit judge.</div>
+        </section>
+      </div>
+    </template>
+    <template x-if="blocked">
+      <div class="alert" data-variant="destructive">
+        <i data-lucide="circle-alert"></i>
+        <h2>Generation is blocked until a taxonomy is approved</h2>
+        <section>
+          <p>Every question is checked against an approved taxonomy (which topic and subtopic it tests). This course has none yet: the AI draft from OpenIntro Statistics (8 topics, 29 subtopics) is waiting for your review.</p>
+          <template x-if="analysedSections.length">
+            <p class="mt-2">
+              <span x-text="`${book.title} was already analysed at import, so generation can start as soon as you approve. `"></span>
+              <template x-for="(a, i) in analysedSections" :key="a.id">
+                <span><a class="underline underline-offset-4" :href="Mock.link('section.html', { book: book.id, section: a.id })" x-text="a.title"></a><span x-text="`: ${a.units} testable units${i < analysedSections.length - 1 ? '; ' : '.'}`"></span></span>
+              </template>
+            </p>
+          </template>
+          <p class="mt-2"><a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a></p>
+        </section>
+      </div>
+    </template>
+
+    <div class="tabs w-full" id="gen-tabs">
+      <nav role="tablist" aria-orientation="horizontal">
+        <button type="button" role="tab" id="gen-tab-single" aria-controls="gen-panel-single" :aria-selected="tab === 'single'" :tabindex="tab === 'single' ? 0 : -1" @click="tab = 'single'">Single</button>
+        <button type="button" role="tab" id="gen-tab-bulk" aria-controls="gen-panel-bulk" :aria-selected="tab === 'bulk'" :tabindex="tab === 'bulk' ? 0 : -1" @click="tab = 'bulk'">Bulk spec sheet</button>
+      </nav>
+
+      <!-- ============ Single ============ -->
+      <div role="tabpanel" id="gen-panel-single" aria-labelledby="gen-tab-single" tabindex="-1" :aria-selected="tab === 'single'" x-show="tab === 'single'">
+        <div class="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
+          <!-- Section picker -->
+          <div class="card gap-3 py-4">
+            <header class="px-4">
+              <h2>Section</h2>
+              <p x-text="`${book.title} · ${book.sections} sections`"></p>
+            </header>
+            <section class="px-2">
+              <template x-if="chapters.length">
+                <div class="grid gap-3 max-h-[28rem] overflow-y-auto">
+                  <template x-for="ch in chapters" :key="ch.number">
+                    <div>
+                      <div class="px-2 pb-1 text-xs font-medium text-muted-foreground" x-text="`Ch. ${ch.number} · ${ch.title}`"></div>
+                      <template x-for="s in ch.sections" :key="s.id">
+                        <button type="button" class="sec" x-init="if (sectionId === s.id) $nextTick(() => $el.scrollIntoView({ block: 'nearest' }))" :aria-current="sectionId === s.id" @click="sectionId = s.id; phase = 'idle'; pickUnit(0)">
+                          <span class="min-w-0 flex-1 truncate" x-text="s.title"></span>
+                          <span class="pill tone-muted font-mono" x-show="s.questions" x-text="`${s.questions} made`"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!chapters.length">
+                <p class="px-2 text-sm text-muted-foreground" x-text="`${book.embedded} of ${book.sections} sections are embedded so far (the embedding job is still running). Sections become available here once the taxonomy is approved.`"></p>
+              </template>
+            </section>
+          </div>
+
+          <div class="grid gap-6 content-start">
+            <!-- Controls -->
+            <div class="card">
+              <header>
+                <h2>Generate from this section</h2>
+                <p x-text="section ? section.title : 'Pick a section on the left.'"></p>
+              </header>
+              <section>
+                <fieldset class="grid gap-5" :disabled="blocked || phase === 'running'">
+                  <!-- Testable units from the section analysis (cached at import). -->
+                  <template x-if="analysis">
+                    <div class="grid gap-2">
+                      <div class="flex flex-wrap items-baseline gap-2">
+                        <span class="text-sm font-medium">What to test</span>
+                        <span class="text-xs text-muted-foreground" x-text="`${analysis.units.length} testable units found at import${analysis.skipped.length ? `, ${analysis.skipped.length} skipped` : ''}`"></span>
+                        <a class="ml-auto text-xs underline underline-offset-4" :href="Mock.link('section.html', { book: book.id, section: sectionId })">See the analysis</a>
+                      </div>
+                      <div class="grid gap-1.5">
+                        <template x-for="(u, i) in analysis.units" :key="i">
+                          <label class="flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer" :style="unitIdx === i ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                            <input type="radio" class="input mt-0.5" name="unit" :value="i" :checked="unitIdx === i" @change="pickUnit(i)">
+                            <span class="min-w-0 flex-1 text-sm" x-text="u.text"></span>
+                            <span class="pill tone-muted shrink-0" x-text="MOCK.KNOWLEDGE_KINDS[u.kind].label"></span>
+                          </label>
+                        </template>
+                      </div>
+                      <p class="text-xs text-muted-foreground" x-show="analysis.skipped.length" x-text="skippedText"></p>
+                    </div>
+                  </template>
+                  <template x-if="unit">
+                    <div class="grid gap-2">
+                      <div class="text-sm font-medium">Answer format</div>
+                      <div class="flex flex-wrap gap-x-3 gap-y-2">
+                        <template x-for="r in unitFormats" :key="r.f">
+                          <div class="grid gap-0.5 justify-items-start">
+                            <button type="button" class="choice inline-flex items-center gap-2" :aria-pressed="format === r.f" @click="format = r.f" :disabled="!r.tool" :title="r.tool ? MOCK.LEVELS[r.level].detail : r.why">
+                              <span x-text="r.label"></span>
+                              <span class="pill" :class="r.tool ? MOCK.LEVELS[r.level].tone : 'tone-muted'" x-text="r.tool ? MOCK.LEVELS[r.level].label : 'No tool'"></span>
+                            </button>
+                            <span class="px-2 text-xs text-muted-foreground" x-show="r.tool" x-text="r.tool ? `checked by ${r.tool.name}` : ''"></span>
+                            <a class="px-2 text-xs underline underline-offset-4" x-show="!r.tool && r.fix" :href="Mock.link('settings.html', { tab: 'tools' })" x-text="r.fix"></a>
+                            <span class="px-2 text-xs text-muted-foreground" x-show="!r.tool && !r.fix" x-text="r.why"></span>
+                          </div>
+                        </template>
+                      </div>
+                      <p class="text-xs text-muted-foreground" x-text="`Formats that fit a ${MOCK.KNOWLEDGE_KINDS[unit.kind].label.toLowerCase()}. A format can be asked when one of this course's tools can check it; the pill is what that check proves for this unit.`"></p>
+                    </div>
+                  </template>
+                  <div class="grid gap-2" x-show="!unit">
+                    <div class="text-sm font-medium">Question type</div>
+                    <div class="flex flex-wrap gap-x-3 gap-y-2">
+                      <template x-for="r in typeRows" :key="r.f">
+                        <div class="grid gap-0.5 justify-items-start">
+                          <button type="button" class="choice" :aria-pressed="type === r.f" @click="type = r.f" x-text="r.label" :disabled="blocked || !r.tool"></button>
+                          <span class="px-2 text-xs text-muted-foreground" x-show="r.tool" x-text="r.tool ? `checked by ${r.tool.name}` : ''"></span>
+                          <a class="px-2 text-xs underline underline-offset-4" x-show="!r.tool && r.fix" :href="Mock.link('settings.html', { tab: 'tools' })" x-text="r.fix"></a>
+                        </div>
+                      </template>
+                    </div>
+                    <p class="text-xs text-muted-foreground">Any format one of this course's checking tools can check. Tools are added or paused in <a class="underline" :href="Mock.link('settings.html', { tab: 'tools' })">Settings</a>.</p>
+                  </div>
+                  <div class="grid gap-2">
+                    <div class="text-sm font-medium">Difficulty</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="d in ['easy','medium','hard']" :key="d">
+                        <button type="button" class="choice" :aria-pressed="difficulty === d" @click="difficulty = d" x-text="d[0].toUpperCase() + d.slice(1)" :disabled="blocked"></button>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="grid gap-2">
+                    <div class="text-sm font-medium">How many</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="n in [1,2,3]" :key="n">
+                        <button type="button" class="choice font-mono" :aria-pressed="count === n" @click="count = n" x-text="n" :disabled="blocked"></button>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" class="btn" @click="runSingle()" :disabled="blocked || !section || phase === 'running'">
+                      <i data-lucide="wand-sparkles"></i><span x-text="blocked ? 'Approve a taxonomy to generate' : `Generate ${count} question${count > 1 ? 's' : ''}`"></span>
+                    </button>
+                    <span class="text-xs text-muted-foreground" x-show="!blocked" x-text="`About ${Mock.usd(cost(count))}: ${count} generation call${count > 1 ? 's' : ''} and ${count * 4} judge calls.${checkText ? ' ' + checkText : ''}`"></span>
+                  </div>
+                </fieldset>
+              </section>
+            </div>
+
+            <!-- Running -->
+            <div class="card" x-show="phase === 'running'">
+              <section class="grid gap-3">
+                <div class="flex items-center gap-2 text-sm">
+                  <i data-lucide="loader" class="size-4 animate-spin"></i>
+                  <span class="font-medium" x-text="stepText"></span>
+                  <span class="ml-auto text-xs text-muted-foreground">Questions are saved one at a time; anything already produced is kept if the run stops.</span>
+                </div>
+                <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full transition-all" :style="{ background: 'var(--primary)', width: `${progress * 100}%` }"></div></div>
+              </section>
+            </div>
+
+            <!-- Results -->
+            <div class="card" x-show="phase === 'done'">
+              <header>
+                <h2 x-text="`${results.length} of ${count} questions generated`"></h2>
+                <p x-text="failedCount ? `${failedCount} failed deterministic validation. It is kept and flagged, and will not enter the review queue.` : 'All passed the deterministic checks and are now in the review queue.'"></p>
+              </header>
+              <section class="p-0">
+                <div class="table-container">
+                  <table class="table">
+                    <thead><tr><th class="w-16">ID</th><th>Prompt</th><th>Difficulty</th><th>Checks</th><th>Judges</th><th>Key</th><th>Status</th></tr></thead>
+                    <tbody>
+                      <template x-for="q in results" :key="q.id">
+                        <tr>
+                          <td class="font-mono text-xs"><a class="underline" :href="Mock.link('question.html', { id: q.id })" x-text="`#${q.id}`"></a></td>
+                          <td class="max-w-80 truncate text-sm" x-text="q.prompt.split('\n')[0].replaceAll('`', '')"></td>
+                          <td class="text-xs" x-text="q.difficulty"></td>
+                          <td><span class="pill" :class="q.status === 'validation_failed' ? 'tone-critical' : 'tone-ok'" x-text="q.status === 'validation_failed' ? 'failed' : 'passed'"></span></td>
+                          <td><span class="pill" :class="flags(q) ? 'tone-warn' : 'tone-muted'" x-text="flags(q) ? `${flags(q)} of 4 flagged` : 'none flagged'"></span></td>
+                          <td class="text-xs whitespace-nowrap"><span class="pill" :class="MOCK.LEVELS[MOCK.verification(q).level].tone" :title="`${MOCK.checkedBy(q).level}: ${MOCK.LEVELS[MOCK.verification(q).level].detail}`" x-text="MOCK.checkedBy(q).name"></span> <span class="font-mono text-muted-foreground" x-text="MOCK.checkedBy(q).version"></span></td>
+                          <td><span class="pill" :class="Mock.tone(q.status)" x-text="Mock.label(q.status)"></span></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <footer class="flex flex-wrap gap-2">
+                <a class="btn" :href="Mock.link('review.html')">Review them now</a>
+                <button type="button" class="btn" data-variant="outline" @click="runSingle()">Generate again from this section</button>
+                <span class="ml-auto self-center text-xs text-muted-foreground" x-text="`${Mock.usd(cost(count))} recorded in Usage`"></span>
+              </footer>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Bulk ============ -->
+      <div role="tabpanel" id="gen-panel-bulk" aria-labelledby="gen-tab-bulk" tabindex="-1" :aria-selected="tab === 'bulk'" x-show="tab === 'bulk'">
+        <div class="card gap-0 py-0">
+          <div class="flex flex-wrap items-center gap-2 p-4 border-b">
+            <div>
+              <div class="font-medium">Spec sheet</div>
+              <div class="text-xs text-muted-foreground">One row per subtopic, type and difficulty. The run is queued as a background job.</div>
+            </div>
+            <div class="ml-auto flex gap-2">
+              <button type="button" class="btn" data-variant="outline" data-size="sm" @click="addGaps()" :disabled="blocked"><i data-lucide="grid-3x3"></i>Add coverage gaps</button>
+              <button type="button" class="btn" data-variant="outline" data-size="sm" @click="addRow()" :disabled="blocked"><i data-lucide="plus"></i>Add row</button>
+            </div>
+          </div>
+
+          <template x-if="blocked">
+            <div class="grid place-items-center gap-2 py-10 text-center">
+              <div class="font-medium">No subtopics to choose from yet</div>
+              <p class="text-sm text-muted-foreground max-w-md">Rows are picked from the approved taxonomy's subtopics. Approve the AI-drafted taxonomy first; its 29 subtopics then appear here.</p>
+            </div>
+          </template>
+
+          <template x-if="!blocked">
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr><th>Subtopic</th><th>Question type</th><th>Difficulty</th><th class="w-28">Count</th><th class="w-28">Approved now</th><th class="w-12"></th></tr>
+                </thead>
+                <tbody>
+                  <template x-for="(r, i) in rows" :key="r.key">
+                    <tr>
+                      <td>
+                        <select class="select w-full" x-model.number="r.sub">
+                          <template x-for="t in course.taxonomy" :key="t.id">
+                            <optgroup :label="t.name">
+                              <template x-for="s in t.subtopics" :key="s.id"><option :value="s.id" x-text="s.name" :selected="r.sub === s.id"></option></template>
+                            </optgroup>
+                          </template>
+                        </select>
+                      </td>
+                      <td>
+                        <select class="select w-full" x-model="r.type">
+                          <template x-for="t in course.question_types" :key="t"><option :value="t" x-text="MOCK.question_types[t].label" :selected="r.type === t"></option></template>
+                        </select>
+                      </td>
+                      <td>
+                        <select class="select w-full" x-model="r.diff">
+                          <template x-for="d in ['easy','medium','hard']" :key="d"><option :value="d" x-text="d" :selected="r.diff === d"></option></template>
+                        </select>
+                      </td>
+                      <td><input class="input w-20 font-mono" type="number" min="1" max="10" x-model.number="r.count"></td>
+                      <td class="font-mono text-xs" :title="`Approved ${r.diff} questions in this subtopic; target is ${course.coverage_target}`">
+                        <span :style="have(r) < course.coverage_target ? 'color:var(--warn-solid)' : ''" x-text="`${have(r)} / ${course.coverage_target}`"></span>
+                      </td>
+                      <td><button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Remove row" @click="rows.splice(i, 1)"><i data-lucide="trash-2"></i></button></td>
+                    </tr>
+                  </template>
+                  <tr x-show="!rows.length"><td colspan="6" class="text-center text-sm text-muted-foreground py-6">No rows. Add a row, or add the coverage gaps.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+
+          <!-- Totals and run -->
+          <div class="flex flex-wrap items-center gap-x-8 gap-y-3 border-t px-5 py-4" style="background:color-mix(in oklch, var(--muted) 40%, transparent)">
+            <div><div class="fig-label">Rows</div><div class="fig-value" x-text="rows.length"></div></div>
+            <div><div class="fig-label">Questions</div><div class="fig-value" style="color:var(--primary)" x-text="totalQ"></div></div>
+            <div><div class="fig-label">E / M / H</div><div class="fig-value" x-text="`${byDiff.easy} / ${byDiff.medium} / ${byDiff.hard}`"></div></div>
+            <div><div class="fig-label">Generation calls</div><div class="fig-value" x-text="totalQ"></div></div>
+            <div><div class="fig-label">Judge calls</div><div class="fig-value" x-text="totalQ * 4"></div></div>
+            <div><div class="fig-label">Estimated cost</div><div class="fig-value" x-text="Mock.usd(cost(totalQ))"></div></div>
+            <div><div class="fig-label" x-text="`Left this month of ${Mock.usd(MOCK.usage.cap_usd)}`"></div><div class="fig-value" :style="cost(totalQ) > budgetLeft ? 'color:var(--critical-solid)' : ''" x-text="Mock.usd(budgetLeft)"></div></div>
+            <button type="button" class="btn ml-auto" @click="runBulk()" :disabled="blocked || !totalQ || cost(totalQ) > budgetLeft || bulkPhase === 'queued'">
+              <i data-lucide="play"></i><span x-text="blocked ? 'Approve a taxonomy to generate' : totalQ ? `Generate ${totalQ} questions` : 'Nothing specified yet'"></span>
+            </button>
+          </div>
+          <p class="px-5 pb-4 text-xs" style="color:var(--critical-solid)" x-show="!blocked && cost(totalQ) > budgetLeft">This run would go over the monthly cap. Remove rows, or raise the cap in Usage and limits.</p>
+        </div>
+
+        <!-- Queued -->
+        <div class="alert mt-4" x-show="bulkPhase === 'queued'">
+          <i data-lucide="loader"></i>
+          <h2 x-text="`Queued: generate ${queued.questions} questions from the spec sheet`"></h2>
+          <section>
+            <p x-text="`Job ${queued.id} runs in the background; you can leave this page. Questions land in the review queue as they pass the checks, and the job appears in Jobs with its progress and cost.`"></p>
+            <p class="mt-2 flex gap-2">
+              <a class="btn" data-size="sm" data-variant="outline" href="jobs.html">See Jobs</a>
+              <button type="button" class="btn" data-size="sm" data-variant="ghost" @click="bulkPhase = 'idle'">Start another sheet</button>
+            </p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c9-c13.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const books = MOCK.books.filter((b) => b.course === c.id);
+      const book = books.find((b) => MOCK.books_sections[b.id]) || books[0];
+      const chapters = MOCK.books_sections[book.id] || [];
+      const blocked = !c.taxonomy.length;
+      const subByName = (name) => { for (const t of c.taxonomy) for (const s of t.subtopics) if (s.name === name) return s.id; return c.taxonomy[0]?.subtopics[0].id; };
+      let key = 0;
+      const row = (sub, type, diff, count) => ({ key: ++key, sub, type, diff, count });
+      const P = MOCK.pricing;
+      const spentThisMonth = MOCK.usage.spent_usd;
+      // Section analysis -> answer formats. A format can be asked when one of the course's tools
+      // (on, self-test passed) can check it (assets/data-tools.js). Fact-like units prefer the book
+      // lookup over a computing tool; code and quantities prefer the computing tool.
+      const TRUST = { Computed: "proven", Quoted: "supported", "Rubric-graded": "rubric", "AI-reviewed only": "judged" };
+      const rankOf = (l) => MOCK.LEVELS[l].rank;
+      // Analysis format -> the question format the tools speak (MOCK.FORMAT_LABEL keys).
+      const TOOL_FORMAT = { choice: "multiple_choice", true_false: "true_false", code_output: "output_prediction", code_write: "coding",
+        parsons: "parsons", numeric: "numeric", expression: "expression", ordering: "ordering", matching: "matching",
+        short_text: "short_text", explanation: "explanation" };
+      const courseTools = MOCK.toolsFor(c.id);
+      const usable = (t) => t.state === "on" && t.selftest.ok;
+      const toolFor = (fmt, unit) => {
+        if (!unit || unit.best === "proven") return MOCK.toolForFormat(c.id, fmt);
+        const pref = ["lookup", "match", "rubric"];
+        const rank = (t) => (pref.indexOf(t.id) + 1) || 9;
+        return courseTools.filter((t) => usable(t) && t.formats.includes(fmt)).sort((x, y) => rank(x) - rank(y))[0] || null;
+      };
+      // Why a format can't be asked, and what would fix it.
+      const missing = (fmt) => {
+        const paused = courseTools.find((t) => t.formats.includes(fmt) && t.state === "paused");
+        if (paused) return { why: `${paused.name} is paused`, fix: `Turn on the ${paused.name} to ask this` };
+        const cand = Object.values(MOCK.TOOL_CATALOG).find((t) => t.formats.includes(fmt) && t.selftest.ok);
+        if (cand) return { why: "No tool in this course checks it", fix: `Add the ${cand.name} to ask this` };
+        return { why: "No checking tool can check this yet", fix: "" };
+      };
+      const formatRows = (u) => [...new Set([...u.formats, ...MOCK.KNOWLEDGE_KINDS[u.kind].formats])].map((f) => {
+        const label = MOCK.FORMATS[f].label, fmt = TOOL_FORMAT[f];
+        const tool = fmt ? toolFor(fmt, u) : null;
+        if (!tool) return { f, label, tool: null, ...(fmt ? missing(fmt) : { why: "No checking tool can check this yet", fix: "" }) };
+        // The tool's trust, capped at what the unit's content can reach (a fact can be Quoted, not Computed).
+        const lv = TRUST[tool.level];
+        return { f, label, tool, level: lv === "rubric" || rankOf(lv) <= rankOf(u.best) ? lv : u.best };
+      });
+      // Which mock question types stand in for each format's results. TODO(real): the generator picks the type.
+      const FORMAT_TYPES = { choice: ["multiple_choice"], true_false: ["true_false"], code_output: ["output_prediction"],
+        code_write: ["code_completion", "debugging", "coding"], parsons: ["parsons"] };
+      const CHECK_TEXT = {
+        proven: "Checked by running a solution program.",
+        crosschecked: "Checked against a structured reference source.",
+        supported: "Checked by quoting the section and two blind solvers.",
+        judged: "Checked by the judge panel only.",
+        rubric: "Graded against your rubric; practice only.",
+      };
+      const analysedSections = Object.entries(MOCK.section_analysis).filter(([id]) => id.startsWith(book.id + "-"))
+        .map(([id, a]) => ({ id, title: a.title || id, units: a.units.length }));
+      return {
+        course: c, book, chapters, blocked,
+        version: c.taxonomy_versions.find((v) => v.active) || {},
+        tab: Mock.param("tab") === "bulk" ? "bulk" : "single",
+        // Single
+        sectionId: Mock.param("section") || (chapters.length ? "b1-9-5" : null),
+        type: c.question_types[0], difficulty: "medium", count: 3,
+        analysedSections, unitIdx: 0, format: null,
+        get analysis() { return MOCK.section_analysis[this.sectionId] || null; },
+        get unit() { return this.analysis ? this.analysis.units[this.unitIdx] || null : null; },
+        get unitFormats() { return this.unit ? formatRows(this.unit) : []; },
+        get formatRow() { return this.unitFormats.find((r) => r.f === this.format && r.tool) || null; },
+        // No analysis: every format the course's tools can check, plus the course's own types.
+        get typeRows() {
+          const fs = [...new Set([...c.question_types, ...courseTools.filter((t) => t.state !== "retired").flatMap((t) => t.formats)])];
+          return fs.map((f) => {
+            const tool = MOCK.toolForFormat(c.id, f);
+            return { f, label: MOCK.FORMAT_LABEL[f] || MOCK.question_types[f]?.label || f, tool, ...(tool ? {} : missing(f)) };
+          });
+        },
+        get skippedText() {
+          return this.analysis ? "Skipped: " + this.analysis.skipped.map((k) => `${k.text} (${k.why.replace(/\.$/, "").toLowerCase()})`).join("; ") + "." : "";
+        },
+        get checkText() {
+          const tool = this.unit ? this.formatRow?.tool : MOCK.toolForFormat(c.id, this.type);
+          if (!tool) return "";
+          return `${tool.name} ${tool.version}: ${CHECK_TEXT[this.unit ? this.formatRow.level : TRUST[tool.level]]}`;
+        },
+        pickUnit(i, want) {
+          this.unitIdx = i;
+          const rows = this.unit ? formatRows(this.unit).filter((r) => r.tool) : [];
+          this.format = (rows.find((r) => r.f === want) || rows.sort((a, b) => rankOf(b.level) - rankOf(a.level))[0] || {}).f || null;
+        },
+        init() {
+          // Deep link from section.html: ?unit=<index>&format=<format>
+          const n = this.analysis ? this.analysis.units.length : 0;
+          const u = Mock.param("unit") === null ? NaN : Number(Mock.param("unit")), f = Mock.param("format");
+          const byFormat = this.analysis ? this.analysis.units.findIndex((x) => x.formats.includes(f)) : -1;
+          this.pickUnit(Number.isInteger(u) && u >= 0 && u < n ? u : Math.max(0, byFormat), f);
+        },
+        phase: "idle", progress: 0, stepText: "", results: [],
+        get section() { for (const ch of chapters) for (const s of ch.sections) if (s.id === this.sectionId) return s; return null; },
+        get failedCount() { return this.results.filter((q) => q.status === "validation_failed").length; },
+        flags: (q) => Object.values(q.judges).filter((v) => v === "flag").length,
+        cost: (n) => n * (P.generation_call_usd + P.judges_per_question * P.judge_call_usd),
+        runSingle() {
+          // TODO(real): results are existing mock questions of the chosen type, so links open real detail pages.
+          const types = this.unit ? FORMAT_TYPES[this.format] || [TOOL_FORMAT[this.format]] : [this.type];
+          const pool = MOCK.questions.filter((q) => q.course === c.id && types.includes(q.type) && ["validation_passed", "validation_failed"].includes(q.status));
+          const n = this.count;
+          this.phase = "running"; this.progress = 0; this.results = [];
+          const steps = [];
+          for (let i = 1; i <= n; i++) steps.push(`Generating ${i} of ${n}`, `Checking ${i} of ${n}`, `Judging ${i} of ${n} (4 judges)`);
+          let k = 0;
+          const tick = setInterval(() => {
+            this.stepText = steps[k]; this.progress = (k + 1) / steps.length; k++;
+            if (k > steps.length) {
+              clearInterval(tick);
+              this.results = pool.slice().sort((a, b) => (b.difficulty === this.difficulty) - (a.difficulty === this.difficulty)).slice(0, n);
+              this.phase = "done";
+              Mock.toast(`${this.results.length} question${this.results.length > 1 ? "s" : ""} generated`);
+            }
+          }, 350);
+        },
+        // Bulk
+        rows: blocked ? [] : [
+          row(subByName("while loops"), "multiple_choice", "medium", 3),
+          row(subByName("Aliasing"), "output_prediction", "hard", 2),
+          row(subByName("Scope"), "debugging", "easy", 2),
+        ],
+        bulkPhase: "idle", queued: {},
+        budgetLeft: MOCK.usage.cap_usd - spentThisMonth,
+        have(r) { return (MOCK.coverage[r.sub] || {})[r.diff] ?? 0; },
+        get totalQ() { return this.rows.reduce((a, r) => a + (Number(r.count) || 0), 0); },
+        get byDiff() { const o = { easy: 0, medium: 0, hard: 0 }; this.rows.forEach((r) => (o[r.diff] += Number(r.count) || 0)); return o; },
+        addRow() { const last = this.rows[this.rows.length - 1]; this.rows.push(row(last?.sub ?? c.taxonomy[0].subtopics[0].id, c.question_types[0], "medium", 1)); },
+        addGaps() {
+          // First 5 subtopic × difficulty cells below the coverage target that aren't on the sheet yet.
+          let added = 0;
+          for (const t of c.taxonomy) for (const s of t.subtopics) for (const d of ["easy", "medium", "hard"]) {
+            const have = MOCK.coverage[s.id]?.[d] ?? 0;
+            if (added < 5 && have < c.coverage_target && !this.rows.some((r) => r.sub === s.id && r.diff === d)) {
+              this.rows.push(row(s.id, "multiple_choice", d, c.coverage_target - have)); added++;
+            }
+          }
+          Mock.toast(added ? `Added ${added} coverage gaps` : "No gaps left to add");
+        },
+        runBulk() {
+          this.queued = { id: "j10", questions: this.totalQ };
+          this.bulkPhase = "queued";
+          Mock.toast(`Job j10 queued · ${this.totalQ} questions`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

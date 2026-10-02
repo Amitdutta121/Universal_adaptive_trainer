@@ -1,0 +1,193 @@
+# Product roadmap — from single-professor tool to a course-building product
+
+Goal: any professor can sign up, bring their own material in any subject, and build a
+human-aligned adaptive course with AI, without help from us. We build on the current
+codebase; nothing here is a rewrite.
+
+This file lists **features (Jira epics) only**. Each feature is broken into PRs later,
+when the team picks it up. Jira import: `docs/jira/product_epics.csv`.
+
+Priority: **P0** = blocks "any professor, any course"; **P1** = needed for a real pilot;
+**P2** = after the pilot.
+
+| ID | Feature | Priority | Depends on |
+|---|---|---|---|
+| F1 | Production database and schema migrations | P0 | — |
+| F2 | Professor accounts and private workspaces | P0 | F1 |
+| F3 | Any-subject courses | P0 | F1 (F2 for per-owner) |
+| F4 | Background jobs for long AI work | P0 | F1 |
+| F5 | Guided course-creation flow | P1 | F2, F3, F4 |
+| F6 | AI-proposed taxonomy, professor-approved | P1 | F5; needs an ADR |
+| F7 | Class and student management | P1 | F2 |
+| F8 | Hosted deployment, cost control, and operations | P1 | F1, F2, F4 |
+| F9 | Alignment quality visible to professors | P2 | — |
+| F10 | UI consolidation and product polish | P1 | — (ongoing) |
+| F11 | LMS integration (LTI 1.3) | P2 | F2, F7 |
+
+---
+
+## F1 — Production database and schema migrations (P0)
+
+**Why.** ADR-008: no migration tool; adding a column means recreating the SQLite file.
+Every schema change would wipe live course data, and F2/F3 both need new columns on
+existing tables.
+
+**Outcome.** Alembic manages the schema; Postgres is the production database; SQLite
+stays for local dev and tests.
+
+**Done when.**
+- A baseline migration reproduces today's schema exactly; `verify_schema` passes on it.
+- An existing `data/adaptive_trainer.db` upgrades in place with no data loss.
+- App and test suite run against both SQLite and Postgres (CI runs both).
+- ADR-008 superseded by a new ADR.
+
+## F2 — Professor accounts and private workspaces (P0)
+
+**Why.** There's no registration (`app/auth/seed.py` seeds one dev user) and no owner on any
+table. Two professors would share one question bank, one set of learned rules and one
+set of judge prompts.
+
+**Outcome.** Professors register (or are invited), log in, and see only their own
+books, taxonomies, questions, judge prompts, learned instructions, question sets and
+students.
+
+**Done when.**
+- Sign-up / invite, email verification, password reset.
+- Every professor-owned row is scoped to an owner (or course); an API test proves
+  professor A cannot read or change professor B's data on every route.
+- Learned instructions and judge prompts are per owner (today one row per type/metric
+  for the whole database).
+- Existing data is assigned to the first account by migration.
+
+## F3 — Any-subject courses (P0)
+
+**Why.** Prompts hardcode "introductory-Python" and code-shaped wording
+(`app/generation/principles.py`, `app/evaluation/prompts.py`). Inventory and a draft plan
+are in `docs/SUBJECT_PROFILE_MILESTONES.md` (g1–g4).
+
+**Outcome.** A professor picks a subject when creating a course; the generator, judges,
+authoring guides and UI text follow it; only question types that make sense for it are offered.
+
+**Done when.**
+- Subject belongs to the course, not the deployment. This replaces the plan's "one subject
+  per database" decision (ADR-050 draft), which only existed because F1 wasn't done.
+- The Python course's prompts match today's output byte for byte (golden file).
+- A non-code subject's prompts never mention code, tests, programs or programmers.
+- Code-executing question types are offered only for Python courses.
+
+**Not in scope.** Code execution for other programming languages.
+
+## F4 — Background jobs for long AI work (P0)
+
+**Why.** Generation runs synchronously inside the request (see the 30 s proxy timeout);
+embedding a new book is a manual script (`docs/MILESTONES.md` m5, not done). Generating a
+whole course takes minutes.
+
+**Outcome.** Generation runs, judge re-runs, PDF import and embedding run as background
+jobs with visible progress, retries and a clear failure state.
+
+**Done when.**
+- Starting any long operation returns a job id immediately; the UI shows progress and
+  the result; closing the tab doesn't lose the job.
+- Importing a book auto-embeds its sections (m5 criteria).
+- A failed job is visible and can be retried; partial results are kept.
+
+## F5 — Guided course-creation flow (P1)
+
+**Why.** Every step exists as a separate page (books → curriculum → questions → review
+→ coverage → freeze). A new professor won't know the order or what "done" looks like.
+
+**Outcome.** One "New course" flow: name and subject → upload material → build or
+import the taxonomy → generate for coverage gaps → review → freeze → share the student
+link. It uses the existing API; no new engine.
+
+**Done when.**
+- A professor who has never seen the app gets from sign-up to a shared student link
+  without documentation (tested with 3 real users).
+- Each step shows what's left (e.g. "12 subtopics have no approved question").
+- A course can be left and resumed at the step where it stopped.
+
+## F6 — AI-proposed taxonomy, professor-approved (P1, needs a decision)
+
+**Why.** Writing a Topic → Subtopic taxonomy is the biggest effort a new professor
+faces. Today the app only produces a guide the professor hands to an outside
+assistant (`app/curriculum/authoring.py`), because ADR-021 says curriculum is declared by
+the professor, never proposed by a model.
+
+**Outcome.** The app drafts a taxonomy from the uploaded book; the professor edits it in
+the existing builder (ADR-049/050) and approves it. Nothing is used until approved, which
+keeps the ADR-021 intent (a human decides the curriculum).
+
+**Done when.**
+- A new ADR narrows ADR-021 (the model proposes, the professor approves).
+- A draft is generated from a book, opens in the builder, and is marked as AI-drafted
+  until approved.
+- Draft quality is checked against the existing hand-built taxonomies (subtopic coverage
+  vs. professor versions).
+
+## F7 — Class and student management (P1)
+
+**Why.** Students join a frozen set with a name only (resume token). A professor running
+a real class needs rosters, several sections, and grades out.
+
+**Outcome.** Courses have join codes per class section; the professor sees a roster and
+per-student progress and can export them.
+
+**Done when.**
+- Join via course code or link; optional roster restriction (allowed emails).
+- Per-student and per-class mastery and progress export to CSV.
+- A professor can remove a student or reset their run.
+- Student data handling is written down (what's stored, retention, deletion on request).
+
+## F8 — Hosted deployment, cost control, and operations (P1)
+
+**Why.** Today it runs locally or with `docker compose`. A product needs a hosted
+environment, and LLM spend has to be bounded per professor.
+
+**Outcome.** A staging and a production deployment with backups, monitoring, and a
+per-professor LLM usage view with limits.
+
+**Done when.**
+- One-command deploy to staging and production; secrets are not in the repo.
+- Nightly database backups with a tested restore.
+- Error tracking and request logs; an alert when LLM provider calls fail at a high rate.
+- Tokens and cost recorded per LLM call, per professor, per course; a configurable
+  monthly cap blocks new runs with a clear message.
+
+## F9 — Alignment quality visible to professors (P2)
+
+**Why.** The human-alignment loop (review queue, judge calibration, learned rules,
+hold-back) is the product's differentiator, but its evidence is internal.
+
+**Outcome.** A professor can see how well the judges agree with them and what the
+generator has learned from their reviews.
+
+**Done when.**
+- Per-course judge-vs-professor agreement over time (from existing calibration, ADR-029/034).
+- Learned rules are listed with the reviews that produced them, and can be edited or disabled.
+- The duplicate threshold is calibrated on approved/rejected history (deferred item in
+  `docs/MILESTONES.md`).
+
+## F10 — UI consolidation and product polish (P1, ongoing)
+
+**Why.** Several experimental UIs live in the tree (`frontend/src/app/experiments/tutorials-*`),
+the landing page and dashboard are uncommitted, and the Instructions page is being removed.
+
+**Outcome.** One coherent professor app and one student app, with no dead or experimental routes.
+
+**Done when.**
+- The experiments are either promoted to real routes or deleted.
+- Landing page and dashboard are committed; navigation matches the F5 flow.
+- Empty states, errors and loading are handled on every page; `frontend-readiness-audit` passes.
+
+## F11 — LMS integration, LTI 1.3 (P2)
+
+**Why.** Universities run courses in Canvas, Moodle or Blackboard; professors won't copy
+grades by hand.
+
+**Outcome.** The course launches from the LMS as an LTI 1.3 tool; students sign in through
+it; mastery or completion flows back to the gradebook.
+
+**Done when.**
+- Tested end to end against a Canvas test instance.
+- Grade passback (LTI AGS) for at least one metric the professor chooses.

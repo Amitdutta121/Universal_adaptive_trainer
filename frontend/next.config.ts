@@ -23,6 +23,13 @@ const nextConfig: NextConfig = {
       .map((source) => ({ source, destination: "/courses", permanent: false }));
   },
   typedRoutes: true,
+  // Opening the dev server from another machine (e.g. over Tailscale) needs its host listed, or
+  // Next blocks its dev scripts and the page never becomes interactive. Comma-separated hosts in
+  // DEV_ALLOWED_ORIGINS (frontend/.env.local); unset means localhost only, as before.
+  allowedDevOrigins: (process.env.DEV_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean),
   experimental: {
     // Next's rewrite proxy kills the upstream connection after 30s by default
     // (dist/server/lib/router-utils/proxy-request.js). Coverage generation runs

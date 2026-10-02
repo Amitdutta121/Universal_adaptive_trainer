@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson editor · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <link rel="stylesheet" href="assets/lesson-editor.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <!-- The editor is Plate (platejs.org) on React, loaded as ES modules; htm stands in for JSX. -->
+  <script type="importmap">{"imports":{
+    "react":"https://esm.sh/react@19.1.0","react/":"https://esm.sh/react@19.1.0/",
+    "react-dom":"https://esm.sh/react-dom@19.1.0?deps=react@19.1.0","react-dom/":"https://esm.sh/react-dom@19.1.0&deps=react@19.1.0/",
+    "platejs/react":"https://esm.sh/platejs@53.3.14/react?deps=react@19.1.0,react-dom@19.1.0",
+    "htm":"https://esm.sh/htm@3.1.1"}}</script>
+</head>
+<!-- Lesson editor: AI draft → professor edits → saved as an example lesson (or approved, for a
+     generated one). 13 block types (assets/lesson-schema.js): title · explanation · common mistake ·
+     recap · worked example · step-through · memory diagram · explorable · predict · misconception
+     check · fill the blank · order the lines · check question. Real Python (Pyodide) runs examples,
+     records step-throughs (sys.settrace) and verifies fill/parsons answers; "Ask AI" is mocked.
+     ?sub=<subtopic id>&mode=draft|example|spot|generated|approved[&rich=0], plus the lessons-page state.
+     Aliasing and range() load the rich lessons (MOCK.RICH_LESSONS) unless rich=0. -->
+<body data-scope="course" data-nav="lessons" data-title="Lesson">
+  <main x-data="{}" x-cloak>
+    <div id="lesson-root" x-ignore><p class="text-sm text-muted-foreground">Loading the editor…</p></div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/lesson-schema.js"></script>
+  <script src="assets/lesson-editor-extra.js"></script>
+  <script src="assets/lesson-finetuning.js"></script>
+  <script src="assets/lesson-curves.js"></script>
+  <script src="assets/lesson-editor-core.js"></script>
+  <script src="assets/lesson-editor-viz.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script type="module">
+    import React, { useState, useMemo, useEffect, useRef } from "react";
+    import { createRoot } from "react-dom/client";
+    import htm from "htm";
+    import { Plate, PlateContent, PlateElement, usePlateEditor, createPlatePlugin, useEditorValue } from "platejs/react";
+    const html = htm.bind(React.createElement);
+    const M = window.MOCK, Mock = window.Mock, C = window.LessonCore;
+    const V = window.LessonViz(React, html);
+    const SEEDS = window.LESSON_SEEDS;
+    const { textOf, words } = C;
+    const clone = (x) => JSON.parse(JSON.stringify(x));
+
+    // ---- Where we are -----------------------------------------------------------------------
+    const extra = M.EXTRA_LESSONS && M.EXTRA_LESSONS[Mock.param("lesson")];
+    const subId = extra ? Mock.param("lesson") : Mock.param("sub") || String(M.lessons.find((l) => l.sub === "Slicing").sub_id);
+    const sub = extra ? { id: subId, name: extra.name, topic: extra.topic } : M.lessonSub(subId);
+    const stored = extra ? { status: "example", blocks: null } : M.lesson(subId);
+    const mode = Mock.param("mode") || stored.status;
+    const seed = SEEDS[sub.name];
+    const rich = !!(M.RICH_LESSONS && M.RICH_LESSONS[sub.name]) && Mock.param("rich") !== "0";
+    const initial = clone(rich ? M.RICH_LESSONS[sub.name]
+      : mode === "example" && stored.blocks ? stored.blocks
+      : ["spot", "generated", "approved"].includes(mode) ? M.styledLesson(sub)
+      : stored.status === "draft" ? stored.blocks : M.rawDraft(sub));
+    initial.forEach((b) => { if (b.type === "trace" && (b.steps || []).length) C.traceCache[b.code] = b.steps; });
+    const original = JSON.stringify(initial);
+    const ctxOf = (value) => ({ sub, seed, M, value });
+    const backState = () => {
+      const p = {};
+      ["saved", "generated", "approved"].forEach((k) => { const v = Mock.param(k); if (v) p[k] = v; });
+      return p;
+    };
+    const addTo = (p, k, v) => ({ ...p, [k]: [...new Set([...(p[k] ? String(p[k]).split(",") : []), String(v)])].join(",") });
+    const insight = (M.insights?.python?.misconceptions || []).find((x) => x.subtopic === sub.name);
+
+    // ---- Checks: how each block was verified --------------------------------------------------
+    const wrongWithoutFeedback = (b) => (b.options || []).filter((_, k) => k !== b.answer && !((b.remediation || {})[String(k)]?.text || "").trim()).length;
+    const checkOf = (b) => {
+      switch (b.type) {
+        case "example": case "predict": return b.stale ? ["Run to check", "tone-warn"] : b.error ? ["Raises an error", "tone-critical"] : ["Computed", "tone-ok"];
+        case "check": return ["From the bank", "tone-ok"];
+        case "mistake": return M.lessonMistake[sub.name] && textOf(b).startsWith(M.lessonMistake[sub.name].slice(0, 20)) ? ["From Insights", "tone-accent"] : ["Your words", "tone-muted"];
+        case "explain": return seed && textOf(b).includes(seed.idea.slice(0, 30)) ? ["Quoted", "tone-accent"] : ["Your words", "tone-muted"];
+        case "trace": return b.stale || !(b.steps || []).length ? ["Record to check", "tone-warn"] : b.error ? ["Raises an error", "tone-critical"] : ["Recorded by running the code", "tone-ok"];
+        case "memory": return b.stale ? ["Record to check", "tone-warn"] : ["Recorded by running the code", "tone-ok"];
+        case "branch": { const n = wrongWithoutFeedback(b); return n ? [`${n} wrong answer${n === 1 ? "" : "s"} without feedback`, "tone-warn"] : ["Feedback on every wrong answer", "tone-ok"]; }
+        case "fill": case "parsons": return b.verified ? (b.verified.ok ? ["Answer verified by running", "tone-ok"] : ["Answer check failed", "tone-critical"]) : ["Not verified yet", "tone-muted"];
+        case "explore": return b.kind === "loss_curves" ? ["From real runs", "tone-ok"] : !b.step ? ["step can't be 0", "tone-critical"] : ["Computed", "tone-ok"];
+        case "recap": return (b.points || []).length > 3 ? ["More than three lines", "tone-warn"] : ["Your words", "tone-muted"];
+        default: return null;
+      }
+    };
+    const sentences = (s) => s.split(/[.!?](\s|$)/).filter((x) => x && x.trim()).length;
+
+    // Her style rules, checked live against the lesson being edited.
+    const styleChecks = (v) => {
+      const body = v.filter((b) => b.type !== "h2");
+      const ex = v.filter((b) => b.type === "explain" && textOf(b).trim());
+      const codes = v.filter((b) => ["example", "trace"].includes(b.type)).map((b) => b.code).join("\n");
+      return [
+        ["Opens with a predict question", body[0]?.type === "predict"],
+        ["Explanations of two or three short sentences", ex.length > 0 && ex.every((b) => sentences(textOf(b)) <= 3 && words(textOf(b)) <= 45)],
+        ["Everyday names in the example", codes && !/\b(s|x|foo|bar)\s*=/.test(codes)],
+        ["Ends with the common mistake", v.some((b) => b.type === "mistake")],
+        ["One check question from the bank", v.filter((b) => b.type === "check").length === 1],
+      ];
+    };
+
+    // ---- Shared editing helpers -----------------------------------------------------------------
+    const idxOf = (editor, element) => editor.api.findPath(element)?.[0] ?? 0;
+    const setAt = (editor, i, props) => editor.tf.setNodes(props, { at: [i] });
+    const replaceText = (editor, i, type, text) => { editor.tf.removeNodes({ at: [i] }); editor.tf.insertNodes({ type, children: [{ text }] }, { at: [i] }); };
+    const stop = (e) => e.preventDefault();
+    const replaceAll = (editor, next) => {
+      if (editor.tf.setValue) { editor.tf.setValue(next); return; }
+      editor.tf.withoutNormalizing(() => { for (let k = editor.children.length - 1; k >= 0; k--) editor.tf.removeNodes({ at: [k] }); editor.tf.insertNodes(next, { at: [0] }); });
+    };
+
+    // Code with line numbers; `line` highlights the line about to run (step-through).
+    function CodeArea({ value, onChange, line, stale, minRows = 2 }) {
+      const lines = String(value || "").split("\n");
+      const onKeyDown = (e) => {
+        if (e.key !== "Tab") return;
+        e.preventDefault();
+        const t = e.target, s = t.selectionStart, v = t.value.slice(0, s) + "    " + t.value.slice(t.selectionEnd);
+        onChange(v); requestAnimationFrame(() => { t.selectionStart = t.selectionEnd = s + 4; });
+      };
+      return html`<div class=${`codearea ${stale ? "is-stale" : ""}`}>
+        <div class="codearea-gutter">${lines.map((_, k) => html`<div key=${k} class=${line === k + 1 ? "cur" : ""}>${k + 1}</div>`)}</div>
+        <div class="codearea-main">
+          ${line && !stale ? html`<div class="codearea-hl" style=${{ top: `${8 + (line - 1) * 20}px` }}></div>` : null}
+          <textarea wrap="off" rows=${Math.max(minRows, lines.length)} spellCheck=${false} value=${value || ""} aria-label="Code"
+            onChange=${(e) => onChange(e.target.value)} onKeyDown=${onKeyDown}></textarea>
+        </div>
+      </div>`;
+    }
+    const Field = ({ label, children, hint }) => html`<label class="grid gap-1"><span class="field-label">${label}</span>${children}${hint && html`<span class="text-xs text-muted-foreground">${hint}</span>`}</label>`;
+    const Mini = ({ children, note }) => html`<div class="mini"><div class="mini-label"><span>Student sees</span>${note && html`<span class="ml-auto">${note}</span>`}</div>${children}</div>`;
+    // Editable list of strings (recap points, parsons lines, decoys).
+    function ListEdit({ items, onChange, mono, addLabel, numbered, placeholder }) {
+      const set = (k, v) => onChange(items.map((x, j) => (j === k ? v : x)));
+      const move = (k, d) => { const to = k + d; if (to < 0 || to >= items.length) return; const n = items.slice(); [n[k], n[to]] = [n[to], n[k]]; onChange(n); };
+      return html`<div class="grid gap-1">
+        ${items.map((x, k) => html`<div key=${k} class="flex items-center gap-1">
+          <span class="text-xs text-muted-foreground w-4 text-right">${numbered ? k + 1 : "•"}</span>
+          <input class=${`input input-sm ${mono ? "mono-input" : ""}`} value=${x} placeholder=${placeholder || ""} onChange=${(e) => set(k, e.target.value)} />
+          <span class="row-tools">
+            <button type="button" title="Move up" onMouseDown=${stop} onClick=${() => move(k, -1)}>↑</button>
+            <button type="button" title="Move down" onMouseDown=${stop} onClick=${() => move(k, 1)}>↓</button>
+            <button type="button" title="Remove" onMouseDown=${stop} onClick=${() => onChange(items.filter((_, j) => j !== k))}>✕</button>
+          </span></div>`)}
+        <div><button type="button" class="btn" data-size="sm" data-variant="ghost" onMouseDown=${stop} onClick=${() => onChange([...items, ""])}>+ ${addLabel}</button></div>
+      </div>`;
+    }
+
+    // ---- Block chrome: label, check status, AI actions, move/delete ------------------------------
+    function Chrome({ editor, element, actions = [], children, label }) {
+      const i = idxOf(editor, element);
+      const chk = checkOf(element);
+      const move = (d) => { const to = i + d; if (to < 1 || to >= editor.children.length) return; editor.tf.moveNodes({ at: [i], to: [to] }); };
+      return html`<div class="blk" data-block=${element.type}>
+        <div class="blk-bar" contentEditable=${false}>
+          <span class="blk-tag">${label || C.label(element.type)}</span>
+          ${chk && html`<span class=${`pill ${chk[1]}`} title=${chk[0] === "Computed" ? "Ran in the sandbox; the output shown is what it printed." : chk[0] === "Quoted" ? "Matches a sentence in the book section." : chk[0].startsWith("Recorded") ? "Every step is a snapshot taken while Python ran this code." : ""}>${chk[0]}</span>`}
+          <span class="blk-actions">
+            ${actions.map(([t, fn]) => html`<button type="button" key=${t} onMouseDown=${(e) => { e.preventDefault(); fn(i); }}>${t}</button>`)}
+            ${element.type !== "h2" && html`<button type="button" title="Move up" onMouseDown=${(e) => { e.preventDefault(); move(-1); }}>↑</button>
+              <button type="button" title="Move down" onMouseDown=${(e) => { e.preventDefault(); move(1); }}>↓</button>
+              <button type="button" title="Delete block" onMouseDown=${(e) => { e.preventDefault(); editor.tf.removeNodes({ at: [i] }); }}>✕</button>`}
+          </span>
+        </div>
+        ${children}
+      </div>`;
+    }
+
+    // ---- Text blocks ---------------------------------------------------------------------------
+    const H2 = (p) => html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${p.element}><div class="editable-h2">${p.children}</div><//><//>`;
+
+    const Explain = (p) => html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${p.element} actions=${[
+      ["Shorten", (i) => { if (seed) replaceText(p.editor, i, "explain", seed.idea); Mock.toast("Shortened to the core idea, quoted from the book."); }],
+      ["Simpler words", (i) => { const t = textOf(p.element); replaceText(p.editor, i, "explain", t.replace(/\b(utilize|frequently|important concept in Python programming)\b/gi, (w) => ({ utilize: "use", frequently: "often" }[w.toLowerCase()] || "idea"))); Mock.toast("Rewrote with simpler words."); }],
+    ]}><p class=${`text-[15px] leading-7 ${textOf(p.element) ? "" : "empty-explain"}`}>${p.children}</p><//><//>`;
+
+    const Mistake = (p) => html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${p.element} actions=${[
+      ["Use Insights", (i) => { const m = M.lessonMistake[sub.name]; if (m) replaceText(p.editor, i, "mistake", m); Mock.toast(m ? "Replaced with the mistake students make most (Insights)." : "No Insights data for this subtopic yet."); }],
+    ]}><div class="mistake text-[15px] leading-7">${p.children}</div><//><//>`;
+
+    // ---- Code blocks: example, predict ------------------------------------------------------------
+    function CodeRunner({ editor, element, field = "code", outField = "output", outLabel = "Output" }) {
+      const [busy, setBusy] = useState(false);
+      const run = async () => {
+        setBusy(true);
+        const r = await C.runPython(element[field]).catch(() => ({ output: "Couldn't load Python in this browser.", error: true }));
+        setAt(editor, idxOf(editor, element), { [outField]: r.output, stale: false, error: r.error });
+        setBusy(false);
+        Mock.toast(r.error ? "The code raised an error; fix it before saving." : "Ran in the browser. Output updated.");
+      };
+      return html`<div class="grid gap-2" contentEditable=${false}>
+        <${CodeArea} value=${element[field]} onChange=${(v) => setAt(editor, idxOf(editor, element), { [field]: v, stale: true })} />
+        <div class="flex items-center gap-2">
+          <button type="button" class="btn" data-size="sm" data-variant="outline" disabled=${busy} onClick=${run}>${busy ? "Running…" : "Run"}</button>
+          <span class="text-xs text-muted-foreground">${element.stale ? "Edited since it last ran: run it to update the output." : "Runs real Python in your browser."}</span>
+        </div>
+        ${outField === "output" && html`<div><div class="text-xs text-muted-foreground mb-1">${outLabel}</div><div class="out" style=${element.error ? { borderColor: "var(--critical-solid)" } : {}}>${element[outField] || " "}</div></div>`}
+      </div>`;
+    }
+
+    const Example = (p) => html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${p.element} actions=${[
+      ["Everyday names", (i) => {
+        const alt = sub.name === "Slicing" ? "title = 'Adaptive'\nprint(title[1:4])\nprint(title[:2])\nprint(title[-3:])" : seed?.example;
+        if (alt) setAt(p.editor, i, { code: alt, stale: true });
+        Mock.toast("Rewrote the example with everyday names. Run it to check the output.");
+      }],
+    ]}><${CodeRunner} editor=${p.editor} element=${p.element} />
+      <div class="text-xs text-muted-foreground mt-1" contentEditable=${false}>${p.element.source ? `Book: ${p.element.source}` : ""}</div>${p.children}<//><//>`;
+
+    const Predict = (p) => {
+      const i = idxOf(p.editor, p.element);
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${p.element} actions=${[
+        ["Swap question", (k) => {
+          const q = M.questions.find((x) => x.course === "python" && x.subtopic === sub.name && x.type === "output_prediction" && x.prompt.includes("\n\n"));
+          if (q) setAt(p.editor, k, { code: q.prompt.split("\n\n").slice(1).join("\n\n"), question: "What does this print?", answer: q.answer_text, stale: false });
+          Mock.toast(q ? "Swapped for a predict question from the bank." : "No other predict question for this subtopic yet.");
+        }],
+      ]}><div class="grid gap-2" contentEditable=${false}>
+          <input class="input" value=${p.element.question} onChange=${(e) => setAt(p.editor, i, { question: e.target.value })} />
+          <${CodeRunner} editor=${p.editor} element=${p.element} outField="answer" />
+          <div class="text-xs text-muted-foreground">Students type their guess, then see the answer: <span class="font-mono text-foreground">${(p.element.answer || "").replace(/\n/g, " ⏎ ")}</span></div>
+        </div>${p.children}<//><//>`;
+    };
+
+    const Check = (p) => html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${p.element}>
+      <div class="grid gap-1.5" contentEditable=${false}>
+        <div class="text-[15px]">${p.element.question.split("\n\n")[0].replace(/`/g, "")}</div>
+        ${p.element.question.includes("\n\n") && html`<div class="code">${p.element.question.split("\n\n").slice(1).join("\n\n")}</div>`}
+        ${p.element.options.map((o, k) => html`<div key=${k} class="flex gap-2 text-sm rounded-md border px-3 py-1.5" style=${k === p.element.answer ? { borderColor: "var(--ok-solid)" } : {}}>
+          <span class="font-mono text-xs text-muted-foreground">${"ABCD"[k]}</span><span class="font-mono">${o}</span>${k === p.element.answer && html`<span class="ml-auto text-xs" style=${{ color: "var(--ok-solid)" }}>key</span>`}</div>`)}
+        <div class="text-xs text-muted-foreground">${`Question #${p.element.question_id} from the approved bank.`}</div>
+      </div>${p.children}<//><//>`;
+
+    // ---- Step-through: record by running, then step ----------------------------------------------
+    const Trace = (p) => {
+      const el = p.element, steps = el.steps || [];
+      const [k, setK] = useState(0); const [busy, setBusy] = useState(false);
+      useEffect(() => { if (k >= steps.length) setK(0); }, [steps.length]);
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      const record = async () => {
+        setBusy(true);
+        try {
+          const r = await C.recordTrace(el.code);
+          upd({ steps: r.steps, stale: false, error: r.error || null }); setK(0);
+          Mock.toast(r.error ? `Recorded ${r.steps.length} steps; the code raises ${r.error}` : `Recorded ${r.steps.length} steps by running the code.`);
+        } catch (e) { Mock.toast("Couldn't load Python in this browser."); }
+        setBusy(false);
+      };
+      const live = steps.length > 0 && !el.stale;
+      const line = live ? steps[Math.min(k, steps.length - 1)].line : null;
+      const code = html`<${CodeArea} value=${el.code} line=${line} stale=${!live} onChange=${(v) => upd({ code: v, stale: true })} />`;
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="grid gap-2" contentEditable=${false}>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" class="btn" data-size="sm" data-variant=${live ? "outline" : undefined} disabled=${busy} onMouseDown=${stop} onClick=${record}>${busy ? (C.pyLoaded() ? "Recording…" : "Loading Python…") : live ? "Record again" : "Record steps"}</button>
+            <span class="text-xs text-muted-foreground">${busy ? "Running the code with a line tracer." : live ? `${steps.length} steps, recorded by running the code${el.error ? `. It ends with ${el.error}` : "."}` : steps.length ? "Code changed since the steps were recorded. Record again so students see what it really does." : "Not recorded yet. Record runs the code and snapshots every line."}</span>
+          </div>
+          ${live ? html`<${V.Stepper} steps=${steps} code=${el.code} k=${k} setK=${setK} renderCode=${() => code} />` : code}
+          <${Field} label="Caption students see"><input class="input input-sm" value=${el.caption || ""} onChange=${(e) => upd({ caption: e.target.value })} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    // ---- Memory diagram: one snapshot, picked from the recorded steps --------------------------------
+    const Memory = (p) => {
+      const el = p.element, value = useEditorValue() || [];
+      const [busy, setBusy] = useState(false);
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      const tr = value.find((b) => b.type === "trace" && b.code === el.code && !b.stale && (b.steps || []).length);
+      const steps = !el.stale && (tr ? tr.steps : C.traceCache[el.code]) || null;
+      const labels = steps ? C.snapshotLabels(steps) : [];
+      const at = steps ? C.stepIndexOf(steps, el.names, el.heap) : -1;
+      const record = async () => {
+        setBusy(true);
+        try { const r = await C.recordTrace(el.code); const last = r.steps[r.steps.length - 1]; upd({ names: last.names, heap: last.heap, stale: false }); Mock.toast("Recorded. Showing the state at the end; pick another moment if you like."); }
+        catch (e) { Mock.toast("Couldn't load Python in this browser."); }
+        setBusy(false);
+      };
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="blk-split" contentEditable=${false}>
+          <div class="grid gap-2 content-start">
+            <${CodeArea} value=${el.code} stale=${true} onChange=${(v) => upd({ code: v, stale: true })} />
+            ${steps ? html`<${Field} label="Snapshot" hint=${tr ? "Steps from the step-through above, recorded by running the code." : "Steps recorded by running the code."}>
+                <select class="select input-sm w-full" value=${at < 0 ? "" : String(at)} onChange=${(e) => { const s = steps[Number(e.target.value)]; upd({ names: s.names, heap: s.heap }); }}>
+                  ${at < 0 && html`<option value="">Custom snapshot</option>`}
+                  ${steps.map((s, j) => j > 0 && html`<option key=${j} value=${String(j)}>${labels[j]}</option>`)}
+                </select><//>`
+              : html`<div class="flex items-center gap-2"><button type="button" class="btn" data-size="sm" disabled=${busy} onMouseDown=${stop} onClick=${record}>${busy ? "Recording…" : "Record"}</button>
+                <span class="text-xs text-muted-foreground">${el.stale ? "Code changed. Record to redraw the diagram from a real run." : "Record to pick the moment to show."}</span></div>`}
+            <${Field} label="Caption"><input class="input input-sm" value=${el.caption || ""} onChange=${(e) => upd({ caption: e.target.value })} /><//>
+          </div>
+          <${Mini} note=${at >= 0 ? labels[at] : ""}>${el.caption && html`<div class="text-sm mb-2">${el.caption}</div>`}<${V.MemoryDiagram} names=${el.names} heap=${el.heap} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    // ---- Misconception check: every wrong option gets its own fix ----------------------------------
+    const SHOW = [["", "Nothing else"], ["memory", "Memory diagram"], ["trace", "Step-through"], ["explore", "Explorable"]];
+    const Branch = (p) => {
+      const el = p.element, value = useEditorValue() || [];
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      const opts = el.options || [], rem = el.remediation || {};
+      const qT = String(el.question || "").split("\n\n")[0], qC = String(el.question || "").includes("\n\n") ? el.question.split("\n\n").slice(1).join("\n\n") : "";
+      const setQ = (t, c) => upd({ question: c.trim() ? `${t}\n\n${c}` : t });
+      const setRem = (k, props) => {
+        const next = { ...rem, [String(k)]: { ...(rem[String(k)] || { text: "" }), ...props } };
+        Object.keys(next[String(k)]).forEach((f) => { if (next[String(k)][f] === "") delete next[String(k)][f]; });
+        const first = opts.map((_, j) => j).filter((j) => j !== el.answer).map((j) => next[String(j)]?.misconception).find(Boolean);
+        upd({ remediation: next, misconception: first || el.misconception || "" });
+      };
+      const removeOpt = (k) => {
+        const next = {};
+        Object.entries(rem).forEach(([j, v]) => { j = Number(j); if (j < k) next[String(j)] = v; else if (j > k) next[String(j - 1)] = v; });
+        upd({ options: opts.filter((_, j) => j !== k), answer: el.answer > k ? el.answer - 1 : el.answer === k ? 0 : el.answer, remediation: next });
+      };
+      const has = { memory: value.some((b) => b.type === "memory") || value.some((b) => b.type === "trace"), trace: value.some((b) => b.type === "trace"), explore: value.some((b) => b.type === "explore") };
+      const known = [...new Set([el.misconception, insight?.reading, ...Object.values(rem).map((r) => r.misconception)].filter(Boolean))];
+      const listId = `mis-${idxOf(p.editor, el)}`;
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="blk-split" contentEditable=${false}>
+          <div class="grid gap-2 content-start">
+            <${Field} label="Question"><input class="input input-sm" value=${qT} onChange=${(e) => setQ(e.target.value, qC)} /><//>
+            <${Field} label="Code (optional)"><${CodeArea} value=${qC} minRows=${1} onChange=${(v) => setQ(qT, v)} /><//>
+            <div class="field-label">Options · pick the right one</div>
+            <datalist id=${listId}>${known.map((m) => html`<option key=${m} value=${m} />`)}</datalist>
+            ${opts.map((o, k) => {
+              const r = rem[String(k)] || {}, wrong = k !== el.answer;
+              const pick = insight && o.trim() === insight.top_wrong;
+              return html`<div key=${k} class="grid gap-1">
+                <div class="opt-row">
+                  <input type="radio" name=${`ans-${listId}`} checked=${k === el.answer} title="Right answer" onChange=${() => upd({ answer: k })} />
+                  <input class="input input-sm mono-input" value=${o} onChange=${(e) => upd({ options: opts.map((x, j) => (j === k ? e.target.value : x)) })} />
+                  <span class="flex items-center gap-1">
+                    ${!wrong ? html`<span class="pill tone-ok">Right</span>` : pick ? html`<span class="pill tone-accent" title=${`Insights, question #${insight.question_id}`}>${`${Math.round(insight.top_wrong_share * 100)}% pick this`}</span>` : null}
+                    <span class="row-tools"><button type="button" title="Remove option" disabled=${opts.length <= 2} onMouseDown=${stop} onClick=${() => removeOpt(k)}>✕</button></span>
+                  </span>
+                </div>
+                ${wrong && html`<div class="opt-wrong">
+                  <div class="flex items-center gap-2"><span class="field-label whitespace-nowrap">Misconception</span>
+                    <input class="input input-sm" list=${listId} placeholder="What a student who picks this believes" value=${M.branchMisconception({ remediation: rem, misconception: k === opts.findIndex((_, j) => j !== el.answer) ? el.misconception : "" }, k)}
+                      onChange=${(e) => setRem(k, { misconception: e.target.value })} /></div>
+                  <textarea class="textarea text-sm" rows="2" placeholder="Feedback for this wrong answer" value=${r.text || ""} onChange=${(e) => setRem(k, { text: e.target.value })}></textarea>
+                  <div class="flex items-center gap-2"><span class="field-label whitespace-nowrap">Then show</span>
+                    <select class="select input-sm" value=${r.show || ""} onChange=${(e) => setRem(k, { show: e.target.value })}>
+                      ${SHOW.map(([v, l]) => html`<option key=${v} value=${v} disabled=${v && !has[v]}>${l}${v && !has[v] ? " (not in this lesson)" : ""}</option>`)}
+                    </select></div>
+                </div>`}
+              </div>`;
+            })}
+            <div><button type="button" class="btn" data-size="sm" data-variant="ghost" onMouseDown=${stop} onClick=${() => upd({ options: [...opts, ""] })}>+ Option</button></div>
+            ${insight && html`<p class="text-xs text-muted-foreground">${`Insights: on question #${insight.question_id}, ${Math.round(insight.top_wrong_share * 100)}% of wrong answers are ${insight.top_wrong}. "${insight.reading}"`}</p>`}
+          </div>
+          <${Mini} note="Pick a wrong answer to see its feedback"><${V.BranchPlayer} b=${el} lesson=${value} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    // ---- Fill the blank ----------------------------------------------------------------------------
+    function VerifyRow({ el, upd, run, label }) {
+      const [busy, setBusy] = useState(false);
+      const go = async () => {
+        setBusy(true);
+        try { const v = await run(el); upd({ verified: v }); Mock.toast(v.ok ? "Verified by running it." : v.note); }
+        catch (e) { Mock.toast("Couldn't load Python in this browser."); }
+        setBusy(false);
+      };
+      return html`<div class="flex items-center gap-2 flex-wrap">
+        <button type="button" class="btn" data-size="sm" data-variant="outline" disabled=${busy} onMouseDown=${stop} onClick=${go}>${busy ? "Running…" : label}</button>
+        ${el.verified && html`<span class="text-xs" style=${{ color: el.verified.ok ? "var(--ok-solid)" : "var(--critical-solid)" }}>${el.verified.note}</span>`}
+        ${!el.verified && !busy && html`<span class="text-xs text-muted-foreground">Runs real Python in your browser.</span>`}
+      </div>`;
+    }
+    const Fill = (p) => {
+      const el = p.element, [draft, setDraft] = useState("");
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      const answers = el.answers || [], blanks = String(el.code || "").split("____").length - 1;
+      const addAns = () => { if (draft.trim() && !answers.includes(draft.trim())) upd({ answers: [...answers, draft.trim()], verified: null }); setDraft(""); };
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="blk-split" contentEditable=${false}>
+          <div class="grid gap-2 content-start">
+            <${Field} label="Code, with the blank as ____" hint=${blanks === 1 ? "" : blanks === 0 ? "Add ____ where the student types." : "Only one blank per block: students fill one line."}>
+              <${CodeArea} value=${el.code} onChange=${(v) => upd({ code: v, verified: null })} /><//>
+            <div class="grid gap-1"><span class="field-label">Accepted answers</span>
+              <div class="flex flex-wrap gap-1 items-center">
+                ${answers.map((a, k) => html`<span key=${a} class="chip">${a}${el.verified?.outputs && html`<span class="text-[11px]" style=${{ color: el.verified.ok ? "var(--ok-solid)" : "var(--muted-foreground)" }}>${` → ${String(el.verified.outputs[k] ?? "").trim().split("\n")[0]}`}</span>`}
+                  <button type="button" title="Remove" onMouseDown=${stop} onClick=${() => upd({ answers: answers.filter((x) => x !== a), verified: null })}>✕</button></span>`)}
+                <input class="input input-sm mono-input" style=${{ width: "11rem" }} placeholder="Another answer, Enter" value=${draft} onChange=${(e) => setDraft(e.target.value)}
+                  onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); addAns(); } }} />
+              </div></div>
+            <${Field} label="Hint after a wrong try"><input class="input input-sm" value=${el.hint || ""} onChange=${(e) => upd({ hint: e.target.value })} /><//>
+            <${VerifyRow} el=${el} upd=${upd} run=${C.verifyFill} label="Verify answers" />
+          </div>
+          <${Mini}><${V.FillPlayer} b=${el} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    // ---- Order the lines (Parsons) -----------------------------------------------------------------
+    const Parsons = (p) => {
+      const el = p.element;
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      const actual = el.verified && !el.verified.ok && el.verified.actual != null && !/raise/.test(el.verified.note) ? el.verified.actual.trim() : null;
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="blk-split" contentEditable=${false}>
+          <div class="grid gap-2 content-start">
+            <${Field} label="Prompt"><input class="input input-sm" value=${el.prompt || ""} onChange=${(e) => upd({ prompt: e.target.value })} /><//>
+            <div class="grid gap-1"><span class="field-label">Lines, in the right order (indent with spaces)</span>
+              <${ListEdit} items=${el.lines || []} mono=${true} numbered=${true} addLabel="Line" onChange=${(v) => upd({ lines: v, verified: null })} /></div>
+            <div class="grid gap-1"><span class="field-label">Decoys: lines that look right but don't belong</span>
+              <${ListEdit} items=${el.distractors || []} mono=${true} addLabel="Decoy" placeholder="e.g. copy = groceries" onChange=${(v) => upd({ distractors: v })} /></div>
+            <${Field} label="It should print"><textarea class="textarea mono-input" rows=${Math.max(1, String(el.output || "").split("\n").length)} value=${el.output || ""} onChange=${(e) => upd({ output: e.target.value, verified: null })}></textarea><//>
+            <${VerifyRow} el=${el} upd=${upd} run=${C.verifyParsons} label="Run in order" />
+            ${actual !== null && html`<div><button type="button" class="btn" data-size="sm" data-variant="ghost" onMouseDown=${stop} onClick=${() => upd({ output: actual, verified: { ok: true, note: `Ran the lines in order: prints ${JSON.stringify(actual)}.`, actual } })}>Use what it prints</button></div>`}
+          </div>
+          <${Mini} note="Tap lines to order them"><${V.ParsonsPlayer} b=${el} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    // ---- Explorable: range() -------------------------------------------------------------------------
+    const Explore = (p) => {
+      const el = p.element;
+      if (el.kind === "loss_curves") return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="grid gap-2" contentEditable=${false}>
+          <p class="text-xs text-muted-foreground">${`Training curves from ${Object.keys(el.runs).length} real runs (tools/finetune_demo.py): ${Object.values(el.approaches).join(", ")} at learning rates ${el.rates.join(", ")}. Students switch between them.`}</p>
+          <${V.LossCurvesView} b=${el} />
+        </div>${p.children}<//><//>`;
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      const num = (k) => html`<${Field} label=${k}><input class="input input-sm mono-input" type="number" value=${el[k]} onChange=${(e) => upd({ [k]: Number(e.target.value) })} /><//>`;
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el}>
+        <div class="blk-split" contentEditable=${false}>
+          <div class="grid gap-2 content-start">
+            <div class="field-label">range(start, stop, step): where the sliders start</div>
+            <div class="grid grid-cols-3 gap-2">${num("start")}${num("stop")}${num("step")}</div>
+            <${Field} label="Caption"><input class="input input-sm" value=${el.caption || ""} onChange=${(e) => upd({ caption: e.target.value })} /><//>
+            <p class="text-xs text-muted-foreground">Students drag start, stop and step; the dots are what range() gives and the red fence is stop, which is never included.</p>
+          </div>
+          <${Mini} note="Try the sliders"><${V.RangeExplore} start=${el.start} stop=${el.stop} step=${el.step} caption=${el.caption} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    // ---- Recap ---------------------------------------------------------------------------------------
+    const Recap = (p) => {
+      const el = p.element;
+      const upd = (props) => setAt(p.editor, idxOf(p.editor, el), props);
+      return html`<${PlateElement} ...${p}><${Chrome} editor=${p.editor} element=${el} actions=${[
+        ["Draft from the lesson", () => {
+          const v = p.editor.children;
+          const pts = [...v.filter((b) => b.type === "explain"), ...v.filter((b) => b.type === "mistake")].map((b) => textOf(b).split(/(?<=[.!?])\s+/)[0]).filter(Boolean).slice(0, 3);
+          if (pts.length) upd({ points: pts });
+          Mock.toast(pts.length ? "Drafted from the first sentence of each explanation and the mistake." : "Write an explanation first.");
+        }],
+      ]}>
+        <div class="blk-split" contentEditable=${false}>
+          <div class="grid gap-1 content-start"><span class="field-label">Points (three short lines)</span>
+            <${ListEdit} items=${el.points || []} addLabel="Point" onChange=${(v) => upd({ points: v })} /></div>
+          <${Mini}><${V.RecapView} b=${el} /><//>
+        </div>${p.children}<//><//>`;
+    };
+
+    const plugins = [
+      createPlatePlugin({ key: "h2", node: { isElement: true, component: H2 } }),
+      createPlatePlugin({ key: "explain", node: { isElement: true, component: Explain } }),
+      createPlatePlugin({ key: "mistake", node: { isElement: true, component: Mistake } }),
+      ...[["example", Example], ["predict", Predict], ["check", Check], ["trace", Trace], ["memory", Memory], ["branch", Branch],
+        ["fill", Fill], ["parsons", Parsons], ["explore", Explore], ["recap", Recap]]
+        .map(([key, component]) => createPlatePlugin({ key, node: { isElement: true, isVoid: true, component } })),
+    ];
+
+    // ---- Block menu (slash command and the Add bar) ---------------------------------------------------
+    const filterBlocks = (q) => C.BLOCKS.filter(([t, l, d]) => !q || `${t} ${l} ${d}`.toLowerCase().includes(q.toLowerCase()));
+    function BlockMenu({ pos, filter = "", index = 0, onPick, onHover, foot, anchored }) {
+      const items = filterBlocks(filter);
+      const ref = useRef(null);
+      useEffect(() => { ref.current?.querySelector(".blockmenu-item.on")?.scrollIntoView({ block: "nearest" }); }, [index]);
+      let lastGroup = null;
+      return html`<div class="blockmenu" ref=${ref} role="listbox" style=${anchored ? { position: "absolute", bottom: "calc(100% + 6px)", left: 0 } : { top: `${pos.top}px`, left: `${pos.left}px` }} onMouseDown=${stop}>
+        ${items.length === 0 && html`<div class="text-sm text-muted-foreground p-2">${`No block matches "${filter}".`}</div>`}
+        ${items.map(([t, l, d, g], k) => {
+          const head = g !== lastGroup ? html`<div class="blockmenu-group">${g}</div>` : null; lastGroup = g;
+          return html`<${React.Fragment} key=${t}>${head}<button type="button" role="option" aria-selected=${k === index} data-type=${t} class=${`blockmenu-item ${k === index ? "on" : ""}`}
+            onMouseEnter=${() => onHover && onHover(k)} onClick=${() => onPick(t)}><span>${l}</span><span>${d}</span></button><//>`;
+        })}
+        ${foot && html`<div class="blockmenu-foot">${foot}</div>`}
+      </div>`;
+    }
+    const menuPos = (rect, h = 384) => {
+      const top = rect.bottom + 6 + h > window.innerHeight && rect.top - h - 6 > 0 ? rect.top - h - 6 : rect.bottom + 6;
+      return { top, left: Math.min(rect.left, window.innerWidth - 352) };
+    };
+
+    // ---- Ask AI: instruction → fake progress → diff → accept / reject -------------------------------
+    const summary = (b) => {
+      const t = textOf(b);
+      const s = t || b.caption || (b.question ? String(b.question).split("\n\n")[0] : "") || b.prompt || (b.points || []).join(" · ") || (b.code || "").split("\n")[0] || (b.type === "explore" ? `range(${b.start}, ${b.stop}, ${b.step})` : "");
+      return s.length > 110 ? s.slice(0, 108) + "…" : s;
+    };
+    function AskAI({ value, onReview, busy, setBusy }) {
+      const [q, setQ] = useState(""); const [steps, setSteps] = useState([]); const [msg, setMsg] = useState(null);
+      const run = async (text) => {
+        const ask = (text ?? q).trim(); if (!ask || busy) return;
+        setQ(ask); setMsg(null); setBusy(true);
+        const prop = C.propose(ask, value, ctxOf(value));
+        const plan = ["Reading the lesson and your style rules", prop.none ? "Looking for a change that fits" : `Writing: ${prop.title?.toLowerCase()}`, ...(prop.record ? ["Recording the step-through by running the code"] : []), "Checking it against your style"];
+        for (let s = 0; s < plan.length; s++) {
+          setSteps(plan.map((p, j) => [p, j < s ? "done" : j === s ? "on" : "todo"]));
+          if (plan[s].startsWith("Recording")) {
+            for (const r of prop.rows.filter((r) => r.kind === "add" && r.block.type === "trace")) {
+              try { const t = await C.recordTrace(r.block.code); r.block = { ...r.block, steps: t.steps, stale: false, error: t.error || null }; } catch (e) { /* stays "Record to check" */ }
+            }
+          } else await new Promise((res) => setTimeout(res, 650));
+        }
+        setSteps([]); setBusy(false);
+        if (prop.none) { setMsg(prop.message); return; }
+        onReview({ ...prop, ask });
+        setQ("");
+      };
+      return html`<section class="grid gap-2 pb-3 mb-2 border-b" style=${{ borderColor: "var(--border)" }}>
+        <form class="ask" onSubmit=${(e) => { e.preventDefault(); run(); }}>
+          <input class="input" aria-label="Ask AI to change this lesson" placeholder='Ask AI to change this lesson, e.g. "add a step-through of the copy"' value=${q} disabled=${busy} onChange=${(e) => setQ(e.target.value)} />
+          <button type="submit" class="btn" data-variant="secondary" disabled=${busy || !q.trim()}>${busy ? "Working…" : "Ask AI"}</button>
+        </form>
+        ${steps.length > 0 && html`<div class="ask-steps">${steps.map(([t, s]) => html`<div key=${t} class=${s}>${s === "on" ? html`<span class="spin"></span>` : s === "done" ? "✓" : "·"} ${t}${s === "on" && t.startsWith("Recording") && !C.pyLoaded() ? " (loading Python)" : ""}</div>`)}</div>`}
+        ${msg && html`<p class="text-sm text-muted-foreground">${msg}</p>`}
+        ${!busy && !steps.length && html`<div class="flex flex-wrap gap-1 items-center"><span class="text-xs text-muted-foreground mr-1">Try</span>
+          ${C.suggestions(sub).map((s) => html`<button key=${s} type="button" class="btn" data-size="sm" data-variant="ghost" onClick=${() => run(s)}>${s}</button>`)}</div>`}
+      </section>`;
+    }
+    function Diff({ proposal, value, onAccept, onReject }) {
+      const next = proposal.rows.filter((r) => r.kind !== "del").map((r) => r.block);
+      const added = proposal.rows.filter((r) => r.kind === "add").length, removed = proposal.rows.filter((r) => r.kind === "del").length;
+      return html`<section class="grid gap-3" data-diff>
+        <div class="flex flex-wrap items-start gap-3">
+          <div class="grid gap-0.5">
+            <div class="text-sm text-muted-foreground">${`Proposed for "${proposal.ask}"`}</div>
+            <div class="font-semibold">${proposal.title}</div>
+            <div class="text-sm text-muted-foreground">${proposal.why}</div>
+            <div class="text-xs text-muted-foreground mt-1">${[added && `${added} added`, removed && `${removed} removed`].filter(Boolean).join(" · ")} · Lesson ${C.estimate(value).label} → ${C.estimate(next).label}</div>
+          </div>
+          <div class="ml-auto flex gap-2"><button type="button" class="btn" data-variant="outline" onClick=${onReject}>Reject</button><button type="button" class="btn" onClick=${() => onAccept(next)}>Accept</button></div>
+        </div>
+        <div class="grid gap-1.5">${proposal.rows.map((r, k) => html`<div key=${k} class=${`diff-row ${r.kind}`}>
+          <div class="flex items-center gap-2 text-sm"><span class="blk-tag whitespace-nowrap">${C.label(r.block.type)}</span>
+            ${r.kind === "add" && html`<span class="pill tone-ok">Added</span>`}${r.kind === "del" && html`<span class="pill tone-critical">Removed</span>`}
+            ${r.kind !== "add" && html`<span class="diff-sum truncate">${summary(r.block)}</span>`}
+            ${r.kind === "add" && checkOf(r.block) && html`<span class=${`pill ${checkOf(r.block)[1]} ml-auto`}>${checkOf(r.block)[0]}</span>`}</div>
+          ${r.kind === "add" && html`<div class="mt-2"><${V.PreviewBlock} b=${r.block} lesson=${next} /></div>`}
+        </div>`)}</div>
+      </section>`;
+    }
+
+    // ---- Student preview ------------------------------------------------------------------------
+    function Preview({ value }) {
+      return html`<div class="phone grid gap-3">
+        <div class="text-xs text-muted-foreground">${`${sub.topic} · ${C.estimate(value).label}`}</div>
+        ${value.map((b, k) => html`<${React.Fragment} key=${k}><${V.PreviewBlock} b=${b} lesson=${value} /><//>`)}
+      </div>`;
+    }
+
+    // ---- Side panel -----------------------------------------------------------------------------
+    function Side({ value, editor }) {
+      const rules = styleChecks(value);
+      const [running, setRunning] = useState(null);
+      const changed = useMemo(() => {
+        const a = JSON.parse(original), b = value;
+        let n = Math.abs(a.length - b.length);
+        b.forEach((x, k) => { if (JSON.stringify(x) !== JSON.stringify(a[k])) n++; });
+        return n;
+      }, [value]);
+      const wordsNow = value.filter((b) => b.type === "explain").reduce((s, b) => s + words(textOf(b)), 0);
+      const wordsBefore = JSON.parse(original).filter((b) => b.type === "explain").reduce((s, b) => s + words(textOf(b)), 0);
+      const pending = value.filter((b) => b.stale).length;
+      const todo = value.filter((b) => b.stale || (["fill", "parsons"].includes(b.type) && !b.verified?.ok) || (b.type === "trace" && !(b.steps || []).length)).length;
+      const est = C.estimate(value);
+      const runAll = async () => {
+        const n = editor.children.length; let done = 0;
+        setRunning("Loading Python…");
+        try {
+          for (let i = 0; i < n; i++) {
+            const b = editor.children[i];
+            const need = b.stale || (["fill", "parsons"].includes(b.type) && !b.verified?.ok) || (b.type === "trace" && !(b.steps || []).length);
+            if (!need) continue;
+            setRunning(`Checking ${C.label(b.type).toLowerCase()} (${++done} of ${todo})`);
+            if (b.type === "example" || b.type === "predict") { const r = await C.runPython(b.code); setAt(editor, i, { [b.type === "example" ? "output" : "answer"]: r.output, stale: false, error: r.error }); }
+            else if (b.type === "trace") { const r = await C.recordTrace(b.code); setAt(editor, i, { steps: r.steps, stale: false, error: r.error || null }); }
+            else if (b.type === "memory") { const r = await C.recordTrace(b.code); const l = r.steps[r.steps.length - 1]; setAt(editor, i, { names: l.names, heap: l.heap, stale: false }); }
+            else if (b.type === "fill") setAt(editor, i, { verified: await C.verifyFill(b) });
+            else if (b.type === "parsons") setAt(editor, i, { verified: await C.verifyParsons(b) });
+          }
+          Mock.toast(`Ran ${done} check${done === 1 ? "" : "s"} in the browser.`);
+        } catch (e) { Mock.toast("Couldn't load Python in this browser."); }
+        setRunning(null);
+      };
+      return html`<aside class="grid gap-4 content-start">
+        <div class="card gap-2"><header><h2>Length</h2></header>
+          <section class="grid gap-1 text-sm">
+            <div class="flex items-baseline gap-2"><span class="text-xl font-semibold" data-estimate>${est.label}</span><span class="text-muted-foreground">for a student</span></div>
+            <div class="text-xs text-muted-foreground">${`${Math.round(est.reading / 6) / 10} min reading · ${Math.round(est.doing / 6) / 10} min doing · ${value.length - 1} blocks`}</div>
+          </section></div>
+        <div class="card gap-2"><header><h2>Your style</h2><p>${mode === "draft" ? "What your example lessons do, checked against this draft as you edit." : "This lesson was written to follow these."}</p></header>
+          <section class="grid gap-1.5">${rules.map(([r, ok]) => html`<div key=${r} class="flex items-start gap-2 text-sm"><span class=${`pill ${ok ? "tone-ok" : "tone-warn"}`}>${ok ? "✓" : "·"}</span><span class=${ok ? "" : "text-muted-foreground"}>${r}</span></div>`)}</section></div>
+        <div class="card gap-2"><header><h2>Checks</h2></header>
+          <section class="grid gap-1.5 text-sm">
+            ${value.filter((b) => b.type !== "h2").map((b, k) => { const c = checkOf(b); return c && html`<div key=${k} class="check-row"><span class="text-muted-foreground">${C.label(b.type)}</span><span class=${`pill ${c[1]}`}>${c[0]}</span></div>`; })}
+            ${pending ? html`<p class="text-xs" style=${{ color: "var(--warn-solid)" }}>${pending} code block${pending === 1 ? "" : "s"} edited since it last ran.</p>`
+              : html`<p class="text-xs text-muted-foreground">Code that students see ran here; outputs and steps are what Python did.</p>`}
+            ${todo > 0 && html`<button type="button" class="btn" data-size="sm" data-variant="outline" disabled=${!!running} onClick=${runAll}>${running || `Run all checks (${todo})`}</button>`}
+          </section></div>
+        ${mode === "draft" && html`<div class="card gap-1"><header><h2>Your changes</h2></header><section class="text-sm grid gap-1">
+          <div>${`${changed} block${changed === 1 ? "" : "s"} changed from the AI draft`}</div>
+          <div class="text-muted-foreground">${`Explanation: ${wordsBefore} → ${wordsNow} words`}</div>
+          <p class="text-xs text-muted-foreground">These changes are what the generator learns from.</p></section></div>`}
+      </aside>`;
+    }
+
+    // ---- Page -----------------------------------------------------------------------------------
+    function App() {
+      const editor = usePlateEditor({ plugins, value: initial });
+      const [preview, setPreview] = useState(false);
+      const [doc, setDoc] = useState(initial);
+      const [slash, setSlash] = useState(null); // { at, filter, index, pos }
+      const [addMenu, setAddMenu] = useState(null); // { pos, index }
+      const [proposal, setProposal] = useState(null);
+      const [asking, setAsking] = useState(false);
+      const dismissed = useRef(null);
+      const lessonsUrl = (extra) => Mock.link("lessons.html", { ...backState(), ...(extra || {}) });
+      const examplesNow = M.lessons.filter((l) => l.status === "example").length + (Mock.param("saved") ? Mock.param("saved").split(",").length : 0);
+      const pending = doc.filter((b) => b.stale).length;
+      const failing = doc.filter((b) => b.verified && !b.verified.ok).length;
+
+      // Slash menu: open while the caret is in an explanation whose whole text is "/word".
+      const refreshSlash = () => {
+        const sel = editor.selection;
+        if (!sel || JSON.stringify(sel.anchor) !== JSON.stringify(sel.focus)) return setSlash(null);
+        const at = sel.anchor.path[0], node = editor.children[at];
+        const t = node && node.type === "explain" ? textOf(node) : "";
+        const m = t.match(/^\/([\w ()-]{0,24})$/);
+        if (!m || dismissed.current === `${at}:${t}`) return setSlash(null);
+        setTimeout(() => {
+          let rect = null;
+          try { const r = window.getSelection().getRangeAt(0).getBoundingClientRect(); if (r.top || r.left) rect = r; } catch (e) {}
+          if (!rect) rect = document.querySelectorAll("[data-slate-editor] > *")[at]?.getBoundingClientRect();
+          if (!rect) return;
+          setSlash((s) => ({ at, filter: m[1], index: s && s.filter === m[1] ? s.index : 0, pos: menuPos(rect) }));
+        }, 0);
+      };
+      useEffect(() => { if (!slash) return; const close = () => setSlash(null); window.addEventListener("scroll", close, true); return () => window.removeEventListener("scroll", close, true); }, [!!slash]);
+      useEffect(() => { if (!addMenu) return; const close = (e) => { if (!e.target.closest(".blockmenu") && !e.target.closest("[data-add-menu]")) setAddMenu(null); }; document.addEventListener("mousedown", close); return () => document.removeEventListener("mousedown", close); }, [!!addMenu]);
+
+      const make = (type) => {
+        const n = C.newBlock(type, ctxOf(editor.children));
+        if (!n) Mock.toast("No approved check question for this subtopic yet.");
+        return n;
+      };
+      const insertBlock = (n, at) => {
+        editor.tf.insertNodes(n, { at: [at] });
+        if (!["explain", "mistake", "h2"].includes(n.type) && at === editor.children.length - 1) editor.tf.insertNodes({ type: "explain", children: [{ text: "" }] }, { at: [at + 1] });
+        setTimeout(() => document.querySelectorAll("[data-slate-editor] > *")[at]?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 50);
+      };
+      const pickSlash = (type) => {
+        const at = slash.at, n = make(type); setSlash(null);
+        if (!n) return;
+        editor.tf.removeNodes({ at: [at] });
+        insertBlock(n, at);
+        if (["explain", "mistake", "h2"].includes(type)) { try { editor.tf.select({ path: [at, 0], offset: textOf(n).length }); editor.tf.focus(); } catch (e) {} }
+        Mock.toast(`Added: ${C.label(type)}.`);
+      };
+      const add = (type) => {
+        const n = make(type); if (!n) return;
+        const cur = editor.selection ? editor.selection.anchor.path[0] : null;
+        const at = type === "predict" ? 1 : cur !== null && cur < editor.children.length - 1 ? cur + 1 : editor.children.length;
+        insertBlock(n, at); setAddMenu(null);
+      };
+      const onKeyDown = (e) => {
+        if (e.target.closest && e.target.closest("input, textarea, select")) return;
+        if (slash) {
+          const n = filterBlocks(slash.filter).length;
+          if (e.key === "ArrowDown") { e.preventDefault(); setSlash({ ...slash, index: (slash.index + 1) % Math.max(1, n) }); return; }
+          if (e.key === "ArrowUp") { e.preventDefault(); setSlash({ ...slash, index: (slash.index - 1 + n) % Math.max(1, n) }); return; }
+          if ((e.key === "Enter" || e.key === "Tab") && n) { e.preventDefault(); pickSlash(filterBlocks(slash.filter)[slash.index][0]); return; }
+          if (e.key === "Escape") { e.preventDefault(); dismissed.current = `${slash.at}:/${slash.filter}`; setSlash(null); return; }
+        }
+        // Enter at the end of a title or mistake, or on a selected void block: new explanation below.
+        if (e.key === "Enter" && !e.shiftKey && editor.selection) {
+          const at = editor.selection.anchor.path[0], node = editor.children[at];
+          const atEnd = editor.selection.anchor.offset >= textOf(node).length;
+          if (node && (!["explain", "mistake", "h2"].includes(node.type) || (node.type !== "explain" && atEnd))) {
+            e.preventDefault();
+            editor.tf.insertNodes({ type: "explain", children: [{ text: "" }] }, { at: [at + 1], select: true });
+          }
+        }
+      };
+
+      const save = () => {
+        if (pending) { Mock.toast("Run the edited code first, so the outputs students see are real."); return; }
+        if (failing) { Mock.toast("A fill-the-blank or order-the-lines answer failed its check. Fix it before saving."); return; }
+        if (mode === "draft") { Mock.toast("Saved as an example lesson. The generator learns from your changes."); setTimeout(() => { location.href = lessonsUrl(addTo(backState(), "saved", sub.id)); }, 900); }
+        else if (["spot", "generated"].includes(mode)) { Mock.toast("Approved. Students see it once Strings opens."); setTimeout(() => { location.href = lessonsUrl(addTo(backState(), "approved", sub.id)); }, 900); }
+        else Mock.toast("Saved.");
+      };
+      const accept = (next) => { replaceAll(editor, clone(next)); setDoc(clone(next)); setProposal(null); Mock.toast("Applied the change."); };
+      const status = { draft: ["AI draft", "tone-warn"], example: ["Your example", "tone-accent"], spot: ["Generated · spot-check", "tone-warn"], generated: ["Generated", "tone-muted"], approved: ["Approved", "tone-ok"] }[mode] || ["AI draft", "tone-warn"];
+      const primary = mode === "draft" ? `Save as example lesson (${Math.min(examplesNow + 1, 6)} of 5–6)` : ["spot", "generated"].includes(mode) ? "Approve" : "Save changes";
+      return html`<div class="grid gap-5">
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <p class="text-sm text-muted-foreground"><a class="hover:underline" href=${lessonsUrl()}>Lessons</a> / ${sub.topic}</p>
+            <div class="flex items-center gap-2"><h1 class="text-2xl font-semibold">${sub.name}</h1><span class=${`pill ${status[1]}`}>${status[0]}</span>
+              <span class="text-sm text-muted-foreground">${C.estimate(doc).label}</span></div>
+            <p class="text-sm text-muted-foreground mt-0.5">${mode === "draft" ? "The AI's first draft from the book. Make it how you'd teach it; your changes teach the generator your style."
+              : ["spot", "generated"].includes(mode) ? "Written by the generator in your style and checked. Read it as a student would, fix anything, then approve."
+              : "One of your example lessons."}</p>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <button type="button" class="btn" data-variant=${preview ? "secondary" : "outline"} disabled=${!!proposal} onClick=${() => setPreview(!preview)}>${preview ? "Back to editing" : "Preview as student"}</button>
+            <button type="button" class="btn" disabled=${!!proposal} onClick=${save}>${primary}</button>
+          </div>
+        </div>
+        <div class="grid lg:grid-cols-[minmax(0,1fr)_20rem] gap-6 items-start">
+          <div class="card gap-0">
+            <section style=${preview || proposal ? { display: "none" } : {}}>
+              <${AskAI} value=${doc} busy=${asking} setBusy=${setAsking} onReview=${setProposal} />
+              <${Plate} editor=${editor} onValueChange=${({ value }) => { setDoc(value); refreshSlash(); }} onSelectionChange=${refreshSlash}>
+                <${PlateContent} class="outline-none" spellCheck=${true} onKeyDown=${onKeyDown} onBlur=${() => setTimeout(() => setSlash(null), 150)} />
+              <//>
+              <div class="relative mt-3 border-t pt-3 flex flex-wrap items-center gap-2" style=${{ borderColor: "var(--border)" }}>
+                <span class="text-xs text-muted-foreground mr-1">Add</span>
+                ${[["predict", "Predict"], ["explain", "Explanation"], ["trace", "Step-through"], ["branch", "Misconception check"], ["mistake", "Common mistake"]].map(([t, l]) =>
+                  html`<button key=${t} type="button" class="btn" data-size="sm" data-variant="outline" onClick=${() => add(t)}>+ ${l}</button>`)}
+                <button type="button" class="btn" data-size="sm" data-variant="ghost" data-add-menu aria-expanded=${!!addMenu}
+                  onClick=${() => setAddMenu(addMenu ? null : { index: -1 })}>All 13 blocks ▾</button>
+                <span class="text-xs text-muted-foreground ml-auto">or type <kbd class="kbd">/</kbd> on an empty line</span>
+                ${addMenu && html`<${BlockMenu} anchored=${true} index=${addMenu.index} onHover=${(k) => setAddMenu({ ...addMenu, index: k })} onPick=${add}
+                  foot="Inserted after the block your cursor is in, or at the end." />`}
+              </div>
+            </section>
+            ${proposal && html`<${Diff} proposal=${proposal} value=${doc} onAccept=${accept} onReject=${() => { setProposal(null); Mock.toast("Discarded. The lesson is unchanged."); }} />`}
+            ${preview && !proposal && html`<section class="grid place-items-center py-2"><${Preview} value=${doc} /></section>`}
+          </div>
+          <${Side} value=${doc} editor=${editor} />
+        </div>
+        ${slash && html`<${BlockMenu} pos=${slash.pos} filter=${slash.filter} index=${slash.index} onHover=${(k) => setSlash({ ...slash, index: k })} onPick=${pickSlash}
+          foot="↑↓ to choose · Enter to insert · Esc to keep typing" />`}
+      </div>`;
+    }
+    createRoot(document.getElementById("lesson-root")).render(html`<${App} />`);
+  </script>
+</body>
+</html>

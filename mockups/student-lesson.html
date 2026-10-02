@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .choice { display: flex; align-items: flex-start; gap: .75rem; border: 1px solid var(--border); border-radius: .6rem; padding: .75rem; cursor: pointer; background: var(--card); }
+    .choice:hover { background: var(--muted); }
+    .choice[data-on] { border-color: var(--primary); background: var(--accent); }
+    .choice[data-right] { border-color: var(--ok-solid); background: var(--ok-wash); }
+    .choice[data-wrong] { border-color: var(--critical-solid); background: var(--critical-wash); }
+    .codebox { border: 1px solid var(--border); border-radius: .6rem; background: var(--muted); overflow-x: auto; font-family: var(--font-mono); font-size: .8rem; line-height: 1.6; }
+    .codeline { display: flex; white-space: pre; padding: 0 .75rem 0 0; border-left: 3px solid transparent; }
+    .codeline > .ln { width: 2rem; flex: none; text-align: right; padding-right: .6rem; color: var(--muted-foreground); user-select: none; }
+    .codeline[data-next] { background: var(--accent); border-left-color: var(--primary); }
+    .codeline[data-ran] { background: color-mix(in oklch, var(--muted-foreground) 12%, transparent); }
+    .rail { display: flex; gap: 3px; }
+    .rail > span { height: 6px; flex: 1; border-radius: 99px; background: var(--border); }
+    .rail > span[data-s="done"] { background: var(--primary); }
+    .rail > span[data-s="cur"] { background: var(--foreground); }
+    .rail > span[data-s="skip"] { background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+    .rail > span[data-added] { box-shadow: 0 2px 0 0 var(--warn-solid); }
+    .chipline { display: block; width: 100%; text-align: left; white-space: pre; overflow-x: auto; font-family: var(--font-mono); font-size: .75rem; line-height: 1.25rem; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--card); }
+    .chipline:hover { border-color: var(--primary); }
+    .chipline.placed { display: flex; gap: .6rem; white-space: normal; background: var(--muted); }
+    input[type=range].slider { width: 100%; accent-color: var(--primary); }
+    .blank { font: inherit; width: 13ch; padding: 0 .35rem; border: 1px solid var(--primary); border-radius: .3rem; background: var(--card); color: var(--foreground); outline: none; }
+    .blank:focus { box-shadow: 0 0 0 2px var(--ring); }
+    .blank[data-ok] { border-color: var(--ok-solid); background: var(--ok-wash); }
+    .blank[data-bad] { border-color: var(--critical-solid); }
+    dialog.sheet { margin: auto auto 0; width: 100%; max-width: 42rem; max-height: 82vh; padding: 0; border: 1px solid var(--border); border-bottom: 0; border-radius: 1rem 1rem 0 0; background: var(--card); color: var(--foreground); }
+    dialog.sheet::backdrop { background: color-mix(in oklch, var(--foreground) 35%, transparent); }
+    .quote { border-left: 3px solid var(--primary); padding: .15rem 0 .15rem .7rem; font-size: .85rem; line-height: 1.5; }
+  </style>
+</head>
+<!-- F5s · Lesson player: the 3-minute lesson for one subtopic, one block at a time.
+     student-lesson.html?sub=<subtopic id>&from=practice|home
+     Blocks follow assets/lesson-schema.js. ADAPTIVE (TODO(real): rules run server-side and are logged):
+       predict right  -> the next explanation collapses to one line, with an offer to skip the step-through
+       predict wrong  -> the step-through has to be stepped to the end before Continue
+       branch missed  -> targeted remediation, the block it names is re-shown inline, and a replay is inserted
+       check missed   -> one more worked example (the subtopic's refresher) is inserted before the recap
+     Only the check question (from the approved bank) moves mastery, like a practice answer. -->
+<body data-scope="student" data-title="Lesson">
+  <main x-data="page()" x-cloak class="mx-auto grid w-full max-w-2xl gap-4 px-4 pt-4 pb-32">
+    <!-- Top: way back, title, ask -->
+    <div class="grid gap-3">
+      <div class="flex items-center gap-2 text-sm">
+        <a class="flex items-center gap-1 text-muted-foreground hover:underline" :href="backHref"><span><i data-lucide="arrow-left" class="size-4"></i></span><span x-text="backLabel"></span></a>
+        <button type="button" class="btn ml-auto" data-variant="outline" data-size="sm" @click="openAsk()"><i data-lucide="message-circle-question"></i>Ask about this lesson</button>
+      </div>
+      <div>
+        <p class="text-xs text-muted-foreground" x-text="`${sub.topic} · ${minutes}-minute lesson · from ${MOCK.student_extra.instructor}`"></p>
+        <h1 class="text-xl font-semibold" x-text="title"></h1>
+      </div>
+      <template x-if="steps.length && !done">
+        <div class="grid gap-1.5">
+          <div class="rail" role="progressbar" :aria-valuenow="position" :aria-valuemax="visibleCount" :aria-label="`Block ${position} of ${visibleCount}`">
+            <template x-for="(s, k) in seq" :key="s.id">
+              <span :data-s="s.skipped ? 'skip' : k < cur ? 'done' : k === cur ? 'cur' : 'todo'" :data-added="s.origin === 'added' ? '' : null" :title="(s.origin === 'added' ? 'Added for you: ' : s.skipped ? 'Skipped: ' : '') + LABEL[s.b.type]"></span>
+            </template>
+          </div>
+          <div class="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+            <span x-text="`${position} of ${visibleCount} · ${LABEL[e.b.type]}`"></span>
+            <span class="ml-auto" x-show="added || skipped" x-text="[added ? `${added} added for you` : '', skipped ? `${skipped} skipped` : ''].filter(Boolean).join(' · ')"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Lesson not written yet -->
+    <template x-if="!steps.length">
+      <section class="card py-8"><section class="grid gap-2 text-center">
+        <h2 class="font-semibold">This lesson isn't ready yet</h2>
+        <p class="text-sm text-muted-foreground">Your instructor hasn't published a lesson for this subtopic. Practice questions still explain each answer.</p>
+        <a class="btn mx-auto mt-2" :href="backHref" x-text="backLabel"></a>
+      </section></section>
+    </template>
+
+    <!-- The current block -->
+    <template x-for="e in seq.slice(cur, cur + 1)" :key="e.id">
+      <section class="card gap-4 py-5" x-show="!done">
+        <header class="grid gap-1.5">
+          <div class="flex items-center gap-2">
+            <h2 class="text-base" x-text="headingFor(e)"></h2>
+            <span class="pill tone-muted ml-auto shrink-0" x-show="interactive(e)">Your turn</span>
+          </div>
+          <p class="flex items-start gap-1.5 text-xs" x-show="e.note" style="color:var(--accent-foreground)"><span class="mt-0.5 shrink-0"><i data-lucide="route" class="size-3.5"></i></span><span x-text="e.note"></span></p>
+        </header>
+        <section class="grid gap-4">
+
+          <!-- predict -->
+          <template x-if="e.b.type === 'predict'">
+            <div class="grid gap-3">
+              <pre class="codebox p-3" x-text="e.b.code"></pre>
+              <div role="group" class="field">
+                <label :for="`g-${e.id}`" x-text="`${e.b.question} Guess before you see it.`"></label>
+                <textarea :id="`g-${e.id}`" rows="2" class="textarea font-mono" x-model="e.st.guess" :disabled="e.st.revealed" placeholder="Type what it prints"></textarea>
+              </div>
+              <button type="button" class="btn" x-show="!e.st.revealed" :disabled="!e.st.guess.trim()" @click="reveal(e)">Check my guess</button>
+              <template x-if="e.st.revealed">
+                <div class="grid gap-2 rounded-lg border p-3" :style="{ borderColor: e.st.right ? 'var(--ok-solid)' : 'var(--critical-solid)' }">
+                  <div class="flex items-center gap-2 text-sm font-medium">
+                    <span x-show="e.st.right" style="color:var(--ok-solid)"><i data-lucide="circle-check" class="size-4"></i></span>
+                    <span x-show="!e.st.right" style="color:var(--critical-solid)"><i data-lucide="circle-x" class="size-4"></i></span>
+                    <span x-text="e.st.right ? 'Right' : 'Not quite'"></span>
+                  </div>
+                  <div class="grid gap-1 text-sm">
+                    <span class="text-xs text-muted-foreground">It prints</span>
+                    <pre class="font-mono text-sm" x-text="e.b.answer"></pre>
+                  </div>
+                  <p class="text-xs text-muted-foreground" x-text="e.st.right ? 'You already have the idea, so the next part is short.' : 'Most people guess that too. The next two blocks show why it prints this.'"></p>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- explain (full, or collapsed after a right prediction) -->
+          <template x-if="e.b.type === 'explain'">
+            <div class="grid gap-3">
+              <p class="leading-7" x-show="!e.collapsed || e.st.open" x-html="code(text(e.b))"></p>
+              <template x-if="e.collapsed && !e.st.open">
+                <div class="grid gap-3">
+                  <div class="flex items-start gap-2">
+                    <span class="mt-0.5" style="color:var(--ok-solid)"><i data-lucide="circle-check" class="size-4"></i></span>
+                    <div class="grid gap-0.5"><span class="font-medium">You've got the idea.</span><span class="text-sm text-muted-foreground" x-text="firstSentence(text(e.b))"></span></div>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button type="button" class="btn" data-variant="outline" data-size="sm" x-show="e.skipList && e.skipList.length" @click="skipAhead(e)" x-text="skipLabel(e)"></button>
+                    <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="e.st.open = true">Read the full explanation</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- mistake -->
+          <template x-if="e.b.type === 'mistake'">
+            <div class="flex items-start gap-3 rounded-lg p-3 tone-warn">
+              <span class="mt-0.5 shrink-0"><i data-lucide="triangle-alert" class="size-4"></i></span>
+              <p class="text-sm leading-6" style="color:var(--foreground)" x-html="code(text(e.b))"></p>
+            </div>
+          </template>
+
+          <!-- example -->
+          <template x-if="e.b.type === 'example'">
+            <div class="grid gap-2">
+              <div class="overflow-hidden rounded-lg border">
+                <pre class="overflow-x-auto px-3 py-2.5 font-mono text-xs leading-5" style="background:var(--muted)" x-text="e.b.code"></pre>
+                <div class="flex gap-3 border-t px-3 py-2 font-mono text-xs"><span class="text-muted-foreground">Output</span><pre x-text="e.b.output"></pre></div>
+              </div>
+              <p class="text-xs text-muted-foreground" x-show="e.b.source" x-text="extra ? e.b.source : `From ${MOCK.lessonAskBook}, ${e.b.source}`"></p>
+            </div>
+          </template>
+
+          <!-- branch: a misconception check with targeted feedback per wrong answer -->
+          <template x-if="e.b.type === 'branch'">
+            <div class="grid gap-3">
+              <p class="leading-7" x-html="code(e.b.question)"></p>
+              <div class="grid gap-2">
+                <template x-for="(o, k) in e.b.options" :key="k">
+                  <button type="button" class="choice text-left text-sm" :disabled="e.st.pick !== null" @click="pickBranch(e, k)"
+                          :data-right="e.st.pick !== null && k === e.b.answer ? '' : null" :data-wrong="e.st.pick === k && k !== e.b.answer ? '' : null">
+                    <span class="font-mono text-xs text-muted-foreground mt-0.5" x-text="String.fromCharCode(65 + k)"></span>
+                    <span class="leading-6" :class="/[=\[\]'_]|\w\(/.test(o) ? 'font-mono' : ''" x-text="o"></span>
+                  </button>
+                </template>
+              </div>
+              <template x-if="e.st.pick !== null">
+                <div class="grid gap-1.5 text-sm leading-6">
+                  <p class="flex items-center gap-2 font-medium">
+                    <span x-show="e.st.pick === e.b.answer" style="color:var(--ok-solid)"><i data-lucide="circle-check" class="size-4"></i></span>
+                    <span x-show="e.st.pick !== e.b.answer" style="color:var(--critical-solid)"><i data-lucide="circle-x" class="size-4"></i></span>
+                    <span x-text="e.st.pick === e.b.answer ? 'Right' : 'Not quite'"></span>
+                  </p>
+                  <p x-show="e.st.pick === e.b.answer" x-text="e.b.misconception ? `The usual trap here: ${e.b.misconception.charAt(0).toLowerCase() + e.b.misconception.slice(1)}. You avoided it.` : 'Right.'"></p>
+                  <p x-show="e.st.rem" x-text="e.st.rem && e.st.rem.text"></p>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- fill the blank -->
+          <template x-if="e.b.type === 'fill'">
+            <div class="grid gap-3">
+              <p class="text-sm">Fill in the blank so the code does what the comment says.</p>
+              <div class="codebox py-2">
+                <template x-for="(ln, k) in e.b.code.split('\n')" :key="k">
+                  <div class="flex items-center whitespace-pre px-3 py-0.5">
+                    <span x-text="ln.split('____')[0]"></span>
+                    <template x-if="ln.includes('____')">
+                      <input class="blank" :style="{ width: `${Math.max(12, e.st.val.length + 2)}ch` }" :aria-label="`Blank on line ${k + 1}`" x-model="e.st.val" :disabled="e.st.ok || e.st.shown" @keydown.enter="checkFill(e)" :data-ok="e.st.ok ? '' : null" :data-bad="e.st.msg && !e.st.ok ? '' : null" autocapitalize="off" autocomplete="off" spellcheck="false">
+                    </template>
+                    <span x-text="ln.split('____')[1] || ''"></span>
+                  </div>
+                </template>
+              </div>
+              <div class="flex flex-wrap gap-2" x-show="!e.st.ok && !e.st.shown">
+                <button type="button" class="btn" data-size="sm" :disabled="!e.st.val.trim()" @click="checkFill(e)">Check</button>
+                <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="e.st.tries >= 2" @click="e.st.shown = true; e.st.val = e.b.answers[0]">Show the answer</button>
+              </div>
+              <p class="text-sm" x-show="e.st.msg && !e.st.ok && !e.st.shown" style="color:var(--critical-solid)" x-text="e.st.msg"></p>
+              <p class="text-sm" x-show="e.st.ok" style="color:var(--ok-solid)" x-text="fillOk(e)"></p>
+              <p class="text-sm text-muted-foreground" x-show="e.st.shown" x-text="`One answer is ${e.b.answers[0]}. Read it once more before you go on.`"></p>
+            </div>
+          </template>
+
+          <!-- parsons: tap lines to build the program -->
+          <template x-if="e.b.type === 'parsons'">
+            <div class="grid gap-3">
+              <p class="text-sm" x-text="e.b.prompt + ' One line is not needed.'"></p>
+              <div class="grid gap-1.5 rounded-lg border border-dashed p-2" :style="{ borderColor: e.st.ok ? 'var(--ok-solid)' : 'var(--border)' }">
+                <span class="px-1 text-xs text-muted-foreground" x-text="e.st.placed.length ? 'Your program (tap a line to take it out)' : 'Your program: tap lines below in the order they should run'"></span>
+                <template x-for="(it, k) in e.st.placed" :key="it">
+                  <button type="button" class="chipline placed" :disabled="e.st.ok || e.st.shown" @click="unplace(e, k)"
+                          :style="{ borderColor: e.st.marks[k] === 'bad' ? 'var(--critical-solid)' : e.st.ok ? 'var(--ok-solid)' : 'var(--border)' }"><span class="text-muted-foreground" x-text="k + 1"></span><span class="whitespace-pre" x-text="e.st.items[it]"></span></button>
+                </template>
+              </div>
+              <div class="grid gap-1.5" x-show="!e.st.ok && !e.st.shown">
+                <template x-for="it in e.st.pool" :key="it">
+                  <button type="button" class="chipline" @click="place(e, it)" x-text="e.st.items[it]"></button>
+                </template>
+              </div>
+              <div class="flex flex-wrap gap-2" x-show="!e.st.ok && !e.st.shown">
+                <button type="button" class="btn" data-size="sm" :disabled="!e.st.placed.length" @click="checkParsons(e)">Check</button>
+                <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="e.st.placed.length" @click="resetParsons(e)">Start over</button>
+                <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="e.st.tries >= 2" @click="showParsons(e)">Show the answer</button>
+              </div>
+              <p class="text-sm" x-show="e.st.msg" :style="{ color: e.st.ok ? 'var(--ok-solid)' : e.st.shown ? 'var(--muted-foreground)' : 'var(--critical-solid)' }" x-text="e.st.msg"></p>
+              <div class="flex gap-3 rounded-md border px-3 py-2 font-mono text-xs" x-show="e.st.ok || e.st.shown"><span class="text-muted-foreground">Output</span><span x-text="e.b.output"></span></div>
+            </div>
+          </template>
+
+          <!-- check: multiple choice from the approved question bank (counts toward mastery) -->
+          <template x-if="e.b.type === 'check'">
+            <div class="grid gap-3">
+              <p class="leading-7" x-html="code(e.b.question)"></p>
+              <div class="grid gap-2">
+                <template x-for="(o, k) in e.b.options" :key="k">
+                  <label class="choice text-sm" :data-on="!e.st.checked && e.st.pick === k ? '' : null" :data-right="e.st.checked && k === e.b.answer ? '' : null" :data-wrong="e.st.checked && e.st.pick === k && k !== e.b.answer ? '' : null">
+                    <input type="radio" class="input mt-0.5" :name="`c-${e.id}`" :checked="e.st.pick === k" :disabled="e.st.checked" @change="e.st.pick = k">
+                    <span class="font-mono text-xs text-muted-foreground mt-0.5" x-text="String.fromCharCode(65 + k)"></span>
+                    <span class="leading-6" :class="/[=\[\]'_]|\w\(/.test(o) ? 'font-mono' : ''" x-text="o"></span>
+                  </label>
+                </template>
+              </div>
+              <button type="button" class="btn" x-show="!e.st.checked" :disabled="e.st.pick === null" @click="checkMc(e)">Check answer</button>
+              <p class="text-xs text-muted-foreground" x-show="!e.st.checked" x-text="extra ? 'A quick check before the recap.' : 'This one is from your question bank, so it counts toward your mastery like a practice answer.'"></p>
+              <p class="text-sm" x-show="e.st.checked" :style="{ color: e.st.pick === e.b.answer ? 'var(--ok-solid)' : 'var(--critical-solid)' }"
+                 x-text="e.st.pick === e.b.answer ? 'Correct.' : `Not quite. The answer is ${e.b.options[e.b.answer]}.`"></p>
+            </div>
+          </template>
+
+          <!-- recap -->
+          <template x-if="e.b.type === 'recap'">
+            <ol class="grid gap-2">
+              <template x-for="(p, k) in e.b.points" :key="k">
+                <li class="flex gap-3 text-sm leading-6"><span class="font-mono text-xs text-muted-foreground mt-1" x-text="k + 1"></span><span x-html="code(p)"></span></li>
+              </template>
+            </ol>
+          </template>
+
+          <!-- Visual blocks (trace, memory, explore): the block itself, or re-shown inside a missed branch -->
+          <template x-for="m in mediaFor(e)" :key="m.id">
+            <div class="grid gap-3" :class="m !== e && 'rounded-lg border p-3'">
+              <p class="text-xs font-medium text-muted-foreground" x-show="m !== e" x-text="m.earlier ? `${LABEL[m.b.type]}, from earlier in the lesson` : LABEL[m.b.type]"></p>
+              <p class="text-sm" x-show="m.b.caption" x-text="m.b.caption"></p>
+
+              <!-- trace -->
+              <template x-if="m.b.type === 'trace'">
+                <div class="grid gap-3">
+                  <div class="codebox py-1.5">
+                    <template x-for="(ln, k) in m.b.code.split('\n')" :key="k">
+                      <div class="codeline" :data-next="m.b.steps[m.st.i].line === k + 1 ? '' : null" :data-ran="m.st.i > 0 && m.b.steps[m.st.i - 1].line === k + 1 && m.b.steps[m.st.i].line !== k + 1 ? '' : null">
+                        <span class="ln" x-text="k + 1"></span><span x-text="ln"></span>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button type="button" class="btn" data-variant="outline" data-size="icon" :disabled="m.st.i === 0" @click="stepTo(m, m.st.i - 1)" aria-label="Previous step"><i data-lucide="chevron-left"></i></button>
+                    <input type="range" class="slider flex-1" min="0" :max="m.b.steps.length - 1" :value="m.st.i" @input="stepTo(m, +$event.target.value)" aria-label="Step">
+                    <button type="button" class="btn" data-size="icon" :disabled="m.st.i === m.b.steps.length - 1" @click="stepTo(m, m.st.i + 1)" aria-label="Next step"><i data-lucide="chevron-right"></i></button>
+                  </div>
+                  <div class="flex items-baseline gap-2 text-xs">
+                    <span class="shrink-0 whitespace-nowrap font-mono text-muted-foreground" x-text="`Step ${m.st.i + 1}/${m.b.steps.length}`"></span>
+                    <span x-html="traceSay(m)"></span>
+                  </div>
+                  <div class="rounded-lg border p-2" style="background:var(--card)" x-html="diagram(m.b.steps[m.st.i], m.st.i ? m.b.steps[m.st.i - 1] : null)"></div>
+                  <div class="flex gap-3 rounded-md border px-3 py-2 font-mono text-xs" x-show="m.b.code.includes('print')">
+                    <span class="text-muted-foreground shrink-0">Printed</span>
+                    <pre class="min-w-0 overflow-x-auto" x-text="m.b.steps[m.st.i].out.replace(/\n$/, '') || ' '"></pre>
+                  </div>
+                  <p class="text-xs text-muted-foreground" x-show="m.st.must && m.st.seen < m.b.steps.length - 1" x-text="`Step to the end to continue (${m.st.seen + 1} of ${m.b.steps.length} seen).`"></p>
+                </div>
+              </template>
+
+              <!-- memory -->
+              <template x-if="m.b.type === 'memory'">
+                <div class="grid gap-2">
+                  <div class="rounded-lg border p-2" style="background:var(--card)" x-html="diagram({ names: m.b.names, heap: m.b.heap }, null)"></div>
+                  <details class="text-xs"><summary class="cursor-pointer text-muted-foreground">The code</summary><pre class="codebox mt-2 p-3" x-text="m.b.code"></pre></details>
+                </div>
+              </template>
+
+              <!-- explore: loss curves (assets/lesson-curves.js draws and handles its own controls) -->
+              <template x-if="m.b.type === 'explore' && m.b.kind === 'loss_curves'">
+                <div x-init="LossCurves.mount($el, m.b, { caption: false })"></div>
+              </template>
+              <!-- explore: range() -->
+              <template x-if="m.b.type === 'explore' && m.b.kind !== 'loss_curves'">
+                <div class="grid gap-3">
+                  <div class="rounded-lg border px-3 py-2 font-mono text-sm" style="background:var(--muted)">
+                    <span x-text="`list(range(${m.st.start}, ${m.st.stop}, ${m.st.step}))`"></span>
+                    <div class="text-xs" :style="{ color: rangeVals(m.st).length ? 'var(--foreground)' : 'var(--warn-solid)' }" x-text="rangeVals(m.st).length ? `[${rangeVals(m.st).join(', ')}]   ${rangeVals(m.st).length} value${rangeVals(m.st).length === 1 ? '' : 's'}` : '[]   empty: start is already at the fence'"></div>
+                  </div>
+                  <div x-html="rangeSvg(m.st)"></div>
+                  <div class="grid gap-2 text-sm">
+                    <template x-for="f in [['start', 0, 10], ['stop', 0, 12], ['step', 1, 4]]" :key="f[0]">
+                      <label class="grid grid-cols-[3.5rem_1fr_1.5rem] items-center gap-3">
+                        <span class="text-muted-foreground" x-text="f[0]"></span>
+                        <input type="range" class="slider" :min="f[1]" :max="f[2]" :value="m.st[f[0]]" @input="m.st[f[0]] = +$event.target.value" :aria-label="f[0]">
+                        <span class="text-right font-mono" x-text="m.st[f[0]]"></span>
+                      </label>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </section>
+      </section>
+    </template>
+
+    <!-- End screen -->
+    <template x-if="done">
+      <div class="grid gap-4">
+        <section class="card gap-4 py-5">
+          <header>
+            <div class="flex items-center gap-2">
+              <span style="color:var(--ok-solid)"><i data-lucide="circle-check" class="size-5"></i></span>
+              <h2>Lesson done</h2>
+              <span class="ml-auto text-sm text-muted-foreground" x-text="`Took ${elapsed}`"></span>
+            </div>
+            <p x-text="summaryLine"></p>
+          </header>
+          <section class="grid gap-4">
+            <p class="text-sm text-muted-foreground" x-show="mastery.none">This lesson isn't part of your course, so it doesn't change your mastery.</p>
+            <div class="grid gap-1.5" x-show="!mastery.none">
+              <div class="flex flex-wrap items-baseline gap-2 text-sm">
+                <span class="font-medium" x-text="`${sub.topic} mastery`"></span>
+                <span class="ml-auto font-mono" x-text="`${Mock.pct(mastery.before)} → ${Mock.pct(mastery.after)}`"></span>
+                <span class="pill" :class="mastery.after > mastery.before ? 'tone-ok' : mastery.after < mastery.before ? 'tone-warn' : 'tone-muted'"
+                      x-text="mastery.after > mastery.before ? `+${Math.round((mastery.after - mastery.before) * 100)} pts` : mastery.after < mastery.before ? 'needs more practice' : 'no change'"></span>
+              </div>
+              <div class="relative h-2 rounded-full" style="background:var(--muted)">
+                <div class="absolute inset-y-0 left-0 rounded-full" :style="{ width: `${shownMastery * 100}%`, background: mastery.after >= mastery.before ? 'var(--primary)' : 'var(--warn-solid)', transition: 'width .8s ease' }"></div>
+                <div class="absolute -inset-y-0.5 w-0.5" :style="{ background: 'var(--foreground)', left: `${mastery.before * 100}%` }" title="Before this lesson"></div>
+              </div>
+              <p class="text-xs text-muted-foreground" x-text="mastery.counted ? 'Only the question from your question bank counts toward mastery. The rest of the lesson is practice.' : 'Nothing in this lesson counted toward mastery: you didn\'t answer its bank question.'"></p>
+            </div>
+
+            <ul class="grid gap-1.5 border-t pt-4 text-sm">
+              <template x-for="r in answerLog" :key="r.id">
+                <li class="flex items-center gap-2">
+                  <span :style="{ color: r.ok ? 'var(--ok-solid)' : 'var(--critical-solid)' }" x-show="r.ok !== null"><span x-show="r.ok"><i data-lucide="check" class="size-4"></i></span><span x-show="!r.ok"><i data-lucide="x" class="size-4"></i></span></span>
+                  <span x-text="r.label"></span>
+                  <span class="ml-auto text-xs text-muted-foreground" x-text="r.detail"></span>
+                </li>
+              </template>
+            </ul>
+
+            <div class="grid gap-1.5 rounded-lg p-3 text-sm" style="background:var(--accent)" x-show="adaptLog.length">
+              <span class="flex items-center gap-1.5 text-xs font-medium" style="color:var(--accent-foreground)"><i data-lucide="route" class="size-3.5"></i>Adapted for you</span>
+              <template x-for="a in adaptLog" :key="a"><p class="leading-6" x-text="a"></p></template>
+            </div>
+          </section>
+        </section>
+
+        <section class="card gap-3 py-5" x-show="extra">
+          <header><h2 class="text-base">Back to your course</h2></header>
+          <section class="grid gap-3">
+            <p class="text-sm leading-6">This was a stand-alone lesson. Your course practice picks up where you left it.</p>
+            <a class="btn w-full" data-size="lg" href="student-home.html">My courses</a>
+          </section>
+        </section>
+        <section class="card gap-3 py-5" x-show="!extra">
+          <header><h2 class="text-base">What to practise next</h2></header>
+          <section class="grid gap-3">
+            <p class="text-sm leading-6" x-text="nextText"></p>
+            <a class="btn w-full" data-size="lg" href="student-practice.html" x-text="from === 'practice' ? 'Back to practice' : `Practise ${sub.name}`"></a>
+            <div class="grid gap-1.5" x-show="nextLessons.length">
+              <span class="text-xs text-muted-foreground">Lessons for your other weak subtopics</span>
+              <template x-for="w in nextLessons" :key="w.id">
+                <a class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-[var(--muted)]" :href="`student-lesson.html?sub=${w.id}&from=${from}`">
+                  <span x-text="w.name"></span><span class="ml-auto font-mono text-xs text-muted-foreground" x-text="Mock.pct(w.m)"></span><span class="text-muted-foreground"><i data-lucide="chevron-right" class="size-4"></i></span>
+                </a>
+              </template>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="restart()"><i data-lucide="rotate-ccw"></i>Go through it again</button>
+              <button type="button" class="btn ml-auto" data-variant="ghost" data-size="sm" x-show="!reported" @click="openReport()"><i data-lucide="flag"></i>Report this lesson</button>
+              <span class="ml-auto text-xs text-muted-foreground self-center" x-show="reported">Reported to your instructor</span>
+            </div>
+          </section>
+        </section>
+      </div>
+    </template>
+
+    <!-- Bottom bar: back / continue -->
+    <div class="fixed inset-x-0 bottom-0 z-10 border-t" style="background:var(--card)" x-show="steps.length && !done">
+      <div class="mx-auto grid max-w-2xl gap-1.5 px-4 py-3">
+        <p class="text-center text-xs text-muted-foreground" x-show="gateText" x-text="gateText"></p>
+        <div class="flex gap-2">
+          <button type="button" class="btn" data-variant="outline" data-size="lg" :disabled="prevIndex() < 0" @click="back()" aria-label="Previous block"><i data-lucide="arrow-left"></i></button>
+          <button type="button" class="btn flex-1" data-size="lg" :disabled="!!gateText" @click="next()" x-text="nextIndex() < 0 ? 'Finish lesson' : 'Continue'"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ask about this lesson (bottom sheet) -->
+    <dialog x-ref="ask" class="sheet" aria-labelledby="ask-title" onclick="if (event.target === this) this.close()">
+      <div class="grid max-h-[82vh] grid-rows-[auto_1fr_auto]">
+        <div class="grid gap-1 border-b px-4 pt-2 pb-3">
+          <span class="mx-auto mb-1 h-1 w-10 rounded-full" style="background:var(--border)"></span>
+          <div class="flex items-center gap-2">
+            <h2 id="ask-title" class="font-semibold">Ask about this lesson</h2>
+            <button type="button" class="btn ml-auto" data-variant="ghost" data-size="icon-sm" onclick="this.closest('dialog').close()" aria-label="Close"><i data-lucide="x"></i></button>
+          </div>
+          <p class="text-xs text-muted-foreground" x-text="`Answers come only from your course book, ${MOCK.lessonAskBook}, and quote the passage they use.`"></p>
+        </div>
+        <div class="grid content-start gap-4 overflow-y-auto px-4 py-4" x-ref="thread">
+          <div class="flex flex-wrap gap-1.5" x-show="!thread.length">
+            <template x-for="s in ask.suggested" :key="s">
+              <button type="button" class="btn" data-variant="outline" data-size="sm" @click="askQ(s)" x-text="s"></button>
+            </template>
+          </div>
+          <template x-for="(t, k) in thread" :key="k">
+            <div class="grid gap-2">
+              <p class="ml-auto max-w-[85%] rounded-lg px-3 py-2 text-sm" style="background:var(--muted)" x-text="t.q"></p>
+              <p class="text-sm text-muted-foreground" x-show="t.loading">Searching the book…</p>
+              <template x-if="!t.loading && t.a">
+                <div class="grid gap-2 text-sm leading-6">
+                  <p x-text="t.a.answer"></p>
+                  <blockquote class="quote" x-show="t.a.quote"><span x-text="`“${t.a.quote}”`"></span></blockquote>
+                  <p class="flex items-center gap-1.5 text-xs text-muted-foreground"><i data-lucide="book-open" class="size-3.5"></i><span x-text="`${MOCK.lessonAskBook} · ${t.a.section}`"></span></p>
+                </div>
+              </template>
+              <template x-if="!t.loading && !t.a">
+                <div class="grid gap-2 text-sm leading-6">
+                  <p>I couldn't find that in the book sections for this lesson, so I won't guess. Try asking it another way, or send it to your instructor.</p>
+                  <button type="button" class="btn w-fit" data-variant="outline" data-size="sm" :disabled="t.sent" @click="t.sent = true; Mock.toast(`Sent to ${MOCK.student_extra.instructor}`)" x-text="t.sent ? 'Sent' : 'Send to my instructor'"></button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <form class="flex gap-2 border-t px-4 py-3" @submit.prevent="askQ(draft)">
+          <input class="input flex-1" x-model="draft" placeholder="e.g. Why do both names change?" aria-label="Your question">
+          <button class="btn" :disabled="!draft.trim()">Ask</button>
+        </form>
+      </div>
+    </dialog>
+
+    <!-- Report this lesson -->
+    <dialog x-ref="report" class="dialog" aria-labelledby="report-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="report-title">Report this lesson</h2>
+          <p>Your instructor sees your report with the lesson and your answers.</p>
+        </header>
+        <section class="grid gap-3">
+          <fieldset class="grid gap-2">
+            <legend class="mb-1 text-sm font-medium">What's wrong?</legend>
+            <template x-for="(label, key) in REPORT" :key="key">
+              <label class="choice items-center text-sm" :data-on="report.reason === key ? '' : null">
+                <input type="radio" name="report-reason" class="input" :checked="report.reason === key" @change="report.reason = key">
+                <span x-text="label"></span>
+              </label>
+            </template>
+          </fieldset>
+          <div role="group" class="field">
+            <label for="report-text">Details (optional)</label>
+            <textarea id="report-text" rows="3" class="textarea" x-model="report.text" placeholder="e.g. In the step-through I couldn't tell which line had just run."></textarea>
+          </div>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" :disabled="!report.reason" @click="sendReport()">Send report</button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-run.js"></script>
+  <script src="assets/data-f.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/lesson-schema.js"></script>
+  <script src="assets/data-lesson-player.js"></script>
+  <script src="assets/lesson-finetuning.js"></script>
+  <script src="assets/lesson-curves.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    // ---- Names -> objects diagram, laid out from the step's names and heap -------------------
+    let svgSeq = 0;
+    const CW = 7.3; // IBM Plex Mono advance at 12px
+    const escX = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    // Long list values wrap after a comma so the diagram fits a phone.
+    const wrapVal = (v, max = 19) => {
+      const parts = String(v).split(/(?<=,) /);
+      const lines = [];
+      parts.forEach((p) => { if (lines.length && (lines[lines.length - 1] + " " + p).length <= max) lines[lines.length - 1] += " " + p; else lines.push(p); });
+      return lines;
+    };
+    function diagram(step, prev) {
+      const names = Object.entries(step.names || {});
+      const heap = step.heap || {};
+      if (!names.length) return '<p class="px-2 py-3 text-xs text-muted-foreground">Nothing has run yet, so there are no names.</p>';
+      const id = `ar${++svgSeq}`;
+      const P = 8, TOP = 26, ROW = 40, CH = 26;
+      const nameW = Math.max(...names.map(([n]) => n.length)) * CW;
+      const cellX = P + nameW + 8;
+      const valW = (v) => Math.max(26, String(v.value).length * CW + 14);
+      const hasHeap = names.some(([, v]) => v.ref);
+      const objX = cellX + 26 + 44;
+      const cy = (i) => TOP + i * ROW + CH / 2;
+      // Objects, in order of the first name that refers to them, placed near those names.
+      const objs = [];
+      names.forEach(([n, v], i) => { if (v.ref) { let o = objs.find((x) => x.id === v.ref); if (!o) objs.push(o = { id: v.ref, rows: [], names: [] }); o.rows.push(i); o.names.push(n); } });
+      let cursor = TOP;
+      objs.forEach((o) => {
+        const h = heap[o.id] || { type: "?", value: "" };
+        o.type = h.type; o.lines = wrapVal(h.value);
+        o.w = Math.max(56, Math.max(...o.lines.map((l) => l.length)) * CW + 18);
+        o.h = o.lines.length * 16 + 12;
+        const want = o.rows.reduce((s, r) => s + cy(r), 0) / o.rows.length - o.h / 2;
+        o.y = Math.max(cursor + 12, want);
+        cursor = o.y + o.h + (o.rows.length > 1 ? 18 : 6);
+        o.changed = !prev || !prev.heap || !prev.heap[o.id] || prev.heap[o.id].value !== h.value;
+      });
+      const W = Math.ceil(hasHeap ? objX + Math.max(...objs.map((o) => o.w)) + P : cellX + Math.max(...names.map(([, v]) => v.ref ? 26 : valW(v))) + P);
+      const H = Math.ceil(Math.max(TOP + names.length * ROW - 8, cursor) + P);
+      const isNew = (n) => prev && !(prev.names || {})[n];
+      const valChanged = (n, v) => prev && (prev.names || {})[n] && prev.names[n].value !== v.value;
+      let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block;font-family:var(--font-mono);font-size:12px" role="img" aria-label="${escX(describe(objs, names))}">`;
+      s += `<defs><marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--primary)"/></marker></defs>`;
+      s += `<text x="${P}" y="14" style="fill:var(--muted-foreground);font-family:var(--font-sans);font-size:11px">Names</text>`;
+      if (hasHeap) s += `<text x="${objX}" y="14" style="fill:var(--muted-foreground);font-family:var(--font-sans);font-size:11px">Objects</text>`;
+      names.forEach(([n, v], i) => {
+        const y = TOP + i * ROW;
+        const hot = isNew(n) || valChanged(n, v);
+        s += `<text x="${cellX - 8}" y="${y + 17}" text-anchor="end" style="fill:var(--foreground);font-weight:${hot ? 600 : 400}">${escX(n)}</text>`;
+        const w = v.ref ? 26 : valW(v);
+        s += `<rect x="${cellX}" y="${y}" width="${w}" height="${CH}" rx="4" style="fill:${hot ? "var(--accent)" : "var(--muted)"};stroke:${hot ? "var(--primary)" : "var(--border)"};stroke-width:${hot ? 1.5 : 1}"/>`;
+        if (v.ref) s += `<circle cx="${cellX + 13}" cy="${y + 13}" r="3.5" style="fill:var(--primary)"/>`;
+        else s += `<text x="${cellX + 7}" y="${y + 17}" style="fill:var(--foreground)">${escX(v.value)}</text>`;
+      });
+      objs.forEach((o) => {
+        o.rows.forEach((r) => {
+          const x1 = cellX + 13, y1 = cy(r), x2 = objX - 2, y2 = o.y + Math.min(o.h / 2, 13) + (o.rows.length > 1 ? (o.rows.indexOf(r) - (o.rows.length - 1) / 2) * 8 : 0);
+          s += `<path d="M${x1} ${y1} C${x1 + 34} ${y1}, ${x2 - 30} ${y2}, ${x2} ${y2}" marker-end="url(#${id})" style="fill:none;stroke:var(--primary);stroke-width:1.6"/>`;
+        });
+        s += `<text x="${objX}" y="${o.y - 4}" style="fill:var(--muted-foreground);font-family:var(--font-sans);font-size:10.5px">${escX(o.type)}</text>`;
+        s += `<rect x="${objX}" y="${o.y}" width="${o.w}" height="${o.h}" rx="5" style="fill:${o.changed ? "var(--accent)" : "var(--card)"};stroke:${o.changed ? "var(--primary)" : "var(--foreground)"};stroke-width:${o.changed ? 2 : 1}"/>`;
+        o.lines.forEach((l, k) => { s += `<text x="${objX + 9}" y="${o.y + 19 + k * 16}" style="fill:var(--foreground)">${escX(l)}</text>`; });
+        if (o.rows.length > 1) s += `<text x="${objX}" y="${o.y + o.h + 13}" style="fill:var(--primary);font-family:var(--font-sans);font-size:11px;font-weight:600">one ${escX(o.type)}, ${o.rows.length} names</text>`;
+      });
+      return s + "</svg>";
+    }
+    function describe(objs, names) {
+      const parts = objs.map((o) => o.names.length > 1 ? `${o.names.join(" and ")} point to the same ${o.type}` : `${o.names[0]} points to its own ${o.type}`);
+      names.filter(([, v]) => !v.ref).forEach(([n, v]) => parts.push(`${n} is ${v.value}`));
+      return parts.join("; ");
+    }
+
+    // ---- range() number line with the stop fence -------------------------------------------
+    const rangeVals = (st) => { const out = []; for (let v = st.start; v < st.stop && out.length < 40; v += st.step) out.push(v); return out; };
+    function rangeSvg(st) {
+      const W = 330, H = 76, L = 14, R = W - 14, max = 12, x = (v) => L + (v * (R - L)) / max;
+      const vals = rangeVals(st);
+      let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;font-family:var(--font-mono);font-size:11px" role="img" aria-label="Number line: range gives ${vals.join(", ") || "nothing"}; the fence is at ${st.stop}">`;
+      s += `<line x1="${L}" y1="40" x2="${R}" y2="40" style="stroke:var(--border);stroke-width:2"/>`;
+      for (let v = 0; v <= max; v++) {
+        s += `<line x1="${x(v)}" y1="36" x2="${x(v)}" y2="44" style="stroke:var(--border)"/>`;
+        s += `<text x="${x(v)}" y="62" text-anchor="middle" style="fill:${vals.includes(v) ? "var(--foreground)" : "var(--muted-foreground)"};font-weight:${vals.includes(v) ? 600 : 400}">${v}</text>`;
+      }
+      for (let k = 1; k < vals.length; k++) s += `<path d="M${x(vals[k - 1]) + 6} 32 Q${(x(vals[k - 1]) + x(vals[k])) / 2} 18 ${x(vals[k]) - 6} 32" style="fill:none;stroke:var(--primary);stroke-width:1.2;opacity:.6"/>`;
+      vals.forEach((v) => { s += `<circle cx="${x(v)}" cy="40" r="6" style="fill:var(--primary)"/>`; });
+      s += `<line x1="${x(st.stop)}" y1="10" x2="${x(st.stop)}" y2="50" style="stroke:var(--critical-solid);stroke-width:2.5"/>`;
+      s += `<text x="${Math.min(x(st.stop) + 4, W - 34)}" y="13" style="fill:var(--critical-solid);font-family:var(--font-sans);font-size:11px;font-weight:600">stop</text>`;
+      return s + "</svg>";
+    }
+
+    function page() {
+      const subId = Mock.param("sub") || 27;
+      const from = Mock.param("from") || "home";
+      const extra = MOCK.EXTRA_LESSONS && MOCK.EXTRA_LESSONS[Mock.param("lesson")];
+      const { sub, blocks } = extra
+        ? { sub: { id: Mock.param("lesson"), name: extra.name, topic: extra.topic, topic_id: null }, blocks: MOCK.RICH_LESSONS[extra.name] }
+        : MOCK.studentLesson(subId);
+      const X = MOCK.student_extra;
+      const student = MOCK.student_session.student;
+      const LABEL = MOCK.BLOCK_TYPES;
+      const SECS = { predict: 30, explain: 15, example: 25, trace: 35, memory: 12, branch: 20, fill: 25, parsons: 30, explore: 30, mistake: 8, check: 18, recap: 6 };
+      const norm = (t) => String(t).replace(/\s+/g, "").replace(/"/g, "'");
+      // TODO(real): the parsons shuffle comes from the server per attempt; fixed here.
+      const shuffle = (n) => { const a = [...Array(n).keys()]; let sd = n * 7 + 3; for (let i = n - 1; i > 0; i--) { sd = (sd * 16807) % 2147483647; const j = sd % (i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+      let n = 0;
+      const initSt = (b) => {
+        switch (b.type) {
+          case "predict": return { guess: "", revealed: false, right: null };
+          case "branch": return { pick: null, rem: null, reshow: null };
+          case "check": return { pick: null, checked: false };
+          case "fill": return { val: "", tries: 0, ok: false, shown: false, msg: "" };
+          case "parsons": { const items = [...b.lines, ...(b.distractors || [])]; return { items, pool: shuffle(items.length), placed: [], marks: [], tries: 0, ok: false, shown: false, msg: "" }; }
+          case "trace": return { i: 0, seen: 0, must: false };
+          case "explore": return { start: b.start, stop: b.stop, step: b.step };
+          default: return { open: false };
+        }
+      };
+      const mk = (b, extra = {}) => ({ id: `e${n++}`, b, origin: "lesson", note: null, skipped: false, collapsed: false, skipList: null, st: initSt(b), ...extra });
+      const build = () => blocks.filter((b) => b.type !== "h2").map((b) => mk(b));
+      const REFRESH = (MOCK.run && MOCK.run.refreshers) || {};
+
+      return {
+        sub, from, LABEL, X,
+        extra: !!extra,
+        title: (blocks.find((b) => b.type === "h2")?.children[0].text) || sub.name,
+        steps: blocks.filter((b) => b.type !== "h2"),
+        seq: build(), cur: 0, done: false, started: Date.now(), elapsed: "",
+        adaptLog: [], mastery: { before: 0, after: 0, counted: false }, shownMastery: 0,
+        ask: MOCK.lessonAsk[sub.name] || MOCK.lessonAskFallback(sub), thread: [], draft: "",
+        reported: false, report: { reason: null, text: "" },
+        REPORT: { wrong: "Something in it is wrong", code: "The code or its output doesn't match", confusing: "It was confusing or too fast", marked: "My answer was marked wrong but it's right", other: "Something else" },
+        get minutes() { return Math.max(2, Math.round(this.steps.reduce((s, b) => s + (SECS[b.type] || 10), 0) / 60)); },
+        get backHref() { return from === "practice" ? "student-practice.html" : "student-home.html"; },
+        get backLabel() { return from === "practice" ? "Back to practice" : "My courses"; },
+        get e() { return this.seq[this.cur]; },
+        get visibleCount() { return this.seq.filter((s) => !s.skipped).length; },
+        get position() { return this.seq.slice(0, this.cur + 1).filter((s) => !s.skipped).length; },
+        get added() { return this.seq.filter((s) => s.origin === "added").length; },
+        get skipped() { return this.seq.filter((s) => s.skipped).length; },
+        text(b) { return b.children.map((c) => c.text).join(""); },
+        firstSentence(t) { return (t.match(/^.*?[.!?](\s|$)/) || [t])[0].trim(); },
+        code(s) { return Mock.esc(s || "").replace(/`([^`]+)`/g, '<code class="font-mono rounded px-1" style="background:var(--muted)">$1</code>'); },
+        interactive(e) { return ["predict", "branch", "fill", "parsons", "check"].includes(e.b.type) || (e.b.type === "explore"); },
+        headingFor(e) {
+          if (e.origin === "added" && e.b.type === "trace") return "Watch it once more";
+          if (e.origin === "added") return e.again ? "The example again" : "One more example";
+          return { predict: "Predict the output", explain: "The idea", mistake: "Common mistake", example: "Worked example", trace: "Step through it", memory: "What's in memory", branch: "Quick check", fill: "Fill the blank", parsons: "Put the lines in order", explore: "Try it", check: extra ? "Quick check" : "One question from your bank", recap: "In short" }[e.b.type] || LABEL[e.b.type];
+        },
+        mediaFor(e) {
+          if (["trace", "memory", "explore"].includes(e.b.type)) return [e];
+          if (e.b.type === "branch" && e.st.reshow) return [e.st.reshow];
+          return [];
+        },
+
+        // ---- gating --------------------------------------------------------------------
+        get gateText() {
+          const e = this.e; if (!e) return "";
+          const st = e.st;
+          if (e.b.type === "predict" && !st.revealed) return "Make a guess first. Being wrong is fine.";
+          if (e.b.type === "branch" && st.pick === null) return "Pick an answer to continue.";
+          if (e.b.type === "check" && !st.checked) return "Answer the question to finish.";
+          if (e.b.type === "fill" && !st.ok && !st.shown) return "Fill the blank to continue.";
+          if (e.b.type === "parsons" && !st.ok && !st.shown) return "Order the lines to continue.";
+          if (e.b.type === "trace" && st.must && st.seen < e.b.steps.length - 1) return "Step through to the end to continue.";
+          return "";
+        },
+        nextIndex() { for (let k = this.cur + 1; k < this.seq.length; k++) if (!this.seq[k].skipped) return k; return -1; },
+        prevIndex() { for (let k = this.cur - 1; k >= 0; k--) if (!this.seq[k].skipped) return k; return -1; },
+        next() { if (this.gateText) return; const k = this.nextIndex(); if (k < 0) return this.finish(); this.cur = k; window.scrollTo(0, 0); },
+        back() { const k = this.prevIndex(); if (k >= 0) { this.cur = k; window.scrollTo(0, 0); } },
+
+        // ---- predict -------------------------------------------------------------------
+        reveal(e) {
+          e.st.revealed = true;
+          e.st.right = norm(e.st.guess) === norm(e.b.answer);
+          const i = this.seq.indexOf(e);
+          if (e.st.right) {
+            const ex = this.seq[i + 1];
+            if (ex && ex.b.type === "explain") {
+              ex.collapsed = true;
+              ex.note = "Adapted for you: you predicted it right, so this is the short version.";
+              const list = [];
+              for (let k = i + 2; k < this.seq.length && ["trace", "memory", "explore", "example"].includes(this.seq[k].b.type); k++) list.push(this.seq[k].id);
+              ex.skipList = list;
+              this.adaptLog.push("You predicted the output, so the explanation was cut to one line.");
+            }
+          } else {
+            const tr = this.seq.slice(i + 1).find((s) => s.b.type === "trace");
+            if (tr) { tr.st.must = true; tr.note = "Adapted for you: your guess was off, so step through this one to the end."; this.adaptLog.push("Your first guess was off, so the step-through was required."); }
+          }
+        },
+        skipLabel(e) {
+          const kinds = [...new Set(e.skipList.map((id) => this.seq.find((s) => s.id === id).b.type))];
+          return kinds.length === 1 && kinds[0] === "trace" ? "Skip the step-through" : `Skip ahead (${kinds.map((k) => LABEL[k].toLowerCase()).join(", ")})`;
+        },
+        skipAhead(e) {
+          const names = [];
+          e.skipList.forEach((id) => { const s = this.seq.find((x) => x.id === id); s.skipped = true; names.push(LABEL[s.b.type].toLowerCase()); });
+          this.adaptLog.push(`You skipped the ${names.join(" and ")}.`);
+          e.skipList = [];
+          this.next();
+        },
+
+        // ---- trace ---------------------------------------------------------------------
+        stepTo(m, k) { m.st.i = Math.max(0, Math.min(m.b.steps.length - 1, k)); m.st.seen = Math.max(m.st.seen, m.st.i); },
+        traceSay(m) {
+          const steps = m.b.steps, i = m.st.i, lines = m.b.code.split("\n");
+          const c = (ln) => `<code class="font-mono">${Mock.esc(lines[ln - 1].trim())}</code>`;
+          const ran = i > 0 ? steps[i - 1].line : null, nxt = steps[i].line;
+          if (i === 0) return `Nothing has run yet. Next: line ${nxt}.`;
+          if (nxt == null) return `Line ${ran} ran: ${c(ran)}. Finished.`;
+          return `Line ${ran} ran: ${c(ran)}. Next: line ${nxt}.`;
+        },
+        // The step just before a second name starts pointing at an object (where aliasing happens).
+        keyStep(tb) {
+          const k = tb.steps.findIndex((s) => { const refs = Object.values(s.names).map((v) => v.ref).filter(Boolean); return refs.length !== new Set(refs).size; });
+          return k > 0 ? k - 1 : 0;
+        },
+
+        // ---- branch: targeted remediation, re-show, and an inserted replay -------------------
+        pickBranch(e, k) {
+          if (e.st.pick !== null) return;
+          e.st.pick = k;
+          if (k === e.b.answer) return;
+          const rem = e.b.remediation[String(k)] || { text: `Not quite: the answer is ${e.b.options[e.b.answer]}.` };
+          e.st.rem = rem;
+          const i = this.seq.indexOf(e);
+          let skippedNext = false;
+          if (rem.show) {
+            const src = this.steps.find((b) => b.type === rem.show);
+            if (src) {
+              const v = mk(src);
+              const m = /range\((\d+),\s*(\d+)\)/.exec(e.b.question);
+              if (src.type === "explore" && m) Object.assign(v.st, { start: +m[1], stop: +m[2], step: 1 });
+              v.earlier = this.steps.indexOf(src) < this.steps.indexOf(e.b);
+              e.st.reshow = v;
+              // The same block coming right up would repeat what was just shown.
+              const nx = this.seq[i + 1];
+              if (nx && nx.b.type === rem.show && nx.origin === "lesson") { nx.skipped = true; skippedNext = true; }
+            }
+          }
+          const tr = this.steps.find((b) => b.type === "trace");
+          const ex = this.steps.find((b) => b.type === "example");
+          let ins = null;
+          if (tr && rem.show !== "trace") {
+            ins = mk(tr, { origin: "added" });
+            ins.st.i = this.keyStep(tr);
+            ins.st.seen = ins.st.i;
+            ins.note = ins.st.i ? `Added for you: the step-through again, paused on line ${tr.steps[ins.st.i].line}, the line that matters here.` : "Added for you: the step-through again, one value at a time.";
+          } else if (ex && !rem.show) {
+            ins = mk(ex, { origin: "added", note: "Added for you: one more worked example before you go on." });
+          }
+          if (ins) this.seq.splice(i + 1, 0, ins);
+          this.adaptLog.push(`You picked ${e.b.options[k]} on the quick check, so you got feedback for that answer${rem.show ? ` with the ${LABEL[rem.show].toLowerCase()}` : ""}${ins ? ` and ${ins.b.type === "trace" ? "a replay of the step-through" : "an extra worked example"}` : ""}.`);
+          if (skippedNext) this.adaptLog.push(`The ${LABEL[rem.show].toLowerCase()} that came next was skipped, since you'd just seen it.`);
+        },
+
+        // ---- fill ----------------------------------------------------------------------
+        checkFill(e) {
+          if (!e.st.val.trim() || e.st.ok) return;
+          if (e.b.answers.map(norm).includes(norm(e.st.val))) { e.st.ok = true; e.st.msg = ""; return; }
+          e.st.tries++;
+          e.st.msg = e.st.tries === 1 ? `Not yet. Hint: ${e.b.hint}` : "Still not it. Look at the hint again, or show the answer.";
+        },
+        fillOk(e) {
+          const seen = new Set([norm(e.st.val)]);
+          const others = e.b.answers.filter((a) => { const k = norm(a); if (seen.has(k)) return false; seen.add(k); return true; });
+          return `Correct.${others.length ? ` These also work: ${others.join(", ")}.` : ""}`;
+        },
+
+        // ---- parsons -------------------------------------------------------------------
+        place(e, it) { e.st.pool = e.st.pool.filter((x) => x !== it); e.st.placed.push(it); e.st.marks = []; e.st.msg = ""; },
+        unplace(e, k) { const it = e.st.placed[k]; e.st.placed.splice(k, 1); e.st.pool.push(it); e.st.marks = []; e.st.msg = ""; },
+        resetParsons(e) { e.st.pool = shuffle(e.st.items.length); e.st.placed = []; e.st.marks = []; e.st.msg = ""; },
+        checkParsons(e) {
+          const L = e.b.lines, got = e.st.placed.map((it) => e.st.items[it]);
+          const dis = got.find((t) => !L.includes(t));
+          e.st.marks = got.map((t, k) => (t === L[k] ? "ok" : "bad"));
+          if (!dis && got.length === L.length && got.every((t, k) => t === L[k])) { e.st.ok = true; e.st.msg = "Correct. That program leaves the original list alone."; return; }
+          e.st.tries++;
+          if (dis) e.st.msg = `${dis} doesn't belong here: it gives the list a second name instead of copying it. Take it out.`;
+          else if (got.length < L.length) e.st.msg = `Use ${L.length} lines. ${L.length - got.length} still to place.`;
+          else e.st.msg = `Line ${e.st.marks.indexOf("bad") + 1} is out of place.`;
+        },
+        showParsons(e) {
+          e.st.placed = e.b.lines.map((t) => e.st.items.indexOf(t)); e.st.pool = []; e.st.marks = []; e.st.shown = true;
+          e.st.msg = `This is the order. The extra line, ${(e.b.distractors || []).join(", ")}, isn't used.`;
+        },
+
+        // ---- check ---------------------------------------------------------------------
+        checkMc(e) {
+          e.st.checked = true;
+          if (e.st.pick === e.b.answer || e.origin === "added") return;
+          const r = REFRESH[sub.name];
+          const ex = r ? { type: "example", code: r.code, output: r.output, source: "", children: [{ text: "" }] } : this.steps.find((b) => b.type === "example");
+          if (ex) {
+            this.seq.splice(this.seq.indexOf(e) + 1, 0, mk(ex, { origin: "added", again: !r, note: r ? "Added for you: one more worked example, since the question was missed." : "Added for you: the worked example again, since the question was missed. Read it with the answer in mind." }));
+            this.adaptLog.push(r ? "You missed the bank question, so one more worked example was added." : "You missed the bank question, so the worked example came back once more.");
+          }
+        },
+
+        // ---- end -----------------------------------------------------------------------
+        finish() {
+          const s = Math.round((Date.now() - this.started) / 1000);
+          this.elapsed = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+          const before = student.mastery[sub.topic_id] || 0;
+          const chk = this.seq.find((x) => x.b.type === "check" && x.st.checked);
+          this.mastery = { before, after: chk && sub.topic_id ? X.update(before, chk.st.pick === chk.b.answer) : before, counted: !!chk && !!sub.topic_id, none: !sub.topic_id };
+          this.shownMastery = before;
+          this.done = true;
+          window.scrollTo(0, 0);
+          setTimeout(() => { this.shownMastery = this.mastery.after; }, 80);
+        },
+        restart() { this.seq = build(); this.cur = 0; this.done = false; this.adaptLog = []; this.started = Date.now(); window.scrollTo(0, 0); },
+        get answerLog() {
+          return this.seq.filter((x) => !x.skipped && ["predict", "branch", "fill", "parsons", "check"].includes(x.b.type)).map((x) => {
+            const st = x.st;
+            const ok = { predict: st.right, branch: st.pick === x.b.answer, fill: st.ok, parsons: st.ok, check: st.pick === x.b.answer }[x.b.type];
+            const detail = {
+              predict: st.right ? "guessed right" : "guessed wrong first",
+              branch: st.pick === x.b.answer ? "right" : "missed, got feedback",
+              fill: st.ok ? (st.tries ? `right after ${st.tries + 1} tries` : "right first time") : "answer shown",
+              parsons: st.ok ? (st.tries ? `right after ${st.tries + 1} tries` : "right first time") : "answer shown",
+              check: st.pick === x.b.answer ? "right · counts" : "missed · counts",
+            }[x.b.type];
+            return { id: x.id, label: this.headingFor(x), ok: !!ok, detail };
+          });
+        },
+        get summaryLine() {
+          const log = this.answerLog, right = log.filter((r) => r.ok).length;
+          return `${sub.name}: ${right} of ${log.length} right${this.adaptLog.length ? ", with the lesson adapted to your answers" : ""}.`;
+        },
+        get nextText() {
+          const missed = this.answerLog.some((r) => !r.ok);
+          return from === "practice"
+            ? `Back in practice you get another ${sub.name} question next, while this is fresh.${missed ? " It's a different question from the one you missed." : ""}`
+            : `Practice gives you ${sub.name} questions until your mastery is steady.`;
+        },
+        get nextLessons() {
+          return Object.entries(X.subtopic_mastery).filter(([nm]) => nm !== sub.name).sort((a, b) => a[1] - b[1]).slice(0, 2)
+            .map(([nm, m]) => { const s = MOCK.course("python").taxonomy.flatMap((t) => t.subtopics).find((x) => x.name === nm); return s ? { id: s.id, name: nm, m } : null; }).filter(Boolean);
+        },
+
+        // ---- ask -----------------------------------------------------------------------
+        openAsk() { this.$refs.ask.showModal(); },
+        askQ(q) {
+          q = (q || "").trim(); if (!q) return;
+          this.draft = "";
+          this.thread.push({ q, a: null, loading: true, sent: false });
+          const k = this.thread.length - 1;
+          const low = ` ${q.toLowerCase()} `;
+          let best = null, score = 0;
+          this.ask.answers.forEach((a) => { const sc = a.keys.filter((k) => low.includes(k)).length; if (sc > score) { score = sc; best = a; } });
+          setTimeout(() => {
+            this.thread[k].a = best; this.thread[k].loading = false;
+            this.$nextTick(() => { this.$refs.thread.scrollTop = this.$refs.thread.scrollHeight; });
+          }, 700);
+        },
+
+        // ---- report --------------------------------------------------------------------
+        openReport() { this.report = { reason: null, text: "" }; this.$refs.report.showModal(); },
+        sendReport() { this.reported = true; this.$refs.report.close(); Mock.toast(`Sent to ${MOCK.student_extra.instructor}`); },
+      };
+    }
+  </script>
+</body>
+</html>

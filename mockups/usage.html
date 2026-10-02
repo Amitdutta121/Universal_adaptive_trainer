@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usage and limits · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .daily-chart .bar { fill: var(--primary); }
+    .daily-chart g.day:hover .bar { fill: var(--accent-text); }
+    .daily-chart g.day .tip { opacity: 0; pointer-events: none; }
+    .daily-chart g.day:hover .tip { opacity: 1; }
+    .daily-chart .grid-line { stroke: var(--border); }
+    .daily-chart .axis-text { fill: var(--muted-foreground); font-size: 13px; font-family: var(--font-sans); }
+    .daily-chart .tip rect { fill: var(--foreground); }
+    .daily-chart .tip text { fill: var(--background); font-size: 11px; font-family: var(--font-sans); }
+  </style>
+</head>
+<!-- B4 · Usage and limits: LLM spend per course and per kind of work, against a monthly cap (F8). -->
+<body data-scope="workspace" data-nav="usage" data-title="Usage and limits">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div>
+      <h1 class="text-2xl font-semibold">Usage and limits</h1>
+      <p class="text-sm text-muted-foreground" x-text="`AI spend for ${u.month}, across all your courses. Resets on October 1.`"></p>
+    </div>
+
+    <!-- Month spend vs cap -->
+    <section class="card">
+      <section class="grid gap-4">
+        <div class="flex flex-wrap items-end gap-x-6 gap-y-2">
+          <div>
+            <div class="text-xs text-muted-foreground">Spent this month</div>
+            <div class="text-3xl font-display font-semibold tabular-nums"><span x-text="Mock.usd(u.spent_usd)"></span> <span class="text-base font-sans font-normal text-muted-foreground" x-text="`of ${Mock.usd(cap)} cap`"></span></div>
+          </div>
+          <div class="text-sm">
+            <span class="pill" :class="level.tone" x-text="`${Math.round(ratio * 100)}% used`"></span>
+            <span class="ml-1 text-muted-foreground" x-text="`${Mock.usd(Math.max(0, cap - u.spent_usd))} left`"></span>
+          </div>
+        </div>
+        <div>
+          <div class="relative h-3 rounded-full" style="background:var(--muted)" role="meter" :aria-valuenow="u.spent_usd" aria-valuemin="0" :aria-valuemax="cap" aria-label="Spend against monthly cap">
+            <div class="h-3 rounded-full" :style="`width:${Math.min(100, ratio * 100)}%;background:${level.color}`"></div>
+            <div class="absolute -top-1 -bottom-1 w-px" :style="`left:${warnAt}%;background:var(--foreground);opacity:.45`"></div>
+          </div>
+          <div class="relative mt-1 h-4 text-xs text-muted-foreground">
+            <span class="absolute left-0">$0</span>
+            <span class="absolute -translate-x-1/2" :style="`left:${warnAt}%`" x-text="`Warn at ${warnAt}%`"></span>
+            <span class="absolute right-0" x-text="`${Mock.usd(cap)} cap`"></span>
+          </div>
+        </div>
+        <div class="alert" x-show="ratio >= warnAt / 100 && ratio < 1" style="border-color:var(--warn-solid)">
+          <i data-lucide="triangle-alert" style="color:var(--warn-solid)"></i>
+          <h2 x-text="`You've used ${Math.round(ratio * 100)}% of this month's cap`"></h2>
+          <section x-text="`${Mock.usd(Math.max(0, cap - u.spent_usd))} left. At ${Mock.usd(cap)}, new AI runs are blocked until October 1; students keep practising.`"></section>
+        </div>
+        <div class="alert" data-variant="destructive" x-show="ratio >= 1">
+          <i data-lucide="octagon-x"></i>
+          <h2>Monthly cap reached</h2>
+          <section>New generation, judge and drafting runs are blocked until October 1. Students keep practising. Raise the cap below to continue now.</section>
+        </div>
+      </section>
+    </section>
+
+    <!-- Daily spend -->
+    <section class="card">
+      <header><h2>Daily spend</h2><p x-text="`${u.month} · highest day ${Mock.usd(maxDay.v)} (Sep ${maxDay.d})`"></p></header>
+      <section>
+        <div class="daily-chart" x-html="chart"></div>
+      </section>
+    </section>
+
+    <div class="grid lg:grid-cols-2 gap-6 items-start">
+      <section class="card py-0 gap-0">
+        <header class="px-6 pt-5 pb-3"><h2>By course</h2></header>
+        <div class="table-container">
+          <table class="table">
+            <thead><tr><th>Course</th><th class="text-end">LLM calls</th><th class="text-end">Tokens</th><th class="text-end">Spend</th><th class="text-end">Share</th></tr></thead>
+            <tbody>
+              <template x-for="r in u.by_course" :key="r.course">
+                <tr>
+                  <td><a class="hover:underline font-medium" :href="Mock.link('course.html', { course: r.course })" x-text="MOCK.course(r.course).code"></a> <span class="text-muted-foreground" x-text="MOCK.course(r.course).name"></span></td>
+                  <td class="text-end tabular-nums" x-text="r.calls.toLocaleString()"></td>
+                  <td class="text-end tabular-nums" x-text="`${r.tokens_m}M`"></td>
+                  <td class="text-end tabular-nums" x-text="Mock.usd(r.spent_usd)"></td>
+                  <td class="text-end tabular-nums" x-text="Mock.pct(r.spent_usd / u.spent_usd)"></td>
+                </tr>
+              </template>
+            </tbody>
+            <tfoot><tr><td>Total</td><td class="text-end tabular-nums" x-text="totalCalls.toLocaleString()"></td><td class="text-end tabular-nums" x-text="`${totalTokens}M`"></td><td class="text-end tabular-nums" x-text="Mock.usd(u.spent_usd)"></td><td></td></tr></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="card py-0 gap-0">
+        <header class="px-6 pt-5 pb-3"><h2>By kind of work</h2></header>
+        <div class="table-container">
+          <table class="table">
+            <thead><tr><th>Work</th><th></th><th class="text-end">Spend</th><th class="text-end">Share</th></tr></thead>
+            <tbody>
+              <template x-for="[kind, usd] in byKind" :key="kind">
+                <tr>
+                  <td class="font-medium" x-text="kind"></td>
+                  <td><div class="w-40 h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="`background:var(--primary);width:${usd / byKind[0][1] * 100}%`"></div></div></td>
+                  <td class="text-end tabular-nums" x-text="Mock.usd(usd)"></td>
+                  <td class="text-end tabular-nums" x-text="Mock.pct(usd / u.spent_usd)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Cap setting -->
+    <form class="card" @submit.prevent="save()">
+      <header><h2>Monthly cap</h2><p>A hard limit on AI spend across all your courses.</p></header>
+      <section class="grid md:grid-cols-[1fr_1fr] gap-8">
+        <div class="grid gap-4 content-start">
+          <div role="group" class="field">
+            <label for="cap">Cap (USD per month)</label>
+            <div class="flex items-center gap-2"><span class="text-muted-foreground">$</span><input class="input w-32" id="cap" type="number" min="5" step="5" x-model.number="draftCap"></div>
+            <p role="alert" style="color:var(--destructive)" x-show="draftCap < u.spent_usd" x-text="`Lower than this month's spend. New runs would be blocked immediately.`"></p>
+          </div>
+          <div role="group" class="field">
+            <label for="warn">Email me at</label>
+            <select class="select w-40" id="warn" x-model.number="draftWarn">
+              <option value="50">50% of the cap</option>
+              <option value="80">80% of the cap</option>
+              <option value="90">90% of the cap</option>
+            </select>
+          </div>
+        </div>
+        <div class="text-sm grid gap-2 content-start">
+          <div class="font-medium">What happens at the cap</div>
+          <ul class="grid gap-1.5 text-muted-foreground list-disc pl-5">
+            <li>New AI runs are blocked: generation, judge re-runs, taxonomy drafts and book embedding. You see a clear message, not an error.</li>
+            <li>Jobs already running finish; their cost can go slightly past the cap.</li>
+            <li>Students keep practising. Serving questions and updating mastery don't call the LLM.</li>
+            <li>Everything resumes on October 1, or as soon as you raise the cap.</li>
+          </ul>
+        </div>
+      </section>
+      <footer class="flex gap-2 border-t pt-4">
+        <span class="text-xs text-muted-foreground">Costs are recorded per LLM call from the provider's token counts.</span>
+        <button class="btn ml-auto" type="submit">Save cap</button>
+      </footer>
+    </form>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-b.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const u = MOCK.usage;
+      // The mock daily values are random; scale them so the month adds up to spent_usd.
+      const rawSum = u.daily.reduce((a, b) => a + b, 0);
+      const daily = u.daily.map((v) => Math.round((v * u.spent_usd) / rawSum * 100) / 100);
+      const maxI = daily.indexOf(Math.max(...daily));
+
+      function buildChart() {
+        const W = 1100, H = 230, L = 40, R = 8, T = 10, B = 26;
+        const pw = W - L - R, ph = H - T - B;
+        const yMax = Math.ceil(Math.max(...daily));
+        const y = (v) => T + ph - (v / yMax) * ph;
+        const slot = pw / daily.length, bw = slot - 6;
+        let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Daily AI spend in ${u.month}">`;
+        for (let t = 0; t <= yMax; t++) {
+          s += `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/>`;
+          s += `<text class="axis-text" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">$${t}</text>`;
+        }
+        daily.forEach((v, i) => {
+          const x = L + i * slot + 3, top = y(v), h = T + ph - top;
+          const day = i + 1;
+          s += `<g class="day"><rect x="${L + i * slot}" y="${T}" width="${slot}" height="${ph}" fill="transparent"/>`;
+          s += `<path class="bar" d="M${x},${T + ph} V${top + 4} q0,-4 4,-4 h${bw - 8} q4,0 4,4 V${T + ph} Z"/>`;
+          if (day === 1 || day % 5 === 0) s += `<text class="axis-text" x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${day}</text>`;
+          const tx = Math.min(Math.max(x + bw / 2 - 42, L), W - R - 84);
+          s += `<g class="tip"><rect x="${tx}" y="${Math.max(T, top - 30)}" width="84" height="22" rx="4"/><text x="${tx + 42}" y="${Math.max(T, top - 30) + 15}" text-anchor="middle">Sep ${day} · $${v.toFixed(2)}</text></g></g>`;
+        });
+        s += `<line x1="${L}" x2="${W - R}" y1="${T + ph}" y2="${T + ph}" stroke="var(--hairline-2)"/>`;
+        return s + "</svg>";
+      }
+
+      return {
+        u,
+        cap: u.cap_usd,
+        warnAt: 80,
+        draftCap: u.cap_usd,
+        draftWarn: 80,
+        chart: buildChart(),
+        maxDay: { v: daily[maxI], d: maxI + 1 },
+        byKind: [...u.by_kind].sort((a, b) => b[1] - a[1]),
+        totalCalls: u.by_course.reduce((a, r) => a + r.calls, 0),
+        totalTokens: Math.round(u.by_course.reduce((a, r) => a + r.tokens_m, 0) * 10) / 10,
+        get ratio() { return u.spent_usd / this.cap; },
+        get level() {
+          if (this.ratio >= 1) return { tone: "tone-critical", color: "var(--critical-solid)" };
+          if (this.ratio >= this.warnAt / 100) return { tone: "tone-warn", color: "var(--warn-solid)" };
+          return { tone: "tone-ok", color: "var(--primary)" };
+        },
+        save() {
+          if (!(this.draftCap > 0)) return;
+          this.cap = this.draftCap;
+          this.warnAt = this.draftWarn;
+          Mock.toast(`Monthly cap set to ${Mock.usd(this.cap)}`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

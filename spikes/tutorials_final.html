@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorials on the adaptive engine (mock data)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<!--
+  Final design of the tutorial system, built ON the existing adaptive engine (app/adaptive/*), on MOCK data.
+
+  The engine below is a faithful port of the real one, so the page reacts the way the product does:
+    * topics run in curriculum order; the current topic is the first with BKT mastery < 0.60   (service._current_topic_pool)
+    * a weakness-weighted, seeded roulette picks a subtopic in that topic                      (selection.choose_subtopic)
+    * the topic's mastery band picks the difficulty: <0.45 easy, <0.85 medium, else hard        (mastery.difficulty_for_mastery)
+    * the cell (subtopic, difficulty) serves its best candidate: unseen first, then priority,
+      then least used, relaxing difficulty when the cell is empty                               (selection.rank_candidates)
+    * the score updates the topic's BKT mastery and the subtopic's weakness                     (state.update_mastery / update_weakness)
+  Nothing about which subtopic to teach is decided here. A tutorial only hangs off the cell the engine already chose.
+
+  TODO(real): the questions, tutorials, book citations, check results and every studio number are invented.
+  TODO(real): TEACH (below) is a proposal for when to attach a tutorial to a drawn cell; the numbers need tuning and an ADR.
+-->
+
+<style>
+  /* Tokens copied from frontend/src/app/globals.css so this reads as the real app. */
+  :root {
+    --paper:#f4f6f6; --surface:#fff; --surface-2:#ecefef; --surface-3:#e4e9e8;
+    --ink:#131a1c; --ink-2:#3d4a4d; --muted-ink:#6b797c; --hairline:#dbe0e0; --hairline-2:#c7cfcf;
+    --accent-solid:#2e6f6a; --accent-text:#1d4a47; --accent-wash:#dceae8;
+    --ok-solid:#2f7d57; --ok-wash:#dcefe4; --warn-solid:#b06b14; --warn-wash:#f5e8d1;
+    --critical-solid:#b4531f; --critical-wash:#f6e1d5;
+    --code-kw:#1d6b66; --code-str:#2f7d57; --code-num:#a35a12; --code-fn:#26648f; --code-cm:#6b797c;
+    --shadow-panel:0 1px 2px rgb(19 26 28/.06),0 8px 18px -8px rgb(19 26 28/.2),0 28px 56px -28px rgb(19 26 28/.34);
+    --radius:.85rem;
+    --font-sans:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    --font-head:"Archivo","IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+    --font-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --paper:#0d1214; --surface:#151c1e; --surface-2:#1d2528; --surface-3:#263033;
+    --ink:#e7ecec; --ink-2:#b4c0c1; --muted-ink:#7e8d8f; --hairline:#26312f; --hairline-2:#35423f;
+    --accent-solid:#66b8b0; --accent-text:#9ad6d0; --accent-wash:#17322f;
+    --ok-solid:#5cb786; --ok-wash:#173123; --warn-solid:#d7a548; --warn-wash:#392c16;
+    --critical-solid:#e5924f; --critical-wash:#3c2518;
+    --code-kw:#7cc9c1; --code-str:#7ccf9e; --code-num:#e0aa62; --code-fn:#82b8e4; --code-cm:#7e8d8f;
+    --shadow-panel:0 1px 2px rgb(0 0 0/.45),0 8px 18px -8px rgb(0 0 0/.5),0 28px 56px -28px rgb(0 0 0/.8);
+  } }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased}
+  h1,h2,h3{font-family:var(--font-head);margin:0;letter-spacing:-.01em} p{margin:0}
+  button,input,summary{font:inherit;color:inherit}
+  button{cursor:pointer}
+  :is(button,input,summary,[tabindex],label.opt):focus-visible,label.opt:has(input:focus-visible){outline:2px solid var(--accent-solid);outline-offset:2px}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  code,.mono{font-family:var(--font-mono)}
+  :not(pre)>code{font-size:.88em;background:var(--surface-2);padding:.08em .38em;border-radius:5px}
+  .eyebrow{font:500 11px var(--font-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted-ink)}
+  .dim{color:var(--muted-ink)}
+
+  .bar{border-bottom:1px solid var(--hairline);background:color-mix(in srgb,var(--surface) 70%,transparent)}
+  .bar-in{max-width:1180px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent-solid);color:#fff;display:grid;place-items:center}
+  .brand b{display:block;font:600 14px var(--font-head)}
+  .seg{display:inline-flex;background:var(--surface-2);border-radius:9px;padding:3px;gap:2px;margin-left:auto}
+  .seg button{border:0;background:transparent;padding:6px 14px;border-radius:7px;font-size:13.5px;color:var(--ink-2)}
+  .seg button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0/.12);font-weight:500}
+  .proto{max-width:1180px;margin:12px auto 0;padding:0 20px}
+  .proto p{background:var(--warn-wash);border:1px solid color-mix(in srgb,var(--warn-solid) 35%,transparent);border-radius:10px;padding:8px 12px;font-size:13px;color:color-mix(in srgb,var(--warn-solid) 55%,var(--ink))}
+  .proto button{border:0;background:none;padding:0;text-decoration:underline;text-underline-offset:2px;color:inherit;font-size:inherit}
+  main{max-width:1180px;margin:0 auto;padding:18px 20px 64px}
+  [hidden]{display:none!important}
+
+  .card{background:var(--surface);border:1px solid var(--hairline);border-radius:12px}
+  .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--hairline-2);background:var(--surface);border-radius:9px;padding:7px 14px;font-size:14px;font-weight:500}
+  .btn:hover{background:var(--surface-2)}
+  .btn.primary{background:var(--accent-solid);border-color:var(--accent-solid);color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--ink-2)}
+  .btn.ghost:hover{background:var(--surface-2)}
+  .btn.sm{padding:4px 10px;font-size:13px}
+  .btn:disabled{opacity:.45;cursor:default;filter:none}
+  .ico{width:15px;height:15px;flex:none}
+  .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap}
+  .pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .pill.live{background:var(--ok-wash);color:var(--ok-solid)}
+  .pill.retired{background:var(--surface-3);color:var(--ink-2)}
+  .pill.failed{background:var(--warn-wash);color:var(--warn-solid)}
+  .pill.none{border-color:var(--hairline-2);color:var(--muted-ink)}
+  .pill.gen{background:var(--accent-wash);color:var(--accent-text)}
+  .pill.gen i{animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.25}}
+  @media (prefers-reduced-motion:reduce){.pill.gen i{animation:none}*{scroll-behavior:auto!important}}
+
+  pre.code{margin:0;padding:10px 0;font:13.5px/1.7 var(--font-mono);background:var(--surface-2);border:1px solid var(--hairline);border-radius:10px;overflow-x:auto}
+  .ln{display:flex;padding:0 14px 0 0;white-space:pre;border-left:3px solid transparent}
+  .ln .n{width:34px;text-align:right;padding-right:12px;color:var(--muted-ink);flex:none;user-select:none}
+  .ln.cur{background:var(--accent-wash);border-left-color:var(--accent-solid)}
+  .kw{color:var(--code-kw);font-weight:500}.st{color:var(--code-str)}.nm{color:var(--code-num)}.fn{color:var(--code-fn)}.cm{color:var(--code-cm);font-style:italic}
+  .out{border:1px solid var(--hairline);border-radius:10px;padding:8px 12px;background:var(--surface);font:13.5px/1.6 var(--font-mono);white-space:pre}
+  .out .eyebrow{display:block;margin-bottom:2px}
+  .recorded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted-ink)}
+
+  /* ---- student */
+  .s-wrap{max-width:820px;margin:0 auto;display:grid;gap:14px}
+  .path{padding:14px 18px;display:grid;gap:12px}
+  .topic-row{display:grid;grid-template-columns:150px 1fr;gap:6px 16px;align-items:center}
+  .topic-row .tname{font:600 14px var(--font-head);display:inline-flex;align-items:center;gap:6px}
+  .topic-row.done .tname,.topic-row.later .tname{color:var(--muted-ink)}
+  .mbar{position:relative;height:8px;background:var(--surface-3);border-radius:4px}
+  .mbar .f{position:absolute;inset:0 auto 0 0;background:var(--accent-solid);border-radius:4px;transition:width .3s}
+  .mbar .tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink-2);left:60%}
+  .mnum{font:12px var(--font-mono);color:var(--muted-ink);display:flex;justify-content:space-between;margin-top:4px}
+  .subs{grid-column:2;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--ink-2)}
+  .subs>span{display:inline-flex;align-items:center;gap:7px}
+  .subs .cur{color:var(--ink);font-weight:500}
+  .wbar{width:44px;height:5px;background:var(--surface-3);border-radius:3px;overflow:hidden;display:inline-block}
+  .wbar i{display:block;height:100%;background:var(--critical-solid)}
+  .subs .has{color:var(--accent-solid);display:inline-flex}
+  .stage{padding:22px 24px 20px}
+  .q-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  .q-head h2{font-size:1.15rem}
+  .q-head .tag{font-size:12.5px;color:var(--muted-ink)}
+  .prompt{margin:8px 0 12px}
+  .opts{display:grid;gap:8px;margin-top:14px}
+  label.opt{display:flex;align-items:center;gap:12px;border:1px solid var(--hairline-2);border-radius:10px;padding:9px 12px;cursor:pointer;background:var(--surface);font-family:var(--font-mono);font-size:13.5px}
+  label.opt:hover{background:var(--surface-2)}
+  label.opt input{position:absolute;opacity:0;pointer-events:none}
+  label.opt .l{width:20px;height:20px;border-radius:50%;border:1px solid var(--hairline-2);display:grid;place-items:center;font-size:11px;color:var(--muted-ink);flex:none}
+  label.opt.sel{border-color:var(--accent-solid);background:var(--accent-wash)}
+  label.opt.right{border-color:var(--ok-solid);background:var(--ok-wash)}
+  label.opt.wrong{border-color:var(--critical-solid);background:var(--critical-wash)}
+  label.opt.dim{opacity:.6;cursor:default}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .grow{flex:1}
+  .fb{margin-top:14px;font-size:14.5px;min-height:22px}
+  .fb b{font-weight:600}.fb .good{color:var(--ok-solid)}.fb .bad{color:var(--critical-solid)}
+  .delta{margin-top:8px;font:12.5px var(--font-mono);color:var(--muted-ink)}
+  .notice{border-left:2px solid var(--accent-solid);background:var(--accent-wash);padding:9px 12px;font-size:14px}
+
+  .trigger{padding:26px 26px 22px}
+  .trigger h2{font-size:1.3rem;margin:6px 0 8px}
+  .why{display:flex;gap:10px;align-items:flex-start;border-left:2px solid var(--accent-solid);background:var(--accent-wash);padding:9px 12px;margin:14px 0 4px;font-size:14px}
+  .why svg{margin-top:3px;color:var(--accent-solid);flex:none}
+
+  .deck-top{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .segs{display:flex;gap:6px;flex:1}
+  .segs button{flex:1;height:6px;border:0;padding:0;border-radius:3px;background:var(--surface-3)}
+  .segs button.done{background:var(--accent-solid)} .segs button.now{background:var(--accent-solid);box-shadow:0 0 0 2px var(--accent-wash)}
+  .card-body{min-height:400px;display:flex;flex-direction:column}
+  .card-body h2{font-size:1.4rem;margin:2px 0 6px}
+  .card-body .lead{color:var(--ink-2);max-width:56ch;margin-bottom:14px}
+  .sim{display:grid;gap:12px}
+  .sim svg.mem{width:100%;height:118px;background:var(--surface);border:1px solid var(--hairline);border-radius:10px}
+  .vars{border:1px solid var(--hairline);border-radius:10px;background:var(--surface);padding:8px 12px;min-height:66px;font:13.5px/1.7 var(--font-mono)}
+  .vars .fr{color:var(--muted-ink);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-top:2px}
+  .vars .v{display:flex;gap:12px}.vars .v span:first-child{width:70px;color:var(--ink-2)}
+  .cap{min-height:24px;font-size:14.5px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
+  .chip{border:1px solid var(--hairline-2);background:var(--surface);border-radius:999px;padding:5px 14px;font:13.5px var(--font-mono)}
+  .chip:hover{background:var(--surface-2)} .chip.sel{border-color:var(--accent-solid);background:var(--accent-wash)}
+  .prov{margin-top:auto;padding-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--muted-ink)}
+  .prov .ok{color:var(--ok-solid);display:inline-flex;align-items:center;gap:5px}
+  .prov button{border:0;background:none;padding:0;color:var(--accent-text);text-decoration:underline;text-underline-offset:2px;font-size:12.5px}
+  .checked{margin:8px 0 0;padding:0;list-style:none;display:grid;gap:3px;font-size:12.5px;color:var(--ink-2)}
+  .checked li{display:flex;gap:7px}.checked svg{color:var(--ok-solid);margin-top:3px}
+  .done-card h2{font-size:1.3rem;margin-bottom:6px}
+
+  details.engine{border:1px solid var(--hairline);border-radius:12px;background:var(--surface)}
+  details.engine summary{cursor:pointer;padding:10px 16px;font-size:13.5px;color:var(--ink-2);list-style:none;display:flex;gap:8px;align-items:center}
+  details.engine summary::before{content:"›";display:inline-block;transition:transform .15s;color:var(--muted-ink)}
+  details.engine[open] summary::before{transform:rotate(90deg)}
+  .eng{padding:2px 16px 14px;font:12.5px/1.65 var(--font-mono);color:var(--ink-2);display:grid;gap:3px}
+  .eng>div{display:grid;grid-template-columns:110px 1fr;gap:10px}
+  .eng .k{color:var(--muted-ink)} .eng b{color:var(--ink);font-weight:500}
+  .eng .y{color:var(--ok-solid)} .eng .n{color:var(--critical-solid)}
+
+  /* ---- studio */
+  .st-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .st-head h1{font-size:1.55rem} .st-head p{color:var(--muted-ink);max-width:72ch;margin-top:4px;font-size:14px}
+  .next{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 16px;margin-bottom:14px;font-size:14px}
+  .next b{font-weight:600}
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:16px;align-items:start}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{font:500 11px var(--font-mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted-ink);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+  td{padding:10px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+  tbody tr{cursor:pointer} tbody tr:hover{background:var(--surface-2)} tbody tr[aria-selected=true]{background:var(--accent-wash)}
+  tbody tr.grp{cursor:default;background:var(--surface-2)} tbody tr.grp:hover{background:var(--surface-2)}
+  tbody tr.grp td{padding:7px 12px;font:500 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted-ink)}
+  tbody tr:last-child td{border-bottom:0}
+  td.num{font-family:var(--font-mono);font-size:13px;white-space:nowrap}
+  .up{color:var(--ok-solid)} .down{color:var(--critical-solid)}
+  .sw{position:relative;width:34px;height:20px;border-radius:999px;background:var(--surface-3);border:0;padding:0;flex:none}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgb(0 0 0/.3);transition:transform .15s}
+  .sw[aria-checked=true]{background:var(--accent-solid)} .sw[aria-checked=true]::after{transform:translateX(14px)}
+  .sw:disabled{opacity:.4;cursor:default}
+  .detail{position:sticky;top:14px}
+  .d-head{padding:16px 18px 0}
+  .d-head h2{font-size:1.15rem;margin:2px 0 8px}
+  .tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--hairline);margin-top:12px}
+  .tabs button{border:0;background:none;padding:9px 10px;font-size:13.5px;color:var(--muted-ink);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent-solid);font-weight:500}
+  .tabpanel{padding:16px 18px 18px;min-height:340px}
+  .checks{list-style:none;margin:0;padding:0;display:grid;gap:11px}
+  .checks li{display:grid;grid-template-columns:20px 1fr;gap:9px;font-size:13.5px}
+  .checks svg{margin-top:2px}.checks .yes{color:var(--ok-solid)}.checks .no{color:var(--critical-solid)}
+  .checks b{font-weight:500;display:block}.checks span{color:var(--muted-ink);font-size:12.5px}
+  .checks li.fail span{color:var(--critical-solid)}
+  .log{list-style:none;margin:0;padding:0;font:12.5px/1.55 var(--font-mono);display:grid;gap:7px}
+  .log li{display:grid;grid-template-columns:auto 1fr;gap:10px}
+  .log .tool{color:var(--accent-text)} .log .res{color:var(--ink-2)}
+  .log li.att{margin-top:6px;font-family:var(--font-sans);font-weight:600;font-size:13px;display:block;border-top:1px solid var(--hairline);padding-top:9px}
+  .log li.att:first-child{border:0;padding:0;margin:0}
+  .log .bad{color:var(--critical-solid)} .log .good{color:var(--ok-solid)}
+  .film{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+  .film div{border:1px solid var(--hairline);border-radius:9px;padding:9px 10px;font-size:12.5px;background:var(--surface-2)}
+  .film b{display:block;font:600 13px var(--font-head);margin:2px 0 1px}.film .eyebrow{font-size:10px}
+  .bars{display:grid;gap:12px;margin:2px 0 14px}
+  .bar-row .lab{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+  .track{height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden}.fill{height:100%;background:var(--accent-solid)}.fill.base{background:var(--hairline-2)}
+  .rule{font-size:12.5px;color:var(--muted-ink);border-top:1px solid var(--hairline);padding-top:12px;margin-top:6px;display:grid;gap:8px}
+  .empty{color:var(--muted-ink);font-size:14px;display:grid;gap:12px;justify-items:start;padding-top:8px}
+  .live-row{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:10px;font-size:13.5px;box-shadow:var(--shadow-panel);z-index:5}
+
+  @media(max-width:640px){
+    main{padding:14px 12px 48px}.stage,.trigger{padding:18px 16px}.card-body{min-height:0}
+    .film{grid-template-columns:1fr}.topic-row{grid-template-columns:1fr}.subs{grid-column:1}
+    th:nth-child(n+5),td:nth-child(n+5){display:none}
+    .seg{margin-left:0}.eng>div{grid-template-columns:1fr;gap:0}
+  }
+  @media print{.bar,.proto{display:none}}
+</style>
+
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 21.5V5.5"/></svg></span>
+      <span><span class="eyebrow">Design prototype</span><b>Tutorials on the adaptive engine</b></span>
+    </div>
+    <div class="seg" role="group" aria-label="View">
+      <button id="v-student" aria-pressed="true">Student session</button>
+      <button id="v-studio" aria-pressed="false">Studio: generate &amp; monitor</button>
+    </div>
+  </div>
+</header>
+<div class="proto"><p><b>Prototype.</b> The questions, tutorials and studio numbers are mock. The engine is a port of the real one, so the choices are real.
+  <span id="demo-jump"><button id="jump">Jump to a Lists draw</button></span></p></div>
+
+<main>
+  <section id="student" class="s-wrap" aria-label="Student practice session">
+    <div class="card path" id="path" aria-label="Where the student is in the curriculum"></div>
+    <div class="card" id="stage" aria-live="polite"></div>
+    <details class="engine" id="engine" open><summary>How the engine chose this</summary><div class="eng" id="eng"></div></details>
+  </section>
+
+  <section id="studio" hidden aria-label="Tutorial studio">
+    <div class="st-head">
+      <div>
+        <h1>Tutorials</h1>
+        <p>One per subtopic, generated from your books. The adaptive engine decides which subtopic a student is taught next; a tutorial is attached to the cell it draws. A tutorial goes live when it passes every automatic check, and is withdrawn if it stops helping. Nothing waits for review.</p>
+      </div>
+    </div>
+    <div class="card next" id="next-gen"></div>
+    <div class="grid">
+      <div class="card" style="overflow:hidden">
+        <table aria-label="Tutorials by subtopic, in curriculum order">
+          <thead><tr><th>Subtopic</th><th>Tutorial</th><th>Checks</th><th>Served</th><th>Score with · without</th><th><span class="sr">Live</span></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <aside class="card detail" id="detail" aria-label="Tutorial details"></aside>
+    </div>
+  </section>
+</main>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script>
+"use strict";
+/* ====================================================================================== helpers */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const KW = new Set("and as break class continue def elif else for from if import in is not or pass return while True False None".split(" "));
+const BI = new Set("print range len type int float str bool input list sum".split(" "));
+function hl(src) {
+  return src.replace(/(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_]\w*\b)|([^#"'\w]+|.)/g, (m, cm, str, num, word, other) => {
+    if (cm) return `<span class="cm">${esc(cm)}</span>`;
+    if (str) return `<span class="st">${esc(str)}</span>`;
+    if (num) return `<span class="nm">${num}</span>`;
+    if (word) return KW.has(word) ? `<span class="kw">${word}</span>` : BI.has(word) ? `<span class="fn">${word}</span>` : word;
+    return esc(other ?? m);
+  });
+}
+function code(src, cur = -1) {
+  return `<pre class="code" tabindex="0" aria-label="Code">${src.split("\n").map((l, i) => `<div class="ln${i + 1 === cur ? " cur" : ""}"><span class="n">${i + 1}</span><span>${hl(l) || " "}</span></div>`).join("")}</pre>`;
+}
+const inl = (s) => String(s).replace(/`([^`]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+const svgI = (d, fill) => `<svg class="ico" viewBox="0 0 24 24" fill="${fill ? "currentColor" : "none"}" stroke="${fill ? "none" : "currentColor"}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  check: svgI('<path d="M20 6 9 17l-5-5"/>'), x: svgI('<path d="M18 6 6 18M6 6l12 12"/>'), book: svgI('<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 21.5V5.5"/>'),
+  target: svgI('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/>'), step: svgI('<path d="M7 5v14l11-7z"/>', true), reset: svgI('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'), back: svgI('<path d="M15 6l-6 6 6 6"/>'),
+};
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 3400); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const f2 = (n) => n.toFixed(2);
+
+/* ====================================================================================== THE ENGINE (port of app/adaptive + app/domain/mastery) */
+const BKT = { learn: 0.03, guess: 0.3, slip: 0.05, init: 0.1 };
+const LOW_CEIL = 0.45, MED_CEIL = 0.85, ADVANCE = 0.6, RATE = 0.25, MIN_W = 0.05, INIT_W = 1.0;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+function evidence(p, correct) {
+  const k = correct ? p * (1 - BKT.slip) : p * BKT.slip, u = correct ? (1 - p) * BKT.guess : (1 - p) * (1 - BKT.guess), t = k + u;
+  return t <= 0 ? p : k / t;
+}
+function updateMastery(p, score) { const f = score / 100, post = f * evidence(p, true) + (1 - f) * evidence(p, false); return clamp(post + (1 - post) * BKT.learn, 0, 1); }
+function updateWeakness(w, score) { return clamp(w + RATE * ((1 - score / 100) - w), MIN_W, INIT_W); }
+const bandOf = (p) => (p < LOW_CEIL ? "easy" : p < MED_CEIL ? "medium" : "hard");
+const FALLBACK = { easy: ["easy", "medium", "hard"], medium: ["medium", "easy", "hard"], hard: ["hard", "medium", "easy"] };
+// Seeded per (session, position), so a run replays exactly (service._draw).
+function xmur(str) { let h = 1779033703 ^ str.length; for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return (h ^= h >>> 16) >>> 0; }; }
+function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const rngFor = (seed, ord) => mulberry(xmur(`${seed}:${ord}`)());
+function chooseSubtopic(weights, rng) {
+  const ordered = Object.entries(weights).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const total = ordered.reduce((s, [, w]) => s + w, 0);
+  if (total <= 0) return ordered[Math.floor(rng() * ordered.length)][0];
+  const threshold = rng() * total; let cum = 0;
+  for (const [id, w] of ordered) { cum += w; if (threshold < cum) return id; }
+  return ordered[ordered.length - 1][0];
+}
+
+// TODO(real): the curriculum, questions and their misconception hints come from the taxonomy and the frozen question set.
+const CURRICULUM = [
+  { id: "F", name: "Functions", subs: ["F1", "F2"] },
+  { id: "L", name: "Lists", subs: ["L1", "L2"] },
+];
+const SUB = { F1: { name: "return vs print", topic: "F" }, F2: { name: "default arguments", topic: "F" }, L1: { name: "indexing", topic: "L" }, L2: { name: "aliasing and copies", topic: "L" } };
+const q = (id, sub, diff, type, prompt, codeText, opts) => ({ id, sub, diff, type, prompt, code: codeText, opts, priority: 5, used: 0 });
+const BANK = [
+  q(1, "F1", "easy", "Output prediction", "What does this print?", "def double(x):\n    return x * 2\n\nprint(double(4))", [["8", 1], ["None", 0, "`double` returns its result, so `print` has something to show."], ["4", 0, "The function multiplies its argument by 2."]]),
+  q(2, "F1", "medium", "Output prediction", "What does this print?", "def add(a, b):\n    print(a + b)\n\nr = add(2, 3)\nprint(r)", [["5", 0, "`print(r)` runs too. What did `add` hand back?"], ["None", 0, "`add` prints 5 first. Then `print(r)` shows None."], ["5, then None", 1]]),
+  q(3, "F2", "easy", "Output prediction", "What does this print?", "def area(w, h=1):\n    return w * h\n\nprint(area(4))", [["4", 1], ["1", 0, "`h` is the default; `w` is 4, so the product is 4."], ["An error", 0, "A parameter with a default may be left out."]]),
+  q(4, "F2", "medium", "Output prediction", "What does this print?", 'def greet(name, punct="!"):\n    return name + punct\n\nprint(greet("Ada", "?"))', [["Ada?", 1], ["Ada!", 0, "A value passed in replaces the default."], ["Ada?!", 0, "The default is replaced, not added to."]]),
+  q(5, "L1", "easy", "Output prediction", "What does this print?", "a = [10, 20, 30]\nprint(a[1])", [["10", 0, "Indexing starts at 0, so `a[0]` is 10."], ["20", 1], ["An error", 0, "Index 1 exists here."]]),
+  q(6, "L1", "medium", "Output prediction", "What does this print?", "a = [10, 20, 30]\nprint(a[-1])", [["30", 1], ["10", 0, "A negative index counts from the end."], ["An error", 0, "Negative indexes are allowed."]]),
+  q(7, "L2", "easy", "True / false", "`b = a` makes an independent copy of the list.", "", [["True", 0, "`b = a` copies nothing; it adds a second name."], ["False", 1]]),
+  q(8, "L2", "medium", "Output prediction", "What does this print?", "a = [1, 2, 3]\nb = a\nb.append(4)\nprint(a)", [["[1, 2, 3]", 0, "You expected `b = a` to copy the list. It gives the same list a second name."], ["[1, 2, 3, 4]", 1], ["An error", 0, "`append` works on lists; nothing here fails."]]),
+  q(10, "F1", "easy", "Output prediction", "What does this print?", "def square(x):\n    return x * x\n\nprint(square(3))", [["9", 1], ["None", 0, "`square` returns its result, so `print` has something to show."], ["6", 0, "`x * x` multiplies, it does not double."]]),
+  q(11, "F2", "easy", "Output prediction", "What does this print?", 'def hello(name="world"):\n    return "hi " + name\n\nprint(hello())', [["hi world", 1], ["hi", 0, "With no argument, `name` takes its default."], ["An error", 0, "A parameter with a default may be left out."]]),
+  q(12, "L1", "easy", "Output prediction", "What does this print?", 'a = ["x", "y", "z"]\nprint(a[0])', [["x", 1], ["y", 0, "Indexing starts at 0, so `a[1]` is y."], ["An error", 0, "Index 0 always exists in a non-empty list."]]),
+  q(13, "L2", "easy", "Output prediction", "What does this print?", "a = [1, 2]\nb = a\nprint(b is a)", [["True", 1], ["False", 0, "`b = a` did not make a new list, so they are the same object."], ["An error", 0, "`is` compares whether two names share one object."]]),
+  q(9, "L2", "hard", "Output prediction", "What does this print?", "a = [1, 2]\nb = a.copy()\nc = b\nc.append(3)\nprint(a, b)", [["[1, 2] [1, 2]", 0, "`c = b` is another name, so `b` changed too."], ["[1, 2] [1, 2, 3]", 1], ["[1, 2, 3] [1, 2, 3]", 0, "`copy()` made `b` independent of `a`."]]),
+];
+// Note: there is no hard question for F1, F2 or L1, so the engine relaxes difficulty exactly as ADR-041 says.
+
+const E = { seed: "demo-1", ordinal: 0, mastery: { F: BKT.init, L: BKT.init }, weak: { F1: INIT_W, F2: INIT_W, L1: INIT_W, L2: INIT_W }, answered: new Set(), attempts: [], offered: new Set(), preset: false };
+function currentTopic() {
+  for (const t of CURRICULUM) { if (E.mastery[t.id] >= ADVANCE) continue; return t; }
+  return null;
+}
+function pickInSubtopic(sub, requested) {
+  for (const d of FALLBACK[requested]) {
+    const rows = BANK.filter((x) => x.sub === sub && x.diff === d);
+    if (!rows.length) continue;
+    const ranked = [...rows].sort((a, b) => (E.answered.has(a.id) - E.answered.has(b.id)) || (b.priority - a.priority) || (a.used - b.used) || (a.id - b.id));
+    return { q: ranked[0], diff: d, candidates: rows.length, unseen: rows.filter((r) => !E.answered.has(r.id)).length };
+  }
+  return null;
+}
+function draw() {
+  const topic = currentTopic(); if (!topic) return null;
+  const ord = E.ordinal++, rng = rngFor(E.seed, ord);
+  const weights = Object.fromEntries(topic.subs.map((s) => [s, E.weak[s]])); const w = { ...weights };
+  const requested = bandOf(E.mastery[topic.id]); let fallback = false;
+  while (Object.keys(w).length) {
+    const sub = chooseSubtopic(w, rng), picked = pickInSubtopic(sub, requested);
+    if (!picked) { delete w[sub]; fallback = true; continue; }
+    if (picked.diff !== requested) fallback = true;
+    picked.q.priority = 0; picked.q.used++;
+    return { ord, topic, weights, sub, requested, served: picked.diff, q: picked.q, fallback, candidates: picked.candidates, unseen: picked.unseen };
+  }
+  return null;
+}
+// TODO(real): a proposal, not the engine's rule. Attaches a tutorial to a cell the engine has ALREADY drawn.
+// Numbers are settings to tune (and to record in an ADR), the same way WEAKNESS_LEARNING_RATE is.
+const TEACH = { minAttempts: 1, minWeakness: 0.7, band: "easy" };
+function teachDecision(d) {
+  const t = TUT[d.sub], w = E.weak[d.sub], n = E.attempts.filter((a) => a.sub === d.sub).length, band = bandOf(E.mastery[d.topic.id]);
+  const rows = [
+    [!!t && t.status === "live", "a live tutorial exists", t ? (t.status === "live" ? "yes" : `no (${t.status})`) : "no"],
+    [!E.offered.has(d.sub), "not offered before", E.offered.has(d.sub) ? "already offered" : "first time"],
+    [n >= TEACH.minAttempts, `at least ${TEACH.minAttempts} attempt on the subtopic`, `${n} so far`],
+    [w >= TEACH.minWeakness, `weakness ≥ ${TEACH.minWeakness}`, f2(w)],
+    [band === TEACH.band, `topic mastery in the ${TEACH.band} band`, `${f2(E.mastery[d.topic.id])} (${band})`],
+  ];
+  return { teach: rows.every((r) => r[0]), rows };
+}
+
+/* ====================================================================================== tutorials (mock) */
+// TODO(real): generated from the book, run in a sandbox, traces recorded with sys.settrace, then checked.
+const AL_CODE = "a = [1, 2, 3]\nb = a\nb.append(4)\nprint(a)";
+const TUT = {
+  L2: { status: "live", ch: 8, mode: "mem", code: AL_CODE, cards: [
+      { h: "One list, two names", lead: "`b = a` doesn't copy the list. It gives the same list a second name.", code: "a = [1, 2, 3]\nb = a" },
+      { sim: true, h: "Watch what append does" },
+      { h: "Want your own copy? Ask for one.", lead: "`a.copy()` makes a new list. Changing it leaves `a` alone.", code: "a = [1, 2]\nb = a.copy()\nb.append(3)\nprint(a, b)", out: "[1, 2] [1, 2, 3]" }],
+    predict: { q: "What will `print(a)` show at the end?", opts: ["[1, 2, 3]", "[1, 2, 3, 4]"], ok: "[1, 2, 3, 4]" }, endWhy: "`a` shows the change too.",
+    steps: [
+      { line: 0, cap: "Press Step to run the first line.", a: 0, b: 0, cells: [1, 2, 3] },
+      { line: 1, cap: "`a` points at a new list.", a: 1, b: 0, cells: [1, 2, 3] },
+      { line: 2, cap: "`b` points at the same list. Not a copy.", a: 1, b: 1, cells: [1, 2, 3] },
+      { line: 3, cap: "`append` changes the one list both names share.", a: 1, b: 1, cells: [1, 2, 3, 4] },
+      { line: 4, cap: "`a` shows the change too.", a: 1, b: 1, cells: [1, 2, 3, 4], out: "[1, 2, 3, 4]" }] },
+  F1: { status: "live", ch: 5, mode: "vars", code: "def add(a, b):\n    print(a + b)\n\nr = add(2, 3)\nprint(r)", cards: [
+      { h: "return hands a value back", lead: "`print` shows something. `return` gives it to whoever called.", code: "def double(x):\n    return x * 2\n\nprint(double(4))", out: "8" },
+      { sim: true, h: "Watch a call that returns nothing" },
+      { h: "No return, no value", lead: "A function without `return` hands back `None`.", code: "def add(a, b):\n    print(a + b)\n\nr = add(2, 3)\nprint(r)", out: "5\nNone" }],
+    predict: { q: "What will `print(r)` show?", opts: ["5", "None"], ok: "None" }, endWhy: "`add` returned nothing, so `r` is `None`.",
+    steps: [
+      { line: 0, cap: "Press Step to run the first line.", vars: [] },
+      { line: 1, cap: "`add` is defined. Nothing runs yet.", vars: [] },
+      { line: 4, cap: "The call jumps into `add`.", vars: [] },
+      { line: 2, cap: "`print` shows 5. Nothing is returned.", vars: [["add", "a", "2"], ["add", "b", "3"]], out: "5" },
+      { line: 4, cap: "No `return`, so `add` hands back None.", vars: [["global", "r", "None"]], out: "5" },
+      { line: 5, cap: "`print(r)` shows None.", vars: [["global", "r", "None"]], out: "5\nNone" }] },
+  L1: { status: "none", ch: 8, mode: "vars", code: "a = [10, 20, 30]\nprint(a[0])\nprint(a[-1])", cards: [
+      { h: "Positions start at 0", lead: "The first item is `a[0]`. A negative index counts from the end.", code: "a = [10, 20, 30]\nprint(a[0])\nprint(a[-1])", out: "10\n30" },
+      { sim: true, h: "Watch the indexes" },
+      { h: "Last item, any length", lead: "`a[-1]` is the last item without counting.", code: "a = [10, 20, 30, 40]\nprint(a[-1])", out: "40" }],
+    predict: { q: "What does `a[-1]` give?", opts: ["10", "30"], ok: "30" }, endWhy: "a negative index counts from the end.",
+    steps: [
+      { line: 0, cap: "Press Step to run the first line.", vars: [] },
+      { line: 1, cap: "`a` is a list of three items.", vars: [["global", "a", "[10, 20, 30]"]] },
+      { line: 2, cap: "`a[0]` is the first item.", vars: [["global", "a", "[10, 20, 30]"]], out: "10" },
+      { line: 3, cap: "`a[-1]` counts from the end.", vars: [["global", "a", "[10, 20, 30]"]], out: "10\n30" }] },
+  F2: { status: "failed" },
+};
+const CHECKS = [
+  ["Structure", "Right block types in order, within the word limits"],
+  ["Code runs and repeats", "Every snippet parses, runs in a sandbox, and prints the same thing twice"],
+  ["Outputs are recorded", "Outputs and traces come from running the code, not from the model's text"],
+  ["Recorded answers are computed", "Every output shown is what the code printed"],
+  ["Scope", "Only constructs the course has taught by this subtopic"],
+  ["Grounding", "Citations exist, and the terms used appear in the cited text"],
+  ["Taxonomy", "The subtopic it claims is in the approved tree"],
+  ["Not a duplicate", "Different enough from every other tutorial on the subtopic"],
+];
+
+/* ====================================================================================== STUDENT */
+const S = { phase: "q", cur: null, teach: null, picked: null, answered: false, delta: null, card: 0, sim: 0, predict: null, predictOn: true, showChecks: false, taught: false, advanced: null };
+
+function subChip(sub, curSub) {
+  const w = E.weak[sub], has = TUT[sub]?.status === "live";
+  return `<span class="${sub === curSub ? "cur" : ""}" title="weakness ${f2(w)}">${SUB[sub].name}<span class="wbar" aria-hidden="true"><i style="width:${w * 100}%"></i></span><span class="sr">weakness ${f2(w)}</span>${has ? `<span class="has" title="tutorial available">${ICON.book}</span>` : ""}</span>`;
+}
+function renderPath() {
+  const cur = currentTopic();
+  $("#path").innerHTML = CURRICULUM.map((t) => {
+    const m = E.mastery[t.id], done = m >= ADVANCE, isCur = cur && cur.id === t.id;
+    return `<div class="topic-row ${done ? "done" : isCur ? "cur" : "later"}"><span class="tname">${done ? ICON.check : ""}${t.name}</span>
+      <div><div class="mbar" role="img" aria-label="${t.name} mastery ${f2(m)}, advance at ${ADVANCE}"><div class="f" style="width:${m * 100}%"></div><span class="tick"></span></div><div class="mnum"><span>mastery ${f2(m)}</span><span>advance at ${f2(ADVANCE)}</span></div></div>
+      ${isCur || done ? `<div class="subs">${t.subs.map((s) => subChip(s, S.cur?.sub)).join("")}</div>` : ""}</div>`;
+  }).join("");
+}
+function renderEngine() {
+  const d = S.cur, el = $("#eng");
+  if (!d) { el.innerHTML = `<div><span class="k">draw</span><span>none: every topic is past ${f2(ADVANCE)}</span></div>`; return; }
+  const pool = Object.entries(d.weights).map(([s, w]) => `${SUB[s].name} <b>${f2(w)}</b>${s === d.sub ? " ←" : ""}`).join(" · ");
+  const td = S.teach;
+  el.innerHTML = `<div><span class="k">draw</span><span>#${d.ord} · seed <b>${E.seed}:${d.ord}</b>${E.preset ? " · demo preset" : ""}</span></div>
+    <div><span class="k">topic</span><span><b>${d.topic.name}</b> is the first topic under ${f2(ADVANCE)} mastery (${f2(E.mastery[d.topic.id])})</span></div>
+    <div><span class="k">roulette</span><span>weakness ${pool}</span></div>
+    <div><span class="k">difficulty</span><span>mastery ${f2(E.mastery[d.topic.id])} → <b>${d.requested}</b>${d.served !== d.requested ? ` · none at ${d.requested}, relaxed to <b>${d.served}</b> (ADR-041)` : ""}</span></div>
+    <div><span class="k">question</span><span>cell (${SUB[d.sub].name}, ${d.served}) · ${d.candidates} candidate${d.candidates > 1 ? "s" : ""}, ${d.unseen} unseen → #${d.q.id}</span></div>
+    ${td ? `<div><span class="k">tutorial?</span><span><b>${td.teach ? "attach" : "not attached"}</b>${td.rows.map((r) => `<br><span class="${r[0] ? "y" : "n"}">${r[0] ? "✓" : "✗"}</span> ${r[1]}: ${r[2]}`).join("")}</span></div>` : ""}`;
+}
+function render() {
+  renderPath(); renderEngine();
+  const st = $("#stage");
+  if (S.phase === "q") renderQuestion(st); else if (S.phase === "trigger") renderTrigger(st); else if (S.phase === "deck") renderDeck(st); else renderEnd(st);
+}
+function resetStudent() {
+  E.seed = "demo-1"; E.ordinal = 0; E.mastery = { F: BKT.init, L: BKT.init }; E.weak = { F1: INIT_W, F2: INIT_W, L1: INIT_W, L2: INIT_W }; E.answered = new Set(); E.attempts = []; E.offered = new Set(); E.preset = false;
+  BANK.forEach((b) => { b.priority = 5; b.used = 0; });
+  S.cur = null; S.teach = null; S.advanced = null; nextDraw();
+}
+function nextDraw() {
+  const d = draw();
+  if (!d) { S.phase = "end"; S.cur = null; S.teach = null; return render(); }
+  S.cur = d; S.teach = teachDecision(d); S.picked = null; S.answered = false; S.delta = null; S.taught = false;
+  if (S.teach.teach) { S.phase = "trigger"; E.offered.add(d.sub); } else S.phase = "q";
+  render();
+}
+function renderQuestion(st) {
+  const d = S.cur, x = d.q;
+  const opts = x.opts.map((o, i) => {
+    let cls = "opt";
+    if (S.answered) cls += o[1] ? " right" : S.picked === i ? " wrong" : " dim"; else if (S.picked === i) cls += " sel";
+    return `<label class="${cls}"><input type="radio" name="o" value="${i}" ${S.picked === i ? "checked" : ""} ${S.answered ? "disabled" : ""}><span class="l">${"ABC"[i]}</span><span>${esc(o[0])}</span></label>`;
+  }).join("");
+  const hint = S.answered && !x.opts[S.picked][1] ? x.opts[S.picked][2] : "";
+  const dl = S.delta ? `<p class="delta">${d.topic.name} mastery ${f2(S.delta.m0)} → ${f2(S.delta.m1)} · ${SUB[d.sub].name} weakness ${f2(S.delta.w0)} → ${f2(S.delta.w1)}</p>` : "";
+  st.innerHTML = `<div class="stage">
+    <div class="q-head"><h2>${d.topic.name} › ${SUB[d.sub].name}</h2><span class="tag">${x.type} · ${d.served}</span></div>
+    ${S.taught ? `<p class="recorded" style="margin:2px 0 6px">${ICON.book} after the refresher</p>` : ""}
+    <p class="prompt">${inl(x.prompt)}</p>${x.code ? code(x.code) : ""}
+    <div class="opts" role="radiogroup" aria-label="Answers">${opts}</div>
+    <div class="fb" aria-live="polite">${S.answered ? (x.opts[S.picked][1] ? `<b class="good">Correct.</b>` : `<b class="bad">Not quite.</b> ${inl(hint)}`) : ""}</div>${dl}
+    ${S.advanced && S.answered ? `<div class="notice" style="margin-top:12px">${S.advanced}</div>` : ""}
+    <div class="row"><span class="grow"></span>${S.answered ? `<button class="btn primary" id="next">Next</button>` : `<button class="btn primary" id="check" ${S.picked === null ? "disabled" : ""}>Check answer</button>`}</div>
+  </div>`;
+  st.querySelectorAll("input[name=o]").forEach((i) => i.addEventListener("change", () => { S.picked = +i.value; render(); $("label.opt.sel input")?.focus(); }));
+  $("#check")?.addEventListener("click", () => {
+    const score = x.opts[S.picked][1] ? 100 : 0, tid = d.topic.id;
+    S.delta = { m0: E.mastery[tid], w0: E.weak[d.sub] };
+    E.mastery[tid] = updateMastery(E.mastery[tid], score); E.weak[d.sub] = updateWeakness(E.weak[d.sub], score);
+    S.delta.m1 = E.mastery[tid]; S.delta.w1 = E.weak[d.sub];
+    E.answered.add(x.id); E.attempts.push({ sub: d.sub, score, tutorial: S.taught });
+    S.answered = true;
+    S.advanced = E.mastery[tid] >= ADVANCE ? `You have moved past ${d.topic.name} (mastery ${f2(E.mastery[tid])} is at least ${f2(ADVANCE)}).` : null;
+    render(); $("#next")?.focus();
+  });
+  $("#next")?.addEventListener("click", () => { S.advanced = null; nextDraw(); });
+}
+function renderTrigger(st) {
+  const d = S.cur, w = E.weak[d.sub], t = TUT[d.sub];
+  st.innerHTML = `<div class="trigger">
+    <span class="eyebrow">Before this question</span>
+    <h2>A one-minute refresher on ${SUB[d.sub].name}</h2>
+    <p style="color:var(--ink-2);max-width:58ch">${t.cards.length} short cards, then the question the engine picked for you. You can skip it and go straight on.</p>
+    <div class="why">${ICON.target}<span><b>Why now:</b> the engine drew <b>${SUB[d.sub].name}</b>, one of your weakest subtopics in ${d.topic.name} (weakness ${f2(w)}), and your ${d.topic.name} mastery is low (${f2(E.mastery[d.topic.id])}).</span></div>
+    <div class="row"><button class="btn primary" id="start">Start the refresher</button><button class="btn ghost" id="skip">Skip for now</button></div></div>`;
+  $("#start").addEventListener("click", () => { S.phase = "deck"; S.card = 0; S.sim = 0; S.predict = null; S.predictOn = true; render(); });
+  $("#skip").addEventListener("click", () => { S.phase = "q"; render(); });
+}
+function memSvg(s) {
+  const cw = 46, x0 = 150, y = 38, h = 40;
+  const cells = s.cells.map((v, i) => `<rect x="${x0 + i * cw}" y="${y}" width="${cw}" height="${h}" rx="5" fill="var(--surface-2)" stroke="var(--hairline-2)"/><text x="${x0 + i * cw + cw / 2}" y="${y + 25}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="15" fill="var(--ink)">${v}</text>`).join("");
+  const tag = (name, on, ty) => on ? `<rect x="22" y="${ty}" width="52" height="28" rx="6" fill="var(--accent-wash)" stroke="var(--accent-solid)"/><text x="48" y="${ty + 19}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="500" fill="var(--accent-text)">${name}</text><path d="M74 ${ty + 14} L${x0 - 6} ${y + h / 2}" stroke="var(--accent-solid)" stroke-width="1.6" fill="none" marker-end="url(#ah)"/>` : "";
+  return `<svg class="mem" viewBox="0 0 ${x0 + 4 * cw + 24} 118" role="img" aria-label="Names a and b pointing at a list"><defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="var(--accent-solid)"/></marker></defs>${tag("a", s.a, 14)}${tag("b", s.b, 70)}${s.a ? cells : ""}${s.b ? `<text x="${x0}" y="${y + h + 24}" font-family="IBM Plex Sans, sans-serif" font-size="12" fill="var(--muted-ink)">one list, two names</text>` : ""}</svg>`;
+}
+function varsView(s) {
+  if (!s.vars.length) return `<div class="vars"><span class="dim">No variables yet.</span></div>`;
+  const frames = [...new Set(s.vars.map((v) => v[0]))];
+  return `<div class="vars">${frames.map((f) => `<div class="fr">${f}</div>${s.vars.filter((v) => v[0] === f).map((v) => `<div class="v"><span>${v[1]}</span><span>${esc(v[2])}</span></div>`).join("")}`).join("")}</div>`;
+}
+function renderDeck(st) {
+  const t = TUT[S.cur.sub], total = t.cards.length, c = S.card, card = t.cards[c];
+  const segs = `<div class="segs" role="group" aria-label="Refresher progress">${t.cards.map((_, i) => `<button class="${i < c ? "done" : i === c ? "now" : ""}" data-go="${i}" aria-label="Card ${i + 1}" ${i > c ? "disabled" : ""}></button>`).join("")}</div>`;
+  let body = "";
+  if (!card.sim) body = `<span class="eyebrow">${SUB[S.cur.sub].name} · ${c + 1} of ${total}</span><h2>${card.h}</h2><p class="lead">${inl(card.lead)}</p>${code(card.code)}${card.out ? `<div class="out" style="margin-top:10px"><span class="eyebrow">Output</span>${esc(card.out)}</div><p class="recorded" style="margin-top:8px">${ICON.check} Recorded from a real run of this code</p>` : ""}`;
+  else {
+    const s = t.steps[S.sim], atEnd = S.sim === t.steps.length - 1, gate = S.predictOn && S.sim === 0 && S.predict === null, pr = t.predict;
+    const predict = S.predictOn && S.sim === 0 ? `<div><p><b>Predict first.</b> ${inl(pr.q)}</p><div class="chips" role="group" aria-label="Prediction">${pr.opts.map((p) => `<button class="chip ${S.predict === p ? "sel" : ""}" data-pred="${esc(p)}">${esc(p)}</button>`).join("")}<button class="btn ghost sm" id="show">Just show me</button></div></div>` : "";
+    const hit = S.predict === pr.ok;
+    const verdict = atEnd && S.predict ? (hit ? "You predicted it. " : `You said <code>${esc(S.predict)}</code>, but `) : "";
+    const capText = atEnd && S.predict && !hit ? t.endWhy : s.cap;
+    body = `<span class="eyebrow">${SUB[S.cur.sub].name} · ${c + 1} of ${total}</span><h2>${card.h}</h2><div class="sim">${t.mode === "mem" ? memSvg(s) : varsView(s)}${code(t.code, s.line)}${predict}${s.out ? `<div class="out"><span class="eyebrow">Output</span>${esc(s.out)}</div>` : ""}<div class="cap" aria-live="polite">${verdict}${inl(capText)}</div>
+      <div class="row" style="margin-top:0"><button class="btn primary sm" id="step" ${atEnd || gate ? "disabled" : ""}>${ICON.step} Step</button><button class="btn sm" id="sback" ${S.sim === 0 ? "disabled" : ""}>${ICON.back} Step back</button><button class="btn ghost sm" id="sreset">${ICON.reset} Reset</button><span class="grow"></span><span class="mono dim" style="font-size:12.5px">${S.sim} / ${t.steps.length - 1}</span></div></div>`;
+  }
+  const last = c === total - 1;
+  const nav = `<div class="row" style="margin-top:14px"><button class="btn ghost" id="cback" ${c === 0 ? "disabled" : ""}>${ICON.back} Back</button><span class="grow"></span>${c === 0 ? `<button class="btn ghost" id="leave">I know this, go to the question</button>` : ""}${last ? `<button class="btn primary" id="finish">Now the question</button>` : `<button class="btn primary" id="cnext">Next</button>`}</div>`;
+  const prov = `<div class="prov"><span>Written from <i>A Practical Introduction to Python Programming</i>, ch. ${t.ch}</span><span class="ok">${ICON.check} 8 of 8 automatic checks passed</span><button id="what">${S.showChecks ? "Hide" : "What was checked"}</button></div>${S.showChecks ? `<ul class="checked">${CHECKS.map((k) => `<li>${ICON.check}<span><b>${k[0]}.</b> ${k[1]}</span></li>`).join("")}</ul>` : ""}`;
+  st.innerHTML = `<div class="stage"><div class="deck-top">${segs}<span class="dim" style="font-size:12.5px">about a minute</span></div><div class="card-body">${body}${nav}${prov}</div></div>`;
+  st.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => { S.card = +b.dataset.go; render(); }));
+  $("#cnext")?.addEventListener("click", () => { S.card++; render(); });
+  $("#cback")?.addEventListener("click", () => { S.card--; render(); });
+  $("#leave")?.addEventListener("click", () => { S.taught = true; S.phase = "q"; render(); });
+  $("#finish")?.addEventListener("click", () => { S.taught = true; S.phase = "q"; render(); });
+  $("#what")?.addEventListener("click", () => { S.showChecks = !S.showChecks; render(); });
+  st.querySelectorAll("[data-pred]").forEach((b) => b.addEventListener("click", () => { S.predict = b.dataset.pred; render(); }));
+  $("#show")?.addEventListener("click", () => { S.predictOn = false; render(); });
+  $("#step")?.addEventListener("click", () => { S.sim = Math.min(S.sim + 1, t.steps.length - 1); render(); $("#step")?.focus(); });
+  $("#sback")?.addEventListener("click", () => { S.sim = Math.max(S.sim - 1, 0); render(); });
+  $("#sreset")?.addEventListener("click", () => { S.sim = 0; S.predict = null; render(); });
+}
+function renderEnd(st) {
+  const taught = E.attempts.filter((a) => a.tutorial).length;
+  st.innerHTML = `<div class="stage done-card"><span class="eyebrow">Curriculum complete</span><h2>Every topic is past ${f2(ADVANCE)}</h2>
+    <p style="color:var(--ink-2);max-width:60ch">${E.attempts.length} questions answered${taught ? `, ${taught} of them straight after a refresher on a cell the engine drew` : ", and no refresher was needed"}. Tutorials never changed which subtopic came next; they only appeared on cells the engine had already drawn.</p>
+    <div class="row"><button class="btn primary" id="restart">Start again</button><button class="btn ghost" id="to-studio">See how tutorials are made</button></div></div>`;
+  $("#restart").addEventListener("click", resetStudent);
+  $("#to-studio").addEventListener("click", () => show("studio"));
+}
+// Demo preset: the student has finished Functions and has one miss on Lists > aliasing. The seed is searched, not the draw forced.
+$("#jump").addEventListener("click", () => {
+  resetStudent();
+  E.mastery.F = 0.72; E.mastery.L = BKT.init; E.attempts = [{ sub: "L2", score: 0, tutorial: false }]; E.answered.add(7);
+  const b7 = BANK.find((b) => b.id === 7); b7.used = 1; b7.priority = 0;
+  E.ordinal = 0; E.preset = true;
+  for (let i = 0; i < 400; i++) { E.seed = `demo-l2-${i}`; if (chooseSubtopic({ L1: E.weak.L1, L2: E.weak.L2 }, rngFor(E.seed, 0)) === "L2") break; }
+  S.advanced = null; show("student"); nextDraw();
+});
+document.addEventListener("keydown", (e) => {
+  if (S.phase !== "deck" || /INPUT|TEXTAREA/.test(document.activeElement?.tagName ?? "")) return;
+  if ((e.key === "ArrowRight" || e.key === " ") && $("#step") && !$("#step").disabled) { e.preventDefault(); $("#step").click(); }
+  if (e.key === "ArrowLeft" && $("#sback") && !$("#sback").disabled) { e.preventDefault(); $("#sback").click(); }
+});
+
+/* ====================================================================================== STUDIO */
+// TODO(real): rows come from the tutorials table; scores from student_attempts (the score on the question drawn right after the tutorial vs the same cell without one).
+const passFor = (t) => CHECKS.map((c, i) => ({ name: c[0], ok: true, note: [
+  `${t.cards.length || 3} cards, ${t.words} words; idea, trace, example`, "5 snippets parsed and run twice; identical output; no imports", "All outputs and the recorded trace come from execution", "Every output shown matches what the code printed",
+  `Uses ${t.constructs}; all taught before ${t.topic}`, `3 citations resolve to ch. ${t.ch}; ${t.terms} of ${t.terms} key terms found; similarity ${t.sim} (needs 0.55)`, `Claims ${t.topic} › ${t.name}; present in the approved tree`, "Closest other tutorial scores 0.31 (limit 0.85)"][i] }));
+const failFor = (t, f) => passFor(t).map((c, i) => (f[i] ? { ...c, ok: false, note: f[i] } : c));
+const R = (id, topic, name, status, served, withT, without, nWith, nWithout, extra) => ({ id, topic, name, status, served, withT, without, nWith, nWithout, checks: [], cards: [], live: status === "live", log: [], ...extra });
+const T = [
+  R(1, "Conditionals", "if / elif / else order", "live", 212, 81, 64, 212, 380, { words: 58, constructs: "if, elif, else, comparisons, print", ch: 3, terms: 12, sim: "0.68", cards: ["An if chain runs one branch", "Watch which branch runs", "Order changes the answer"], log: [["att", "Attempt 1"], ["search_book", "“if elif else” → 4 sections, best: ch. 3 §3.2"], ["run_python", "4 snippets → outputs recorded"], ["record_trace", "grade example → 5 steps"], ["run_checks", "8 of 8 passed"], ["publish", "live automatically"]] }),
+  R(2, "Conditionals", "boolean expressions", "live", 143, 76, 61, 143, 260, { words: 60, constructs: "and, or, not, comparisons, print", ch: 3, terms: 11, sim: "0.65", cards: ["and, or, not", "Watch the test evaluate", "Truth tables are optional"], log: [["att", "Attempt 1"], ["run_checks", "8 of 8 passed"], ["publish", "live automatically"]] }),
+  R(3, "Loops", "while loop condition", "live", 167, 74, 60, 167, 301, { words: 64, constructs: "while, comparisons, assignment, print", ch: 4, terms: 13, sim: "0.64", cards: ["A while loop re-checks", "Watch the test each pass", "The loop that never ends"], log: [["att", "Attempt 1"], ["run_checks", "8 of 8 passed"], ["publish", "live automatically"]] }),
+  R(4, "Loops", "for and range", "live", 190, 79, 66, 190, 322, { words: 62, constructs: "for, range, print", ch: 4, terms: 12, sim: "0.69", cards: ["for takes each item", "Watch range count", "The stop is excluded"], log: [["att", "Attempt 1"], ["run_checks", "8 of 8 passed"], ["publish", "live automatically"]] }),
+  R(5, "Functions", "return vs print", "live", 131, 72, 58, 131, 244, { words: 60, constructs: "def, return, calls, print", ch: 5, terms: 11, sim: "0.70", cards: ["return hands a value back", "Watch a call that returns nothing", "No return, no value"], log: [["att", "Attempt 1"], ["search_book", "“return print none” → 2 sections"], ["run_python", "4 snippets → outputs recorded"], ["record_trace", "add() example → 5 steps"], ["run_checks", "8 of 8 passed"], ["publish", "live automatically"]] }),
+  R(6, "Functions", "default arguments", "failed", 0, 0, 0, 0, 0, { words: 70, constructs: "def, default parameters, print", ch: 5, terms: 12, sim: "0.49", failed: { 4: "Used `*args`, which the course teaches after default arguments", 5: "“keyword-only” is not in the cited text (ch. 5 §5.4)" }, log: [["att", "Attempt 1"], ["run_checks", "4 of 8 passed"], ["att", "Attempt 2 · fed back the failures"], ["run_checks", "5 of 8 passed"], ["att", "Attempt 3 · fed back the failures"], ["run_checks", "<span class=\"bad\">6 of 8 passed: still short, so it stays down</span>"]] }),
+  R(7, "Lists", "indexing", "none", 0, 0, 0, 0, 0, { words: 56, constructs: "list literals, indexing, print", ch: 8, terms: 10, sim: "0.66" }),
+  R(8, "Lists", "aliasing and copies", "live", 46, 71, 52, 46, 118, { words: 61, constructs: "assignment, list literals, .append, .copy, print", ch: 8, terms: 14, sim: "0.71", cards: ["One list, two names", "Watch what append does", "Want your own copy?"], log: [["att", "Attempt 1 · failed"], ["search_book", "“list alias copy” → 3 sections, best: ch. 8 §8.3"], ["run_python", "5 snippets → outputs recorded"], ["run_checks", "7 of 8: <span class=\"bad\">Scope failed, used a list comprehension</span>"], ["att", "Attempt 2 · fed back the failure"], ["record_trace", "alias example → 4 steps"], ["run_checks", "<span class=\"good\">8 of 8 passed</span>"], ["publish", "live automatically"]] }),
+  R(9, "Recursion", "the base case", "retired", 41, 38, 40, 41, 96, { words: 66, constructs: "def, return, recursion, if, print", ch: 9, terms: 12, sim: "0.62", cards: ["A function can call itself", "Watch the call stack", "No base case, no end"], log: [["att", "Attempt 1"], ["run_checks", "8 of 8 passed"], ["publish", "live automatically"], ["att", "After 41 served"], ["retire", "<span class=\"bad\">score with 38 vs without 40 over 41 draws: no better, so withdrawn automatically</span>"]] }),
+];
+T.forEach((t) => { if (t.status === "live" || t.status === "retired") t.checks = passFor(t); else if (t.failed) t.checks = failFor(t, t.failed); });
+const ORDER = ["Conditionals", "Loops", "Functions", "Lists", "Recursion"];
+let sel = 8, tab = "preview", busy = false;
+const PILL = { live: ["live", "Live"], retired: ["retired", "Retired"], failed: ["failed", "Failed checks"], none: ["none", "Not generated"], gen: ["gen", "Generating"] };
+const pill = (s) => `<span class="pill ${PILL[s][0]}"><i></i>${PILL[s][1]}</span>`;
+function renderNext() {
+  const t = T.find((x) => x.id === 7);
+  $("#next-gen").innerHTML = t.status === "none"
+    ? `<span class="eyebrow">Generate next</span><span><b>Lists › indexing</b>: 14 students are on Lists right now, it is one of the topic's two subtopics, and it has no tutorial.</span><span class="grow"></span><button class="btn primary sm" id="gen-next">Generate tutorial</button>`
+    : `<span class="eyebrow">Generate next</span><span>Every subtopic the engine can reach has a tutorial, or a recorded reason it doesn't.</span>`;
+  $("#gen-next")?.addEventListener("click", () => { sel = 7; tab = "log"; renderStudio(); generate(t); });
+}
+function renderRows() {
+  let html = "";
+  for (const topic of ORDER) {
+    html += `<tr class="grp"><td colspan="6">${topic}</td></tr>`;
+    for (const t of T.filter((x) => x.topic === topic)) {
+      const passed = t.checks.filter((c) => c.ok).length, has = t.served > 0, d = t.withT - t.without;
+      html += `<tr data-id="${t.id}" tabindex="0" aria-selected="${t.id === sel}"><td>${t.name}</td><td>${pill(t.status)}</td><td class="num ${t.checks.length ? "" : "dim"}">${t.checks.length ? `${passed}/8` : "-"}</td><td class="num ${has ? "" : "dim"}">${has ? t.served : "-"}</td><td class="num">${has ? `${t.withT} · ${t.without} <span class="${d > 0 ? "up" : "down"}">${d > 0 ? "+" : ""}${d}</span>` : '<span class="dim">-</span>'}</td><td><button class="sw" role="switch" aria-checked="${t.live}" aria-label="Live: ${t.name}" ${t.status === "live" || t.status === "retired" ? "" : "disabled"} data-sw="${t.id}"></button></td></tr>`;
+    }
+  }
+  $("#rows").innerHTML = html;
+  $("#rows").querySelectorAll("tr[data-id]").forEach((r) => { const go = () => { sel = +r.dataset.id; renderStudio(); }; r.addEventListener("click", (e) => { if (!e.target.closest("[data-sw]")) go(); }); r.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }); });
+  $("#rows").querySelectorAll("[data-sw]").forEach((b) => b.addEventListener("click", () => { const t = T.find((x) => x.id === +b.dataset.sw); t.live = !t.live; t.status = t.live ? "live" : "retired"; syncTut(t); toast(t.live ? `“${t.name}” is live again.` : `“${t.name}” is switched off. The engine will not attach it.`); renderStudio(); }));
+}
+// The student view reads the same status, so a switch or a generation here changes what the engine can attach.
+const TUT_OF = { 5: "F1", 6: "F2", 7: "L1", 8: "L2" };
+function syncTut(t) { const k = TUT_OF[t.id]; if (k && TUT[k]) TUT[k].status = t.status === "live" ? "live" : t.status; }
+function renderDetail() {
+  const t = T.find((x) => x.id === sel), d = $("#detail");
+  const head = `<div class="d-head"><span class="eyebrow">${t.topic}</span><h2>${t.name}</h2>${pill(t.status)}</div><div class="tabs" role="tablist">${[["preview", "Preview"], ["checks", "Checks"], ["log", "Generation log"], ["results", "Results"]].map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" data-tab="${k}">${l}</button>`).join("")}</div>`;
+  let body = "";
+  if (t.status === "none" || (t.status === "gen" && !t.checks.length && !t.log.length)) {
+    body = `<div class="empty"><p>${t.status === "gen" ? "Generating…" : "No tutorial yet for this subtopic."}</p>${t.status === "none" ? `<p>The generator reads the linked book sections, writes the cards, runs every snippet, records the step-through and runs the eight checks. If it passes it goes live on its own, and the next time the engine draws this cell it can attach it.</p><button class="btn primary" id="gen">Generate tutorial</button>` : ""}</div>`;
+  } else if (tab === "preview") {
+    body = t.cards.length ? `<div class="film">${t.cards.map((c, i) => `<div><span class="eyebrow">Card ${i + 1}</span><b>${c}</b>${i === 1 ? "step-through" : "text + code"}</div>`).join("")}</div><p class="dim" style="font-size:13px;margin-bottom:12px">It ends by handing over to the question the engine drew for that cell. The tutorial carries no question of its own.</p>${TUT_OF[t.id] && TUT[TUT_OF[t.id]]?.status === "live" ? `<button class="btn" id="open-student">${ICON.book} Try it in a session</button>` : ""}` : `<div class="empty"><p>Nothing to preview: no attempt passed the checks.</p></div>`;
+  } else if (tab === "checks") {
+    body = t.checks.length ? `<ul class="checks">${t.checks.map((c) => `<li class="${c.ok ? "" : "fail"}"><span class="${c.ok ? "yes" : "no"}">${c.ok ? ICON.check : ICON.x}</span><div><b>${c.name}</b><span>${inl(c.note)}</span></div></li>`).join("")}</ul>` : `<div class="empty"><p>The checks run after generation.</p></div>`;
+  } else if (tab === "log") {
+    body = t.log.length ? `<ul class="log">${t.log.map(([k, v]) => k === "att" ? `<li class="att">${v}</li>` : `<li><span class="tool">${k}</span><span class="res">${v}</span></li>`).join("")}</ul>` : `<div class="empty"><p>Nothing generated yet.</p></div>`;
+  } else {
+    body = t.served ? `<div class="bars"><div class="bar-row"><div class="lab"><span>Score on the question drawn right after it</span><b>${t.withT}</b></div><div class="track"><div class="fill" style="width:${t.withT}%"></div></div><p class="dim" style="font-size:12px;margin-top:3px">${t.nWith} draws</p></div>
+      <div class="bar-row"><div class="lab"><span>Same cell, drawn without a tutorial</span><b>${t.without}</b></div><div class="track"><div class="fill base" style="width:${t.without}%"></div></div><p class="dim" style="font-size:12px;margin-top:3px">${t.nWithout} draws</p></div></div>
+      <div class="rule"><p>Measured from the students' own attempts, the same scores the engine already uses for mastery and weakness. Nothing extra is asked of students.</p><p>A tutorial is withdrawn by itself if, over 30 draws, the score with it is no higher than without it. <span class="dim">A small share of eligible draws (chosen by the session seed, so a run still replays) skips the tutorial so this comparison stays fair.</span></p><p>The engine attaches a tutorial when a live one exists, the student has answered the subtopic at least once, its weakness is at least ${TEACH.minWeakness}, and the topic's mastery is in the ${TEACH.band} band. These are settings.</p></div>
+      <div class="live-row"><button class="sw" role="switch" aria-checked="${t.live}" id="sw2" ${t.status === "live" || t.status === "retired" ? "" : "disabled"} aria-label="Live"></button><span>${t.live ? "Live: the engine may attach it" : "Off: the engine will not attach it"}</span></div>` : `<div class="empty"><p>The engine has not attached this yet.</p></div>`;
+  }
+  d.innerHTML = head + `<div class="tabpanel" role="tabpanel">${body}</div>`;
+  d.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { tab = b.dataset.tab; renderDetail(); }));
+  $("#gen")?.addEventListener("click", () => generate(t));
+  $("#open-student")?.addEventListener("click", () => $("#jump").click());
+  $("#sw2")?.addEventListener("click", () => { t.live = !t.live; t.status = t.live ? "live" : "retired"; syncTut(t); renderStudio(); });
+}
+async function generate(t) {
+  if (busy) return; busy = true;
+  t.status = "gen"; tab = "log"; t.log = []; t.checks = []; renderStudio();
+  const steps = [["att", "Attempt 1"], ["search_book", `“${t.name}” → 3 sections, best: ch. ${t.ch} §${t.ch}.1`], ["read_section", `ch. ${t.ch} §${t.ch}.1 (480 words)`], ["run_python", "4 snippets → outputs recorded"], ["record_trace", "indexing example → 4 steps"]];
+  for (const s of steps) { await sleep(420); t.log.push(s); if (tab === "log" && sel === t.id) renderDetail(); }
+  const results = passFor({ ...t, cards: ["a", "b", "c"] });
+  for (let i = 0; i < results.length; i++) { await sleep(300); t.checks = results.slice(0, i + 1); renderRows(); }
+  await sleep(300); t.log.push(["run_checks", '<span class="good">8 of 8 passed</span>'], ["publish", "live automatically"]);
+  t.status = "live"; t.live = true; t.cards = ["Positions start at 0", "Watch the indexes", "Last item, any length"]; busy = false; tab = "checks";
+  syncTut(t);
+  renderStudio(); toast(`“${t.name}” passed 8 of 8 checks and is live. The engine can attach it from the next draw.`);
+}
+function renderStudio() { renderNext(); renderRows(); renderDetail(); }
+
+/* ====================================================================================== views */
+function show(v) {
+  $("#student").hidden = v !== "student"; $("#studio").hidden = v !== "studio";
+  $("#v-student").setAttribute("aria-pressed", v === "student"); $("#v-studio").setAttribute("aria-pressed", v === "studio");
+  $("#demo-jump").hidden = v !== "student";
+  if (v === "studio") renderStudio(); else render();
+}
+$("#v-student").addEventListener("click", () => show("student"));
+$("#v-studio").addEventListener("click", () => show("studio"));
+resetStudent(); show("student");
+</script>
+</html>

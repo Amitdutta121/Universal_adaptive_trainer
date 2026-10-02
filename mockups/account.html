@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- B5 · Account: profile, password, email notifications, and the people you teach with (F2). -->
+<body data-scope="workspace" data-nav="account" data-title="Account">
+  <main x-data="page()" x-cloak class="grid gap-6 max-w-4xl">
+    <div class="flex items-end gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold">Account</h1>
+        <p class="text-sm text-muted-foreground">Your profile and sign-in. Your courses, questions and students are visible only to you and the co-instructors you invite.</p>
+      </div>
+      <a class="btn ml-auto" data-variant="outline" href="login.html">Sign out</a>
+    </div>
+
+    <!-- Profile -->
+    <form class="card" @submit.prevent="Mock.toast('Profile saved')">
+      <header><h2>Profile</h2><p>Shown to co-instructors and on invitations you send.</p></header>
+      <section class="grid md:grid-cols-2 gap-4">
+        <div role="group" class="field"><label for="p-name">Full name</label><input class="input" id="p-name" x-model="profile.name"></div>
+        <div role="group" class="field">
+          <label for="p-email">Email</label>
+          <input class="input" id="p-email" type="email" x-model="profile.email">
+          <p x-show="profile.email === me.email"><span class="pill tone-ok">Verified</span> Used to sign in.</p>
+          <p x-show="profile.email !== me.email">We'll send a link to the new address; the old one keeps working until you confirm.</p>
+        </div>
+        <div role="group" class="field"><label for="p-inst">Institution</label><input class="input" id="p-inst" x-model="profile.institution"></div>
+        <div role="group" class="field"><label for="p-dept">Department</label><input class="input" id="p-dept" x-model="profile.department"></div>
+        <div role="group" class="field">
+          <label for="p-tz">Time zone</label>
+          <select class="select w-full" id="p-tz" x-model="profile.timezone">
+            <option>America/Los_Angeles (Pacific)</option><option>America/Denver (Mountain)</option><option>America/Chicago (Central)</option><option>America/New_York (Eastern)</option><option>Europe/London</option>
+          </select>
+          <p>Used for job times and the weekly digest.</p>
+        </div>
+      </section>
+      <footer class="border-t pt-4 flex"><button class="btn ml-auto" type="submit">Save profile</button></footer>
+    </form>
+
+    <!-- Password -->
+    <form class="card" @submit.prevent="changePassword()">
+      <header><h2>Password</h2><p>At least 10 characters. Changing it signs you out on other devices.</p></header>
+      <section class="grid md:grid-cols-3 gap-4">
+        <div role="group" class="field"><label for="pw-cur">Current password</label><input class="input" id="pw-cur" type="password" x-model="pw.current" autocomplete="current-password"></div>
+        <div role="group" class="field" :data-invalid="pwTried && pw.next.length < 10 ? '' : null">
+          <label for="pw-new">New password</label><input class="input" id="pw-new" type="password" x-model="pw.next" autocomplete="new-password" :aria-invalid="pwTried && pw.next.length < 10">
+          <p role="alert" x-show="pwTried && pw.next.length < 10">Use at least 10 characters.</p>
+        </div>
+        <div role="group" class="field" :data-invalid="pwTried && pw.confirm !== pw.next ? '' : null">
+          <label for="pw-conf">Confirm new password</label><input class="input" id="pw-conf" type="password" x-model="pw.confirm" autocomplete="new-password" :aria-invalid="pwTried && pw.confirm !== pw.next">
+          <p role="alert" x-show="pwTried && pw.confirm !== pw.next">Doesn't match the new password.</p>
+        </div>
+      </section>
+      <footer class="border-t pt-4 flex items-center">
+        <a class="text-sm underline text-muted-foreground" href="reset-password.html">Forgot your current password?</a>
+        <button class="btn ml-auto" type="submit" :disabled="!pw.current">Change password</button>
+      </footer>
+    </form>
+
+    <!-- Notifications -->
+    <div class="card">
+      <header><h2>Email notifications</h2><p x-text="`Sent to ${profile.email}.`"></p></header>
+      <section class="grid gap-4">
+        <template x-for="n in prefs" :key="n.id">
+          <div role="group" class="field" data-orientation="horizontal">
+            <input type="checkbox" role="switch" class="input" :id="`n-${n.id}`" x-model="n.on" @change="Mock.toast(`${n.on ? 'On' : 'Off'}: ${n.label.toLowerCase()}`)">
+            <section><label :for="`n-${n.id}`" x-text="n.label"></label><p><span x-text="n.detail"></span><template x-if="n.id === 'review_digest'"><span> <a class="underline" href="email-digest.html">Preview</a></span></template></p></section>
+          </div>
+        </template>
+      </section>
+    </div>
+
+    <!-- Team -->
+    <div class="card py-0 gap-0">
+      <header class="px-6 pt-5 pb-3 grid gap-1">
+        <h2>People you teach with</h2>
+        <p class="text-sm text-muted-foreground">Invite a colleague once here, then add them to courses from each course's settings. They get their own login; nothing outside the courses you share is visible to them.</p>
+      </header>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Courses</th><th class="text-end"></th></tr></thead>
+          <tbody>
+            <template x-for="p in team" :key="p.email">
+              <tr>
+                <td>
+                  <div class="flex items-center gap-2">
+                    <span class="grid size-7 place-items-center rounded-full text-xs font-medium" :class="p.pending ? 'tone-muted' : 'tone-accent'" x-text="p.initials"></span>
+                    <span class="font-medium" x-text="p.name"></span>
+                    <span class="text-xs text-muted-foreground" x-show="p.id === me.id">(you)</span>
+                  </div>
+                </td>
+                <td x-text="p.email"></td>
+                <td><span x-show="!p.pending" x-text="p.role"></span><span x-show="p.pending" class="pill tone-warn">Invite pending</span></td>
+                <td class="text-muted-foreground" x-text="p.courses"></td>
+                <td class="text-end">
+                  <template x-if="p.pending">
+                    <span class="inline-flex gap-1">
+                      <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="Mock.toast(`Invitation re-sent to ${p.email}`)">Resend</button>
+                      <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="revoke(p)">Revoke</button>
+                    </span>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <form class="grid md:grid-cols-[1fr_12rem_auto] items-end gap-3 border-t px-6 py-4" @submit.prevent="invite()">
+        <div role="group" class="field" :data-invalid="inviteError ? '' : null">
+          <label for="inv-email">Invite by email</label>
+          <input class="input" id="inv-email" type="email" placeholder="colleague@example.edu" x-model="inviteEmail" :aria-invalid="!!inviteError">
+          <p role="alert" x-show="inviteError" x-text="inviteError"></p>
+        </div>
+        <div role="group" class="field">
+          <label for="inv-course">To course</label>
+          <select class="select w-full" id="inv-course" x-model="inviteCourse">
+            <template x-for="c in courses" :key="c.id"><option :value="c.id" x-text="c.code"></option></template>
+          </select>
+        </div>
+        <button class="btn" type="submit"><i data-lucide="send"></i>Send invite</button>
+      </form>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-b.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const me = MOCK.me;
+      const coursesOf = (uid) => MOCK.courses.filter((c) => c.owner === uid || c.collaborators.includes(uid)).map((c) => c.code).join(", ");
+      return {
+        me,
+        courses: MOCK.courses,
+        profile: { name: me.name, email: me.email, ...MOCK.me_profile },
+        pw: { current: "", next: "", confirm: "" },
+        pwTried: false,
+        prefs: MOCK.notification_prefs.map((n) => ({ ...n })),
+        team: MOCK.users.map((u) => ({ ...u, courses: coursesOf(u.id) })),
+        inviteEmail: "",
+        inviteCourse: "statistics",
+        inviteError: "",
+        changePassword() {
+          this.pwTried = true;
+          if (this.pw.next.length < 10 || this.pw.next !== this.pw.confirm) return;
+          this.pw = { current: "", next: "", confirm: "" };
+          this.pwTried = false;
+          Mock.toast("Password changed. Other devices were signed out.");
+        },
+        invite() {
+          const email = this.inviteEmail.trim().toLowerCase();
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { this.inviteError = "Enter a valid email address."; return; }
+          if (this.team.some((p) => p.email === email)) { this.inviteError = "This person is already on your team."; return; }
+          this.inviteError = "";
+          const local = email.split("@")[0];
+          this.team.push({ email, name: local, initials: local.slice(0, 2).toUpperCase(), pending: true, courses: MOCK.course(this.inviteCourse).code });
+          this.inviteEmail = "";
+          Mock.toast(`Invitation sent to ${email}`);
+        },
+        revoke(p) {
+          this.team = this.team.filter((x) => x !== p);
+          Mock.toast(`Invitation to ${p.email} revoked`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

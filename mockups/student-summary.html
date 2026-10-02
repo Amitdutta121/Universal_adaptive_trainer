@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Session summary · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- F4s · Session summary. Reads the session's answers from ?r=1000:1,1001:0,... (written by student-practice.html);
+     without it, shows a sample session. -->
+<body data-scope="student" data-title="Session summary">
+  <main x-data="page()" x-cloak class="mx-auto grid w-full max-w-2xl gap-4 px-4 py-6">
+    <div>
+      <p class="text-sm text-muted-foreground" x-text="`${course.name} (${course.code}) · today`"></p>
+      <h1 class="text-xl font-semibold">Session done</h1>
+    </div>
+
+    <template x-if="!results.length">
+      <div class="card"><header><h2>You ended the session before answering anything</h2><p>Nothing changed. Your mastery is where you left it.</p></header>
+        <footer><a class="btn w-full" href="student-practice.html">Start practising</a></footer></div>
+    </template>
+
+    <template x-if="results.length">
+      <div class="grid gap-4">
+        <section class="grid grid-cols-3 gap-3">
+          <div class="card gap-1 p-4"><div class="text-xs text-muted-foreground">Answered</div><div class="font-display text-2xl font-semibold" x-text="results.length"></div></div>
+          <div class="card gap-1 p-4"><div class="text-xs text-muted-foreground">Correct</div><div class="font-display text-2xl font-semibold" x-text="`${right}/${results.length}`"></div></div>
+          <div class="card gap-1 p-4"><div class="text-xs text-muted-foreground">Topics</div><div class="font-display text-2xl font-semibold" x-text="topics.length"></div></div>
+        </section>
+
+        <section class="card gap-3 py-5">
+          <header><h2>How your mastery moved</h2><p>Each topic you practised, before and after this session.</p></header>
+          <section>
+            <ul class="grid gap-3">
+              <template x-for="t in topics" :key="t.id">
+                <li class="grid gap-1">
+                  <div class="flex items-baseline gap-2 text-sm">
+                    <span class="font-medium" x-text="t.name"></span>
+                    <span class="text-xs text-muted-foreground" x-text="`${t.right} of ${t.total} right`"></span>
+                    <span class="ml-auto font-mono text-xs" x-text="`${Mock.pct(t.before)} → ${Mock.pct(t.after)}`"></span>
+                    <span class="pill" :class="t.after >= t.before ? 'tone-ok' : 'tone-critical'" x-text="(t.after >= t.before ? '+' : '') + Math.round((t.after - t.before) * 100)"></span>
+                  </div>
+                  <div class="relative h-1.5 rounded-full" style="background:var(--muted)">
+                    <div class="absolute inset-y-0 left-0 rounded-full" :style="`width:${t.after * 100}%;background:${t.after >= t.before ? 'var(--primary)' : 'var(--critical-solid)'}`"></div>
+                    <div class="absolute -inset-y-0.5 w-0.5" :style="{ background: 'var(--foreground)', left: `${t.before * 100}%` }"></div>
+                  </div>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </section>
+
+        <section class="card gap-3 py-5">
+          <header><h2>Next time</h2><p>Your weakest subtopics. The next session starts with these.</p></header>
+          <section>
+            <ol class="grid gap-2 text-sm">
+              <template x-for="(w, k) in next" :key="w.name">
+                <li class="flex items-center gap-2">
+                  <span class="font-mono text-xs text-muted-foreground" x-text="k + 1"></span>
+                  <span class="whitespace-nowrap" x-text="w.name"></span>
+                  <span class="text-xs text-muted-foreground" x-text="w.topic"></span>
+                  <span class="pill tone-warn" x-show="w.missed">Missed today</span>
+                  <span class="ml-auto font-mono text-xs" x-text="Mock.pct(w.m)"></span>
+                </li>
+              </template>
+            </ol>
+          </section>
+        </section>
+
+        <section class="card gap-3 py-5">
+          <header><h2>Your answers</h2></header>
+          <section class="p-0">
+            <ul class="divide-y">
+              <template x-for="r in results" :key="r.id">
+                <li class="flex items-start gap-3 px-6 py-3 text-sm">
+                  <span class="pill shrink-0" :class="r.correct ? 'tone-ok' : 'tone-critical'" x-text="r.correct ? 'Right' : 'Wrong'"></span>
+                  <span class="min-w-0">
+                    <span class="block truncate" x-text="r.q.prompt.split('\n')[0].replaceAll('`', '')"></span>
+                    <span class="text-xs text-muted-foreground" x-text="`${r.q.topic} · ${r.q.subtopic}`"></span>
+                  </span>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </section>
+      </div>
+    </template>
+
+    <div class="grid gap-2 sm:grid-cols-2">
+      <a class="btn" data-size="lg" href="student-practice.html">Practise again</a>
+      <a class="btn" data-variant="outline" data-size="lg" href="student-home.html">Back to my courses</a>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-f.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const X = MOCK.student_extra;
+      const course = MOCK.course("python");
+      const raw = Mock.param("r") ?? "1000:1,1001:1,1002:0,1004:1,1006:1,1007:0"; // sample session when opened directly
+      const results = raw ? raw.split(",").map((p) => { const [id, c] = p.split(":"); return { id: Number(id), correct: c === "1", q: MOCK.question(id) }; }) : [];
+      const missedSubs = new Set(results.filter((r) => !r.correct).map((r) => r.q.subtopic));
+      const rightSubs = new Set(results.filter((r) => r.correct).map((r) => r.q.subtopic));
+      const topicOf = (sub) => course.taxonomy.find((t) => t.subtopics.some((s) => s.name === sub))?.name;
+      // TODO(real): per-subtopic mastery after the session comes from the server's BKT state.
+      const next = Object.entries(X.subtopic_mastery)
+        .map(([name, m]) => ({ name, topic: topicOf(name), missed: missedSubs.has(name), m: rightSubs.has(name) ? X.update(m, true) : missedSubs.has(name) ? X.update(m, false) : m }))
+        .sort((a, b) => a.m - b.m).slice(0, 4);
+      return {
+        course, results, next,
+        right: results.filter((r) => r.correct).length,
+        topics: X.replay(results),
+      };
+    }
+  </script>
+</body>
+</html>

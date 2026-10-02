@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My courses · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- B1 · My courses: the professor's home across all their courses (F2, F5). Replaces the single-course /dashboard. -->
+<body data-scope="workspace" data-nav="courses" data-title="My courses">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <!-- G0 · brand-new account (?new=1): no own courses yet, a read-only sample course to explore. -->
+    <template x-if="isNew">
+      <div class="grid gap-6 max-w-4xl">
+        <div>
+          <p class="text-sm text-muted-foreground" x-text="`${me.name} · no courses yet`"></p>
+          <h1 class="text-2xl font-semibold">My courses</h1>
+        </div>
+
+        <div class="card gap-0 py-0">
+          <div class="flex items-start gap-6 px-6 pt-5">
+            <div class="min-w-0 flex-1">
+              <p class="text-xs text-muted-foreground flex items-center gap-2"><span class="pill tone-accent">Sample</span><span x-text="`Prof. Example · made-up class · Programming (Python) · read-only`"></span></p>
+              <a class="text-lg font-display font-semibold hover:underline" :href="sampleHref">Sample: Intro to Python</a>
+              <p class="text-sm text-muted-foreground mt-0.5">Explore a finished course, nothing you do there is saved. Two textbooks, a 12-topic taxonomy, reviewed questions, and 28 practice students five weeks into a term.</p>
+            </div>
+            <a class="btn shrink-0" data-variant="outline" data-size="sm" :href="sampleHref">Explore the sample</a>
+          </div>
+          <dl class="mt-4 grid grid-cols-3 md:grid-cols-6 border-t text-sm">
+            <template x-for="k in keyNumbers(sample)" :key="k.label">
+              <div class="px-6 py-3">
+                <dt class="text-xs text-muted-foreground" x-text="k.label"></dt>
+                <dd class="font-medium tabular-nums" x-text="k.value"></dd>
+              </div>
+            </template>
+          </dl>
+          <div class="border-t px-6 py-3 text-sm text-muted-foreground" style="background:color-mix(in oklch, var(--muted) 45%, transparent)">Good places to start: <a class="underline" :href="courseLink(sample, 'review.html', { sample: 1 })">the review queue</a>, <a class="underline" :href="courseLink(sample, 'insights.html', { sample: 1 })">class insights</a>, <a class="underline" :href="courseLink(sample, 'student.html', { id: 's5', sample: 1 })">one student's mastery</a>.</div>
+        </div>
+
+        <div class="card">
+          <header><h2>Your own course</h2><p>Takes about 20 minutes of your time; the AI work runs in the background.</p></header>
+          <section>
+            <ol class="grid md:grid-cols-3 gap-4 text-sm">
+              <template x-for="(s, i) in firstSteps" :key="s.t">
+                <li class="flex gap-3">
+                  <span class="grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold tone-muted" x-text="i + 1"></span>
+                  <div><div class="font-medium" x-text="s.t"></div><p class="text-muted-foreground" x-text="s.d"></p></div>
+                </li>
+              </template>
+            </ol>
+          </section>
+          <footer class="border-t pt-4 flex items-center gap-3">
+            <span class="text-xs text-muted-foreground">You can delete a course at any time. Nothing is shared with students until you open a class.</span>
+            <a class="btn ml-auto" href="new-course.html"><i data-lucide="plus"></i>Create your first course</a>
+          </footer>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="!isNew">
+    <div class="contents">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${me.name} · ${courses.length} courses this term`"></p>
+        <h1 class="text-2xl font-semibold">My courses</h1>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <a class="btn" href="new-course.html"><i data-lucide="plus"></i>New course</a>
+      </div>
+    </div>
+
+    <!-- Workspace numbers (the current dashboard's counts, summed over courses) -->
+    <section class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <template x-for="n in numbers" :key="n.label">
+        <a class="card p-4 gap-1 hover:border-[var(--hairline-2)]" :href="n.href">
+          <div class="text-xs text-muted-foreground" x-text="n.label"></div>
+          <div class="text-2xl font-display font-semibold tabular-nums" x-text="n.value"></div>
+          <div class="text-xs" :class="n.warn ? 'text-[var(--warn-solid)]' : 'text-muted-foreground'" x-text="n.sub"></div>
+        </a>
+      </template>
+    </section>
+
+    <div class="grid lg:grid-cols-[1fr_20rem] gap-6 items-start">
+      <!-- Course list -->
+      <section class="grid gap-4">
+        <template x-for="c in courses" :key="c.id">
+          <article class="card gap-0 py-0">
+            <div class="flex flex-wrap items-start gap-4 px-6 pt-5">
+              <div class="min-w-0">
+                <p class="text-xs text-muted-foreground" x-text="`${c.code} · ${c.term} · ${subjectLabel(c)}`"></p>
+                <a class="text-lg font-display font-semibold hover:underline" :href="courseLink(c, 'course.html')" x-text="c.name"></a>
+                <p class="text-sm text-muted-foreground mt-0.5" x-text="teamLine(c)"></p>
+              </div>
+              <div class="ml-auto flex gap-2">
+                <a class="btn" data-variant="ghost" data-size="sm" x-show="c.id === 'python'" :href="courseLink(c, 'copy-course.html')">Copy to a new term</a>
+                <a class="btn" data-variant="ghost" data-size="sm" :href="courseLink(c, 'settings.html')">Settings</a>
+                <a class="btn" data-variant="outline" data-size="sm" :href="courseLink(c, next(c).file)" x-text="next(c).cta"></a>
+              </div>
+            </div>
+
+            <!-- Running course: this week at a glance (MOCK.course_week) -->
+            <template x-if="week(c)">
+              <div class="px-6 pt-4 grid gap-2">
+                <div class="flex flex-wrap items-baseline gap-x-2 text-sm">
+                  <span class="font-medium" x-text="`Week ${week(c).week} of 15`"></span>
+                  <span class="text-muted-foreground" x-text="`· ${week(c).due}, due ${week(c).due_date}`"></span>
+                  <a class="ml-auto text-xs hover:underline" :href="courseLink(c, 'classes.html')" x-text="`${week(c).sections} sections`"></a>
+                </div>
+                <div class="flex h-1.5 overflow-hidden rounded-full" style="background:var(--muted)">
+                  <div :style="{ background: 'var(--ok-solid)', width: `${week(c).done / week(c).total * 100}%` }"></div>
+                  <div :style="{ background: 'var(--warn-solid)', width: `${week(c).in_progress / week(c).total * 100}%` }"></div>
+                </div>
+                <div class="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
+                  <span x-text="`${week(c).done} done`"></span><span x-text="`${week(c).in_progress} in progress`"></span><span x-text="`${week(c).not_started} not started`"></span>
+                  <a class="ml-auto hover:underline" :href="courseLink(c, 'insights.html')" x-text="`Most missed: ${week(c).mistake}`"></a>
+                </div>
+              </div>
+            </template>
+
+            <!-- Setup progress (until students can practise) -->
+            <div class="px-6 pt-4" x-show="!week(c)">
+              <div class="flex items-baseline text-sm">
+                <span class="font-medium">Setup</span>
+                <span class="ml-2 text-muted-foreground" x-text="`${doneCount(c)} of ${steps.length} steps done`"></span>
+                <span class="ml-auto text-xs text-muted-foreground" x-show="doneCount(c) === steps.length">Ready for students</span>
+              </div>
+              <ol class="mt-2 grid grid-cols-6 gap-0.5">
+                <template x-for="s in steps" :key="s.key">
+                  <li class="grid gap-1">
+                    <span class="h-1.5 rounded-full" :style="`background:${barColor(c.setup[s.key])}`"></span>
+                    <a class="text-xs truncate hover:underline" :class="c.setup[s.key] === 'todo' ? 'text-muted-foreground' : ''" :href="courseLink(c, s.file)" :title="`${s.label}: ${Mock.label(c.setup[s.key])}`" x-text="s.label"></a>
+                  </li>
+                </template>
+              </ol>
+            </div>
+
+            <!-- Key numbers -->
+            <dl class="mt-4 grid grid-cols-3 md:grid-cols-6 border-t text-sm">
+              <template x-for="k in keyNumbers(c)" :key="k.label">
+                <div class="px-6 py-3">
+                  <dt class="text-xs text-muted-foreground" x-text="k.label"></dt>
+                  <dd class="font-medium tabular-nums" x-text="k.value"></dd>
+                </div>
+              </template>
+            </dl>
+
+            <!-- Attention + running -->
+            <div class="border-t px-6 py-3 grid gap-1.5 text-sm" style="background:color-mix(in oklch, var(--muted) 45%, transparent)">
+              <template x-for="a in attention[c.id]" :key="a.text">
+                <div class="flex items-center gap-2"><span class="pill" :class="a.tone" x-text="a.tag"></span><a class="hover:underline" :href="courseLink(c, a.file)" x-text="a.text"></a></div>
+              </template>
+              <template x-for="j in running(c)" :key="j.id">
+                <div class="flex items-center gap-2">
+                  <span class="pill tone-accent">Running</span>
+                  <a class="hover:underline" href="jobs.html" x-text="`${j.kind} · ${j.detail}`"></a>
+                  <span class="ml-auto text-xs text-muted-foreground tabular-nums" x-text="`${Math.round(j.progress * 100)}%`"></span>
+                </div>
+              </template>
+            </div>
+          </article>
+        </template>
+
+        <a href="new-course.html" class="card border-dashed py-5 px-6 flex-row items-center gap-3 text-sm text-muted-foreground hover:text-foreground" style="box-shadow:none;background:transparent">
+          <i data-lucide="plus" class="size-4"></i>
+          <span>New course: pick a subject and question types, then follow the setup steps.</span>
+        </a>
+      </section>
+
+      <!-- Side column -->
+      <aside class="grid gap-4">
+        <div class="card gap-3">
+          <header><h2>Teach with a colleague</h2><p>Co-instructors share a course's materials, questions and review queue. Your other courses stay private.</p></header>
+          <section class="grid gap-2 text-sm">
+            <template x-for="c in courses" :key="c.id">
+              <div class="flex items-center gap-2">
+                <span class="font-medium" x-text="c.code"></span>
+                <span class="text-muted-foreground truncate" x-text="c.collaborators.length ? `with ${c.collaborators.map((id) => user(id).name).join(', ')}` : 'Only you'"></span>
+                <a class="ml-auto text-xs underline shrink-0" :href="courseLink(c, 'settings.html', { tab: 'collaborators' })" x-text="c.collaborators.length ? 'Manage' : 'Invite'"></a>
+              </div>
+            </template>
+          </section>
+        </div>
+
+        <div class="card gap-3">
+          <header><h2>Recent activity</h2></header>
+          <section>
+            <ol class="grid gap-3 text-sm">
+              <template x-for="a in activity" :key="a.when + a.text">
+                <li class="grid gap-0.5">
+                  <a class="hover:underline" :href="courseLink(courseById(a.course), a.file)"><span class="font-medium" x-text="a.who"></span> <span x-text="a.text"></span></a>
+                  <span class="text-xs text-muted-foreground" x-text="`${courseById(a.course).code} · ${a.when}`"></span>
+                </li>
+              </template>
+            </ol>
+          </section>
+        </div>
+      </aside>
+    </div>
+    </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-b.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const STEPS = [
+        { key: "materials", label: "Materials", file: "materials.html", cta: "Add course material" },
+        { key: "taxonomy", label: "Taxonomy", file: "taxonomy.html", cta: "Define the taxonomy" },
+        { key: "coverage", label: "Coverage", file: "coverage.html", cta: "Fill coverage gaps" },
+        { key: "review", label: "Review", file: "review.html", cta: "Review questions" },
+        { key: "question_set", label: "Question set", file: "question-sets.html", cta: "Freeze a question set" },
+        { key: "classes", label: "Classes", file: "classes.html", cta: "Open a class" },
+      ];
+      const courses = MOCK.courses;
+      const sum = (f) => courses.reduce((a, c) => a + f(c), 0);
+      const u = MOCK.usage;
+      const usedPct = u.spent_usd / u.cap_usd;
+      return {
+        isNew: Mock.param("new") === "1",
+        sample: MOCK.course("python"),
+        sampleHref: Mock.link("course.html", { course: "python", sample: 1 }),
+        // TODO(real): onboarding copy; steps mirror the course setup checklist.
+        firstSteps: [
+          { t: "Add your textbook", d: "Upload the PDF (or structured JSON) you teach from. Questions are generated from it and cite its sections." },
+          { t: "Set the topics", d: "Let the AI draft a taxonomy from the book, import one, or build it by hand. You approve it." },
+          { t: "Review questions, open a class", d: "Approve the generated questions, then share a join code with your students." },
+        ],
+        me: MOCK.me,
+        courses,
+        steps: STEPS,
+        activity: MOCK.activity,
+        numbers: [
+          { label: "Questions", value: sum((c) => c.numbers.questions), sub: `${sum((c) => c.numbers.approved)} approved`, href: Mock.link("questions.html", { course: "python" }) },
+          { label: "Awaiting review", value: sum((c) => c.numbers.awaiting_review), sub: courses.filter((c) => c.numbers.awaiting_review).map((c) => `${c.numbers.awaiting_review} in ${c.code}`).join(" · "), href: Mock.link("review.html", { course: "python" }) },
+          { label: "Students", value: sum((c) => c.numbers.students), sub: `in ${MOCK.classes.length} class sections`, href: Mock.link("students.html", { course: "python" }) },
+          { label: "Jobs running", value: MOCK.jobs.filter((j) => j.status === "running").length, sub: `${MOCK.jobs.filter((j) => j.status === "failed").length} failed`, href: "jobs.html", warn: MOCK.jobs.some((j) => j.status === "failed") },
+          { label: `AI spend · ${u.month.split(" ")[0]}`, value: Mock.usd(u.spent_usd), sub: `${Math.round(usedPct * 100)}% of ${Mock.usd(u.cap_usd)} cap`, href: "usage.html", warn: usedPct > 0.8 },
+        ],
+        attention: {
+          python: [
+            { tag: "Review", tone: "tone-warn", text: `${MOCK.courses[0].numbers.awaiting_review} questions awaiting review`, file: "review.html" },
+            { tag: "Job failed", tone: "tone-critical", text: "Judge re-run stopped after 17 of 42 (rate limit)", file: "jobs.html" },
+            { tag: "Alignment", tone: "tone-accent", text: "Difficulty judge agrees with you only 67% of the time", file: "alignment.html" },
+          ],
+          biology: [
+            { tag: "Review", tone: "tone-warn", text: `${MOCK.course("biology").numbers.awaiting_review} questions awaiting review`, file: "review.html" },
+            { tag: "Report", tone: "tone-warn", text: "1 student report: a Punnett square question", file: "reports.html" },
+          ],
+          statistics: [
+            { tag: "Taxonomy", tone: "tone-warn", text: "AI-drafted taxonomy (8 topics, 29 subtopics) is waiting for your approval", file: "taxonomy-draft.html" },
+          ],
+        },
+        user: (id) => MOCK.users.find((x) => x.id === id),
+        courseById: (id) => MOCK.course(id),
+        subjectLabel: (c) => MOCK.subject(c.subject).label,
+        courseLink: (c, file, extra) => Mock.link(file, { course: c.id, ...(extra || {}) }),
+        teamLine(c) {
+          const names = c.collaborators.map((id) => this.user(id).name);
+          return names.length ? `You (owner) and ${names.join(", ")}` : "You (owner)";
+        },
+        doneCount: (c) => STEPS.filter((s) => c.setup[s.key] === "done").length,
+        next(c) {
+          if (this.week(c)) return { file: "course.html", cta: "Open this week" };
+          const s = STEPS.find((x) => c.setup[x.key] !== "done");
+          return s ? { file: s.file, cta: `Continue: ${s.cta}` } : { file: "course.html", cta: "Open course" };
+        },
+        barColor: (state) => ({ done: "var(--ok-solid)", in_progress: "var(--warn-solid)" })[state] || "var(--muted)",
+        keyNumbers(c) {
+          const n = c.numbers, k = MOCK.course_counts[c.id] || { books: 1, taxonomy_versions: 1 };
+          return [
+            { label: "Books", value: k.books },
+            { label: "Taxonomies", value: k.taxonomy_versions },
+            { label: "Questions", value: n.questions },
+            { label: "Coverage", value: `${n.coverage_pct}%` },
+            { label: "Students", value: n.students },
+            { label: "Avg. mastery", value: Mock.pct(n.avg_mastery) },
+          ];
+        },
+        running: (c) => MOCK.jobs.filter((j) => j.course === c.id && j.status === "running"),
+        week: (c) => MOCK.course_week?.[c.id] || null,
+      };
+    }
+  </script>
+</body>
+</html>

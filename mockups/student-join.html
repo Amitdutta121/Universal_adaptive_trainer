@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join a class · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- F1s · Join a class with a code (or a join link: ?code=PY7-K4Q prefills and checks it).
+     Step 1: code -> the class it belongs to. Step 2: name + email -> student-practice.html.
+     PY7-M2X (Section 002) is roster-restricted: only emails on its roster get in. -->
+<body data-scope="student" data-title="Join a class">
+  <main x-data="page()" x-cloak class="mx-auto grid w-full max-w-md gap-4 px-4 py-8">
+    <form class="card" x-show="!cls" @submit.prevent="checkCode()" novalidate>
+      <header>
+        <h2>Join a class</h2>
+        <p>Enter the code your instructor gave you. It looks like <span class="font-mono">PY7-K4Q</span>.</p>
+      </header>
+      <section>
+        <div role="group" class="field" :data-invalid="codeError ? '' : null">
+          <label for="code">Join code</label>
+          <input id="code" type="text" x-model="code" @input="code = code.toUpperCase()" class="font-mono tracking-widest uppercase" autocomplete="off" autocapitalize="characters" placeholder="ABC-123" :aria-invalid="!!codeError">
+          <p role="alert" x-show="codeError" x-text="codeError"></p>
+        </div>
+      </section>
+      <footer>
+        <button type="submit" class="btn w-full" data-size="lg" :disabled="busy" x-text="busy ? 'Checking…' : 'Find class'"></button>
+      </footer>
+    </form>
+
+    <template x-if="cls">
+      <form class="card" @submit.prevent="join()" novalidate>
+        <header>
+          <p class="font-mono text-xs text-muted-foreground" x-text="cls.join_code"></p>
+          <h2 x-text="`${course.name} (${course.code})`"></h2>
+          <p x-text="`${cls.name} · ${MOCK.student_extra.instructor} · ${set.questions} questions`"></p>
+        </header>
+        <section class="grid gap-4">
+          <div role="group" class="field" :data-invalid="errors.name ? '' : null">
+            <label for="name">Your name</label>
+            <input id="name" type="text" x-model="name" autocomplete="name" :aria-invalid="!!errors.name">
+            <p x-show="!errors.name">Your instructor sees this name next to your progress.</p>
+            <p role="alert" x-show="errors.name" x-text="errors.name"></p>
+          </div>
+          <div role="group" class="field" :data-invalid="errors.email ? '' : null">
+            <label for="email">School email</label>
+            <input id="email" type="email" x-model="email" autocomplete="email" inputmode="email" :aria-invalid="!!errors.email">
+            <p x-show="!errors.email">Use the same email next time and you'll pick up where you left off.</p>
+            <p role="alert" x-show="errors.email" x-text="errors.email"></p>
+          </div>
+        </section>
+        <footer class="grid gap-2">
+          <button type="submit" class="btn w-full" data-size="lg" :disabled="busy" x-text="busy ? 'Joining…' : 'Start practising'"></button>
+          <button type="button" class="btn w-full" data-variant="ghost" @click="cls = null; errors = {}">Use a different code</button>
+        </footer>
+      </form>
+    </template>
+
+    <div class="card gap-3 py-5">
+      <header><h2 class="text-base">How this practice adapts to you</h2></header>
+      <section>
+        <ul class="grid gap-3 text-sm leading-6">
+          <li class="flex items-start gap-2.5"><span class="mt-0.5 shrink-0" style="color:var(--primary)"><i data-lucide="target" class="size-4"></i></span>Questions favour the subtopics you're weakest in.</li>
+          <li class="flex items-start gap-2.5"><span class="mt-0.5 shrink-0" style="color:var(--primary)"><i data-lucide="trending-up" class="size-4"></i></span>Difficulty follows your measured mastery, topic by topic.</li>
+          <li class="flex items-start gap-2.5"><span class="mt-0.5 shrink-0" style="color:var(--primary)"><i data-lucide="rotate-ccw" class="size-4"></i></span>A question you've seen comes back only after others have had a turn.</li>
+        </ul>
+      </section>
+    </div>
+    <p class="text-center text-xs text-muted-foreground">Mockup: codes <span class="font-mono">PY7-K4Q</span> and <span class="font-mono">PY7-M2X</span> (roster only) work. Already joined? <a class="underline" href="student-home.html">My courses</a></p>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-f.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const me = MOCK.student_session.student;
+      return {
+        code: (Mock.param("code") || "").toUpperCase(), codeError: "", cls: null, busy: false,
+        name: "", email: "", errors: {},
+        course: MOCK.course("python"),
+        get set() { return MOCK.question_sets.find((s) => s.id === this.cls.question_set); },
+        init() { if (this.code) this.checkCode(); },
+        checkCode() {
+          const c = this.code.trim().replace(/\s+/g, "");
+          if (!c) { this.codeError = "Enter the join code."; return; }
+          this.busy = true;
+          setTimeout(() => {
+            this.busy = false;
+            this.cls = MOCK.classes.find((k) => k.join_code === c) || null;
+            this.codeError = this.cls ? "" : `No class uses the code ${c}. Check it with your instructor; codes look like PY7-K4Q.`;
+            if (this.cls && !this.name) { this.name = me.name; this.email = me.email; } // TODO(real): prefilled from this browser's stored identity
+          }, 400);
+        },
+        join() {
+          const e = {};
+          if (!this.name.trim()) e.name = "Enter your name.";
+          const em = this.email.trim().toLowerCase();
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) e.email = "Enter a valid email address.";
+          else if (this.cls.restrict_roster && !MOCK.students.some((s) => s.class_id === this.cls.id && s.email === em))
+            e.email = `${this.cls.name} only admits students on its roster, and ${em} isn't on it. Use the email your school gave you, or ask your instructor to add you.`;
+          this.errors = e;
+          if (Object.keys(e).length) return;
+          this.busy = true;
+          setTimeout(() => { location.href = "student-practice.html"; }, 500);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

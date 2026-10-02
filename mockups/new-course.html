@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New course · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- B2 · New course: name, code, term, checking tools (assets/data-tools.js; the subject is only a label that preselects tools), coverage target. Creating lands on the course checklist. -->
+<body data-scope="workspace" data-nav="courses" data-title="New course">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div>
+      <a href="courses.html" class="text-sm text-muted-foreground inline-flex items-center gap-1 hover:underline"><i data-lucide="chevron-left" class="size-3.5"></i>My courses</a>
+      <h1 class="text-2xl font-semibold mt-1">New course</h1>
+      <p class="text-sm text-muted-foreground">You can change all of this later in the course settings.</p>
+    </div>
+
+    <div class="grid lg:grid-cols-[1fr_20rem] gap-6 items-start">
+      <form class="card" @submit.prevent="create()">
+        <section class="grid gap-6">
+          <fieldset class="fieldset">
+            <legend>Course</legend>
+            <div class="grid md:grid-cols-[1fr_10rem_10rem] gap-4">
+              <div role="group" class="field" :data-invalid="tried && !form.name.trim() ? '' : null">
+                <label for="nc-name">Name</label>
+                <input class="input" id="nc-name" x-model="form.name" placeholder="e.g. Intro Statistics" :aria-invalid="tried && !form.name.trim()">
+                <p role="alert" x-show="tried && !form.name.trim()">Give the course a name.</p>
+              </div>
+              <div role="group" class="field" :data-invalid="tried && !form.code.trim() ? '' : null">
+                <label for="nc-code">Code</label>
+                <input class="input" id="nc-code" x-model="form.code" placeholder="STAT 152" :aria-invalid="tried && !form.code.trim()">
+                <p role="alert" x-show="tried && !form.code.trim()">Add a course code.</p>
+              </div>
+              <div role="group" class="field">
+                <label for="nc-term">Term</label>
+                <select class="select w-full" id="nc-term" x-model="form.term">
+                  <template x-for="t in terms" :key="t"><option :value="t" x-text="t"></option></template>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend>Checking tools</legend>
+            <p>The ways this course can check answers. The generator may write any question one of these tools can check.</p>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              <label for="nc-subject" class="text-muted-foreground">Subject</label>
+              <select class="select w-56" id="nc-subject" x-model="form.subject" @change="subjectChanged()">
+                <template x-for="s in profiles" :key="s.id"><option :value="s.id" x-text="s.label" :selected="s.id === form.subject"></option></template>
+              </select>
+              <span class="text-xs text-muted-foreground">A label. Picking one preselects the usual tools for it.</span>
+            </div>
+            <div class="grid gap-1.5">
+              <template x-for="t in catalog" :key="t.id">
+                <label class="flex items-start gap-3 rounded-lg border px-3 py-2" :class="t.selftest.ok ? 'cursor-pointer' : 'opacity-70'" :style="form.tools.includes(t.id) ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                  <input type="checkbox" class="input mt-0.5" :value="t.id" x-model="form.tools" :disabled="!t.selftest.ok" :aria-label="t.name">
+                  <span class="grid gap-0.5 min-w-0 flex-1">
+                    <span class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-medium" x-text="t.name"></span>
+                      <span class="font-mono text-xs text-muted-foreground" x-text="t.version"></span>
+                      <span class="pill" :class="tone(t.level)" x-text="t.level"></span>
+                      <span class="text-xs text-muted-foreground" x-show="suggested.includes(t.id)">Suggested</span>
+                    </span>
+                    <span class="text-xs text-muted-foreground" x-text="t.checks"></span>
+                    <span class="text-xs" x-text="`Formats: ${t.formats.map((f) => FORMAT_LABEL[f]).join(', ')}`"></span>
+                    <span class="text-xs" style="color:var(--critical-solid)" x-show="!t.selftest.ok" x-text="`Unavailable: self-test failed ${t.selftest.at}: ${t.selftest.error}`"></span>
+                  </span>
+                </label>
+              </template>
+            </div>
+            <p x-text="`${form.tools.length} tools · the generator can ask ${formats.length} question formats. You can add tools later. Tools can be paused but not removed.`"></p>
+            <p role="alert" class="text-sm" style="color:var(--destructive)" x-show="tried && !form.tools.length">Pick at least one checking tool.</p>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend>Coverage target</legend>
+            <div class="flex flex-wrap items-center gap-3">
+              <input class="input w-20" type="number" min="1" max="5" x-model.number="form.target" aria-label="Approved questions per cell">
+              <span class="text-sm">approved questions per subtopic, at each difficulty (easy, medium, hard)</span>
+            </div>
+            <p x-text="`A taxonomy of 30 subtopics would need ${30 * 3 * (form.target || 0)} approved questions. Coverage shows the gaps and generates for them.`"></p>
+          </fieldset>
+        </section>
+        <footer class="flex items-center gap-2 border-t pt-4">
+          <span class="text-xs text-muted-foreground">You'll be the owner. Invite co-instructors from the course settings.</span>
+          <a class="btn ml-auto" data-variant="ghost" href="courses.html">Cancel</a>
+          <button class="btn" type="submit" :disabled="creating">
+            <span x-show="creating" class="inline-flex"><i data-lucide="loader-circle" class="animate-spin"></i></span>
+            <span x-text="creating ? 'Creating…' : 'Create course'"></span>
+          </button>
+        </footer>
+      </form>
+
+      <aside class="card gap-3">
+        <header><h2>After you create it</h2><p>The course overview walks you through these steps, in order.</p></header>
+        <section>
+          <ol class="grid gap-2.5 text-sm">
+            <template x-for="(s, i) in next" :key="s">
+              <li class="flex gap-3"><span class="grid size-5 shrink-0 place-items-center rounded-full text-xs tone-muted" x-text="i + 1"></span><span x-text="s"></span></li>
+            </template>
+          </ol>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-b.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const TRUST = { Computed: "proven", Quoted: "supported", "Rubric-graded": "rubric", "AI-reviewed only": "judged" };
+      const catalog = Object.values(MOCK.TOOL_CATALOG);
+      // Suggested tools for a subject, minus any that failed their self-test.
+      const suggest = (id) => (MOCK.TOOL_SUGGESTIONS[id] || MOCK.TOOL_SUGGESTIONS.general).filter((t) => MOCK.TOOL_CATALOG[t].selftest.ok);
+      return {
+        catalog, FORMAT_LABEL: MOCK.FORMAT_LABEL,
+        profiles: MOCK.profiles,
+        terms: ["Fall 2026", "Spring 2027", "Summer 2027"],
+        next: [
+          "Upload the textbook (PDF or JSON). It's split into sections and embedded in the background.",
+          "Define the taxonomy: draft it with AI from the book, import it, or build it by hand.",
+          "Generate questions for the coverage gaps.",
+          "Review: approve, edit or reject.",
+          "Freeze a question set.",
+          "Open a class and share the join code.",
+        ],
+        form: { name: "", code: "", term: "Fall 2026", subject: "statistics", tools: suggest("statistics"), target: 2 },
+        tried: false,
+        creating: false,
+        get suggested() { return MOCK.TOOL_SUGGESTIONS[this.form.subject] || MOCK.TOOL_SUGGESTIONS.general; },
+        // Every question format the picked tools can check.
+        get formats() { return [...new Set(this.form.tools.flatMap((id) => MOCK.TOOL_CATALOG[id].formats))]; },
+        tone(level) { return (MOCK.LEVELS[TRUST[level]] || MOCK.LEVELS.judged).tone; },
+        subjectChanged() { this.form.tools = suggest(this.form.subject); },
+        create() {
+          this.tried = true;
+          if (!this.form.name.trim() || !this.form.code.trim() || !this.form.tools.length) return;
+          this.creating = true;
+          Mock.toast(`Created ${this.form.code.trim()} · ${this.form.name.trim()} · ${this.form.tools.length} checking tools`);
+          // Mock: the half-set-up statistics course stands in for the course just created.
+          setTimeout(() => { location.href = "course.html?course=statistics"; }, 900);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

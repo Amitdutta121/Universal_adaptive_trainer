@@ -436,7 +436,7 @@ export function StudentExperience() {
               </Button>
             ) : null}
             <a
-              href="/"
+              href="/dashboard"
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-muted-foreground text-sm hover:text-foreground"
             >
               <Home className="size-3.5" aria-hidden="true" />

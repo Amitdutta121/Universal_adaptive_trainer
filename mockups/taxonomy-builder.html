@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Taxonomy builder · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .outline-row { display: flex; align-items: center; gap: 0.35rem; width: 100%; text-align: left; border-radius: 0.45rem; padding: 0.3rem 0.5rem; font-size: 0.875rem; }
+    .outline-row:hover { background: var(--muted); }
+    .outline-row[aria-current="true"] { background: var(--accent); color: var(--accent-foreground); font-weight: 500; }
+    .ghost-input { border-color: transparent; background: transparent; box-shadow: none; }
+    .ghost-input:hover { border-color: var(--input); }
+  </style>
+</head>
+<!-- C6 · Taxonomy builder: outline on the left, selected topic's fields and subtopic table on the right
+     (same structure as frontend/src/app/curriculum/builder/taxonomy-builder.tsx). -->
+<body data-scope="course" data-nav="taxonomy" data-title="Taxonomy builder">
+  <main x-data="page()" x-cloak class="grid gap-4" @keydown.ctrl.z.window="undo()">
+    <a class="text-sm text-muted-foreground hover:underline inline-flex items-center gap-1 w-fit" :href="Mock.link('taxonomy.html')"><i data-lucide="arrow-left" class="size-3"></i>All versions</a>
+
+    <div>
+      <p class="text-xs text-muted-foreground">
+        <template x-if="origin"><span>Editing <span class="font-medium text-foreground" x-text="`“${origin.label}”`"></span>. Save changes updates it; Save as new version leaves it as it is.</span></template>
+        <template x-if="!origin"><span>New taxonomy</span></template>
+      </p>
+      <input class="input ghost-input font-display font-semibold text-xl h-auto px-1.5 py-0.5 mt-1 max-w-xl" x-model="label" @input="dirty = true" placeholder="Taxonomy name, e.g. Introductory Python, Fall 2026" aria-label="Taxonomy name">
+    </div>
+
+    <template x-if="origin && origin.fromDraft">
+      <div class="alert">
+        <i data-lucide="wand-sparkles"></i>
+        <h2>AI-drafted, not approved yet</h2>
+        <section>This taxonomy was drafted with AI. Edits here are kept, but nothing is used until you approve it on the review page. <a class="underline" :href="Mock.link('taxonomy-draft.html')">Go to review</a></section>
+      </div>
+    </template>
+
+    <template x-if="problem">
+      <div class="alert" data-variant="destructive">
+        <i data-lucide="triangle-alert"></i>
+        <h2>Not ready to save</h2>
+        <section x-text="problem"></section>
+      </div>
+    </template>
+
+    <div class="grid gap-4 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] items-start">
+      <!-- Outline -->
+      <section class="card">
+        <header class="flex items-center gap-1">
+          <h2>Outline</h2>
+          <div class="ml-auto flex gap-1">
+            <button type="button" class="btn" data-variant="outline" data-size="sm" :disabled="!removed.length" @click="undo()" :title="removed.length ? `Put back: ${removed[removed.length - 1].what} (Ctrl+Z)` : 'Nothing to undo yet'"><i data-lucide="undo-2"></i>Undo<span class="pill tone-muted" x-show="removed.length" x-text="removed.length"></span></button>
+            <button type="button" class="btn" data-variant="outline" data-size="sm" @click="addTopic()"><i data-lucide="plus"></i>Add topic</button>
+          </div>
+        </header>
+        <section class="grid gap-2">
+          <input class="input" type="search" placeholder="Search topics and subtopics" x-model="query" aria-label="Search the outline">
+          <ol class="grid gap-0.5 max-h-[62vh] overflow-y-auto pr-1" aria-label="Taxonomy outline">
+            <template x-for="(t, ti) in topics" :key="t.id">
+              <li x-show="matchesTopic(t)">
+                <button type="button" class="outline-row" :aria-current="selectedId === t.id" @click="selectedId = t.id">
+                  <span class="text-xs text-muted-foreground tabular-nums w-5" x-text="ti + 1"></span>
+                  <span class="truncate" :class="!t.name && 'italic text-muted-foreground'" x-text="t.name || 'Untitled topic'"></span>
+                  <span class="pill tone-critical ml-auto" x-show="!t.subtopics.length" title="Needs at least one subtopic">!</span>
+                  <span class="ml-auto text-xs text-muted-foreground tabular-nums" x-show="t.subtopics.length" x-text="t.subtopics.length"></span>
+                </button>
+                <ul class="pl-7" x-show="selectedId === t.id || query">
+                  <template x-for="s in t.subtopics" :key="s.id">
+                    <li x-show="!query || matches(s.name) || matches(t.name)" class="text-sm text-muted-foreground py-0.5 truncate" x-text="s.name || 'Untitled subtopic'"></li>
+                  </template>
+                </ul>
+              </li>
+            </template>
+          </ol>
+          <p class="text-sm text-muted-foreground" x-show="!topics.length">No topics yet. Use “Add topic” to start.</p>
+        </section>
+      </section>
+
+      <!-- Detail -->
+      <template x-if="active">
+        <section class="card">
+          <header class="flex items-center gap-1">
+            <h2 x-text="`Topic ${activeIndex + 1} of ${topics.length}`"></h2>
+            <div class="ml-auto flex gap-0.5">
+              <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Move topic up" title="Move topic up" :disabled="activeIndex === 0" @click="moveTopic(-1)"><i data-lucide="arrow-up"></i></button>
+              <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Move topic down" title="Move topic down" :disabled="activeIndex === topics.length - 1" @click="moveTopic(1)"><i data-lucide="arrow-down"></i></button>
+              <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Remove topic" title="Remove topic" @click="removeTopic()"><i data-lucide="trash-2"></i></button>
+            </div>
+          </header>
+          <section class="grid gap-5">
+            <nav class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span x-text="label || 'Untitled'"></span><i data-lucide="chevron-right" class="size-3"></i>
+              <span class="font-medium text-foreground" x-text="active.name || 'Untitled topic'"></span>
+            </nav>
+            <div role="group" class="field">
+              <label for="topic-name">Topic name</label>
+              <input id="topic-name" type="text" x-model="active.name" @input="dirty = true" placeholder="e.g. Loops" maxlength="120">
+            </div>
+            <div role="group" class="field">
+              <label for="topic-desc">Description <span class="font-normal text-muted-foreground">(optional)</span></label>
+              <textarea id="topic-desc" class="textarea" rows="2" x-model="active.description" @input="dirty = true" maxlength="600"></textarea>
+            </div>
+
+            <div class="grid gap-2">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium">Subtopics in this topic</span>
+                <span class="font-mono text-xs text-muted-foreground" x-text="active.subtopics.length"></span>
+              </div>
+              <div class="rounded-lg border overflow-hidden">
+                <p class="p-4 text-center text-sm text-muted-foreground" x-show="!active.subtopics.length">This topic has no subtopics yet. A topic needs at least one.</p>
+                <table class="table" x-show="active.subtopics.length">
+                  <thead><tr><th class="w-[36%]">Name</th><th>Description</th><th class="w-28"></th></tr></thead>
+                  <tbody>
+                    <template x-for="(s, si) in active.subtopics" :key="s.id">
+                      <tr>
+                        <td class="align-top"><input class="input" type="text" x-model="s.name" @input="dirty = true" placeholder="Subtopic name" :aria-label="`Subtopic ${si + 1} name`"></td>
+                        <td class="align-top"><textarea class="textarea min-h-9" rows="1" x-model="s.description" @input="dirty = true" placeholder="Optional" :aria-label="`Subtopic ${si + 1} description`"></textarea></td>
+                        <td class="align-top">
+                          <div class="flex justify-end gap-0.5">
+                            <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :aria-label="`Move subtopic ${si + 1} up`" :disabled="si === 0" @click="moveSub(si, -1)"><i data-lucide="arrow-up"></i></button>
+                            <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :aria-label="`Move subtopic ${si + 1} down`" :disabled="si === active.subtopics.length - 1" @click="moveSub(si, 1)"><i data-lucide="arrow-down"></i></button>
+                            <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :aria-label="`Remove subtopic ${si + 1}`" @click="removeSub(si)"><i data-lucide="x"></i></button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <button type="button" class="btn justify-self-start" data-variant="outline" data-size="sm" @click="addSub()"><i data-lucide="plus"></i>Add subtopic</button>
+            </div>
+          </section>
+        </section>
+      </template>
+      <template x-if="!active">
+        <section class="card"><section class="py-12 text-center text-sm text-muted-foreground">
+          <p x-text="topics.length ? 'No topic selected. Pick one from the outline.' : 'This taxonomy is empty. Add a topic to begin.'"></p>
+          <button type="button" class="btn mt-3" data-size="sm" x-show="!topics.length" @click="addTopic()"><i data-lucide="plus"></i>Add topic</button>
+        </section></section>
+      </template>
+    </div>
+
+    <!-- Action bar: on the left so a toast never covers Save -->
+    <div class="card flex-row flex-wrap items-center gap-2 px-4 py-3 sticky bottom-3">
+      <template x-if="origin && !origin.fromDraft">
+        <div class="flex gap-2">
+          <button type="button" class="btn" :disabled="!!problem || !dirty" @click="saveChanges()">Save changes</button>
+          <button type="button" class="btn" data-variant="outline" :disabled="!!problem" @click="$refs.confirm.showModal()">Save as new version</button>
+        </div>
+      </template>
+      <template x-if="origin && origin.fromDraft">
+        <button type="button" class="btn" :disabled="!!problem || !dirty" @click="saveChanges()">Save draft edits</button>
+      </template>
+      <template x-if="!origin">
+        <button type="button" class="btn" :disabled="!!problem" @click="$refs.confirm.showModal()">Save taxonomy</button>
+      </template>
+      <button type="button" class="btn" data-variant="ghost" :disabled="!!problem" @click="$refs.preview.showModal()">Preview document</button>
+      <p class="ml-2 text-sm text-muted-foreground">
+        <span class="font-medium text-foreground" x-text="`${topics.length} topic${topics.length === 1 ? '' : 's'}`"></span> ·
+        <span class="font-medium text-foreground" x-text="`${subCount} subtopic${subCount === 1 ? '' : 's'}`"></span>
+        <span x-show="dirty"> · unsaved changes are kept in this browser</span>
+      </p>
+    </div>
+
+    <!-- Confirm: a new version becomes the active one -->
+    <dialog x-ref="confirm" class="dialog" aria-labelledby="confirm-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="confirm-title">Make this the active taxonomy?</h2>
+          <p>Saving creates a new version and makes it the active taxonomy, the one that question generation and coverage use.</p>
+        </header>
+        <section class="grid gap-2 text-sm" x-show="current">
+          <p><span class="font-medium" x-text="current?.label"></span> <span x-text="`(${current?.topics} topics, ${current?.subtopics} subtopics) is active now and will be replaced.`"></span></p>
+          <p class="text-muted-foreground">Its questions and your students' progress stay with it. You can make it active again later from the versions list.</p>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.confirm.close()">Cancel</button>
+          <button type="button" class="btn" @click="saveNew()">Save and make active</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <!-- Preview JSON -->
+    <dialog x-ref="preview" class="dialog" aria-labelledby="preview-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-2xl">
+        <header>
+          <h2 id="preview-title">Taxonomy document (JSON)</h2>
+          <p>This is exactly what will be saved. It is checked again when you save.</p>
+        </header>
+        <section><pre class="max-h-96 overflow-auto rounded-lg border p-3 font-mono text-xs" style="background:var(--muted)" x-text="json"></pre></section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="navigator.clipboard?.writeText(json); Mock.toast('Copied JSON')">Copy JSON</button>
+          <button type="button" class="btn" @click="$refs.preview.close()">Close</button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const vid = Mock.param("version") || (c.taxonomy_versions.find((v) => v.active) || c.taxonomy_versions[0] || { id: "new" }).id;
+      const version = c.taxonomy_versions.find((v) => v.id === vid) || null;
+      let n = 1;
+      const clone = (topics) => topics.map((t) => ({
+        id: n++, name: t.name, description: t.description || "",
+        subtopics: t.subtopics.filter((s) => s.draft_state !== "discarded").map((s) => ({ id: n++, name: s.name, description: s.description || "" })),
+      }));
+      let source = [];
+      if (version && version.status === "under_review") source = c.taxonomy_draft || [];
+      else if (version && c.taxonomy.length) {
+        // TODO(real): older versions are approximated by trimming the current tree.
+        source = c.taxonomy.slice(0, version.topics).map((t, i) => ({
+          ...t, subtopics: t.subtopics.slice(0, version.id === "v1" && i < 5 ? 3 : t.subtopics.length),
+        }));
+      }
+      const topics = clone(source);
+      return {
+        course: c,
+        origin: version ? { label: version.label, fromDraft: version.status === "under_review" } : null,
+        current: c.taxonomy_versions.find((v) => v.active) || null,
+        label: version ? version.label : "",
+        topics, selectedId: topics[0]?.id ?? null,
+        query: "", dirty: false, removed: [],
+        get active() { return this.topics.find((t) => t.id === this.selectedId) || null; },
+        get activeIndex() { return this.topics.findIndex((t) => t.id === this.selectedId); },
+        get subCount() { return this.topics.reduce((a, t) => a + t.subtopics.length, 0); },
+        get problem() {
+          if (!this.label.trim()) return "Give the taxonomy a name.";
+          if (!this.topics.length) return "Add at least one topic.";
+          const i = this.topics.findIndex((t) => !t.name.trim());
+          if (i >= 0) return `Topic ${i + 1} needs a name.`;
+          const e = this.topics.find((t) => !t.subtopics.length);
+          if (e) return `“${e.name}” needs at least one subtopic.`;
+          const u = this.topics.find((t) => t.subtopics.some((s) => !s.name.trim()));
+          if (u) return `A subtopic in “${u.name}” has no name.`;
+          return null;
+        },
+        get json() {
+          return JSON.stringify({ schema_version: "1", label: this.label, topics: this.topics.map((t) => ({
+            name: t.name, description: t.description || undefined,
+            subtopics: t.subtopics.map((s) => ({ name: s.name, description: s.description || undefined })),
+          })) }, null, 2);
+        },
+        matches(s) { return s.toLowerCase().includes(this.query.trim().toLowerCase()); },
+        matchesTopic(t) { return !this.query.trim() || this.matches(t.name) || t.subtopics.some((s) => this.matches(s.name)); },
+        addTopic() {
+          const t = { id: n++, name: "", description: "", subtopics: [{ id: n++, name: "", description: "" }] };
+          const at = this.activeIndex >= 0 ? this.activeIndex + 1 : this.topics.length;
+          this.topics.splice(at, 0, t);
+          this.selectedId = t.id; this.dirty = true;
+          this.$nextTick(() => document.getElementById("topic-name")?.focus());
+        },
+        moveTopic(d) {
+          const i = this.activeIndex, j = i + d;
+          [this.topics[i], this.topics[j]] = [this.topics[j], this.topics[i]];
+          this.dirty = true;
+        },
+        removeTopic() {
+          const i = this.activeIndex, t = this.topics[i];
+          this.removed.push({ what: `topic “${t.name || "Untitled topic"}”`, undo: () => { this.topics.splice(i, 0, t); this.selectedId = t.id; } });
+          this.topics.splice(i, 1);
+          this.selectedId = (this.topics[i] || this.topics[i - 1] || {}).id ?? null;
+          this.dirty = true;
+          Mock.toast(`Removed topic “${t.name || "Untitled topic"}” and its ${t.subtopics.length} subtopics. Undo with Ctrl+Z.`);
+        },
+        addSub() { this.active.subtopics.push({ id: n++, name: "", description: "" }); this.dirty = true; },
+        moveSub(i, d) {
+          const s = this.active.subtopics;
+          [s[i], s[i + d]] = [s[i + d], s[i]];
+          this.dirty = true;
+        },
+        removeSub(i) {
+          const t = this.active, s = t.subtopics[i];
+          this.removed.push({ what: `subtopic “${s.name || "Untitled subtopic"}”`, undo: () => { t.subtopics.splice(i, 0, s); this.selectedId = t.id; } });
+          t.subtopics.splice(i, 1);
+          this.dirty = true;
+          Mock.toast(`Removed subtopic “${s.name || "Untitled subtopic"}”. Undo with Ctrl+Z.`);
+        },
+        undo() {
+          const r = this.removed.pop();
+          if (!r) return;
+          r.undo(); Mock.toast(`Put back ${r.what}`);
+        },
+        saveChanges() {
+          this.dirty = false; this.removed = [];
+          Mock.toast(this.origin.fromDraft ? "Draft edits saved. Approve it on the review page." : `Saved changes to “${this.label}”. Removed items are kept as deleted; their questions keep their taxonomy.`);
+        },
+        saveNew() {
+          this.$refs.confirm.close();
+          const next = `v${c.taxonomy_versions.length + 1}`;
+          this.dirty = false; this.removed = [];
+          this.origin = { label: this.label, fromDraft: false };
+          Mock.toast(`Saved as ${next}. It is now the active taxonomy.`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

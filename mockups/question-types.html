@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Question types · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjs@13.2.0/lib/browser/math.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .q-code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; line-height: 1.55; white-space: pre; overflow-x: auto;
+      background: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .q-opt { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .q-opt:has(input:checked) { border-color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, transparent); }
+    .q-opt.is-key { border-color: var(--ok-solid); }
+    .q-letter { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted-foreground); padding-top: 2px; }
+    .q-row { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px 6px 12px; background: var(--card); }
+  </style>
+</head>
+<!-- Design reference: what questions look like in six subjects, one card per answer type, answerable.
+     "Show answer key" reveals the key and how it was verified (the verifier ladder). -->
+<body data-scope="public" data-title="Question types">
+  <main x-data="page()" x-cloak class="grid gap-6 max-w-6xl mx-auto w-full">
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="max-w-3xl">
+        <p class="text-sm text-muted-foreground">Design reference · 6 subjects × 6 questions</p>
+        <h1 class="text-2xl font-semibold">What questions look like in each subject</h1>
+        <p class="text-sm text-muted-foreground mt-1">Two easy, two medium and two hard per subject, as a student sees them. Answer any of them. Turn on the answer key to see how each key was proven correct before the question reached review.</p>
+      </div>
+      <label class="ml-auto flex items-center gap-2 text-sm">
+        <input type="checkbox" role="switch" class="input" x-model="showKey"> Show answer key and verification
+      </label>
+    </div>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex flex-wrap gap-1 rounded-lg p-1" style="background:var(--muted)">
+        <template x-for="d in [{ id: 'all', name: 'All subjects' }, ...domains]" :key="d.id">
+          <button type="button" class="btn" data-size="sm" :data-variant="domain === d.id ? 'outline' : 'ghost'" @click="domain = d.id" x-text="d.name"></button>
+        </template>
+      </div>
+      <div class="flex gap-1 rounded-lg p-1" style="background:var(--muted)">
+        <template x-for="f in ['all', 'easy', 'medium', 'hard']" :key="f">
+          <button type="button" class="btn" data-size="sm" :data-variant="diff === f ? 'outline' : 'ghost'" @click="diff = f" x-text="f === 'all' ? 'Any difficulty' : f[0].toUpperCase() + f.slice(1)"></button>
+        </template>
+      </div>
+      <span class="text-sm text-muted-foreground ml-auto" x-text="`${answeredRight} of ${answered} answered correctly`"></span>
+    </div>
+
+    <!-- Verifier legend -->
+    <div class="card py-3" x-show="showKey">
+      <section class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+        <template x-for="(v, k) in QT.verifiers" :key="k">
+          <span class="flex items-center gap-2"><span class="pill" :class="v.tone" x-text="v.label"></span><span class="text-muted-foreground text-xs" x-text="v.detail"></span></span>
+        </template>
+      </section>
+    </div>
+
+    <template x-for="d in shownDomains" :key="d.id">
+      <section class="grid gap-3">
+        <div class="flex items-baseline gap-2">
+          <h2 class="text-lg font-semibold" x-text="d.name"></h2>
+          <span class="text-sm text-muted-foreground" x-text="d.book"></span>
+          <span class="text-xs text-muted-foreground ml-auto" x-text="typesOf(d)"></span>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <template x-for="q in d.questions.filter((q) => diff === 'all' || q.diff === diff)" :key="q.id">
+            <article class="card gap-0 py-0" :id="q.id">
+              <header class="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2">
+                <span class="pill" :class="{ easy: 'tone-ok', medium: 'tone-warn', hard: 'tone-critical' }[q.diff]" x-text="q.diff"></span>
+                <span class="pill tone-muted" x-text="QT.kinds[q.kind]"></span>
+                <span class="text-xs text-muted-foreground ml-auto" x-text="q.sub"></span>
+              </header>
+              <section class="grid gap-3 px-5 pb-4">
+                <p class="text-sm leading-6" x-html="tex(q.prompt)"></p>
+                <div class="q-code" x-show="q.code" x-text="q.code"></div>
+
+                <!-- choice -->
+                <template x-if="q.kind === 'choice'">
+                  <div class="grid gap-2">
+                    <template x-for="(o, i) in q.options" :key="i">
+                      <label class="q-opt" :class="showKey && i === q.answer && 'is-key'">
+                        <input type="radio" class="input mt-0.5" :name="q.id" :value="i" x-model.number="st[q.id].sel" @change="st[q.id].result = null">
+                        <span class="q-letter" x-text="'ABCD'[i]"></span>
+                        <span class="text-sm" :class="q.mono && 'font-mono'" x-text="o"></span>
+                      </label>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- true / false -->
+                <template x-if="q.kind === 'true_false'">
+                  <div class="grid grid-cols-2 gap-2">
+                    <template x-for="v in [true, false]" :key="String(v)">
+                      <label class="q-opt" :class="showKey && v === q.answer && 'is-key'">
+                        <input type="radio" class="input mt-0.5" :name="q.id" @change="st[q.id].sel = v; st[q.id].result = null">
+                        <span class="text-sm" x-text="v ? 'True' : 'False'"></span>
+                      </label>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- typed text: output, completion, short answer -->
+                <template x-if="['output', 'completion', 'short_text'].includes(q.kind)">
+                  <input class="input" :class="q.kind !== 'short_text' && 'font-mono'" type="text" x-model="st[q.id].text" @input="st[q.id].result = null"
+                         :placeholder="{ output: 'Type the exact output', completion: 'What goes in the blank?', short_text: 'Your answer' }[q.kind]">
+                </template>
+
+                <!-- written explanation -->
+                <template x-if="q.kind === 'rubric'">
+                  <textarea class="textarea text-sm" rows="4" x-model="st[q.id].text" @input="st[q.id].result = null" placeholder="Write 2–3 sentences"></textarea>
+                </template>
+
+                <!-- ordering -->
+                <template x-if="q.kind === 'ordering'">
+                  <ol class="grid gap-1.5">
+                    <template x-for="(idx, pos) in st[q.id].order" :key="idx">
+                      <li class="q-row">
+                        <span class="q-letter w-4" x-text="pos + 1"></span>
+                        <span class="text-sm flex-1" :class="q.mono && 'font-mono whitespace-pre'" x-text="q.hideYears ? q.items[idx].replace(/ \(\d{4}\)/, '') : q.items[idx]"></span>
+                        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :disabled="pos === 0" @click="move(q, pos, -1)" aria-label="Move up"><i data-lucide="arrow-up"></i></button>
+                        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :disabled="pos === q.items.length - 1" @click="move(q, pos, 1)" aria-label="Move down"><i data-lucide="arrow-down"></i></button>
+                      </li>
+                    </template>
+                  </ol>
+                </template>
+
+                <!-- matching -->
+                <template x-if="q.kind === 'matching'">
+                  <div class="grid gap-2">
+                    <template x-for="(p, i) in q.pairs" :key="i">
+                      <div class="grid grid-cols-[10rem_1fr] items-center gap-3">
+                        <span class="text-sm font-medium" x-text="p[0]"></span>
+                        <select class="select w-full" x-model.number="st[q.id].match[i]" @change="st[q.id].result = null">
+                          <option value="-1">Choose…</option>
+                          <template x-for="j in rightOrder(q)" :key="j"><option :value="j" x-text="q.pairs[j][1]"></option></template>
+                        </select>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- numeric (+ units) -->
+                <template x-if="q.kind === 'numeric'">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <input class="input w-40 font-mono" type="text" inputmode="decimal" x-model="st[q.id].text" @input="st[q.id].result = null" placeholder="e.g. 0.25">
+                    <span class="text-sm" x-show="q.suffix" x-text="q.suffix"></span>
+                    <template x-if="q.units">
+                      <select class="select w-32" x-model="st[q.id].unit" @change="st[q.id].result = null" aria-label="Unit">
+                        <option value="">Unit…</option>
+                        <template x-for="u in q.units" :key="u"><option :value="u" x-text="u"></option></template>
+                      </select>
+                    </template>
+                    <span class="text-xs text-muted-foreground" x-show="/fraction/i.test(q.prompt)">Fractions like 3/8 are fine.</span>
+                  </div>
+                </template>
+
+                <!-- expression -->
+                <template x-if="q.kind === 'expression'">
+                  <div class="grid gap-1">
+                    <input class="input font-mono" type="text" x-model="st[q.id].text" @input="st[q.id].result = null" :placeholder="q.placeholder">
+                    <div class="text-sm min-h-6" x-html="preview(st[q.id].text)"></div>
+                  </div>
+                </template>
+
+                <!-- balance the equation -->
+                <template x-if="q.kind === 'coefficients'">
+                  <div class="flex flex-wrap items-center gap-2 text-base">
+                    <template x-for="(t, i) in q.terms" :key="i">
+                      <span class="flex items-center gap-2">
+                        <input class="input w-14 text-center font-mono" type="text" inputmode="numeric" x-model="st[q.id].coef[i]" @input="st[q.id].result = null" :aria-label="`Coefficient for ${t}`">
+                        <span x-text="t"></span>
+                        <span class="text-muted-foreground" x-text="i === q.arrowAfter ? '→' : i < q.terms.length - 1 ? '+' : ''"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- check + feedback -->
+                <div class="flex items-center gap-3">
+                  <button type="button" class="btn" data-size="sm" @click="grade(q)" :disabled="!ready(q)">Check</button>
+                  <template x-if="st[q.id].result">
+                    <div class="text-sm flex items-start gap-2">
+                      <span class="pill" :class="st[q.id].result.ok ? 'tone-ok' : st[q.id].result.partial ? 'tone-warn' : 'tone-critical'"
+                            x-text="st[q.id].result.ok ? 'Correct' : st[q.id].result.partial ? 'Almost' : 'Not quite'"></span>
+                      <span x-text="st[q.id].result.msg"></span>
+                    </div>
+                  </template>
+                </div>
+              </section>
+
+              <!-- answer key and verification -->
+              <footer class="grid gap-2 border-t px-5 py-3 text-sm" style="border-color:var(--border);background:var(--muted)" x-show="showKey">
+                <div><span class="text-muted-foreground">Answer: </span><span class="font-medium" x-html="keyText(q)"></span></div>
+                <div class="flex flex-wrap gap-1.5">
+                  <template x-for="v in q.verify" :key="v"><span class="pill" :class="QT.verifiers[v].tone" x-text="QT.verifiers[v].label"></span></template>
+                  <span class="text-xs text-muted-foreground self-center" x-text="`Source: ${d.book}`"></span>
+                </div>
+                <div class="font-mono text-xs" x-show="q.check" x-text="q.check"></div>
+                <template x-if="q.kind === 'rubric'">
+                  <ul class="grid gap-1 text-xs"><template x-for="r in q.rubric" :key="r.point"><li x-text="`Rubric point: ${r.point}`"></li></template></ul>
+                </template>
+                <div class="text-xs text-muted-foreground" x-show="q.note" x-text="q.note"></div>
+              </footer>
+            </article>
+          </template>
+        </div>
+      </section>
+    </template>
+
+    <p class="text-xs text-muted-foreground">Every numeric key on this page was computed by a solution program before it was written here. Book names are real open textbooks; the chapters are illustrative. TODO(real): generated by the pipeline, not hand-written.</p>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-qtypes.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const QT = window.QTYPES;
+      const st = {};
+      QT.domains.forEach((d) => d.questions.forEach((q) => {
+        st[q.id] = { sel: null, text: "", unit: "", result: null, order: q.shuffle ? [...q.shuffle] : [],
+          match: (q.pairs || []).map(() => -1), coef: (q.terms || []).map(() => "") };
+      }));
+      const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const texOne = (t) => { try { return katex.renderToString(t, { throwOnError: false }); } catch { return esc(t); } };
+      const num = (s) => { try { const v = math.evaluate(String(s).replace(/%/g, "").replace(/,/g, "").trim()); return typeof v === "number" && isFinite(v) ? v : NaN; } catch { return NaN; } };
+      const norm = (s, code) => code ? s.replace(/\s+/g, "") : s.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+      return {
+        QT, st, domains: QT.domains, domain: "all", diff: "all", showKey: Mock.param("key") === "1",
+        get shownDomains() { return this.domain === "all" ? this.domains : this.domains.filter((d) => d.id === this.domain); },
+        get answered() { return Object.values(this.st).filter((s) => s.result).length; },
+        get answeredRight() { return Object.values(this.st).filter((s) => s.result?.ok).length; },
+        typesOf(d) { return [...new Set(d.questions.map((q) => QT.kinds[q.kind]))].join(" · "); },
+        tex(s) { return esc(s).replace(/\$([^$]+)\$/g, (_, t) => texOne(t.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"))); },
+        preview(s) {
+          if (!s.trim()) return "";
+          try { return texOne(math.parse(s).toTex({ parenthesis: "auto" })); } catch { return '<span class="text-xs text-muted-foreground">Keep typing…</span>'; }
+        },
+        rightOrder(q) { const n = q.pairs.length; return q.pairs.map((_, i) => (i * 3 + 1) % n); }, // stable shuffle for n = 4
+        move(q, pos, dir) { const o = this.st[q.id].order; [o[pos], o[pos + dir]] = [o[pos + dir], o[pos]]; this.st[q.id].result = null; },
+        ready(q) {
+          const s = this.st[q.id];
+          if (["choice", "true_false"].includes(q.kind)) return s.sel !== null;
+          if (q.kind === "ordering") return true;
+          if (q.kind === "matching") return s.match.every((m) => m >= 0);
+          if (q.kind === "coefficients") return s.coef.every((c) => String(c).trim());
+          return !!s.text.trim();
+        },
+        keyText(q) {
+          switch (q.kind) {
+            case "choice": return esc(`${"ABCD"[q.answer]}. ${q.options[q.answer]}`);
+            case "true_false": return q.answer ? "True" : "False";
+            case "output": case "completion": case "short_text": return `<span class="${q.kind === "short_text" ? "" : "font-mono"}">${esc(q.accept[0])}</span>${q.accept.length > 1 ? ` <span class="text-xs text-muted-foreground">(also accepts ${esc(q.accept.slice(1, 4).join(", "))})</span>` : ""}`;
+            case "ordering": return q.mono ? `<div class="q-code mt-1">${esc(q.items.join("\n"))}</div>` : esc(q.items.join("  →  "));
+            case "matching": return esc(q.pairs.map((p) => `${p[0]} → ${p[1]}`).join(" · "));
+            case "numeric": {
+              const dec = Math.max(0, Math.ceil(-Math.log10(q.tol) - 1e-9)); // tolerance 0.02 -> 2 decimals
+              return esc(`${(Math.round(q.value * 10 ** dec) / 10 ** dec).toFixed(dec)}${q.suffix || ""}${q.unit ? " " + q.unit : ""} (± ${q.tol})`);
+            }
+            case "expression": return texOne(math.parse(q.expr).toTex());
+            case "coefficients": {
+              const term = (i) => `${q.answer[i] === 1 ? "" : q.answer[i]}${q.terms[i]}`;
+              const idx = q.terms.map((_, i) => i);
+              return esc(`${idx.slice(0, q.arrowAfter + 1).map(term).join(" + ")} → ${idx.slice(q.arrowAfter + 1).map(term).join(" + ")}`);
+            }
+            case "rubric": return "Graded against the rubric below";
+          }
+        },
+        grade(q) {
+          const s = this.st[q.id];
+          let r;
+          switch (q.kind) {
+            case "choice": case "true_false":
+              r = s.sel === q.answer ? { ok: true, msg: "" } : { ok: false, msg: q.kind === "choice" ? `The answer is ${"ABCD"[q.answer]}.` : `It's ${q.answer ? "true" : "false"}.` }; break;
+            case "output": case "completion": case "short_text": {
+              const code = q.kind !== "short_text";
+              const ok = q.accept.some((a) => norm(a, code) === norm(s.text, code));
+              r = ok ? { ok, msg: "" } : { ok, msg: `Expected ${q.accept[0]}.` }; break;
+            }
+            case "ordering": {
+              const right = s.order.filter((v, i) => v === i).length;
+              r = right === q.items.length ? { ok: true, msg: "" } : { ok: false, msg: `${right} of ${q.items.length} are in the right place.` }; break;
+            }
+            case "matching": {
+              const right = s.match.filter((m, i) => m === i).length;
+              r = right === q.pairs.length ? { ok: true, msg: "" } : { ok: false, partial: right >= q.pairs.length - 1, msg: `${right} of ${q.pairs.length} matched correctly.` }; break;
+            }
+            case "numeric": {
+              const v = num(s.text);
+              if (isNaN(v)) { r = { ok: false, msg: "That isn't a number." }; break; }
+              const close = Math.abs(v - q.value) <= q.tol;
+              const unitOk = !q.units || s.unit === q.unit;
+              if (close && unitOk) { r = { ok: true, msg: "" }; break; }
+              if (close && !unitOk) { r = { ok: false, partial: true, msg: s.unit ? `Right number, wrong unit: it's ${q.unit}.` : "Right number; pick the unit too." }; break; }
+              const near = (q.near || []).find((n) => Math.abs(v - n.value) <= n.tol);
+              r = { ok: false, msg: near ? near.hint : `Not within ${q.tol} of the answer.` }; break;
+            }
+            case "expression": {
+              try {
+                const f = math.compile(s.text), key = math.compile(q.expr);
+                let same = true;
+                for (let k = 0; k < 6; k++) {
+                  const scope = Object.fromEntries(q.vars.map((x, i) => [x, 1 + ((k * 7 + i * 3) % 9) + 0.37 * i]));
+                  const a = f.evaluate(scope), b = key.evaluate(scope);
+                  if (!(Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b)))) { same = false; break; }
+                }
+                r = same ? { ok: true, msg: "Equivalent to the key (checked numerically)." } : { ok: false, msg: "Not equivalent to the key. Find the fall time from h first, then multiply by v." };
+              } catch { r = { ok: false, msg: "Couldn't read that expression." }; }
+              break;
+            }
+            case "coefficients": {
+              const c = s.coef.map((x) => parseInt(x, 10));
+              if (c.some((x) => !(x > 0))) { r = { ok: false, msg: "Use positive whole numbers." }; break; }
+              const k = c[0] / q.answer[0];
+              const proportional = c.every((x, i) => Math.abs(x / q.answer[i] - k) < 1e-9);
+              r = proportional && k === 1 ? { ok: true, msg: "Balanced: 4 H and 2 O on each side." }
+                : proportional ? { ok: false, partial: true, msg: "Balanced, but not the smallest whole numbers." }
+                : { ok: false, msg: "Not balanced: count the H and O atoms on each side." };
+              break;
+            }
+            case "rubric": {
+              const t = s.text.toLowerCase();
+              const met = q.rubric.filter((p) => p.keys.some((k) => t.includes(k)));
+              r = { ok: met.length === q.rubric.length, partial: met.length > 0 && met.length < q.rubric.length,
+                msg: `${met.length} of ${q.rubric.length} rubric points. ${q.rubric.filter((p) => !met.includes(p)).map((p) => `Missing: ${p.point.split(":")[0].toLowerCase()} reason.`).join(" ")} (Mock grading by keyword; TODO(real): LLM grading against the rubric.)` };
+              break;
+            }
+          }
+          s.result = r;
+        },
+      };
+    }
+  </script>
+</body>
+</html>
