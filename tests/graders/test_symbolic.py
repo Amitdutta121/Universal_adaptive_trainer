@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import subprocess
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -14,6 +17,17 @@ from graders.symbolic import SymbolicEquivalenceGrader
 
 GRADER = SymbolicEquivalenceGrader()
 DERIVATIVE = {"expected": "2*x*sin(x) + x**2*cos(x)", "variables": ["x"]}
+
+
+def _never_proves(*args: object) -> bool:
+    """Stands in for simplify. Module-level: the budgeted work runs in a worker process, which
+    receives the function by reference (``test_symbolic._never_proves``)."""
+    return False
+
+
+def _spin(*args: object) -> None:
+    while True:
+        pass
 
 
 def _score(spec: dict[str, Any], answer: str) -> float:
@@ -66,7 +80,7 @@ def test_multiple_variables_and_split_symbols() -> None:
 
 
 def test_numeric_fallback_when_simplify_does_not_prove(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(symbolic, "_symbolically_equal", lambda *args: False)
+    monkeypatch.setattr(symbolic, "_symbolically_equal", _never_proves)
     assert _score(DERIVATIVE, "x*(2*sin(x)+x*cos(x))") == 1.0
     assert _score(DERIVATIVE, "x**2*sin(x)") == 0.0
 
@@ -103,7 +117,7 @@ def test_equation_mode() -> None:
 
 
 def test_equation_fallback_numeric(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(symbolic, "_symbolically_equal", lambda *args: False)
+    monkeypatch.setattr(symbolic, "_symbolically_equal", _never_proves)
     spec = {"expected": "y = 2x", "variables": ["x", "y"], "equation": True}
     assert _score(spec, "2y = 4x") == 1.0
     assert _score(spec, "y = 3x") == 0.0
@@ -269,3 +283,64 @@ def test_registry_builds_it() -> None:
     assert grader.version == "1"
     assert isinstance(grader, graders.Grader)
     assert grader.grade(DERIVATIVE, "x*(2*sin(x)+x*cos(x))").score == 1.0
+
+
+# --- C9: the time budget kills the work --------------------------------------------------------
+
+PATHOLOGICAL = "sin(x)^60*cos(x)^60 - (sin(2x)/2)^60 + x"  # simplify takes ~3 s, numeric is fast
+
+
+def _warm_pool() -> None:
+    assert symbolic._with_budget(abs, (-1,), 30.0) == (True, 1)
+    for worker in list(symbolic._idle):
+        assert worker.wait_ready(60.0)
+
+
+def _live_workers() -> set[int]:
+    return {p.pid for p in multiprocessing.active_children() if p.name == symbolic._WORKER_NAME}
+
+
+def _idle_workers() -> set[int]:
+    return {worker.process.pid for worker in symbolic._idle}
+
+
+def test_a_budget_overrun_terminates_the_worker() -> None:
+    _warm_pool()
+    threads = threading.active_count()
+    started = time.perf_counter()
+    assert symbolic._with_budget(_spin, (), 0.3) == (False, None)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 0.3 + 1.0, elapsed
+    # The spinning worker is gone: every live worker is an idle one, and no thread was left.
+    assert _live_workers() <= _idle_workers()
+    assert threading.active_count() == threads
+    # And the pool still works.
+    assert symbolic._with_budget(abs, (-2,), 30.0) == (True, 2)
+
+
+def test_a_pathological_answer_returns_within_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _warm_pool()
+    monkeypatch.setattr(symbolic, "SIMPLIFY_BUDGET_S", 0.5)
+    spec = {"expected": "x", "variables": ["x"]}
+    started = time.perf_counter()
+    result = GRADER.grade(spec, PATHOLOGICAL)
+    elapsed = time.perf_counter() - started
+    assert result.score == 1.0  # simplify was cut off; the numeric check decided
+    assert elapsed < 0.5 + 1.5, elapsed
+    assert _live_workers() <= _idle_workers()
+
+
+def test_both_budgets_blown_is_a_format_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _warm_pool()
+    monkeypatch.setattr(symbolic, "_numerically_equal", _spin)
+    monkeypatch.setattr(symbolic, "SIMPLIFY_BUDGET_S", 0.3)
+    monkeypatch.setattr(symbolic, "NUMERIC_BUDGET_S", 0.3)
+    started = time.perf_counter()
+    result = GRADER.grade({"expected": "x", "variables": ["x"]}, PATHOLOGICAL)
+    assert time.perf_counter() - started < 0.6 + 1.5
+    assert result.score == 0.0 and result.format_error
+    assert _live_workers() <= _idle_workers()
+
+
+def test_an_exception_in_the_worker_is_not_proven() -> None:
+    assert symbolic._with_budget(int, ("not a number",), 30.0) == (False, None)

@@ -16,6 +16,12 @@ arithmetic such as ``"2*3 m"`` is not accepted either.
 - Significant figures follow the usual convention: leading zeros never count; trailing zeros of
   an integer without a decimal point do not count (``"1200"`` has 2, ``"1200."`` and ``"1.200e3"``
   have 4). Too few significant figures scores 0 with feedback saying so (not a format error).
+- An expected ``value`` of 0 needs an ``absolute`` tolerance: a relative tolerance (including
+  the default 1%) times 0 is 0, so only an exact 0 would pass and ``1e-17 N`` would be wrong.
+  ``check_spec`` reports ``zero_value_needs_absolute`` instead of guessing one, because no
+  unit-free default exists (0.001 is generous in ``N`` and tiny in ``mN``) -- the author knows
+  the scale. ``grade`` itself is unchanged (exact 0 under a relative-only tolerance), so a spec
+  stored before this check still grades as it always did rather than starting to raise.
 """
 
 from __future__ import annotations
@@ -170,6 +176,15 @@ class QuantityGrader:
             return [SpecIssue("invalid_spec", str(error))]
         assert isinstance(parsed, QuantitySpec)
         issues = _spec_issues(parsed)
+        absolute = parsed.tolerance.absolute if parsed.tolerance is not None else None
+        if parsed.value == 0 and not (absolute is not None and absolute > 0):
+            issues.append(
+                SpecIssue(
+                    "zero_value_needs_absolute",
+                    "The expected value is 0, so a relative tolerance accepts only an exact 0; "
+                    "give an absolute tolerance (in the spec's unit).",
+                )
+            )
         if not issues:
             # The reference answer itself must score full marks (sig figs aside: repr() of the
             # value need not carry them; accepted_units may deliberately exclude the spec's unit).
