@@ -43,30 +43,15 @@ class MultipleChoice:
         )
 
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
+        """Option count, blank options and the correct index are ``gradable``'s (check_spec)."""
         del runner
         options = content.get("options")
-        options_valid = (
-            isinstance(options, list)
-            and len(options) >= 2
-            and all(isinstance(option, str) and bool(option.strip()) for option in options)
-        )
-        no_duplicates = options_valid and len(set(options)) == len(options)
-        correct_index = content.get("correct_option_index")
-        correct_exists = (
-            options_valid
-            and isinstance(correct_index, int)
-            and not isinstance(correct_index, bool)
-            and 0 <= correct_index < len(options)
-        )
+        # Duplicates still grade (by index), but leave the student two identical choices.
+        texts = [str(option) for option in options] if isinstance(options, list) else []
+        no_duplicates = bool(texts) and len(set(texts)) == len(texts)
         explanation_present = present_text(content.get("explanation"))
         return [
-            make_check("mc_options_valid", options_valid, "Options are valid"),
             make_check("mc_no_duplicate_options", no_duplicates, "No duplicate options"),
-            make_check(
-                "mc_correct_option_exists",
-                correct_exists,
-                "Correct-answer reference exists",
-            ),
             make_check(
                 "mc_explanation_present",
                 explanation_present,

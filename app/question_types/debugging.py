@@ -6,13 +6,7 @@ from app.domain.enums import QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import DebuggingDraft
 from app.question_types._executable import Executable
-from app.question_types._shared import (
-    EXECUTABLE_CONTRACT,
-    parse_tests,
-    parses,
-    reference_check,
-    run_reference,
-)
+from app.question_types._shared import EXECUTABLE_CONTRACT, parse_tests, parses
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
 
@@ -29,6 +23,7 @@ class Debugging(Executable):
     )
 
     def authoring_checks(self, content: dict, runner: LocalCodeRunner) -> list[QuestionCheck]:
+        """Usable tests and "the reference passes them" are ``gradable``'s (check_spec)."""
         broken = content.get("code")
         broken_parses = isinstance(broken, str) and parses(broken)
         reference = content.get("reference_solution")
@@ -47,7 +42,6 @@ class Debugging(Executable):
             if broken_exhibits_issue:
                 broken_evidence = broken_summary.evidence
 
-        reference_summary = run_reference(reference, reference_parses, tests, runner)
         return [
             make_check(
                 "debug_broken_exhibits_issue",
@@ -59,11 +53,6 @@ class Debugging(Executable):
                 "debug_reference_parses",
                 reference_parses,
                 "Reference solution parses",
-            ),
-            make_check("harness_valid", tests is not None, "Test harness is valid"),
-            reference_check(
-                reference_summary,
-                len(tests) if tests is not None else 0,
             ),
         ]
 

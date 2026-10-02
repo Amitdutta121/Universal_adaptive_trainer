@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.domain.questions import Question, QuestionValidationReport
+from app.validation.gradable import check_gradable
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
 from app.validation.shared import check_shared
@@ -32,4 +33,5 @@ class DeterministicQuestionValidator:
             return QuestionValidationReport(question_id=question.id, checks=checks)
 
         checks.extend(check_type(question, content, LocalCodeRunner()))
+        checks.extend(check_gradable(question, content))
         return QuestionValidationReport(question_id=question.id, checks=checks)

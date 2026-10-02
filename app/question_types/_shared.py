@@ -7,13 +7,9 @@ import ast
 import json
 from typing import Any
 
-from app.domain.questions import QuestionCheck
 from app.generation.schemas import ExecutableTestCase
-from app.validation.report import make_check
 from app.validation.runner import (
     EVIDENCE_LIMIT,
-    LocalCodeRunner,
-    TestRunSummary,
     normalize_output,
     parse_test_cases,
 )
@@ -88,29 +84,6 @@ def parse_tests(raw: object) -> list[ExecutableTestCase] | None:
 
 def present_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
-
-
-def run_reference(
-    reference: object,
-    reference_parses: bool,
-    tests: list[ExecutableTestCase] | None,
-    runner: LocalCodeRunner,
-) -> TestRunSummary | None:
-    if not reference_parses or tests is None:
-        return None
-    return runner.run_tests(reference, tests)
-
-
-def reference_check(summary: TestRunSummary | None, total: int) -> QuestionCheck:
-    passed = summary.passed_count if summary is not None else 0
-    successful = summary is not None and passed == summary.total and not summary.timed_out
-    evidence = summary.evidence if summary is not None else None
-    return make_check(
-        "reference_passes_tests",
-        successful,
-        f"{passed}/{total} tests pass",
-        evidence,
-    )
 
 
 def script_evidence(result: object, expected: str) -> str:

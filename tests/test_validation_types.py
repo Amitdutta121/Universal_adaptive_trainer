@@ -34,16 +34,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
             "mc_no_duplicate_options",
         ),
         (
-            QuestionType.MULTIPLE_CHOICE,
-            {"options": ["one", "two"], "correct_option_index": 9, "explanation": "Why."},
-            "mc_correct_option_exists",
-        ),
-        (
-            QuestionType.TRUE_FALSE,
-            {"correct_answer": "yes", "explanation": "Why."},
-            "tf_boolean_answer",
-        ),
-        (
             QuestionType.TRUE_FALSE,
             {"correct_answer": True, "explanation": " "},
             "tf_explanation_present",
@@ -57,11 +47,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
             QuestionType.OUTPUT_PREDICTION,
             {"code": "print(4)", "expected_output": "3"},
             "expected_output_verified",
-        ),
-        (
-            QuestionType.CODE_COMPLETION,
-            {"reference_solution": "print(1)", "tests": [{}]},
-            "harness_valid",
         ),
         (
             QuestionType.CODE_COMPLETION,
@@ -81,15 +66,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
             "debug_broken_exhibits_issue",
         ),
         (
-            QuestionType.DEBUGGING,
-            {
-                "code": "print(1)",
-                "reference_solution": "print(1)",
-                "tests": [{"stdout": "2"}],
-            },
-            "reference_passes_tests",
-        ),
-        (
             QuestionType.PARSONS,
             {
                 "blocks": [
@@ -99,22 +75,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
                 "correct_order": ["a"],
             },
             "parsons_order_consistent",
-        ),
-        (
-            QuestionType.PARSONS,
-            {
-                "blocks": [{"id": "a", "text": "print(3)", "indent": -1}],
-                "correct_order": ["a"],
-            },
-            "parsons_indent_valid",
-        ),
-        (
-            QuestionType.CODING,
-            {
-                "reference_solution": "print(1)",
-                "tests": [{"stdout": "2"}],
-            },
-            "reference_passes_tests",
         ),
     ],
 )
@@ -155,24 +115,14 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
         (
             QuestionType.MULTIPLE_CHOICE,
             {"options": ["one", "two"], "correct_option_index": 0, "explanation": "Why."},
-            [
-                "mc_options_valid",
-                "mc_no_duplicate_options",
-                "mc_correct_option_exists",
-                "mc_explanation_present",
-            ],
-            [
-                "Options are valid",
-                "No duplicate options",
-                "Correct-answer reference exists",
-                "Explanation exists",
-            ],
+            ["mc_no_duplicate_options", "mc_explanation_present"],
+            ["No duplicate options", "Explanation exists"],
         ),
         (
             QuestionType.TRUE_FALSE,
             {"correct_answer": True, "explanation": "Why."},
-            ["tf_boolean_answer", "tf_explanation_present"],
-            ["Valid boolean answer", "Explanation exists"],
+            ["tf_explanation_present"],
+            ["Explanation exists"],
         ),
         (
             QuestionType.OUTPUT_PREDICTION,
@@ -186,8 +136,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "reference_solution": "def add(a,b):\n    return a+b",
                 "tests": [{"assert": "assert add(1,2)==3"}],
             },
-            ["completion_reference_parses", "harness_valid", "reference_passes_tests"],
-            ["Reference solution parses", "Test harness is valid", "1/1 tests pass"],
+            ["completion_reference_parses"],
+            ["Reference solution parses"],
         ),
         (
             QuestionType.DEBUGGING,
@@ -196,18 +146,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "reference_solution": "print(2)",
                 "tests": [{"stdout": "2"}],
             },
-            [
-                "debug_broken_exhibits_issue",
-                "debug_reference_parses",
-                "harness_valid",
-                "reference_passes_tests",
-            ],
-            [
-                "Broken code exhibits the issue",
-                "Reference solution parses",
-                "Test harness is valid",
-                "1/1 tests pass",
-            ],
+            ["debug_broken_exhibits_issue", "debug_reference_parses"],
+            ["Broken code exhibits the issue", "Reference solution parses"],
         ),
         (
             QuestionType.PARSONS,
@@ -215,16 +155,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "blocks": [{"id": "only", "text": "print(3)", "indent": 0}],
                 "correct_order": ["only"],
             },
-            [
-                "parsons_order_consistent",
-                "parsons_indent_valid",
-                "parsons_reference_compiles",
-            ],
-            [
-                "Canonical order is consistent",
-                "Indentation representation is valid",
-                "Reconstructed reference compiles",
-            ],
+            ["parsons_order_consistent", "parsons_reference_compiles"],
+            ["Canonical order uses every block once", "Reconstructed reference compiles"],
         ),
         (
             QuestionType.CODING,
@@ -232,8 +164,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "reference_solution": "def add(a,b):\n    return a+b",
                 "tests": [{"assert": "assert add(1,2)==3"}],
             },
-            ["coding_reference_parses", "harness_valid", "reference_passes_tests"],
-            ["Reference solution parses", "Test harness is valid", "1/1 tests pass"],
+            ["coding_reference_parses"],
+            ["Reference solution parses"],
         ),
     ],
 )
