@@ -30,6 +30,7 @@ CODE_TYPES: frozenset[str] = frozenset(spec.id for spec in QUESTION_TYPES if spe
 _WORDING: dict[str, tuple[str, str]] = {
     "intro_python": ("introductory-Python", "Python"),
     "physics": ("physics", "physics"),
+    "ml_llms": ("machine-learning", "machine learning and large language models"),
     "biology": ("biology", "biology"),
 }
 

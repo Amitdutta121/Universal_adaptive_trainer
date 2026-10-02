@@ -347,3 +347,22 @@ def test_generation_refuses_a_type_the_course_did_not_choose(client: TestClient)
         json={"chunks": [{"section_id": 1, "easy": 1, "question_types": ["parsons"]}]},
     )
     assert batch.status_code == 422, batch.text
+
+
+def test_an_ml_course_starts_from_concepts_numbers_and_formulas(client: TestClient) -> None:
+    body = client.get("/api/courses/catalog").json()
+    ml = {item["id"]: item for item in body["subjects"]}["ml_llms"]
+    assert ml["default_types"] == [
+        "multiple_choice",
+        "true_false",
+        "numeric_response",
+        "equation_response",
+    ]
+    assert ml["coming_soon_types"] == []
+    created = client.post("/api/courses", json={"name": "LLMs 101", "subject": "ml_llms"})
+    assert created.status_code == 201, created.text
+    assert set(created.json()["capabilities"]) == {
+        "quantity.units",
+        "structured.choice",
+        "symbolic.expression_equivalence",
+    }

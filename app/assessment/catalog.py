@@ -255,7 +255,7 @@ SUBJECTS: tuple[SubjectPreset, ...] = (
     SubjectPreset(
         "physics",
         "Physics",
-        "Conceptual choice now; numeric and equation answers when their graders are built.",
+        "Conceptual choice, numbers with units and equations, each marked automatically.",
         default_types=(
             "multiple_choice",
             "true_false",
@@ -270,6 +270,28 @@ SUBJECTS: tuple[SubjectPreset, ...] = (
             "numeric_response": "A ball falls from rest. Its speed after 2 s, in m/s?",
             "equation_response": "Write the kinetic energy of a mass m moving at speed v.",
             "short_explanation": "Explain why a satellite in orbit is in free fall.",
+        },
+    ),
+    SubjectPreset(
+        "ml_llms",
+        "Machine learning & LLMs",
+        "Concepts, worked numbers and formulas; add code questions to run models in Python.",
+        default_types=(
+            "multiple_choice",
+            "true_false",
+            "numeric_response",
+            "equation_response",
+        ),
+        primary_groups=("quick", "maths", "code"),
+        examples={
+            "multiple_choice": "Which transformer layer lets every token attend to every other?",
+            "true_false": "True or false: a lower validation loss always means less overfitting.",
+            "short_answer": "What does the 'T' in GPT stand for?",
+            "numeric_response": "A 7B-parameter model in 16-bit weights needs how many GB?",
+            "equation_response": "Write the softmax of z_i over n logits.",
+            "output_prediction": "What does this tokenizer call print?",
+            "coding": "Write cosine_similarity(a, b) for two lists of floats.",
+            "short_explanation": "Explain why temperature 0 makes sampling deterministic.",
         },
     ),
     SubjectPreset(

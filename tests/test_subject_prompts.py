@@ -46,6 +46,8 @@ PHYSICS = profile_for(
     _course("Mechanics", "physics", ["multiple_choice", "true_false", "numeric_response"])
 )
 BIOLOGY = profile_for(_course("Cells", "biology", ["multiple_choice", "short_answer"]))
+ML = profile_for(_course("LLMs", "ml_llms", None))
+ML_WITH_CODE = profile_for(_course("LLMs", "ml_llms", ["multiple_choice", "coding"]))
 
 
 def _all_prompts(profile: SubjectProfile) -> dict[str, str]:
@@ -56,17 +58,17 @@ def _all_prompts(profile: SubjectProfile) -> dict[str, str]:
     return prompts
 
 
-@pytest.mark.parametrize("profile", [PHYSICS, BIOLOGY], ids=["physics", "biology"])
+@pytest.mark.parametrize("profile", [PHYSICS, BIOLOGY, ML], ids=["physics", "biology", "ml"])
 def test_non_code_prompts_never_mention_code(profile: SubjectProfile) -> None:
     assert not profile.has_code_types
     for name, text in _all_prompts(profile).items():
         assert not BANNED.findall(text), (name, BANNED.findall(text))
-        assert f"{profile.phrase} assessment question" in text or name.endswith(
-            "generatability"
-        ), name
+        assert f"{profile.phrase} assessment question" in text or name.endswith("generatability"), (
+            name
+        )
 
 
-@pytest.mark.parametrize("profile", [PHYSICS, BIOLOGY], ids=["physics", "biology"])
+@pytest.mark.parametrize("profile", [PHYSICS, BIOLOGY, ML], ids=["physics", "biology", "ml"])
 def test_non_code_issue_codes_drop_the_test_codes(profile: SubjectProfile) -> None:
     codes = issue_codes_for(profile)
     assert not set(codes) & TEST_ISSUE_CODES
@@ -141,3 +143,9 @@ def test_any_code_type_brings_in_the_code_wording() -> None:
     assert set(issue_codes_for(profile)) == set(JUDGE_ISSUE_CODES)
     assert "any tests agree" in common_system(profile)
     assert "untaught Python\nfeature" in common_system(profile)
+
+
+def test_an_ml_course_that_picks_a_code_type_gets_the_code_wording() -> None:
+    assert ML_WITH_CODE.has_code_types and ML_WITH_CODE.code_language == "Python"
+    assert set(issue_codes_for(ML_WITH_CODE)) >= TEST_ISSUE_CODES
+    assert "machine-learning assessment question" in common_system(ML_WITH_CODE)
