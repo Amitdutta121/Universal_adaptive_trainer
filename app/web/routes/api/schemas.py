@@ -68,6 +68,7 @@ from app.generation import ChunkQuestionRequest, PlannedQuestion
 from app.ingestion import VocabularyTerm
 from app.persistence.models import (
     BookRow,
+    CourseRow,
     CurriculumVersionRow,
     JudgeBatchRunRow,
     ProfessorReviewRow,
@@ -190,6 +191,120 @@ class CountsResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- books
+
+
+class TaxonomyDraftRequest(BaseModel):
+    """What the professor tells the AI about the taxonomy they want (ADR-052)."""
+
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=4000)
+    audience: str = Field(default="", max_length=1000)
+    #: Topics or outcomes that must appear, one per line; a pasted syllabus works.
+    must_cover: str = Field(default="", max_length=8000)
+    leave_out: str = Field(default="", max_length=2000)
+    size: Literal["compact", "standard", "detailed"] = "standard"
+
+
+class TaxonomyDraftResponse(BaseModel):
+    """An AI-proposed taxonomy that has not been saved (ADR-052)."""
+
+    #: Provider and model that drafted it, e.g. "openrouter/openai/gpt-4o".
+    drafted_by: str
+    document: dict[str, Any]
+    #: The model's chapter-by-chapter notes, written before the taxonomy.
+    analysis: str
+
+
+class CourseOut(BaseModel):
+    """One course, with how much has been built in it so far."""
+
+    id: int
+    name: str
+    description: str | None
+    created_at: datetime
+    book_count: int = 0
+    curriculum_version_count: int = 0
+    question_count: int = 0
+
+    @classmethod
+    def from_row(cls, row: CourseRow, counts: tuple[int, int, int] = (0, 0, 0)) -> CourseOut:
+        books, versions, questions = counts
+        return cls(
+            id=row.id,
+            name=row.name,
+            description=row.description,
+            created_at=row.created_at,
+            book_count=books,
+            curriculum_version_count=versions,
+            question_count=questions,
+        )
+
+
+class MostMissedOut(BaseModel):
+    subtopic: str
+    topic: str
+    miss_rate: float
+    attempts: int
+
+
+class CourseProgressOut(BaseModel):
+    """One course card on the course list: what is built, and what is next."""
+
+    course: CourseOut
+    owner_email: str | None
+    owned_by_you: bool
+    proposed_curriculum_count: int
+    approved_question_count: int
+    awaiting_review_count: int
+    question_set_count: int
+    student_count: int
+    coverage: float | None
+    avg_mastery: float | None
+    most_missed: MostMissedOut | None
+    #: Setup steps in build order, each done or not.
+    setup: list[SetupStepOut]
+
+
+class SetupStepOut(BaseModel):
+    key: str
+    done: bool
+
+
+class ActivityEventOut(BaseModel):
+    kind: str
+    text: str
+    at: datetime
+    course_id: int | None
+    course_name: str | None
+
+
+class CoursesOverviewResponse(BaseModel):
+    courses: list[CourseProgressOut]
+    activity: list[ActivityEventOut]
+
+
+class CourseListResponse(BaseModel):
+    courses: list[CourseOut]
+
+
+class CourseCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("A course needs a name.")
+        return clean
+
+
+class CourseUpdate(BaseModel):
+    """Omitted fields are left as they are."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class BookSummary(BaseModel):
@@ -1806,6 +1921,21 @@ class GenerationRunResponse(BaseModel):
     skipped: list[SkippedRunTarget]
     failed: list[FailedRunTarget]
     possible_duplicates: int
+
+
+class TaxonomyLinkOut(BaseModel):
+    """One taxonomy and the classroom link it has, if any (ADR-053)."""
+
+    curriculum_version_id: int
+    label: str
+    #: Approved questions it has now -- what creating or updating the link would freeze.
+    approved_question_count: int
+    #: The snapshot its link serves; ``None`` until the link is created.
+    classroom: QuestionSetOut | None
+
+
+class TaxonomyLinkListResponse(BaseModel):
+    links: list[TaxonomyLinkOut]
 
 
 class QuestionSetOut(BaseModel):

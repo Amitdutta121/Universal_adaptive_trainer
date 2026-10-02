@@ -15,6 +15,7 @@ import { readApiError } from "@/lib/api/client";
 import {
   useCreateStudent,
   useProdQuestionSet,
+  useTaxonomyClassroom,
   useQuestionSet,
   useResumeStudent,
   useStartTrainingSession,
@@ -41,6 +42,11 @@ export function JoinClassroomScreen() {
   const searchParams = useSearchParams();
   const rawSetId = searchParams.get("set");
   const isProdLink = rawSetId === "prod";
+  // A taxonomy's own classroom link: resolves to whatever snapshot it currently serves.
+  const taxonomyId = useMemo(() => {
+    const parsed = Number(searchParams.get("taxonomy"));
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
   // A missing or non-numeric `set` query param renders as a broken-link
   // state below rather than a query error, since there is no id to query with.
   const explicitSetVersionId = useMemo(() => {
@@ -52,7 +58,9 @@ export function JoinClassroomScreen() {
     enabled: explicitSetVersionId !== null,
   });
   const prodClassroom = useProdQuestionSet({ enabled: isProdLink });
-  const classroom = isProdLink ? prodClassroom : frozenClassroom;
+  const taxonomyClassroom = useTaxonomyClassroom(taxonomyId);
+  const classroom =
+    taxonomyId !== null ? taxonomyClassroom : isProdLink ? prodClassroom : frozenClassroom;
   const createStudent = useCreateStudent();
   const startTrainingSession = useStartTrainingSession();
   const resumeStudent = useResumeStudent();
@@ -61,6 +69,10 @@ export function JoinClassroomScreen() {
   const [email, setEmail] = useState("");
   const [identity, setIdentity] = useState<LearnerIdentity | null>(null);
   const resolvedSetVersionId = classroom.data?.id ?? explicitSetVersionId;
+  // A link that follows whatever the professor last froze (a taxonomy's link, or the
+  // legacy prod link), rather than one fixed snapshot.
+  const isMovingLink = isProdLink || taxonomyId !== null;
+  const hasTarget = isMovingLink || explicitSetVersionId !== null;
 
   // Read the per-browser identity once, on the client. Prefill the name and
   // email fields from it (or the legacy name-only key) for a visitor who has no
@@ -182,18 +194,18 @@ export function JoinClassroomScreen() {
         showTaxonomySelector={false}
       />
 
-      {rawSetId === null || (!isProdLink && explicitSetVersionId === null) ? (
+      {!hasTarget ? (
         <EmptyState
           title="This classroom link is incomplete"
           hint="The join URL must include a valid classroom id."
         />
       ) : null}
 
-      {(isProdLink || explicitSetVersionId !== null) && classroom.isError ? (
+      {hasTarget && classroom.isError ? (
         <QueryError error={classroom.error} />
       ) : null}
 
-      {(isProdLink || explicitSetVersionId !== null) && classroom.data ? (
+      {hasTarget && classroom.data ? (
         <div className="mx-auto grid w-full max-w-4xl gap-4 lg:grid-cols-[1.1fr_0.9fr]">
           <Card className="border-border/70">
             <CardHeader className="gap-3">
@@ -207,7 +219,7 @@ export function JoinClassroomScreen() {
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">Set #{classroom.data.id}</Badge>
                 <Badge variant="outline">{classroom.data.member_count} questions</Badge>
-                {isProdLink ? <Badge>Current prod classroom</Badge> : null}
+                {isMovingLink ? <Badge>Current classroom</Badge> : null}
                 <Badge variant="outline">
                   Frozen{" "}
                   {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
@@ -217,8 +229,8 @@ export function JoinClassroomScreen() {
               </div>
 
               <p className="text-muted-foreground text-sm leading-6">
-                {isProdLink
-                  ? "This link always opens the professor's current production classroom snapshot."
+                {isMovingLink
+                  ? "This link always opens the professor's current classroom snapshot."
                   : "This classroom always uses the exact question snapshot the professor froze for it, so everyone joining later is still training against the same set."}
               </p>
 
@@ -250,7 +262,9 @@ export function JoinClassroomScreen() {
 
           <Card className="border-border/70">
             <CardHeader>
-              <CardTitle className="text-xl">{identity ? "Welcome back" : "Start learning"}</CardTitle>
+              <CardTitle className="text-xl">
+                {identity ? "Welcome back" : "Start learning"}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {identity ? (
@@ -282,9 +296,7 @@ export function JoinClassroomScreen() {
                           type="button"
                           className="w-full"
                           onClick={() =>
-                            router.push(
-                              `/students/join/session/${activeSession.id}` as Route,
-                            )
+                            router.push(`/students/join/session/${activeSession.id}` as Route)
                           }
                         >
                           <ArrowRight />
@@ -383,7 +395,7 @@ export function JoinClassroomScreen() {
               )}
 
               <p className="text-center text-muted-foreground text-xs">
-                Instructor Studio: <Link href="/students">manage classrooms and learners</Link>
+                Instructor Studio: <Link href="/courses">manage classrooms and learners</Link>
               </p>
             </CardContent>
           </Card>

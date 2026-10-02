@@ -187,7 +187,8 @@ class CurriculumLibraryService:
                 "Only an approved curriculum version can be made active.",
                 detail="Upload a valid taxonomy, or choose one that was approved already.",
             )
-        current = self._curriculum.get_approved()
+        # The active version is per course: activating one never displaces another course's.
+        current = self._curriculum.get_approved(course_id=version.course_id)
         if current is not None and current.id == version_id:
             return version
         candidate = _sqlite_orderable_utc(datetime.now(UTC))
@@ -211,7 +212,8 @@ class CurriculumLibraryService:
         """What points at this version, counted before anything is decided."""
         topic_ids = self._curriculum.topic_ids_in(version_id)
         subtopic_ids = self._curriculum.subtopic_ids_in(version_id)
-        approved = self._curriculum.get_approved()
+        version = self._curriculum.get_version(version_id)
+        approved = self._curriculum.get_approved(course_id=version.course_id)
         return CurriculumUsage(
             question_count=self._questions.count_for_curriculum_version(version_id),
             question_subtopic_link_count=self._questions.count_subtopic_links(subtopic_ids),

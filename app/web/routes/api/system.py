@@ -21,7 +21,7 @@ from app.persistence.repositories import (
     StudentRepository,
     TypeInstructionRepository,
 )
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession
 from app.web.routes.api.schemas import ConfigResponse, CountsResponse, HealthResponse
 
 logger = logging.getLogger(__name__)
@@ -73,12 +73,12 @@ def config() -> ConfigResponse:
 
 
 @router.get("/counts", response_model=CountsResponse)
-def counts(session: DbSession) -> CountsResponse:
-    """One count per section."""
+def counts(session: DbSession, course: CourseScope) -> CountsResponse:
+    """One count per section. Books, taxonomies and questions are the course's own."""
     return CountsResponse(
-        books=BookRepository(session).count(),
-        curriculum_versions=CurriculumRepository(session).count(),
-        questions=QuestionRepository(session).count(),
+        books=BookRepository(session).count(course_id=course),
+        curriculum_versions=CurriculumRepository(session).count(course_id=course),
+        questions=QuestionRepository(session).count(course_id=course),
         reviews=ProfessorReviewRepository(session).count(),
         learned_instructions=len(TypeInstructionRepository(session).list_all()),
         students=StudentRepository(session).count(),

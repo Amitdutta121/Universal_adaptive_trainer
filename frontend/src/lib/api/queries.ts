@@ -18,7 +18,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/env";
-import { ApiError, api, unwrap } from "./client";
+import { ApiError, api, COURSE_HEADER, unwrap } from "./client";
 import type {
   QuestionStatus,
   QuestionType,
@@ -42,8 +42,11 @@ export const qk = {
       ["questions", "list", params] as const,
     detail: (id: number) => ["questions", "detail", id] as const,
     evaluations: (id: number) => ["questions", "evaluations", id] as const,
-    reviewQueue: (params: { mode: "all" | "scoreable"; after?: number | null }) =>
-      ["questions", "review-queue", params] as const,
+    reviewQueue: (params: {
+      mode: "all" | "scoreable";
+      after?: number | null;
+      curriculumVersionId?: number | null;
+    }) => ["questions", "review-queue", params] as const,
     generationPlan: (bookId: number) => ["questions", "generation-plan", bookId] as const,
     batchPlan: (chunks: readonly ChunkGenerationSpec[]) =>
       ["questions", "batch-plan", chunks] as const,
@@ -69,6 +72,8 @@ export const qk = {
     list: () => ["question-sets", "list"] as const,
     detail: (setVersionId: number) => ["question-sets", "detail", setVersionId] as const,
     prod: () => ["question-sets", "prod"] as const,
+    taxonomy: (curriculumVersionId: number) =>
+      ["question-sets", "taxonomy", curriculumVersionId] as const,
   },
   instructions: {
     all: ["instructions"] as const,
@@ -104,6 +109,12 @@ export const qk = {
   auth: {
     me: () => ["auth", "me"] as const,
   },
+  courses: {
+    all: ["courses"] as const,
+    list: () => ["courses", "list"] as const,
+    overview: () => ["courses", "overview"] as const,
+    detail: (courseId: number) => ["courses", "detail", courseId] as const,
+  },
 } as const;
 
 // --- Auth ---------------------------------------------------------------------
@@ -128,9 +139,11 @@ async function login(email: string, password: string): Promise<void> {
 async function activateCurriculumVersion(
   versionId: number,
 ): Promise<Schemas["CurriculumVersionDetail"]> {
+  // A plain fetch, so the client's course middleware does not run: name the course here.
+  const courseId = /^\/courses\/(\d+)/.exec(window.location.pathname)?.[1];
   const response = await fetch(`${API_BASE_URL}/api/curriculum/versions/${versionId}/activate`, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...(courseId ? { [COURSE_HEADER]: courseId } : {}) },
   });
   if (!response.ok) {
     let payload: unknown = null;
@@ -174,6 +187,46 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => unwrap(api.POST("/api/auth/logout")),
     onSuccess: () => client.invalidateQueries({ queryKey: qk.auth.me() }),
+  });
+}
+
+// --- Courses ----------------------------------------------------------------
+
+export const useCourses = () =>
+  useQuery({ queryKey: qk.courses.list(), queryFn: () => unwrap(api.GET("/api/courses")) });
+
+export const useCourse = (courseId: number | null) =>
+  useQuery({
+    queryKey: qk.courses.detail(courseId ?? 0),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/courses/{course_id}", { params: { path: { course_id: courseId ?? 0 } } }),
+      ),
+    enabled: courseId !== null,
+  });
+
+export const useCoursesOverview = () =>
+  useQuery({
+    queryKey: qk.courses.overview(),
+    queryFn: () => unwrap(api.GET("/api/courses/overview")),
+  });
+
+export function useUpdateCourse() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, body }: { courseId: number; body: Schemas["CourseUpdate"] }) =>
+      unwrap(
+        api.PATCH("/api/courses/{course_id}", { params: { path: { course_id: courseId } }, body }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.courses.all }),
+  });
+}
+
+export function useCreateCourse() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CourseCreate"]) => unwrap(api.POST("/api/courses", { body })),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.courses.all }),
   });
 }
 
@@ -241,7 +294,12 @@ export const useQuestion = (id: number | null, { enabled = true } = {}) =>
       ),
   });
 
-export const useReviewQueue = (params: { mode: "all" | "scoreable"; after?: number | null }) =>
+export const useReviewQueue = (params: {
+  mode: "all" | "scoreable";
+  after?: number | null;
+  /** The taxonomy picked in the header; the queue offers only its questions. */
+  curriculumVersionId?: number | null;
+}) =>
   useQuery({
     queryKey: qk.questions.reviewQueue(params),
     queryFn: () =>
@@ -251,6 +309,9 @@ export const useReviewQueue = (params: { mode: "all" | "scoreable"; after?: numb
             query: {
               mode: params.mode,
               ...(params.after ? { after: params.after } : {}),
+              ...(params.curriculumVersionId
+                ? { curriculum_version_id: params.curriculumVersionId }
+                : {}),
             },
           },
         }),
@@ -615,6 +676,14 @@ export const useTaxonomyDocumentGuide = () =>
  * Unlike the book import there is no title override to send: a taxonomy document
  * declares its own `label`, and a wrong label is a wrong document.
  */
+/** Ask the AI to propose a taxonomy from the professor's brief. Nothing is saved (ADR-052). */
+export function useDraftTaxonomy() {
+  return useMutation({
+    mutationFn: (body: Schemas["TaxonomyDraftRequest"]) =>
+      unwrap(api.POST("/api/curriculum/drafts", { body })),
+  });
+}
+
 export function useImportTaxonomy() {
   const client = useQueryClient();
   return useMutation({
@@ -804,6 +873,37 @@ export function useCreateQuestionSet() {
       unwrap(api.POST("/api/question-sets", { body })),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questionSets.all });
+    },
+  });
+}
+
+/** The snapshot behind one taxonomy's classroom link; 404 until the link is created. */
+export const useTaxonomyClassroom = (curriculumVersionId: number | null, { enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.questionSets.taxonomy(curriculumVersionId ?? 0),
+    enabled: enabled && curriculumVersionId !== null,
+    retry: false,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/question-sets/taxonomy/{curriculum_version_id}", {
+          params: { path: { curriculum_version_id: curriculumVersionId ?? 0 } },
+        }),
+      ),
+  });
+
+/** Freeze a taxonomy's approved questions and point its classroom link at them. */
+export function useSyncTaxonomyClassroom() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (curriculumVersionId: number) =>
+      unwrap(
+        api.POST("/api/question-sets/taxonomy/{curriculum_version_id}/sync", {
+          params: { path: { curriculum_version_id: curriculumVersionId } },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questionSets.all });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
     },
   });
 }

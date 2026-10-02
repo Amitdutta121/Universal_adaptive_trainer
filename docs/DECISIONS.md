@@ -2148,3 +2148,88 @@ cover the readers, and touching sixty call sites for the sake of a flag is how o
 *Reusing `rejected`:* legacy rows already carry it, with a different meaning, and hiding them would
 change what old versions show.
 
+
+
+---
+
+## ADR-051 — Alembic migrations, and courses as the workspace books and taxonomies belong to
+
+**Status:** accepted. Supersedes ADR-008's "no migration tool".
+
+**Migrations.** `init_db` now owns the schema through Alembic, run in-process (no `alembic.ini`,
+no offline mode; scripts under `app/persistence/migrations/`). An empty database is built with
+`create_all` and stamped at head, which keeps the test suite fast. A database from before
+migrations existed is stamped at `0001_baseline` (an empty revision standing for ADR-008's schema)
+and upgraded. A brand-new *table* still needs no migration; a change to an existing table does,
+and `verify_schema` names a column added without one.
+
+**Courses.** A `courses` table (`name`, `description`, `owner_id` for roadmap F2). Only `books` and
+`curriculum_versions` carry `course_id`; everything else reaches its course through them, and a
+question through its curriculum version, which generation always requires. Migration `0002`
+moves every existing book and taxonomy into one "Default course".
+
+**Scoping.** The Studio's URLs are `/courses/{id}/...`, and the API client sends that id as
+`X-Course-Id`. Routes keep their paths; lists, counts, imports, the approved taxonomy and the
+generation default narrow to the course, and a book or taxonomy fetched by id from another course
+is a 404. Each course has its own approved taxonomy. Without the header nothing is narrowed, so
+scripts and the existing tests see the whole installation.
+
+**Not yet course-scoped, on purpose:** learned type instructions, judge prompts, students and the
+single `prod` classroom alias (it follows whichever course last synced it). Courses are not access
+control either; F2 owns that.
+
+**Alternatives rejected.** *Path-prefixed API routes:* rewrites every router and the generated
+client for no behavioural gain over a header. *A cookie for the current course:* hidden state, and
+two tabs would fight over it. *`course_id` on questions:* duplicates what the curriculum version
+already says, and touches every place a question is built.
+
+---
+
+## ADR-052 — The model may propose a taxonomy from the professor's brief; only the professor saves one
+
+**Status:** accepted. Narrows ADR-021; implements roadmap F6.
+
+`POST /api/curriculum/drafts` takes what the professor writes -- title and description
+(required), audience and level, a "must cover" list (one topic or outcome per line; a pasted
+syllabus works), a "leave out" list, and a size (compact ~15, standard ~30, detailed ~45
+subtopics) -- and returns an LLM-proposed Topic -> Subtopic taxonomy **unsaved**. The Curriculum
+page opens it in the existing builder (ADR-049/050) with a banner naming the model and its
+planning notes; closing asks before discarding, and the draft is kept in the browser like any
+unsaved work. It becomes a curriculum version only when the professor saves it, through the same
+validated upload as a hand-built taxonomy.
+
+**No book is read.** An earlier version drafted from a book's outline; it was dropped because it
+copied the book's chapter structure into the taxonomy and tied the course to one textbook. The
+professor's intent decides the shape; the books still ground the *questions* later, so a subtopic
+no book covers shows up as a coverage gap, not as an error here.
+
+**The instruction** (`app/curriculum/drafting.py`) is subject-neutral and says what the product
+does with the result: topics are walked in order, each subtopic costs ~9 reviewed questions, and
+a subtopic's description is the query that finds its reading passage. The response schema puts an
+`analysis` field first, so the model plans (level, skill areas, dependencies) before it writes
+any topic. Duplicate names, over-long fields and empty topics are repaired rather than rejected;
+the result is then judged by the normal validator.
+
+**ADR-021 still holds where it matters:** a human decides the curriculum, and there is one
+definition of it. What changes is that the app may now *suggest* one.
+
+---
+
+## ADR-053 — No "active" taxonomy: the header selector chooses, and every taxonomy has its own classroom link
+
+**Status:** accepted. Replaces the single installation-wide `prod` classroom link.
+
+The taxonomy selector at the top right is the one place a professor chooses which taxonomy
+they are working in; every course page follows it (Questions, Review queue, Generate, Coverage,
+Classrooms, Roster). The choice is still stored per course (`approved_at`, ADR-051), so it
+survives a reload and is the same in every tab, but the UI no longer calls it "active": there is
+no "Make active" action, and a saved taxonomy that is not selected is simply "saved".
+
+What students get no longer depends on that choice. **Each taxonomy has its own stable classroom
+link**, `/students/join?taxonomy={id}`, backed by a question-set alias `taxonomy-{id}`.
+"Create classroom link" / "Update" freezes that taxonomy's approved questions as a new immutable
+snapshot (ADR-036) and points the alias at it; learners already in a run keep their snapshot.
+So several taxonomies can be taught at once. `POST /api/question-sets/taxonomy/{id}/sync`
+(professor, course-scoped) and `GET /api/question-sets/taxonomy/{id}` (public) implement it.
+
+Old `?set={id}` and `?set=prod` links keep working; the UI no longer creates prod links.

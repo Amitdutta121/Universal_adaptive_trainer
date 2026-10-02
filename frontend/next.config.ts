@@ -14,6 +14,14 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` }];
   },
+  // Professor screens moved under /courses/{id}; an old bookmark lands on the
+  // course list rather than a 404.
+  async redirects() {
+    return ["books", "curriculum", "questions", "review", "coverage", "judges", "dashboard", "feedback"]
+      .flatMap((section) => [`/${section}`, `/${section}/:path*`])
+      .concat(["/students", "/students/roster"])
+      .map((source) => ({ source, destination: "/courses", permanent: false }));
+  },
   typedRoutes: true,
   experimental: {
     // Next's rewrite proxy kills the upstream connection after 30s by default

@@ -1,6 +1,7 @@
 "use client";
 
 import { LogIn, Sparkles } from "lucide-react";
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { QueryError } from "@/components/query-state";
@@ -20,9 +21,9 @@ export function LoginScreen() {
     if (!email.trim() || !password) return;
     try {
       await login.mutateAsync({ email: email.trim(), password });
-      // Not "/": there is no page at the bare root (see NAV_SECTIONS), so this
-      // is the first real professor screen once signed in.
-      router.push("/books");
+      // Every professor screen works inside a course, so signing in lands on
+      // the course list rather than on any one course's screens.
+      router.push("/courses" as Route);
     } catch {
       // Mutation state already carries the error for rendering below.
     }

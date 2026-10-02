@@ -10,10 +10,12 @@ needs them.
 from __future__ import annotations
 
 import secrets
+import uuid
 from datetime import UTC, datetime
 
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
+from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -90,12 +92,39 @@ class TimestampMixin:
 #: its original ``*_json`` name. Nothing about an existing database file changes.
 
 
+class CourseRow(TimestampMixin, Base):
+    """A course: the workspace a professor's books and taxonomies belong to.
+
+    Only books and curriculum versions carry ``course_id`` directly. Everything
+    else reaches its course through one of them -- chapters and sections through
+    their book, topics and subtopics through their version, and questions and
+    question sets through the curriculum version they are generated or frozen
+    against (generation always requires one, see ``app/generation/spec.py``).
+    """
+
+    __tablename__ = "courses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Who created it. Nullable because there is no per-owner scoping yet
+    #: (roadmap F2); recorded now so that feature needs no backfill guesswork.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="SET NULL"), default=None, index=True
+    )
+
+
 class BookRow(TimestampMixin, Base):
     """An imported textbook, as declared by its book JSON document."""
 
     __tablename__ = "books"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    #: Nullable only for rows built outside the API (scripts, unit tests); every
+    #: book the API imports names the course it was imported into.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), default=None, index=True
+    )
     title: Mapped[str] = mapped_column(String(500))
     #: Only populated when the document states an author. Never inferred.
     author: Mapped[str | None] = mapped_column(String(500), default=None)
@@ -240,6 +269,10 @@ class CurriculumVersionRow(TimestampMixin, Base):
     __tablename__ = "curriculum_versions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    #: Nullable for the same reason as ``BookRow.course_id``.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), default=None, index=True
+    )
     label: Mapped[str] = mapped_column(String(200))
     status: Mapped[CurriculumStatus] = mapped_column(
         StrEnumType(CurriculumStatus, 32), default=CurriculumStatus.PROPOSED

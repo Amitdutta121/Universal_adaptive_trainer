@@ -52,6 +52,28 @@ const acceptJson: Middleware = {
   },
 };
 
+/** The header naming the course a request works inside (`app/web/routes/api/deps.py`). */
+export const COURSE_HEADER = "X-Course-Id";
+
+/** Matches `courseIdFromPath` in `lib/course.ts`, which is a client module and not imported here. */
+const COURSE_SEGMENT = /^\/courses\/(\d+)(?:\/|$)/;
+
+/**
+ * A browser request made from inside a course names that course.
+ *
+ * Read from the page's own URL rather than passed by each caller, so no screen
+ * can forget it. A Server Component has no `window` and sets the header itself
+ * (see `app/courses/[courseId]/questions/[question_id]/page.tsx`).
+ */
+const courseHeader: Middleware = {
+  async onRequest({ request }) {
+    if (typeof window === "undefined" || request.headers.has(COURSE_HEADER)) return request;
+    const match = COURSE_SEGMENT.exec(window.location.pathname);
+    if (match) request.headers.set(COURSE_HEADER, match[1]);
+    return request;
+  },
+};
+
 /**
  * Build a client against an explicit origin.
  *
@@ -61,7 +83,7 @@ const acceptJson: Middleware = {
  */
 export function createApiClient(baseUrl: string) {
   const client = createClient<paths>({ baseUrl });
-  client.use(acceptJson);
+  client.use(acceptJson, courseHeader);
   return client;
 }
 

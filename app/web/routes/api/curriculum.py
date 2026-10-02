@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
 from app.config import get_settings
 from app.curriculum import (
@@ -30,9 +30,11 @@ from app.curriculum import (
     proposal_warnings,
     taxonomy_authoring_prompt,
 )
+from app.curriculum.drafting import DraftBrief, draft_taxonomy
 from app.errors import NotFoundError
+from app.llm.client import StructuredLLMClient
 from app.persistence.repositories import BookRepository, CurriculumRepository
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookSummary,
     CurriculumItemLabelUpdate,
@@ -48,6 +50,8 @@ from app.web.routes.api.schemas import (
     SubtopicParent,
     SubtopicSummary,
     TaxonomyDocumentGuide,
+    TaxonomyDraftRequest,
+    TaxonomyDraftResponse,
     TopicOut,
 )
 
@@ -57,12 +61,14 @@ router = APIRouter(prefix="/curriculum", tags=["curriculum"])
 
 
 @router.get("/versions", response_model=CurriculumListResponse)
-def list_versions(session: DbSession, limit: int = 50) -> CurriculumListResponse:
-    """Every curriculum version, newest first, plus which one is approved."""
+def list_versions(
+    session: DbSession, course: CourseScope, limit: int = 50
+) -> CurriculumListResponse:
+    """Every curriculum version in the course, newest first, plus which one is approved."""
     repo = CurriculumRepository(session)
-    approved = repo.get_approved()
-    latest = repo.get_latest()
-    rows = repo.list_versions(limit=limit)
+    approved = repo.get_approved(course_id=course)
+    latest = repo.get_latest(course_id=course)
+    rows = repo.list_versions(limit=limit, course_id=course)
     # One grouped query for the whole page rather than a count per row.
     counts = repo.subtopic_counts_for([row.id for row in rows])
     return CurriculumListResponse(
@@ -72,7 +78,7 @@ def list_versions(session: DbSession, limit: int = 50) -> CurriculumListResponse
         ],
         approved_version_id=approved.id if approved else None,
         latest_version_id=latest.id if latest else None,
-        total=repo.count(),
+        total=repo.count(course_id=course),
     )
 
 
@@ -81,19 +87,45 @@ def list_versions(session: DbSession, limit: int = 50) -> CurriculumListResponse
 )
 def import_taxonomy(
     session: DbSession,
+    course: CourseScope,
     file: Annotated[UploadFile, File()],
 ) -> CurriculumVersionDetail:
     """Validate and import a fixed Topic -> Subtopic taxonomy document."""
     data = file.file.read()
     filename = file.filename or "taxonomy.json"
     try:
-        version = TaxonomyImportService(session).import_upload(filename=filename, data=data)
+        version = TaxonomyImportService(session).import_upload(
+            filename=filename, data=data, course_id=course
+        )
     except Exception:
         session.rollback()
         logger.info("Rejected taxonomy upload %r", filename)
         raise
     session.commit()
-    return get_version(session, version.id)
+    return get_version(session, course, version.id)
+
+
+def get_draft_client() -> StructuredLLMClient | None:
+    """The client drafts run on. ``None`` builds one from settings; tests override it."""
+    return None
+
+
+@router.post("/drafts", response_model=TaxonomyDraftResponse)
+def draft_with_ai(
+    payload: TaxonomyDraftRequest,
+    client: Annotated[StructuredLLMClient | None, Depends(get_draft_client)],
+) -> TaxonomyDraftResponse:
+    """Ask the LLM to propose a taxonomy from what the professor wrote. Nothing is saved.
+
+    The draft opens in the builder; it becomes a curriculum version only when the
+    professor saves it there (ADR-052).
+    """
+    draft = draft_taxonomy(DraftBrief(**payload.model_dump()), client=client)
+    return TaxonomyDraftResponse(
+        drafted_by=draft.drafted_by,
+        document=draft.document.model_dump(),
+        analysis=draft.analysis,
+    )
 
 
 @router.get("/document-guide", response_model=TaxonomyDocumentGuide)
@@ -116,22 +148,25 @@ def document_guide() -> TaxonomyDocumentGuide:
 
 
 @router.get("/approved", response_model=CurriculumVersionDetail)
-def get_approved(session: DbSession) -> CurriculumVersionDetail:
-    """The curriculum version question generation is allowed to use."""
-    approved = CurriculumRepository(session).get_approved()
+def get_approved(session: DbSession, course: CourseScope) -> CurriculumVersionDetail:
+    """The curriculum version question generation is allowed to use, in this course."""
+    approved = CurriculumRepository(session).get_approved(course_id=course)
     if approved is None:
         raise NotFoundError(
             "No curriculum version has been approved yet.",
             detail="Upload a valid taxonomy document first.",
         )
-    return get_version(session, approved.id)
+    return get_version(session, course, approved.id)
 
 
 @router.get("/versions/{version_id}", response_model=CurriculumVersionDetail)
-def get_version(session: DbSession, version_id: int) -> CurriculumVersionDetail:
+def get_version(
+    session: DbSession, course: CourseScope, version_id: int
+) -> CurriculumVersionDetail:
     """One curriculum version with its full Topic -> Subtopic hierarchy."""
     repo = CurriculumRepository(session)
     version = repo.get_with_tree(version_id)
+    ensure_in_course(version.course_id, course, f"Curriculum version {version_id}")
     books: list[BookSummary] = []
     for book_id in version.source_book_ids or []:
         try:
@@ -158,22 +193,26 @@ def get_version(session: DbSession, version_id: int) -> CurriculumVersionDetail:
 
 @router.patch("/versions/{version_id}", response_model=CurriculumVersionDetail)
 def update_version(
-    session: DbSession, version_id: int, update: CurriculumVersionLabelUpdate
+    session: DbSession, course: CourseScope, version_id: int, update: CurriculumVersionLabelUpdate
 ) -> CurriculumVersionDetail:
     """Rename a curriculum version. Its status and its tree are unchanged."""
+    _version_in_course(session, version_id, course)
     CurriculumLibraryService(session).update_version_label(version_id, label=update.label)
     session.commit()
-    return get_version(session, version_id)
+    return get_version(session, course, version_id)
 
 
 @router.put("/versions/{version_id}/tree", response_model=CurriculumVersionDetail)
-def update_tree(session: DbSession, version_id: int, update: TreeUpdate) -> CurriculumVersionDetail:
+def update_tree(
+    session: DbSession, course: CourseScope, version_id: int, update: TreeUpdate
+) -> CurriculumVersionDetail:
     """Edit a version's tree in place: rename, add, reorder and soft-delete (ADR-050).
 
     The body is the whole tree as it should now be. A row that is no longer listed is hidden, not
     removed, so anything that points at it still resolves. The version's status is unchanged, so
     editing the active taxonomy changes what the product uses immediately.
     """
+    _version_in_course(session, version_id, course)
     try:
         CurriculumTreeService(session).apply(version_id, update)
     except Exception:
@@ -182,15 +221,18 @@ def update_tree(session: DbSession, version_id: int, update: TreeUpdate) -> Curr
     session.commit()
     # The session keeps what it loaded across a commit, and the tree was just rewritten under it.
     session.expire_all()
-    return get_version(session, version_id)
+    return get_version(session, course, version_id)
 
 
 @router.post("/versions/{version_id}/activate", response_model=CurriculumVersionDetail)
-def activate_version(session: DbSession, version_id: int) -> CurriculumVersionDetail:
-    """Make an already-approved curriculum version the live one again."""
+def activate_version(
+    session: DbSession, course: CourseScope, version_id: int
+) -> CurriculumVersionDetail:
+    """Make an already-approved curriculum version the live one in its course again."""
+    _version_in_course(session, version_id, course)
     CurriculumLibraryService(session).activate(version_id)
     session.commit()
-    return get_version(session, version_id)
+    return get_version(session, course, version_id)
 
 
 @router.patch("/topics/{topic_id}", response_model=TopicOut)
@@ -221,7 +263,7 @@ def update_subtopic(
 
 @router.delete("/versions/{version_id}", response_model=CurriculumVersionDeletion)
 def delete_version(
-    session: DbSession, version_id: int, force: bool = False
+    session: DbSession, course: CourseScope, version_id: int, force: bool = False
 ) -> CurriculumVersionDeletion:
     """Delete a curriculum version, its topics and its subtopics.
 
@@ -230,6 +272,7 @@ def delete_version(
     have no ``force`` path -- a frozen question set names the version, or it is
     the approved one -- because neither leaves a professor anything to decide.
     """
+    _version_in_course(session, version_id, course)
     repo = CurriculumRepository(session)
     topic_count = len(repo.topic_ids_in(version_id))
     subtopic_count = repo.subtopic_count(version_id)
@@ -241,6 +284,11 @@ def delete_version(
         deleted_subtopic_count=subtopic_count,
         stranded=CurriculumVersionUsage.from_usage(stranded),
     )
+
+
+def _version_in_course(session: DbSession, version_id: int, course: int | None) -> None:
+    version = CurriculumRepository(session).get_version(version_id)
+    ensure_in_course(version.course_id, course, f"Curriculum version {version_id}")
 
 
 @router.get("/subtopics/{subtopic_id}", response_model=SubtopicDetail)

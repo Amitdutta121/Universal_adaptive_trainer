@@ -47,7 +47,14 @@ class BookImportService:
         self._books = BookRepository(session)
         self._structure = BookStructureRepository(session)
 
-    def import_upload(self, *, filename: str, data: bytes, title: str | None = None) -> BookRow:
+    def import_upload(
+        self,
+        *,
+        filename: str,
+        data: bytes,
+        title: str | None = None,
+        course_id: int | None = None,
+    ) -> BookRow:
         """Validate and store one uploaded book document.
 
         Args:
@@ -55,6 +62,7 @@ class BookImportService:
             data: the file's bytes -- a UTF-8 JSON book document, or a PDF.
             title: an optional professor-supplied title, which overrides the one
                 in the document.
+            course_id: the course the book is imported into.
 
         Returns:
             The persisted book row, in ``IMPORTED`` or ``PARTIAL`` status.
@@ -77,6 +85,7 @@ class BookImportService:
         stored_name, stored_path = store_upload(data, filename, self._settings)
         book = self._books.add(
             BookRow(
+                course_id=course_id,
                 title=(title or "").strip() or document.title,
                 author=document.author,
                 original_filename=filename,

@@ -10,8 +10,18 @@
  */
 
 import { headers } from "next/headers";
+import { COURSE_HEADER } from "@/lib/api/client";
 
 export async function forwardedCookieHeader(): Promise<Record<string, string>> {
   const cookie = (await headers()).get("cookie");
   return cookie ? { Cookie: cookie } : {};
+}
+
+/**
+ * The cookie plus the course the page belongs to. The browser client reads the
+ * course from `window.location`; a Server Component has no window, so a page under
+ * `/courses/[courseId]` passes its own `courseId` param here.
+ */
+export async function courseRequestHeaders(courseId: string): Promise<Record<string, string>> {
+  return { ...(await forwardedCookieHeader()), [COURSE_HEADER]: courseId };
 }

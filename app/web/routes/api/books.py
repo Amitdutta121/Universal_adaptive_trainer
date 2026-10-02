@@ -39,7 +39,7 @@ from app.ingestion import (
 )
 from app.ingestion.storage import resolve_stored_path
 from app.persistence.repositories import BookRepository, BookStructureRepository
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookDeletion,
     BookDetail,
@@ -60,23 +60,34 @@ router = APIRouter(prefix="/books", tags=["books"])
 
 
 @router.get("", response_model=BookListResponse)
-def list_books(session: DbSession, limit: int = 50, usable_only: bool = False) -> BookListResponse:
-    """Every imported book, newest first.
+def list_books(
+    session: DbSession, course: CourseScope, limit: int = 50, usable_only: bool = False
+) -> BookListResponse:
+    """Every imported book in the course, newest first.
 
     ``usable_only`` restricts the list to books that have sections to generate
     from, which is what a generation form needs.
     """
     repo = BookRepository(session)
-    rows = repo.list_usable() if usable_only else repo.list_recent(limit=limit)
+    rows = (
+        repo.list_usable(course_id=course)
+        if usable_only
+        else repo.list_recent(limit=limit, course_id=course)
+    )
     return BookListResponse(
         books=[BookSummary.from_row(row) for row in rows],
-        total=repo.count(),
+        total=repo.count(course_id=course),
     )
+
+
+def _book_in_course(session: Session, book_id: int, course: int | None) -> None:
+    ensure_in_course(BookRepository(session).get(book_id).course_id, course, f"Book {book_id}")
 
 
 @router.post("", response_model=BookSummary, status_code=status.HTTP_201_CREATED)
 def import_book(
     session: DbSession,
+    course: CourseScope,
     file: Annotated[UploadFile, File()],
     title: Annotated[str, Form()] = "",
 ) -> BookSummary:
@@ -88,7 +99,9 @@ def import_book(
     data = file.file.read()
     filename = file.filename or "upload"
     try:
-        book = BookImportService(session).import_upload(filename=filename, data=data, title=title)
+        book = BookImportService(session).import_upload(
+            filename=filename, data=data, title=title, course_id=course
+        )
     except Exception:
         session.rollback()
         logger.info("Rejected book upload %r", filename)
@@ -119,9 +132,10 @@ def document_guide() -> BookDocumentGuide:
 
 
 @router.get("/{book_id}", response_model=BookDetail)
-def get_book(session: DbSession, book_id: int) -> BookDetail:
+def get_book(session: DbSession, course: CourseScope, book_id: int) -> BookDetail:
     """One book: import status, warnings and its chapter/section hierarchy."""
     book = BookRepository(session).get_with_structure(book_id)
+    ensure_in_course(book.course_id, course, f"Book {book_id}")
     chapters = SourceRetrieval(session).chapters_in_book(book_id)
     return BookDetail(
         book=BookSummary.from_row(book),
@@ -133,8 +147,11 @@ def get_book(session: DbSession, book_id: int) -> BookDetail:
 
 
 @router.patch("/{book_id}", response_model=BookSummary)
-def update_book(session: DbSession, book_id: int, update: BookMetadataUpdate) -> BookSummary:
+def update_book(
+    session: DbSession, course: CourseScope, book_id: int, update: BookMetadataUpdate
+) -> BookSummary:
     """Edit a book's labels. Omitted fields are left as they are."""
+    _book_in_course(session, book_id, course)
     book = BookLibraryService(session).update_metadata(
         book_id, title=update.title, author=update.author, notes=update.notes
     )
@@ -143,19 +160,22 @@ def update_book(session: DbSession, book_id: int, update: BookMetadataUpdate) ->
 
 
 @router.delete("/{book_id}", response_model=BookDeletion)
-def delete_book(session: DbSession, book_id: int, force: bool = False) -> BookDeletion:
+def delete_book(
+    session: DbSession, course: CourseScope, book_id: int, force: bool = False
+) -> BookDeletion:
     """Delete a book, its structure and its retained document.
 
     Refuses with 409 while questions cite the book, naming how many. ``force``
     proceeds anyway; the questions are kept and their citations are stranded.
     """
+    _book_in_course(session, book_id, course)
     stranded = BookLibraryService(session).delete(book_id, force=force)
     session.commit()
     return BookDeletion(deleted_book_id=book_id, stranded_question_count=stranded)
 
 
 @router.get("/{book_id}/source")
-def get_book_source(session: DbSession, book_id: int) -> FileResponse:
+def get_book_source(session: DbSession, course: CourseScope, book_id: int) -> FileResponse:
     """The original PDF as uploaded, for in-browser rendering.
 
     Only a book imported from a PDF (``SourceFormat.BOOK_PDF``) has a source
@@ -167,6 +187,7 @@ def get_book_source(session: DbSession, book_id: int) -> FileResponse:
     client can fetch it inline.
     """
     book = BookRepository(session).get(book_id)
+    ensure_in_course(book.course_id, course, f"Book {book_id}")
     if book.source_format != SourceFormat.BOOK_PDF or not book.stored_filename:
         raise NotFoundError(f"Book {book_id} has no retained PDF source file.")
     settings = get_settings()
@@ -177,10 +198,10 @@ def get_book_source(session: DbSession, book_id: int) -> FileResponse:
 
 
 @router.get("/{book_id}/sections", response_model=SectionListResponse)
-def list_sections(session: DbSession, book_id: int) -> SectionListResponse:
+def list_sections(session: DbSession, course: CourseScope, book_id: int) -> SectionListResponse:
     """Every section of one book in reading order, without section text."""
     # Confirms the book exists, so an unknown id is a 404 rather than an empty list.
-    BookRepository(session).get(book_id)
+    _book_in_course(session, book_id, course)
     sections = SourceRetrieval(session).sections_in_book(book_id)
     return SectionListResponse(
         sections=[SectionSummary.from_section(section) for section in sections],
@@ -189,8 +210,11 @@ def list_sections(session: DbSession, book_id: int) -> SectionListResponse:
 
 
 @router.get("/{book_id}/sections/{section_id}", response_model=SectionDetail)
-def get_section(session: DbSession, book_id: int, section_id: int) -> SectionDetail:
+def get_section(
+    session: DbSession, course: CourseScope, book_id: int, section_id: int
+) -> SectionDetail:
     """One section's verbatim text plus the citation that makes it traceable."""
+    _book_in_course(session, book_id, course)
     return _section_detail(session, book_id=book_id, section_id=section_id)
 
 

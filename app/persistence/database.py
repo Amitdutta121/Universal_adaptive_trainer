@@ -1,8 +1,9 @@
 """Engine, session and schema bootstrap.
 
-SQLite via SQLAlchemy 2.0. The schema is created with ``create_all`` for now;
-a migration tool will be introduced once the tables stop changing shape
-(see ``docs/DECISIONS.md``).
+SQLite via SQLAlchemy 2.0. A fresh database is built with ``create_all``; a
+change to an existing table ships as an Alembic migration under
+``migrations/versions`` and is applied on start by :func:`init_db`
+(see ``docs/DECISIONS.md`` ADR-051, superseding ADR-008).
 """
 
 from __future__ import annotations
@@ -12,7 +13,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, inspect
+from alembic import command
+from alembic.config import Config as AlembicConfig
+from sqlalchemy import Connection, Engine, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import Settings, get_settings
@@ -79,16 +82,49 @@ def get_session_factory() -> sessionmaker[Session]:
     return _session_factory
 
 
-def init_db(engine: Engine | None = None) -> None:
-    """Create any missing tables, then check existing ones are up to date.
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+#: The revision every pre-Alembic database is assumed to match (ADR-008's schema).
+BASELINE_REVISION = "0001_baseline"
 
-    Safe to call repeatedly. Import of :mod:`app.persistence.models` is what
-    registers the tables on :class:`Base`, so it happens here explicitly.
+
+def _alembic_config(connection: Connection) -> AlembicConfig:
+    config = AlembicConfig()
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    config.attributes["connection"] = connection
+    return config
+
+
+def init_db(engine: Engine | None = None) -> None:
+    """Bring the database to the current schema, then check it matches the models.
+
+    Three cases, all safe to repeat:
+
+    - **Empty database:** ``create_all`` builds every table, then it is stamped at
+      head -- Alembic's documented way to start a fresh database, and fast enough
+      for the test suite to do per test.
+    - **Database from before migrations existed** (tables, no ``alembic_version``):
+      stamped at :data:`BASELINE_REVISION`, then upgraded.
+    - **Migrated database:** upgraded to head; a no-op when already there.
+
+    Import of :mod:`app.persistence.models` is what registers the tables on
+    :class:`Base`, so it happens here explicitly.
     """
     from app.persistence import models  # noqa: F401  (registers mappers)
 
     target = engine or get_engine()
-    Base.metadata.create_all(bind=target)
+    with target.begin() as connection:
+        tables = set(inspect(connection).get_table_names())
+        config = _alembic_config(connection)
+        if not tables - {"alembic_version"}:
+            Base.metadata.create_all(bind=connection)
+            command.stamp(config, "head")
+        else:
+            if "alembic_version" not in tables:
+                command.stamp(config, BASELINE_REVISION)
+            command.upgrade(config, "head")
+            # Tables added to the models without a migration still get created, as
+            # before Alembic; only changes to existing tables need a migration.
+            Base.metadata.create_all(bind=connection)
     verify_schema(target)
     logger.info("Database schema ready (%d tables)", len(Base.metadata.tables))
 
@@ -98,9 +134,9 @@ def verify_schema(engine: Engine | None = None) -> None:
 
     ``create_all`` adds missing *tables* but never alters existing ones, so a
     database file created before a model gained a column would otherwise survive
-    startup and fail later with a bare "no such column". There is no migration
-    tool yet (see ``docs/DECISIONS.md`` ADR-008), so the honest response is to
-    name the drift and the remedy.
+    startup and fail later with a bare "no such column". This runs after
+    :func:`init_db` has applied every migration, so remaining drift means a model
+    gained a column without one (ADR-051); the honest response is to name it.
 
     Raises:
         SchemaOutOfDateError: if any mapped column is absent from the database.
@@ -127,8 +163,8 @@ def verify_schema(engine: Engine | None = None) -> None:
     raise SchemaOutOfDateError(
         "The database file is older than the current data model.",
         detail=(
-            f"Missing column(s): {', '.join(sorted(drift))}. There is no migration tool yet, "
-            f"so delete the database file and let it be recreated on the next start: {location}"
+            f"Missing column(s): {', '.join(sorted(drift))} in {location}. A model gained "
+            "a column without a migration: add one under app/persistence/migrations/versions."
         ),
     )
 

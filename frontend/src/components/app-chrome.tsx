@@ -69,13 +69,20 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   const isLoginRoute = pathname === "/login";
   // A multi-column workspace, not a document — capping it to reading width
   // wastes a wide monitor instead of giving the PDF pane the room it needs.
-  const isWideRoute = pathname.startsWith("/questions/generate/single");
+  const isWideRoute = /^\/courses\/\d+\/questions\/generate\/single/.test(pathname);
+  // The course list is where a professor lands after login, before any course is
+  // open, so there is no course navigation to show yet: signed-in, no sidebar.
+  const isCoursePicker = pathname === "/courses";
   // Standalone design prototypes under /experiments bring their own full-page
   // shell and never call the API, so they skip both the console chrome and the
   // auth gate — the same treatment the login route gets.
   const isExperimentRoute = pathname.startsWith("/experiments");
+  // The landing page at the bare root is the first thing a new install shows,
+  // before any account or backend exists, so it must be reachable logged out.
+  const isLandingRoute = pathname === "/";
 
-  if (isLoginRoute || isExperimentRoute) return <>{children}</>;
+  if (isLoginRoute || isExperimentRoute || isLandingRoute) return <>{children}</>;
+  if (isCoursePicker) return <AuthGate>{children}</AuthGate>;
   return isStudentRoute ? (
     <StudentChrome>{children}</StudentChrome>
   ) : (

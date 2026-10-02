@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.adaptive import AdaptiveTrainingEngine
 from app.auth.backend import current_active_user
-from app.coverage import get_prod_question_set
+from app.coverage import get_prod_question_set, get_taxonomy_question_set
 from app.domain.mastery import difficulty_for_mastery, mastery_band
 from app.errors import ActiveSessionExistsError, DomainRuleError, NotFoundError
 from app.persistence.repositories import (
@@ -138,6 +138,15 @@ def _passes_activity(last_activity: datetime | None, band: str, *, now: datetime
 def get_prod_classroom(session: DbSession) -> QuestionSetOut:
     """The current production classroom snapshot behind the stable join link."""
     return QuestionSetOut.from_row(get_prod_question_set(session), is_prod=True)
+
+
+@router.get("/question-sets/taxonomy/{curriculum_version_id}", response_model=QuestionSetOut)
+def get_taxonomy_classroom(session: DbSession, curriculum_version_id: int) -> QuestionSetOut:
+    """The snapshot behind a taxonomy's classroom link; public, like the join page.
+
+    404 until the professor has created the link for this taxonomy.
+    """
+    return QuestionSetOut.from_row(get_taxonomy_question_set(session, curriculum_version_id))
 
 
 @router.get("/question-sets/{set_version_id}", response_model=QuestionSetOut)

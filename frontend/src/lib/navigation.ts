@@ -7,6 +7,9 @@
  *
  * `review` and `generate` are distinct routes because they are screens of their
  * own in the React console, even though their data hangs off the questions API.
+ *
+ * Every `path` is relative to the open course: the sidebar and dashboard turn
+ * `/books` into `/courses/{id}/books` with `coursePath` (`lib/course.ts`).
  */
 
 import {
@@ -18,24 +21,23 @@ import {
   type LucideIcon,
   Network,
   Scale,
-  ScrollText,
   Users,
   Wand2,
 } from "lucide-react";
-import type { Route } from "next";
 
 /** A sidebar-only sub-link, nested under a `NavSection` that has more than one screen. */
 export interface NavChild {
   key: string;
   label: string;
-  path: Route;
+  /** Relative to the open course. */
+  path: string;
 }
 
 export interface NavSection {
   key: string;
   label: string;
-  /** `Route` is Next's typed-routes union: a path with no page fails to compile. */
-  path: Route;
+  /** Relative to the open course, e.g. `/books`. */
+  path: string;
   summary: string;
   icon: LucideIcon;
   /**
@@ -59,7 +61,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "curriculum",
     label: "Curriculum",
     path: "/curriculum",
-    summary: "Build a Topic → Subtopic taxonomy, or import one you already have. The active taxonomy is what questions and coverage use.",
+    summary:
+      "Build a Topic → Subtopic taxonomy, or import one you already have. Every page follows the taxonomy chosen at the top right.",
     icon: Network,
   },
   {
@@ -95,13 +98,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     summary:
       "Professor feedback now lives here: review, approve, reject, or edit queued questions.",
     icon: ClipboardCheck,
-  },
-  {
-    key: "instructions",
-    label: "Instructions",
-    path: "/instructions",
-    summary: "What the generator is told for each question type, learned from your reviews.",
-    icon: ScrollText,
   },
   {
     key: "judges",

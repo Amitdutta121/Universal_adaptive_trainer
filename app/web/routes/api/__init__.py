@@ -13,6 +13,7 @@ from app.web.routes.api import (
     auth,
     books,
     calibration,
+    courses,
     coverage,
     curriculum,
     evaluation,
@@ -34,6 +35,7 @@ router.include_router(auth.router)
 #: with the anonymous student join/session flow, so it protects its own
 #: routes individually instead (see the ``dependencies=`` on those handlers).
 _professor_only = [
+    courses.router,
     books.router,
     curriculum.router,
     questions.router,
@@ -56,6 +58,7 @@ __all__ = [
     "auth",
     "books",
     "calibration",
+    "courses",
     "coverage",
     "curriculum",
     "evaluation",

@@ -23,7 +23,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.coverage import build_coverage_report, create_question_set, sync_prod_question_set
+from app.coverage import (
+    build_coverage_report,
+    create_question_set,
+    sync_prod_question_set,
+    sync_taxonomy_question_set,
+    taxonomy_alias,
+)
 from app.domain.enums import QuestionType
 from app.errors import LLMRequestError, MalformedModelOutputError
 from app.evaluation import new_run_id
@@ -33,7 +39,7 @@ from app.persistence.repositories import CurriculumRepository, QuestionSetReposi
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.dedup import flag_possible_duplicates
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.questions import approved_curriculum_id
 from app.web.routes.api.retrieval import EmbedderDep
 from app.web.routes.api.schemas import (
@@ -47,6 +53,8 @@ from app.web.routes.api.schemas import (
     QuestionSetListResponse,
     QuestionSetOut,
     SkippedRunTarget,
+    TaxonomyLinkListResponse,
+    TaxonomyLinkOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,14 +95,16 @@ GenerationClientDep = Annotated[StructuredLLMClient | None, Depends(get_generati
 
 
 @router.get("/coverage", response_model=CoverageReportResponse)
-def coverage(session: DbSession, set_version_id: int | None = None) -> CoverageReportResponse:
+def coverage(
+    session: DbSession, course: CourseScope, set_version_id: int | None = None
+) -> CoverageReportResponse:
     """The subtopic x difficulty grid over approved questions.
 
     Without ``set_version_id`` this is the live bank -- what to generate next.
     With one it is that frozen set -- what a training run would actually serve.
     """
     return CoverageReportResponse.from_report(
-        build_coverage_report(session, set_version_id=set_version_id),
+        build_coverage_report(session, set_version_id=set_version_id, course_id=course),
         active_run_topic_ids=active_generation_topic_ids(),
     )
 
@@ -102,6 +112,7 @@ def coverage(session: DbSession, set_version_id: int | None = None) -> CoverageR
 @router.post("/coverage/generation-runs", response_model=GenerationRunResponse)
 def start_generation_run(
     session: DbSession,
+    course: CourseScope,
     payload: FillGapsRequest,
     embedder: EmbedderDep,
     client: GenerationClientDep,
@@ -115,7 +126,9 @@ def start_generation_run(
     failure on one target is reported beside the questions the run did produce
     (ADR-032). The new questions land in the review queue with no extra step.
     """
-    return run_generation_for_gaps(session, payload.targets, embedder=embedder, client=client)
+    return run_generation_for_gaps(
+        session, payload.targets, embedder=embedder, client=client, course_id=course
+    )
 
 
 def run_generation_for_gaps(
@@ -124,6 +137,7 @@ def run_generation_for_gaps(
     *,
     embedder: Embedder,
     client: StructuredLLMClient | None,
+    course_id: int | None = None,
 ) -> GenerationRunResponse:
     """Wire retrieval to generation for a set of coverage gap targets.
 
@@ -132,7 +146,7 @@ def run_generation_for_gaps(
     """
     # Resolved before any model call: an unapproved curriculum or an unknown
     # subtopic must report the fixable problem, not leave a partial run behind.
-    curriculum_version_id = approved_curriculum_id(session)
+    curriculum_version_id = approved_curriculum_id(session, course_id)
     curriculum = CurriculumRepository(session)
     resolved = [
         (target, curriculum.get_subtopic(target.subtopic_id).topic_id) for target in targets
@@ -239,8 +253,8 @@ def run_generation_for_gaps(
 
 
 @router.get("/question-sets", response_model=QuestionSetListResponse)
-def list_question_sets(session: DbSession) -> QuestionSetListResponse:
-    rows = QuestionSetRepository(session).list_versions()
+def list_question_sets(session: DbSession, course: CourseScope) -> QuestionSetListResponse:
+    rows = QuestionSetRepository(session).list_versions(course_id=course)
     return QuestionSetListResponse(
         sets=[
             QuestionSetOut.from_row(
@@ -258,17 +272,68 @@ def list_question_sets(session: DbSession) -> QuestionSetListResponse:
     response_model=QuestionSetOut,
     status_code=status.HTTP_201_CREATED,
 )
-def create_set(session: DbSession, payload: CreateQuestionSetRequest) -> QuestionSetOut:
-    """Freeze every approved question of the approved curriculum under a name."""
-    row = create_question_set(session, label=payload.label, notes=payload.notes)
+def create_set(
+    session: DbSession, course: CourseScope, payload: CreateQuestionSetRequest
+) -> QuestionSetOut:
+    """Freeze every approved question of the course's approved curriculum under a name."""
+    row = create_question_set(session, label=payload.label, notes=payload.notes, course_id=course)
     return QuestionSetOut.from_row(row)
+
 
 @router.post(
     "/question-sets/prod/sync",
     response_model=QuestionSetOut,
     status_code=status.HTTP_201_CREATED,
 )
-def sync_prod_set(session: DbSession) -> QuestionSetOut:
+def sync_prod_set(session: DbSession, course: CourseScope) -> QuestionSetOut:
+    """Superseded by per-taxonomy links; kept so an existing prod link can still be refreshed."""
+    return _sync_prod(session, course)
+
+
+@router.get("/question-sets/taxonomy-links", response_model=TaxonomyLinkListResponse)
+def list_taxonomy_links(session: DbSession, course: CourseScope) -> TaxonomyLinkListResponse:
+    """Every taxonomy in the course with its classroom link's current snapshot, if any.
+
+    One call for the whole list, so the Classrooms page does not ask once per taxonomy.
+    """
+    sets = QuestionSetRepository(session)
+    links: list[TaxonomyLinkOut] = []
+    for version in CurriculumRepository(session).list_versions(limit=200, course_id=course):
+        alias = sets.get_alias(taxonomy_alias(version.id))
+        classroom = alias.set_version if alias is not None else None
+        links.append(
+            TaxonomyLinkOut(
+                curriculum_version_id=version.id,
+                label=version.label,
+                approved_question_count=len(
+                    sets.approved_question_ids(curriculum_version_id=version.id)
+                ),
+                classroom=QuestionSetOut.from_row(classroom) if classroom is not None else None,
+            )
+        )
+    return TaxonomyLinkListResponse(links=links)
+
+
+@router.post(
+    "/question-sets/taxonomy/{curriculum_version_id}/sync",
+    response_model=QuestionSetOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def sync_taxonomy_set(
+    session: DbSession, course: CourseScope, curriculum_version_id: int
+) -> QuestionSetOut:
+    """Freeze this taxonomy's approved questions and point its classroom link at them.
+
+    Each taxonomy has its own stable link (``/students/join?taxonomy={id}``), so
+    any taxonomy can be taught, not only the selected one.
+    """
+    version = CurriculumRepository(session).get_version(curriculum_version_id)
+    ensure_in_course(version.course_id, course, f"Curriculum version {curriculum_version_id}")
+    row = sync_taxonomy_question_set(session, curriculum_version_id)
+    return QuestionSetOut.from_row(row)
+
+
+def _sync_prod(session: DbSession, course: int | None) -> QuestionSetOut:
     """Freeze the approved bank now and repoint the stable prod classroom link."""
-    row = sync_prod_question_set(session)
+    row = sync_prod_question_set(session, course_id=course)
     return QuestionSetOut.from_row(row, is_prod=True)

@@ -48,7 +48,7 @@ export interface paths {
         };
         /**
          * Counts
-         * @description One count per section.
+         * @description One count per section. Books, taxonomies and questions are the course's own.
          */
         get: operations["counts_api_counts_get"];
         put?: never;
@@ -113,6 +113,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Courses
+         * @description Every course, newest first, with what has been built in each.
+         */
+        get: operations["list_courses_api_courses_get"];
+        put?: never;
+        /**
+         * Create Course
+         * @description Create an empty course owned by the professor creating it.
+         */
+        post: operations["create_course_api_courses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Courses Overview
+         * @description The course list's dashboard: each course's progress, and recent activity.
+         */
+        get: operations["courses_overview_api_courses_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Course */
+        get: operations["get_course_api_courses__course_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Course
+         * @description Rename a course or change its description.
+         */
+        patch: operations["update_course_api_courses__course_id__patch"];
+        trace?: never;
+    };
     "/api/books": {
         parameters: {
             query?: never;
@@ -122,7 +187,7 @@ export interface paths {
         };
         /**
          * List Books
-         * @description Every imported book, newest first.
+         * @description Every imported book in the course, newest first.
          *
          *     ``usable_only`` restricts the list to books that have sections to generate
          *     from, which is what a generation form needs.
@@ -275,7 +340,7 @@ export interface paths {
         };
         /**
          * List Versions
-         * @description Every curriculum version, newest first, plus which one is approved.
+         * @description Every curriculum version in the course, newest first, plus which one is approved.
          */
         get: operations["list_versions_api_curriculum_versions_get"];
         put?: never;
@@ -284,6 +349,29 @@ export interface paths {
          * @description Validate and import a fixed Topic -> Subtopic taxonomy document.
          */
         post: operations["import_taxonomy_api_curriculum_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft With Ai
+         * @description Ask the LLM to propose a taxonomy from what the professor wrote. Nothing is saved.
+         *
+         *     The draft opens in the builder; it becomes a curriculum version only when the
+         *     professor saves it there (ADR-052).
+         */
+        post: operations["draft_with_ai_api_curriculum_drafts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -323,7 +411,7 @@ export interface paths {
         };
         /**
          * Get Approved
-         * @description The curriculum version question generation is allowed to use.
+         * @description The curriculum version question generation is allowed to use, in this course.
          */
         get: operations["get_approved_api_curriculum_approved_get"];
         put?: never;
@@ -402,7 +490,7 @@ export interface paths {
         put?: never;
         /**
          * Activate Version
-         * @description Make an already-approved curriculum version the live one again.
+         * @description Make an already-approved curriculum version the live one in its course again.
          */
         post: operations["activate_version_api_curriculum_versions__version_id__activate_post"];
         delete?: never;
@@ -573,7 +661,7 @@ export interface paths {
          * @description Generate the questions a per-chunk spec sheet asks for (ADR-044).
          *
          *     One chunk may produce several questions, at several difficulties, in several
-         *     formats — which is what separates this from ``/generate``, where a run carries
+         *     formats â€” which is what separates this from ``/generate``, where a run carries
          *     one difficulty and one format for every section in it.
          *
          *     The run is synchronous: each question costs one generation call plus one judge
@@ -1026,7 +1114,7 @@ export interface paths {
         put?: never;
         /**
          * Create Set
-         * @description Freeze every approved question of the approved curriculum under a name.
+         * @description Freeze every approved question of the course's approved curriculum under a name.
          */
         post: operations["create_set_api_question_sets_post"];
         delete?: never;
@@ -1046,9 +1134,32 @@ export interface paths {
         put?: never;
         /**
          * Sync Prod Set
-         * @description Freeze the approved bank now and repoint the stable prod classroom link.
+         * @description Superseded by per-taxonomy links; kept so an existing prod link can still be refreshed.
          */
         post: operations["sync_prod_set_api_question_sets_prod_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets/taxonomy/{curriculum_version_id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Taxonomy Set
+         * @description Freeze this taxonomy's approved questions and point its classroom link at them.
+         *
+         *     Each taxonomy has its own stable link (``/students/join?taxonomy={id}``), so
+         *     any taxonomy can be taught, not only the selected one.
+         */
+        post: operations["sync_taxonomy_set_api_question_sets_taxonomy__curriculum_version_id__sync_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1087,6 +1198,28 @@ export interface paths {
          * @description The current production classroom snapshot behind the stable join link.
          */
         get: operations["get_prod_classroom_api_question_sets_prod_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets/taxonomy/{curriculum_version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Taxonomy Classroom
+         * @description The snapshot behind a taxonomy's classroom link; public, like the join page.
+         *
+         *     404 until the professor has created the link for this taxonomy.
+         */
+        get: operations["get_taxonomy_classroom_api_question_sets_taxonomy__curriculum_version_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1481,6 +1614,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivityEventOut */
+        ActivityEventOut: {
+            /** Kind */
+            kind: string;
+            /** Text */
+            text: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Course Id */
+            course_id: number | null;
+            /** Course Name */
+            course_name: string | null;
+        };
         /**
          * AgreementTrendResponse
          * @description Agreement panel by panel, oldest first (ADR-041).
@@ -2049,6 +2198,95 @@ export interface components {
             learned_instructions: number;
             /** Students */
             students: number;
+        };
+        /** CourseCreate */
+        CourseCreate: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+        };
+        /** CourseListResponse */
+        CourseListResponse: {
+            /** Courses */
+            courses: components["schemas"]["CourseOut"][];
+        };
+        /**
+         * CourseOut
+         * @description One course, with how much has been built in it so far.
+         */
+        CourseOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Book Count
+             * @default 0
+             */
+            book_count: number;
+            /**
+             * Curriculum Version Count
+             * @default 0
+             */
+            curriculum_version_count: number;
+            /**
+             * Question Count
+             * @default 0
+             */
+            question_count: number;
+        };
+        /**
+         * CourseProgressOut
+         * @description One course card on the course list: what is built, and what is next.
+         */
+        CourseProgressOut: {
+            course: components["schemas"]["CourseOut"];
+            /** Owner Email */
+            owner_email: string | null;
+            /** Owned By You */
+            owned_by_you: boolean;
+            /** Proposed Curriculum Count */
+            proposed_curriculum_count: number;
+            /** Approved Question Count */
+            approved_question_count: number;
+            /** Awaiting Review Count */
+            awaiting_review_count: number;
+            /** Question Set Count */
+            question_set_count: number;
+            /** Student Count */
+            student_count: number;
+            /** Coverage */
+            coverage: number | null;
+            /** Avg Mastery */
+            avg_mastery: number | null;
+            most_missed: components["schemas"]["MostMissedOut"] | null;
+            /** Setup */
+            setup: components["schemas"]["SetupStepOut"][];
+        };
+        /**
+         * CourseUpdate
+         * @description Omitted fields are left as they are.
+         */
+        CourseUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /** CoursesOverviewResponse */
+        CoursesOverviewResponse: {
+            /** Courses */
+            courses: components["schemas"]["CourseProgressOut"][];
+            /** Activity */
+            activity: components["schemas"]["ActivityEventOut"][];
         };
         /**
          * CoverageCell
@@ -2962,6 +3200,17 @@ export interface components {
          * @enum {string}
          */
         MetricStatus: "completed" | "error";
+        /** MostMissedOut */
+        MostMissedOut: {
+            /** Subtopic */
+            subtopic: string;
+            /** Topic */
+            topic: string;
+            /** Miss Rate */
+            miss_rate: number;
+            /** Attempts */
+            attempts: number;
+        };
         /**
          * ParsonsBlockOut
          * @description One draggable block, including the indentation it should display with.
@@ -3642,6 +3891,13 @@ export interface components {
             /** Blocks */
             blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
         };
+        /** SetupStepOut */
+        SetupStepOut: {
+            /** Key */
+            key: string;
+            /** Done */
+            done: boolean;
+        };
         /**
          * SkippedRunTarget
          * @description A gap target the run did not generate for, and why.
@@ -3988,6 +4244,51 @@ export interface components {
             retains_upload: boolean;
         };
         /**
+         * TaxonomyDraftRequest
+         * @description What the professor tells the AI about the taxonomy they want (ADR-052).
+         */
+        TaxonomyDraftRequest: {
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Audience
+             * @default
+             */
+            audience: string;
+            /**
+             * Must Cover
+             * @default
+             */
+            must_cover: string;
+            /**
+             * Leave Out
+             * @default
+             */
+            leave_out: string;
+            /**
+             * Size
+             * @default standard
+             * @enum {string}
+             */
+            size: "compact" | "standard" | "detailed";
+        };
+        /**
+         * TaxonomyDraftResponse
+         * @description An AI-proposed taxonomy that has not been saved (ADR-052).
+         */
+        TaxonomyDraftResponse: {
+            /** Drafted By */
+            drafted_by: string;
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /** Analysis */
+            analysis: string;
+        };
+        /**
          * TopicCoverage
          * @description One topic's rows, and what a professor would have to do about it.
          *
@@ -4298,7 +4599,9 @@ export interface operations {
     counts_api_counts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4311,6 +4614,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CountsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4420,13 +4732,154 @@ export interface operations {
             };
         };
     };
+    list_courses_api_courses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseListResponse"];
+                };
+            };
+        };
+    };
+    create_course_api_courses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CourseCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    courses_overview_api_courses_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoursesOverviewResponse"];
+                };
+            };
+        };
+    };
+    get_course_api_courses__course_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_course_api_courses__course_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CourseUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_books_api_books_get: {
         parameters: {
             query?: {
                 limit?: number;
                 usable_only?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4455,7 +4908,9 @@ export interface operations {
     import_book_api_books_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4508,7 +4963,9 @@ export interface operations {
     get_book_api_books__book_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4541,7 +4998,9 @@ export interface operations {
             query?: {
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4572,7 +5031,9 @@ export interface operations {
     update_book_api_books__book_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4607,7 +5068,9 @@ export interface operations {
     get_book_source_api_books__book_id__source_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4638,7 +5101,9 @@ export interface operations {
     list_sections_api_books__book_id__sections_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4669,7 +5134,9 @@ export interface operations {
     get_section_api_books__book_id__sections__section_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
                 section_id: number;
@@ -4703,7 +5170,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4732,7 +5201,9 @@ export interface operations {
     import_taxonomy_api_curriculum_versions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4749,6 +5220,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_with_ai_api_curriculum_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxonomyDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyDraftResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4785,7 +5289,9 @@ export interface operations {
     get_approved_api_curriculum_approved_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4800,12 +5306,23 @@ export interface operations {
                     "application/json": components["schemas"]["CurriculumVersionDetail"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_version_api_curriculum_versions__version_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4838,7 +5355,9 @@ export interface operations {
             query?: {
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4869,7 +5388,9 @@ export interface operations {
     update_version_api_curriculum_versions__version_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4904,7 +5425,9 @@ export interface operations {
     update_tree_api_curriculum_versions__version_id__tree_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4939,7 +5462,9 @@ export interface operations {
     activate_version_api_curriculum_versions__version_id__activate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -5077,7 +5602,9 @@ export interface operations {
                 section_id?: number | null;
                 run_id?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5106,7 +5633,9 @@ export interface operations {
     generate_questions_api_questions_generate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5207,7 +5736,9 @@ export interface operations {
     generate_batch_api_questions_generate_batch_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5275,8 +5806,11 @@ export interface operations {
             query?: {
                 after?: number | null;
                 mode?: "all" | "scoreable";
+                curriculum_version_id?: number | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5746,7 +6280,9 @@ export interface operations {
             query?: {
                 set_version_id?: number | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5775,7 +6311,9 @@ export interface operations {
     start_generation_run_api_coverage_generation_runs_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5808,7 +6346,9 @@ export interface operations {
     list_question_sets_api_question_sets_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5823,12 +6363,23 @@ export interface operations {
                     "application/json": components["schemas"]["QuestionSetListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     create_set_api_question_sets_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5861,7 +6412,9 @@ export interface operations {
     sync_prod_set_api_question_sets_prod_sync_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5874,6 +6427,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_taxonomy_set_api_question_sets_taxonomy__curriculum_version_id__sync_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                curriculum_version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5929,6 +6524,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+        };
+    };
+    get_taxonomy_classroom_api_question_sets_taxonomy__curriculum_version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curriculum_version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

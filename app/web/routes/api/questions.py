@@ -37,7 +37,7 @@ from app.persistence.repositories import (
     CurriculumRepository,
     QuestionRepository,
 )
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession
 from app.web.routes.api.schemas import (
     BatchPlanResponse,
     BatchPlanTotals,
@@ -72,6 +72,7 @@ router = APIRouter(prefix="/questions", tags=["questions"])
 @router.get("", response_model=QuestionListResponse)
 def list_questions(
     session: DbSession,
+    course: CourseScope,
     limit: int = 50,
     status: QuestionStatus | None = None,
     curriculum_version_id: int | None = None,
@@ -95,12 +96,13 @@ def list_questions(
         curriculum_version_id=curriculum_version_id,
         section_id=section_id,
         run_id=run_id,
+        course_id=course,
     )
     return QuestionListResponse(
         questions=[QuestionSummary.from_row(row) for row in rows],
-        status_counts=repo.count_by_status(),
-        curriculum_version_counts=repo.count_by_curriculum_version(),
-        total=repo.count(),
+        status_counts=repo.count_by_status(course_id=course),
+        curriculum_version_counts=repo.count_by_curriculum_version(course_id=course),
+        total=repo.count(course_id=course),
         status=status,
         curriculum_version_id=curriculum_version_id,
         run_id=run_id,
@@ -111,7 +113,7 @@ def list_questions(
     "/generate", response_model=GenerateQuestionsResponse, status_code=status.HTTP_201_CREATED
 )
 def generate_questions(
-    session: DbSession, payload: GenerateQuestionsRequest
+    session: DbSession, course: CourseScope, payload: GenerateQuestionsRequest
 ) -> GenerateQuestionsResponse:
     """Generate and persist one question per selected source section.
 
@@ -130,7 +132,7 @@ def generate_questions(
         )
     # Resolved before the service is built so that a missing curriculum reports
     # the fixable problem rather than an LLM-configuration error raised first.
-    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session)
+    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
 
     try:
         generated = GenerationService(session).generate_for_sections(
@@ -213,11 +215,13 @@ def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
 @router.post(
     "/generate-batch", response_model=GenerateBatchResponse, status_code=status.HTTP_201_CREATED
 )
-def generate_batch(session: DbSession, payload: GenerateBatchRequest) -> GenerateBatchResponse:
+def generate_batch(
+    session: DbSession, course: CourseScope, payload: GenerateBatchRequest
+) -> GenerateBatchResponse:
     """Generate the questions a per-chunk spec sheet asks for (ADR-044).
 
     One chunk may produce several questions, at several difficulties, in several
-    formats — which is what separates this from ``/generate``, where a run carries
+    formats â€” which is what separates this from ``/generate``, where a run carries
     one difficulty and one format for every section in it.
 
     The run is synchronous: each question costs one generation call plus one judge
@@ -228,7 +232,7 @@ def generate_batch(session: DbSession, payload: GenerateBatchRequest) -> Generat
     # Compiled before the service is built so an unusable sheet reports the
     # fixable problem rather than an LLM-configuration error raised first.
     planned = compile_chunk_requests(chunks)
-    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session)
+    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
 
     try:
         generated = GenerationService(session).generate_batch(
@@ -248,9 +252,9 @@ def generate_batch(session: DbSession, payload: GenerateBatchRequest) -> Generat
     )
 
 
-def approved_curriculum_id(session: Session) -> int:
-    """Return the approved curriculum id or raise an actionable generation error."""
-    approved = CurriculumRepository(session).get_approved()
+def approved_curriculum_id(session: Session, course: int | None = None) -> int:
+    """Return the course's approved curriculum id or raise an actionable generation error."""
+    approved = CurriculumRepository(session).get_approved(course_id=course)
     if approved is None:
         raise InvalidQuestionSpecError(
             "No approved curriculum is available.",
@@ -326,7 +330,11 @@ def generation_plan(
 
 @router.get("/review-queue", response_model=ReviewQueueResponse)
 def review_queue(
-    session: DbSession, after: int | None = None, mode: ReviewQueueMode = "all"
+    session: DbSession,
+    course: CourseScope,
+    after: int | None = None,
+    mode: ReviewQueueMode = "all",
+    curriculum_version_id: int | None = None,
 ) -> ReviewQueueResponse:
     """The next question awaiting a professor verdict, plus progress counts.
 
@@ -339,14 +347,25 @@ def review_queue(
     ``remaining == 0`` rather than stalling on questions the queue excludes.
     """
     repo = QuestionRepository(session)
-    scoreable = [row for row in repo.list_unreviewed(require_evaluation=True) if _is_scoreable(row)]
+    scoreable = [
+        row
+        for row in repo.list_unreviewed(
+            require_evaluation=True, course_id=course, curriculum_version_id=curriculum_version_id
+        )
+        if _is_scoreable(row)
+    ]
 
-    candidates = repo.list_unreviewed(after_id=after, require_evaluation=mode == "scoreable")
+    candidates = repo.list_unreviewed(
+        after_id=after,
+        require_evaluation=mode == "scoreable",
+        course_id=course,
+        curriculum_version_id=curriculum_version_id,
+    )
     if mode == "scoreable":
         candidates = [row for row in candidates if _is_scoreable(row)]
 
-    total = repo.count_reviewable()
-    reviewed = repo.count_reviewed()
+    total = repo.count_reviewable(course_id=course, curriculum_version_id=curriculum_version_id)
+    reviewed = repo.count_reviewed(course_id=course, curriculum_version_id=curriculum_version_id)
     return ReviewQueueResponse(
         mode=mode,
         total=total,
@@ -420,9 +439,9 @@ def resolve_taxonomy(session: Session, question: QuestionRow) -> QuestionTaxonom
     """
     subtopic_ids = list(question.subtopic_ids)
     taxonomy = QuestionTaxonomy(
-        curriculum=str(question.curriculum_version_id or "—"),
-        topic=str(question.topic_id or "—"),
-        subtopics=[str(subtopic_id) for subtopic_id in subtopic_ids] or ["—"],
+        curriculum=str(question.curriculum_version_id or "â€”"),
+        topic=str(question.topic_id or "â€”"),
+        subtopics=[str(subtopic_id) for subtopic_id in subtopic_ids] or ["â€”"],
     )
     if question.curriculum_version_id is None:
         return taxonomy

@@ -14,6 +14,9 @@ dependencies = [
     # fastapi-users; named here because application code now depends on it.
     "email-validator>=2.0",
     "sqlalchemy>=2.0.36",
+    # Schema migrations, applied in-process on start (app/persistence/database.py).
+    # See docs/DECISIONS.md ADR-051.
+    "alembic>=1.13",
     # Cookie-session auth for the Instructor Studio (app/auth/). Database
     # strategy: logout revokes server-side rather than only clearing the cookie.
     "fastapi-users[sqlalchemy]>=14.0",

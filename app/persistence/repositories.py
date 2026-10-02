@@ -31,6 +31,7 @@ from app.persistence.models import (
     BookChapterRow,
     BookRow,
     BookSectionRow,
+    CourseRow,
     CurriculumVersionRow,
     JudgeBatchRunRow,
     JudgePromptRow,
@@ -54,20 +55,89 @@ from app.persistence.models import (
 )
 
 
-class BookRepository:
-    """Uploaded textbooks."""
+def questions_in_course(course_id: int) -> ColumnElement[bool]:
+    """Questions whose curriculum version belongs to this course.
+
+    A question has no ``course_id`` of its own: generation always grounds it in a
+    curriculum version (``app/generation/spec.py``), and the version carries the
+    course. A question with no version belongs to no course.
+    """
+    return QuestionRow.curriculum_version_id.in_(
+        select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course_id)
+    )
+
+
+class CourseRepository:
+    """Courses: the workspace books and taxonomies are created in."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(BookRow)) or 0
-
-    def list_recent(self, limit: int = 50) -> list[BookRow]:
-        stmt = select(BookRow).order_by(BookRow.created_at.desc(), BookRow.id.desc()).limit(limit)
+    def list_all(self) -> list[CourseRow]:
+        stmt = select(CourseRow).order_by(CourseRow.created_at.desc(), CourseRow.id.desc())
         return list(self._session.scalars(stmt))
 
-    def list_usable(self) -> list[BookRow]:
+    def get(self, course_id: int) -> CourseRow:
+        row = self._session.get(CourseRow, course_id)
+        if row is None:
+            raise NotFoundError(f"Course {course_id} does not exist.")
+        return row
+
+    def add(self, course: CourseRow) -> CourseRow:
+        self._session.add(course)
+        self._session.flush()
+        return course
+
+    def content_counts(self) -> dict[int, tuple[int, int, int]]:
+        """``(books, curriculum versions, questions)`` per course id, in three queries."""
+        books = dict(
+            self._session.execute(
+                select(BookRow.course_id, func.count()).group_by(BookRow.course_id)
+            ).all()
+        )
+        versions = dict(
+            self._session.execute(
+                select(CurriculumVersionRow.course_id, func.count()).group_by(
+                    CurriculumVersionRow.course_id
+                )
+            ).all()
+        )
+        questions = dict(
+            self._session.execute(
+                select(CurriculumVersionRow.course_id, func.count(QuestionRow.id))
+                .join(QuestionRow, QuestionRow.curriculum_version_id == CurriculumVersionRow.id)
+                .group_by(CurriculumVersionRow.course_id)
+            ).all()
+        )
+        ids = {key for key in (*books, *versions, *questions) if key is not None}
+        return {
+            key: (books.get(key, 0), versions.get(key, 0), questions.get(key, 0)) for key in ids
+        }
+
+
+class BookRepository:
+    """Uploaded textbooks.
+
+    ``course_id`` on a list or count narrows it to one course; ``None`` means
+    every course, which is what scripts and unit tests rely on.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(BookRow)
+        if course_id is not None:
+            stmt = stmt.where(BookRow.course_id == course_id)
+        return self._session.scalar(stmt) or 0
+
+    def list_recent(self, limit: int = 50, *, course_id: int | None = None) -> list[BookRow]:
+        stmt = select(BookRow).order_by(BookRow.created_at.desc(), BookRow.id.desc()).limit(limit)
+        if course_id is not None:
+            stmt = stmt.where(BookRow.course_id == course_id)
+        return list(self._session.scalars(stmt))
+
+    def list_usable(self, *, course_id: int | None = None) -> list[BookRow]:
         """Books whose text may ground curriculum work.
 
         Every stored book validated on import, so this is all of them; the filter
@@ -78,6 +148,8 @@ class BookRepository:
             .where(BookRow.status.in_((BookStatus.IMPORTED, BookStatus.PARTIAL)))
             .order_by(BookRow.created_at.desc(), BookRow.id.desc())
         )
+        if course_id is not None:
+            stmt = stmt.where(BookRow.course_id == course_id)
         return list(self._session.scalars(stmt))
 
     def get(self, book_id: int) -> BookRow:
@@ -211,29 +283,38 @@ def _visible(*rows: type[TopicRow] | type[SubtopicRow]) -> list[ColumnElement[bo
     return [row.review_status != CurriculumItemStatus.DELETED for row in rows]
 
 
+def _versions_in(course_id: int | None) -> list[ColumnElement[bool]]:
+    """The condition narrowing curriculum versions to one course, or none for every course."""
+    return [] if course_id is None else [CurriculumVersionRow.course_id == course_id]
+
+
 class CurriculumRepository:
     """Curriculum versions and their Topic -> Subtopic trees."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(CurriculumVersionRow)) or 0
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(CurriculumVersionRow)
+        return self._session.scalar(stmt.where(*_versions_in(course_id))) or 0
 
-    def list_versions(self, limit: int = 50) -> list[CurriculumVersionRow]:
+    def list_versions(
+        self, limit: int = 50, *, course_id: int | None = None
+    ) -> list[CurriculumVersionRow]:
         stmt = (
             select(CurriculumVersionRow)
             .options(selectinload(CurriculumVersionRow.topics))
             .order_by(CurriculumVersionRow.created_at.desc(), CurriculumVersionRow.id.desc())
             .limit(limit)
         )
-        return list(self._session.scalars(stmt))
+        return list(self._session.scalars(stmt.where(*_versions_in(course_id))))
 
-    def get_approved(self) -> CurriculumVersionRow | None:
+    def get_approved(self, *, course_id: int | None = None) -> CurriculumVersionRow | None:
         """Return the most recently approved version, if any.
 
         Question generation must ground itself in an approved version; callers
-        treat ``None`` as "curriculum not approved yet".
+        treat ``None`` as "curriculum not approved yet". Each course has its own
+        approved version; ``course_id=None`` looks across every course.
         """
         stmt = (
             select(CurriculumVersionRow)
@@ -241,9 +322,9 @@ class CurriculumRepository:
             .order_by(CurriculumVersionRow.approved_at.desc(), CurriculumVersionRow.id.desc())
             .limit(1)
         )
-        return self._session.scalars(stmt).first()
+        return self._session.scalars(stmt.where(*_versions_in(course_id))).first()
 
-    def get_latest(self) -> CurriculumVersionRow | None:
+    def get_latest(self, *, course_id: int | None = None) -> CurriculumVersionRow | None:
         """The most recently created version, approved or not.
 
         What the Curriculum page shows by default: the professor's last proposal
@@ -254,7 +335,7 @@ class CurriculumRepository:
             .order_by(CurriculumVersionRow.created_at.desc(), CurriculumVersionRow.id.desc())
             .limit(1)
         )
-        return self._session.scalars(stmt).first()
+        return self._session.scalars(stmt.where(*_versions_in(course_id))).first()
 
     def get_with_tree(self, version_id: int) -> CurriculumVersionRow:
         """One version with its topics, subtopics and evidence loaded eagerly.
@@ -515,14 +596,21 @@ class QuestionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(QuestionRow)) or 0
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(QuestionRow)
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        return self._session.scalar(stmt) or 0
 
-    def count_by_status(self) -> dict[str, int]:
+    def count_by_status(self, *, course_id: int | None = None) -> dict[str, int]:
         stmt = select(QuestionRow.status, func.count()).group_by(QuestionRow.status)
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         return {str(status): count for status, count in self._session.execute(stmt)}
 
-    def count_reviewable(self) -> int:
+    def count_reviewable(
+        self, *, course_id: int | None = None, curriculum_version_id: int | None = None
+    ) -> int:
         """Questions a professor could be asked to rule on.
 
         Excludes the same statuses :meth:`list_unreviewed` excludes, so the review
@@ -535,6 +623,10 @@ class QuestionRepository:
             .select_from(QuestionRow)
             .where(QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES))
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return self._session.scalar(stmt) or 0
 
     def count_grounded_in_sections(self, section_ids: Collection[int]) -> int:
@@ -591,6 +683,7 @@ class QuestionRepository:
         curriculum_version_id: int | None = None,
         section_id: int | None = None,
         run_id: str | None = None,
+        course_id: int | None = None,
     ) -> list[QuestionRow]:
         """The newest questions, optionally narrowed to particular statuses.
 
@@ -616,6 +709,8 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         if run_id is not None:
             stmt = stmt.where(
                 QuestionRow.id.in_(
@@ -635,7 +730,7 @@ class QuestionRepository:
             return rows
         return list(self._session.scalars(stmt.limit(limit)))
 
-    def count_by_curriculum_version(self) -> dict[str, int]:
+    def count_by_curriculum_version(self, *, course_id: int | None = None) -> dict[str, int]:
         """How many questions each curriculum version grounds, whole bank.
 
         A question generated before this column existed has no version to name;
@@ -644,6 +739,8 @@ class QuestionRepository:
         stmt = select(QuestionRow.curriculum_version_id, func.count()).group_by(
             QuestionRow.curriculum_version_id
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         return {
             (str(version_id) if version_id is not None else "none"): count
             for version_id, count in self._session.execute(stmt)
@@ -687,7 +784,9 @@ class QuestionRepository:
         )
         return list(self._session.scalars(stmt))
 
-    def count_reviewed(self) -> int:
+    def count_reviewed(
+        self, *, course_id: int | None = None, curriculum_version_id: int | None = None
+    ) -> int:
         """How many reviewable questions carry at least one professor verdict.
 
         Restricted to the same set as :meth:`count_reviewable` so the two can be
@@ -703,10 +802,19 @@ class QuestionRepository:
                 QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES),
             )
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return self._session.scalar(stmt) or 0
 
     def list_unreviewed(
-        self, *, after_id: int | None = None, require_evaluation: bool = False
+        self,
+        *,
+        after_id: int | None = None,
+        require_evaluation: bool = False,
+        course_id: int | None = None,
+        curriculum_version_id: int | None = None,
     ) -> list[QuestionRow]:
         """Questions no professor has ruled on yet, lowest id first.
 
@@ -736,6 +844,10 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.id > after_id)
         if require_evaluation:
             stmt = stmt.where(QuestionRow.pedagogical_eval.is_not(None))
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return list(self._session.scalars(stmt))
 
     def list_judgeable(self) -> list[QuestionRow]:
@@ -1204,7 +1316,10 @@ class QuestionSetRepository:
         self._session.flush()
         return row
 
-    def list_versions(self, limit: int = 50) -> list[QuestionSetVersionRow]:
+    def list_versions(
+        self, limit: int = 50, *, course_id: int | None = None
+    ) -> list[QuestionSetVersionRow]:
+        """Frozen sets, newest first; ``course_id`` narrows through the set's curriculum."""
         stmt = (
             select(QuestionSetVersionRow)
             .options(
@@ -1214,6 +1329,14 @@ class QuestionSetRepository:
             .order_by(QuestionSetVersionRow.created_at.desc(), QuestionSetVersionRow.id.desc())
             .limit(limit)
         )
+        if course_id is not None:
+            stmt = stmt.where(
+                QuestionSetVersionRow.curriculum_version_id.in_(
+                    select(CurriculumVersionRow.id).where(
+                        CurriculumVersionRow.course_id == course_id
+                    )
+                )
+            )
         return list(self._session.scalars(stmt))
 
     def get(self, set_version_id: int) -> QuestionSetVersionRow:

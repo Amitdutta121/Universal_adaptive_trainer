@@ -1348,7 +1348,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   const endRun = async () => {
     try {
       await endTrainingSession.mutateAsync(trainingSessionId);
-      router.push("/students" as Route);
+      router.push("/courses" as Route);
     } catch {
       // Mutation state renders the backend error.
     }
@@ -1454,7 +1454,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                 <AlertTitle>Session closed</AlertTitle>
                 <AlertDescription>
                   This run ended on {learnerDate(session.data.ended_at)}.{" "}
-                  <Link href="/students">Return to the students page</Link>.
+                  <Link href="/courses">Return to the students page</Link>.
                 </AlertDescription>
               </Alert>
             ) : null}

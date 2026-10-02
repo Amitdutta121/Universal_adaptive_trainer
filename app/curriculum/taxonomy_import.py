@@ -30,7 +30,13 @@ class TaxonomyImportService:
         self._settings = settings or get_settings()
         self._curriculum = CurriculumRepository(session)
 
-    def import_upload(self, *, filename: str, data: bytes) -> CurriculumVersionRow:
+    def import_upload(
+        self,
+        *,
+        filename: str,
+        data: bytes,
+        course_id: int | None = None,
+    ) -> CurriculumVersionRow:
         if not filename.lower().endswith(SUPPORTED_EXTENSIONS):
             raise UnsupportedFileError(
                 f"Only {', '.join(SUPPORTED_EXTENSIONS)} taxonomy documents are accepted.",
@@ -45,7 +51,7 @@ class TaxonomyImportService:
             )
 
         document = parse_taxonomy_document(data)
-        version = self._persist(document)
+        version = self._persist(document, course_id=course_id)
         logger.info(
             "Imported taxonomy version %s (%d topic(s))",
             version.id,
@@ -53,10 +59,13 @@ class TaxonomyImportService:
         )
         return version
 
-    def _persist(self, document: TaxonomyDocument) -> CurriculumVersionRow:
+    def _persist(
+        self, document: TaxonomyDocument, *, course_id: int | None
+    ) -> CurriculumVersionRow:
         now = datetime.now(UTC)
         version = self._curriculum.add(
             CurriculumVersionRow(
+                course_id=course_id,
                 label=document.label,
                 status=CurriculumStatus.APPROVED,
                 approved_at=now,
