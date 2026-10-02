@@ -12,13 +12,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from app.assessment import catalog
 from app.auth.backend import current_active_user
 from app.courses.overview import SETUP_STEPS, build_overview
+from app.errors import DomainRuleError
 from app.persistence.models import CourseRow, UserRow
 from app.persistence.repositories import CourseRepository
 from app.web.routes.api.deps import DbSession
 from app.web.routes.api.schemas import (
     ActivityEventOut,
+    AssessmentCatalogResponse,
+    CapabilityOut,
     CourseCreate,
     CourseListResponse,
     CourseOut,
@@ -26,7 +30,10 @@ from app.web.routes.api.schemas import (
     CoursesOverviewResponse,
     CourseUpdate,
     MostMissedOut,
+    QuestionTypeGroupOut,
+    QuestionTypeOut,
     SetupStepOut,
+    SubjectPresetOut,
 )
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -40,9 +47,7 @@ def list_courses(session: DbSession) -> CourseListResponse:
     repo = CourseRepository(session)
     counts = repo.content_counts()
     return CourseListResponse(
-        courses=[
-            CourseOut.from_row(row, counts.get(row.id, (0, 0, 0))) for row in repo.list_all()
-        ]
+        courses=[CourseOut.from_row(row, counts.get(row.id, (0, 0, 0))) for row in repo.list_all()]
     )
 
 
@@ -75,11 +80,88 @@ def courses_overview(session: DbSession, user: CurrentUser) -> CoursesOverviewRe
     )
 
 
+@router.get("/catalog", response_model=AssessmentCatalogResponse)
+def assessment_catalog() -> AssessmentCatalogResponse:
+    """Subjects, question types and capabilities, for choosing what a new course assesses."""
+    return AssessmentCatalogResponse(
+        capabilities=[
+            CapabilityOut(**vars(item), built=item.built) for item in catalog.CAPABILITIES
+        ],
+        question_types=[
+            QuestionTypeOut(
+                id=spec.id,
+                label=spec.label,
+                widget=spec.widget,
+                group=spec.group,
+                graded_by=list(spec.graded_by),
+                also_needs=list(spec.also_needs),
+                offerable=catalog.is_offerable(spec.id),
+                ai_graded=all(
+                    not catalog.CAPABILITIES_BY_ID[cap].deterministic for cap in spec.graded_by
+                ),
+            )
+            for spec in catalog.QUESTION_TYPES
+        ],
+        groups=[
+            QuestionTypeGroupOut(id=key, title=title, hint=hint)
+            for key, (title, hint) in catalog.GROUPS.items()
+        ],
+        subjects=[
+            SubjectPresetOut(
+                id=preset.id,
+                label=preset.label,
+                description=preset.description,
+                default_types=catalog.default_types_for(preset.id),
+                coming_soon_types=[
+                    type_id for type_id in preset.default_types if not catalog.is_offerable(type_id)
+                ],
+                primary_groups=list(preset.primary_groups),
+                examples={
+                    spec.id: catalog.example_for(preset.id, spec.id)
+                    for spec in catalog.QUESTION_TYPES
+                },
+            )
+            for preset in catalog.SUBJECTS
+        ],
+    )
+
+
+def _chosen_types(body: CourseCreate) -> tuple[str, list[str]]:
+    """The subject and question types to store, refusing anything that cannot be generated."""
+    subject = body.subject or catalog.LEGACY_SUBJECT
+    if subject not in catalog.SUBJECTS_BY_ID:
+        raise DomainRuleError(f"Unknown subject {subject!r}.")
+    if body.question_types is None:
+        return subject, catalog.default_types_for(subject)
+    chosen = list(dict.fromkeys(body.question_types))
+    refused = [type_id for type_id in chosen if not catalog.is_offerable(type_id)]
+    if refused:
+        raise DomainRuleError(
+            "Some question types cannot be used yet.",
+            detail=f"Not available: {', '.join(refused)}.",
+        )
+    if not chosen:
+        raise DomainRuleError("A course needs at least one question type.")
+    return subject, chosen
+
+
 @router.post("", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
 def create_course(session: DbSession, user: CurrentUser, body: CourseCreate) -> CourseOut:
-    """Create an empty course owned by the professor creating it."""
+    """Create an empty course owned by the professor creating it.
+
+    The professor picks a subject and question types; the capabilities are worked out from the
+    types and stored with them (ADR-054).
+    """
+    subject, types = _chosen_types(body)
     course = CourseRepository(session).add(
-        CourseRow(name=body.name, description=body.description or None, owner_id=user.id)
+        CourseRow(
+            name=body.name,
+            description=body.description or None,
+            owner_id=user.id,
+            subject=subject,
+            question_types=types,
+            capabilities=catalog.capabilities_for(types),
+        )
     )
     session.commit()
     return CourseOut.from_row(course)

@@ -39,7 +39,12 @@ from app.persistence.repositories import CurriculumRepository, QuestionSetReposi
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.dedup import flag_possible_duplicates
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.deps import (
+    CourseScope,
+    DbSession,
+    ensure_in_course,
+    ensure_question_types_allowed,
+)
 from app.web.routes.api.questions import approved_curriculum_id
 from app.web.routes.api.retrieval import EmbedderDep
 from app.web.routes.api.schemas import (
@@ -146,6 +151,8 @@ def run_generation_for_gaps(
     """
     # Resolved before any model call: an unapproved curriculum or an unknown
     # subtopic must report the fixable problem, not leave a partial run behind.
+    # Gap filling writes multiple-choice questions, so the course must use them.
+    ensure_question_types_allowed(session, course_id, [QuestionType.MULTIPLE_CHOICE.value])
     curriculum_version_id = approved_curriculum_id(session, course_id)
     curriculum = CurriculumRepository(session)
     resolved = [

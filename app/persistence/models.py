@@ -112,6 +112,17 @@ class CourseRow(TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("user.id", ondelete="SET NULL"), default=None, index=True
     )
+    #: Subject preset it was created from (``app.assessment.catalog.SUBJECTS``); ``None`` is
+    #: treated as the legacy Intro Python subject.
+    subject: Mapped[str | None] = mapped_column(String(50), default=None)
+    #: The question types the professor chose: the AI generates only these (ADR-054).
+    question_types: Mapped[list[str]] = mapped_column(
+        "question_types_json", JsonList, default=list, nullable=True
+    )
+    #: Worked out from ``question_types`` on save, never chosen directly.
+    capabilities: Mapped[list[str]] = mapped_column(
+        "capabilities_json", JsonList, default=list, nullable=True
+    )
 
 
 class BookRow(TimestampMixin, Base):

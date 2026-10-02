@@ -86,7 +86,7 @@ class TestMigrations:
     def test_a_fresh_database_is_stamped_at_head(self, engine: Engine) -> None:
         with engine.connect() as connection:
             version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "0002_courses"
+        assert version == "0003_course_question_types"
 
     def test_a_pre_migration_database_is_upgraded_keeping_its_rows(self, engine: Engine) -> None:
         # Rebuild the shape a pre-Alembic database had -- no courses table, no
@@ -116,6 +116,12 @@ class TestMigrations:
         with engine.connect() as connection:
             courses = connection.execute(text("SELECT id, name FROM courses")).all()
             assert [name for _, name in courses] == ["Default course"]
+            # 0003: an existing course keeps everything it could generate before.
+            subject, types = connection.execute(
+                text("SELECT subject, question_types_json FROM courses")
+            ).one()
+            assert subject == "intro_python"
+            assert "coding" in types and "multiple_choice" in types
             (course_id,) = (course_id for course_id, _ in courses)
             assert connection.execute(text("SELECT course_id, title FROM books")).all() == [
                 (course_id, "Old book")

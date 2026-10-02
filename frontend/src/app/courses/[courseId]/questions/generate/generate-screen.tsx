@@ -15,7 +15,7 @@
  */
 
 import { parseAsInteger, parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ import { RunSummary } from "./components/run-summary";
 import { SheetToolbar } from "./components/sheet-toolbar";
 import { SpecSheet } from "./components/spec-sheet";
 import { type SheetRow, toRequestChunks } from "./spec-sheet-types";
+import { useCourseQuestionTypes } from "./use-course-question-types";
 import { useChunkSpecs } from "./use-chunk-specs";
 import { useDebouncedValue } from "./use-debounced-value";
 import { type SheetFilters, useSheetRows } from "./use-sheet-rows";
@@ -46,6 +47,15 @@ export function GenerateScreen() {
   const [search, setSearch] = useQueryState("q", parseAsString.withDefault(""));
 
   const [defaultFormats, setDefaultFormats] = useState<QuestionType[]>(INITIAL_DEFAULT_FORMATS);
+  // A course that did not choose multiple choice starts from the first type it did choose.
+  const offered = useCourseQuestionTypes();
+  useEffect(() => {
+    setDefaultFormats((current) => {
+      const kept = current.filter((format) => offered.includes(format));
+      if (kept.length === current.length) return current;
+      return kept.length > 0 ? kept : offered.slice(0, 1);
+    });
+  }, [offered]);
   const [reading, setReading] = useState<SheetRow | null>(null);
 
   const filters: SheetFilters = useMemo(
@@ -115,8 +125,8 @@ export function GenerateScreen() {
                     <span className="font-mono text-foreground">
                       {approvedCurriculum.data.version.id}
                     </span>
-                    . Change the taxonomy from the header selector above; this screen then
-                    generates against that taxonomy.
+                    . Change the taxonomy from the header selector above; this screen then generates
+                    against that taxonomy.
                   </p>
                   <p className="text-muted-foreground text-sm leading-6">
                     Topic and subtopics are inferred from the source chunk during generation, then

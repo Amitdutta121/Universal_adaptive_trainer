@@ -34,6 +34,7 @@ import {
   useQuestionSets,
   useSyncTaxonomyClassroom,
   useTaxonomyClassroom,
+  useTaxonomyLinks,
 } from "@/lib/api/queries";
 import type { QuestionDetail, QuestionSetOut } from "@/lib/api/types";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
@@ -78,6 +79,7 @@ export function StudentsScreen() {
   const taxonomyId = selectedTaxonomy.data?.version.id ?? null;
   const classroom = useTaxonomyClassroom(taxonomyId);
   const syncLink = useSyncTaxonomyClassroom();
+  const taxonomyLinks = useTaxonomyLinks();
   const questionSets = {
     ...allQuestionSets,
     data: allQuestionSets.data
@@ -100,9 +102,7 @@ export function StudentsScreen() {
 
   useEffect(() => {
     if (selectedSetId === null && questionSets.data?.sets.length) {
-      setSelectedSetId(
-        classroom.data?.id ?? newestQuestionSet(questionSets.data.sets)?.id ?? null,
-      );
+      setSelectedSetId(classroom.data?.id ?? newestQuestionSet(questionSets.data.sets)?.id ?? null);
     }
   }, [classroom.data, questionSets.data, selectedSetId]);
 
@@ -158,11 +158,12 @@ export function StudentsScreen() {
 
   const joinLink = origin && selectedSet ? `${origin}/students/join?set=${selectedSet.id}` : "";
 
-  async function updateClassroomLink() {
-    if (taxonomyId === null) return;
+  /** Create or update one taxonomy's link: the selected one, or any row of the list. */
+  async function updateClassroomLink(versionId: number | null = taxonomyId) {
+    if (versionId === null) return;
     try {
-      const synced = await syncLink.mutateAsync(taxonomyId);
-      setSelectedSetId(synced.id);
+      const synced = await syncLink.mutateAsync(versionId);
+      if (versionId === taxonomyId) setSelectedSetId(synced.id);
       toast.success(
         `Classroom link now serves snapshot #${synced.id} (${synced.question_count} questions).`,
       );
@@ -178,10 +179,7 @@ export function StudentsScreen() {
         summary="Generate a joinable adaptive-training classroom from a frozen question set. Enrolled learners and their progress live on the Roster page."
         actions={
           questionSets.data ? (
-            <Badge
-              variant="outline"
-              className="h-7 rounded-full px-3 font-mono tracking-[0.08em]"
-            >
+            <Badge variant="outline" className="h-7 rounded-full px-3 font-mono tracking-[0.08em]">
               {questionSets.data.sets.length} frozen sets
             </Badge>
           ) : null
@@ -249,6 +247,87 @@ export function StudentsScreen() {
                     ? "Update to the current approved questions"
                     : "Create classroom link"}
               </Button>
+
+              <div className="space-y-2 border-border/60 border-t pt-4">
+                <div className="font-medium text-sm">Every taxonomy in this course</div>
+                {taxonomyLinks.isPending ? <TableSkeleton rows={3} /> : null}
+                {taxonomyLinks.isError ? <QueryError error={taxonomyLinks.error} /> : null}
+                {taxonomyLinks.data ? (
+                  <div className="rounded-xl border border-border/70">
+                    <Table aria-label="Classroom links by taxonomy">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Taxonomy</TableHead>
+                          <TableHead>Classroom link</TableHead>
+                          <TableHead>Snapshot</TableHead>
+                          <TableHead className="text-right">Questions</TableHead>
+                          <TableHead className="w-28" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {taxonomyLinks.data.links.map((row) => {
+                          const id = row.curriculum_version_id;
+                          const link = origin ? `${origin}/students/join?taxonomy=${id}` : "";
+                          const busy = syncLink.isPending && syncLink.variables === id;
+                          return (
+                            <TableRow
+                              key={id}
+                              data-selected={id === taxonomyId || undefined}
+                              className="data-[selected]:bg-muted/40"
+                            >
+                              <TableCell className="max-w-[18rem]">
+                                <div className="truncate font-medium" title={row.label}>
+                                  {row.label}
+                                </div>
+                                <div className="text-muted-foreground text-xs">
+                                  v{id}
+                                  {id === taxonomyId ? " · selected" : ""}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {row.classroom ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-xs">…/join?taxonomy={id}</span>
+                                    <CopyButton text={link} label="Copy" copiedLabel="Copied" />
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">No link yet</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {row.classroom
+                                  ? `#${row.classroom.id} · ${formatDate(row.classroom.created_at)}`
+                                  : "—"}
+                              </TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {row.classroom
+                                  ? row.classroom.question_count
+                                  : `${row.approved_question_count} approved`}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={syncLink.isPending || row.approved_question_count === 0}
+                                  title={
+                                    row.approved_question_count === 0
+                                      ? "No approved questions to freeze yet"
+                                      : undefined
+                                  }
+                                  onClick={() => void updateClassroomLink(id)}
+                                >
+                                  {busy ? "Freezing…" : row.classroom ? "Update" : "Create link"}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
         ) : null}
@@ -322,8 +401,8 @@ export function StudentsScreen() {
                     </div>
                   </div>
                   <p className="text-muted-foreground text-sm">
-                    A link to this one snapshot. It never moves to a newer one; for that, share
-                    the classroom link above.
+                    A link to this one snapshot. It never moves to a newer one; for that, share the
+                    classroom link above.
                   </p>
                 </div>
 

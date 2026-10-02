@@ -23,7 +23,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { QuestionType } from "@/lib/api/types";
-import { QUESTION_TYPE_LABEL, QUESTION_TYPE_SHORT, QUESTION_TYPES } from "../spec-sheet-types";
+import { QUESTION_TYPE_LABEL, QUESTION_TYPE_SHORT } from "../spec-sheet-types";
+import { useCourseQuestionTypes } from "../use-course-question-types";
 
 export function FormatPicker({
   value,
@@ -43,6 +44,8 @@ export function FormatPicker({
   disabled?: boolean;
   triggerLabel?: string;
 }) {
+  // Only the types this course chose; the backend refuses any other (ADR-054).
+  const offered = useCourseQuestionTypes();
   const summary =
     value.length === 0
       ? "No format"
@@ -54,7 +57,7 @@ export function FormatPicker({
     const next = checked ? [...value, format] : value.filter((entry) => entry !== format);
     // Ordered by the canonical list rather than by click order, so two chunks with
     // the same formats always read the same way.
-    onChange(QUESTION_TYPES.filter((entry) => next.includes(entry)));
+    onChange(offered.filter((entry) => next.includes(entry)));
   };
 
   return (
@@ -77,7 +80,7 @@ export function FormatPicker({
       <DropdownMenuContent align="start" className="w-56">
         <DropdownMenuLabel>Formats to draw from</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {QUESTION_TYPES.map((format) => (
+        {offered.map((format) => (
           <DropdownMenuCheckboxItem
             key={format}
             checked={value.includes(format)}

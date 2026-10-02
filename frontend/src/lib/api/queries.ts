@@ -74,6 +74,7 @@ export const qk = {
     prod: () => ["question-sets", "prod"] as const,
     taxonomy: (curriculumVersionId: number) =>
       ["question-sets", "taxonomy", curriculumVersionId] as const,
+    taxonomyLinks: () => ["question-sets", "taxonomy-links"] as const,
   },
   instructions: {
     all: ["instructions"] as const,
@@ -113,6 +114,7 @@ export const qk = {
     all: ["courses"] as const,
     list: () => ["courses", "list"] as const,
     overview: () => ["courses", "overview"] as const,
+    catalog: () => ["courses", "catalog"] as const,
     detail: (courseId: number) => ["courses", "detail", courseId] as const,
   },
 } as const;
@@ -221,6 +223,15 @@ export function useUpdateCourse() {
     onSuccess: () => client.invalidateQueries({ queryKey: qk.courses.all }),
   });
 }
+
+/** Subjects, question types and capabilities, for choosing what a new course assesses. */
+export const useAssessmentCatalog = () =>
+  useQuery({
+    queryKey: qk.courses.catalog(),
+    queryFn: () => unwrap(api.GET("/api/courses/catalog")),
+    // The registry only changes with a deploy.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 
 export function useCreateCourse() {
   const client = useQueryClient();
@@ -889,6 +900,13 @@ export const useTaxonomyClassroom = (curriculumVersionId: number | null, { enabl
           params: { path: { curriculum_version_id: curriculumVersionId ?? 0 } },
         }),
       ),
+  });
+
+/** Every taxonomy in the course with the snapshot its classroom link serves, in one call. */
+export const useTaxonomyLinks = () =>
+  useQuery({
+    queryKey: qk.questionSets.taxonomyLinks(),
+    queryFn: () => unwrap(api.GET("/api/question-sets/taxonomy-links")),
   });
 
 /** Freeze a taxonomy's approved questions and point its classroom link at them. */

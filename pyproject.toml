@@ -17,6 +17,10 @@ dependencies = [
     # Schema migrations, applied in-process on start (app/persistence/database.py).
     # See docs/DECISIONS.md ADR-051.
     "alembic>=1.13",
+    # Isolated capability graders (graders/, docs/GENERIC_ASSESSMENT_MILESTONES.md):
+    # numeric answers with units, and symbolic (formula) equivalence.
+    "pint>=0.24",
+    "sympy>=1.13",
     # Cookie-session auth for the Instructor Studio (app/auth/). Database
     # strategy: logout revokes server-side rather than only clearing the cookie.
     "fastapi-users[sqlalchemy]>=14.0",
@@ -51,7 +55,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "graders*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

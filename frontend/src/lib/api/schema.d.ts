@@ -129,6 +129,9 @@ export interface paths {
         /**
          * Create Course
          * @description Create an empty course owned by the professor creating it.
+         *
+         *     The professor picks a subject and question types; the capabilities are worked out from the
+         *     types and stored with them (ADR-054).
          */
         post: operations["create_course_api_courses_post"];
         delete?: never;
@@ -149,6 +152,26 @@ export interface paths {
          * @description The course list's dashboard: each course's progress, and recent activity.
          */
         get: operations["courses_overview_api_courses_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Assessment Catalog
+         * @description Subjects, question types and capabilities, for choosing what a new course assesses.
+         */
+        get: operations["assessment_catalog_api_courses_catalog_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1143,6 +1166,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/question-sets/taxonomy-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Taxonomy Links
+         * @description Every taxonomy in the course with its classroom link's current snapshot, if any.
+         *
+         *     One call for the whole list, so the Classrooms page does not ask once per taxonomy.
+         */
+        get: operations["list_taxonomy_links_api_question_sets_taxonomy_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/question-sets/taxonomy/{curriculum_version_id}/sync": {
         parameters: {
             query?: never;
@@ -1677,6 +1722,20 @@ export interface components {
             mastery_after: number | null;
         };
         /**
+         * AssessmentCatalogResponse
+         * @description What a course can assess: the registry option D's course creation reads.
+         */
+        AssessmentCatalogResponse: {
+            /** Capabilities */
+            capabilities: components["schemas"]["CapabilityOut"][];
+            /** Question Types */
+            question_types: components["schemas"]["QuestionTypeOut"][];
+            /** Groups */
+            groups: components["schemas"]["QuestionTypeGroupOut"][];
+            /** Subjects */
+            subjects: components["schemas"]["SubjectPresetOut"][];
+        };
+        /**
          * AttemptOut
          * @description One question served to a student, answered or not.
          */
@@ -1999,6 +2058,19 @@ export interface components {
             /** Difficulty Confusions */
             difficulty_confusions: components["schemas"]["DifficultyConfusion"][];
         };
+        /** CapabilityOut */
+        CapabilityOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Deterministic */
+            deterministic: boolean;
+            /** Built */
+            built: boolean;
+        };
         /**
          * ChapterOut
          * @description One chapter and the sections beneath it.
@@ -2205,6 +2277,10 @@ export interface components {
             name: string;
             /** Description */
             description?: string | null;
+            /** Subject */
+            subject?: string | null;
+            /** Question Types */
+            question_types?: string[] | null;
         };
         /** CourseListResponse */
         CourseListResponse: {
@@ -2242,6 +2318,12 @@ export interface components {
              * @default 0
              */
             question_count: number;
+            /** Subject */
+            subject: string;
+            /** Question Types */
+            question_types: string[];
+            /** Capabilities */
+            capabilities: string[];
         };
         /**
          * CourseProgressOut
@@ -3559,6 +3641,34 @@ export interface components {
          * @enum {string}
          */
         QuestionType: "multiple_choice" | "true_false" | "output_prediction" | "code_completion" | "debugging" | "parsons" | "coding";
+        /** QuestionTypeGroupOut */
+        QuestionTypeGroupOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Hint */
+            hint: string;
+        };
+        /** QuestionTypeOut */
+        QuestionTypeOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Widget */
+            widget: string;
+            /** Group */
+            group: string;
+            /** Graded By */
+            graded_by: string[];
+            /** Also Needs */
+            also_needs: string[];
+            /** Offerable */
+            offerable: boolean;
+            /** Ai Graded */
+            ai_graded: boolean;
+        };
         /** ReasonCount */
         ReasonCount: {
             code: components["schemas"]["RejectionReason"];
@@ -4074,6 +4184,25 @@ export interface components {
             /** Score Series */
             score_series?: number[];
         };
+        /** SubjectPresetOut */
+        SubjectPresetOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Default Types */
+            default_types: string[];
+            /** Coming Soon Types */
+            coming_soon_types: string[];
+            /** Primary Groups */
+            primary_groups: string[];
+            /** Examples */
+            examples: {
+                [key: string]: string;
+            };
+        };
         /**
          * SubmitBatchRunRequest
          * @description Optional narrowing of a re-run to named questions.
@@ -4287,6 +4416,24 @@ export interface components {
             };
             /** Analysis */
             analysis: string;
+        };
+        /** TaxonomyLinkListResponse */
+        TaxonomyLinkListResponse: {
+            /** Links */
+            links: components["schemas"]["TaxonomyLinkOut"][];
+        };
+        /**
+         * TaxonomyLinkOut
+         * @description One taxonomy and the classroom link it has, if any (ADR-053).
+         */
+        TaxonomyLinkOut: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Label */
+            label: string;
+            /** Approved Question Count */
+            approved_question_count: number;
+            classroom: components["schemas"]["QuestionSetOut"] | null;
         };
         /**
          * TopicCoverage
@@ -4801,6 +4948,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CoursesOverviewResponse"];
+                };
+            };
+        };
+    };
+    assessment_catalog_api_courses_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentCatalogResponse"];
                 };
             };
         };
@@ -6427,6 +6594,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_taxonomy_links_api_question_sets_taxonomy_links_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyLinkListResponse"];
                 };
             };
             /** @description Validation Error */

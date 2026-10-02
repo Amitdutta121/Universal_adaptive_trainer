@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = Field(default=4096, gt=0)
     embedding_model: str = "openai/text-embedding-3-small"
     validation_timeout_seconds: float = Field(default=2.0, gt=0)
+    # Where student and generated code runs (C6, ADR-055). ``local`` is a plain subprocess and
+    # NOT a sandbox -- fine for one researcher's machine, not for real students. ``piston`` sends
+    # every run to the Piston sandbox at ``piston_url`` (see docker/piston/README.md).
+    executor: Literal["local", "piston"] = "local"
+    piston_url: str = "http://127.0.0.1:2000"
 
     # -- Bulk judge re-run (ADR-030) ----------------------------------------
     # OpenRouter's batch jobs are asynchronous and live under /api/beta, not

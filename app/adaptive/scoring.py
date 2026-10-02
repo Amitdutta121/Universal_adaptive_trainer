@@ -1,10 +1,11 @@
 """Turn a student's submitted answer into a 0-100 score.
 
 Responsibility
-    One function per assessment format, implementing the fixed scoring rule from
-    the adaptive design: a testable programming question scores
-    ``passed_tests / total_tests * 100``, and a naturally discrete question
-    scores 0 or 100.
+    Grade one answer through the isolated capability graders (``graders/``, ADR-055):
+    :mod:`app.assessment.specs` says which capability grades the question and with what spec,
+    the grader returns 0-1, and this module reports it on the app's 0-100 scale. A testable
+    programming question still scores ``passed_tests / total_tests * 100``; a naturally discrete
+    question scores 0 or 100.
 
 A malformed answer is a **wrong answer, not an error**. A student who types
 ``banana`` where an option index was expected has answered incorrectly; raising
@@ -12,11 +13,12 @@ would turn their mistake into a failed request and lose the attempt. Only a
 question that *cannot be marked at all* -- no options, no test cases -- raises,
 because that is a defect in an approved question rather than in the answer.
 
+The behaviour is the scorer's from before the move, unchanged:
+``tests/test_grader_replay.py`` replays answers through a frozen copy of the old scorer
+(``tests/grading_oracle.py``) and through this one and requires identical results.
+
 Allowed dependencies
-    ``app.domain``, ``app.errors``, ``app.validation``. The last is what runs the
-    submitted code; reading a question's stored test cases and executing them are
-    one import (:func:`app.validation.runner.parse_test_cases`), which is what
-    keeps :mod:`app.generation` out of the student loop.
+    ``app.domain``, ``app.errors``, ``app.assessment``, ``graders``.
 """
 
 from __future__ import annotations
@@ -24,13 +26,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.domain.enums import QuestionType
-from app.domain.mastery import MAX_SCORE, MIN_SCORE, score_from_tests
+from app.assessment.specs import Unmarkable, plan_for
+from app.domain.mastery import MAX_SCORE
 from app.domain.questions import Question
-from app.errors import DomainRuleError
-from app.validation.runner import LocalCodeRunner, normalize_output, parse_test_cases
+from app.errors import CodeExecutionUnavailableError, DomainRuleError
+from graders import ExecutorError, SpecError, get_grader
 
 logger = logging.getLogger(__name__)
+
+#: Capabilities whose result is a fraction of tests, reported with test counts.
+_TESTED_CAPABILITIES = frozenset({"code.python.tests"})
 
 
 @dataclass(frozen=True)
@@ -47,48 +52,6 @@ class ScoredAnswer:
     detail: str | None = None
 
 
-def score_answer(
-    question: Question, answer: str, runner: LocalCodeRunner | None = None
-) -> ScoredAnswer:
-    """Score ``answer`` against ``question``.
-
-    Raises:
-        DomainRuleError: if the question carries no assessment format, or its
-            stored content is missing what marking requires.
-    """
-    if question.question_type is None:
-        raise DomainRuleError(
-            "This question has no assessment format, so an answer cannot be scored.",
-            detail=f"Question {question.id}.",
-        )
-
-    content = question.content or {}
-    match question.question_type:
-        case QuestionType.MULTIPLE_CHOICE:
-            return _multiple_choice(question, content, answer)
-        case QuestionType.TRUE_FALSE:
-            return _true_false(question, content, answer)
-        case QuestionType.OUTPUT_PREDICTION:
-            return _output_prediction(question, content, answer)
-        case QuestionType.PARSONS:
-            return _parsons(question, content, answer)
-        case QuestionType.CODE_COMPLETION | QuestionType.DEBUGGING | QuestionType.CODING:
-            return _executable(question, content, answer, runner or LocalCodeRunner())
-
-
-def _explanation(content: dict) -> str | None:
-    text = content.get("explanation")
-    return text if isinstance(text, str) and text.strip() else None
-
-
-def _discrete(correct: bool, content: dict) -> ScoredAnswer:
-    """A discrete question is worth all of the marks or none of them."""
-    return ScoredAnswer(
-        score=MAX_SCORE if correct else MIN_SCORE,
-        detail=_explanation(content),
-    )
-
-
 def _unmarkable(question: Question, what: str) -> DomainRuleError:
     return DomainRuleError(
         "This question cannot be marked, so it should not have been served.",
@@ -96,130 +59,55 @@ def _unmarkable(question: Question, what: str) -> DomainRuleError:
     )
 
 
-def _multiple_choice(question: Question, content: dict, answer: str) -> ScoredAnswer:
-    correct_index = content.get("correct_option_index")
-    options = content.get("options")
-    if not isinstance(correct_index, int) or isinstance(correct_index, bool):
-        raise _unmarkable(question, "no correct option is recorded")
-    if not isinstance(options, list) or correct_index >= len(options):
-        raise _unmarkable(question, "the correct option is not among the options")
+def score_answer(question: Question, answer: str) -> ScoredAnswer:
+    """Score ``answer`` against ``question``.
+
+    Raises:
+        DomainRuleError: if the question carries no assessment format, or its
+            stored content is missing what marking requires.
+        CodeExecutionUnavailableError: the answer's code could not be run at all.
+    """
+    if question.question_type is None:
+        raise DomainRuleError(
+            "This question has no assessment format, so an answer cannot be scored.",
+            detail=f"Question {question.id}.",
+        )
+    try:
+        plan = plan_for(question.question_type, question.content or {}, question.tests)
+    except Unmarkable as reason:
+        raise _unmarkable(question, str(reason)) from reason
 
     try:
-        chosen = int(answer.strip())
-    except (AttributeError, ValueError):
-        # Not an index at all. Wrong, not broken.
-        return _discrete(correct=False, content=content)
-    return _discrete(correct=chosen == correct_index, content=content)
+        grader = get_grader(plan.capability)
+    except KeyError as reason:
+        raise _unmarkable(question, f"no grader is built for {plan.capability}") from reason
+    try:
+        result = grader.grade(plan.spec, plan.rewrite_answer(answer))
+    except SpecError as reason:
+        raise _unmarkable(question, str(reason)) from reason
+    except ExecutorError as reason:
+        # The sandbox could not run the answer. Not the student's fault: raise before anything
+        # is recorded, so the attempt stays open and can be resubmitted. The reason names the
+        # sandbox, so it is logged, not sent to the student.
+        logger.error("Could not run an answer to question %s: %s", question.id, reason)
+        raise CodeExecutionUnavailableError(
+            "Your answer could not be run right now. Please submit it again in a moment.",
+            detail=f"Question {question.id}.",
+        ) from reason
 
-
-def _true_false(question: Question, content: dict, answer: str) -> ScoredAnswer:
-    expected = content.get("correct_answer")
-    if not isinstance(expected, bool):
-        raise _unmarkable(question, "no correct answer is recorded")
-
-    submitted = answer.strip().casefold()
-    if submitted not in {"true", "false"}:
-        return _discrete(correct=False, content=content)
-    return _discrete(correct=(submitted == "true") == expected, content=content)
-
-
-def _output_prediction(question: Question, content: dict, answer: str) -> ScoredAnswer:
-    expected = content.get("expected_output")
-    if not isinstance(expected, str):
-        raise _unmarkable(question, "no expected output is recorded")
-
-    # Compared the way the runner compares a program's stdout, so a trailing
-    # newline or a CRLF does not fail an answer that is right.
-    correct = normalize_output(answer) == normalize_output(expected)
-    return _discrete(correct=correct, content=content)
-
-
-def _parsons_order(answer: str) -> list[str]:
-    """Read submitted block ids from newline- or comma-separated text."""
-    separated = answer.replace(",", "\n")
-    return [line.strip() for line in separated.splitlines() if line.strip()]
-
-
-def _parsons_layout(answer: str) -> list[tuple[str, int]]:
-    """Read submitted block ids plus their indentation level.
-
-    The student answer remains plain text. Each non-empty line names one block,
-    and leading whitespace encodes the intended indent level in multiples of
-    four spaces. Tabs are treated as one indent level each.
-    """
-    if "," in answer and "\n" not in answer and "\r" not in answer:
-        return [(block_id, 0) for block_id in _parsons_order(answer)]
-
-    layout: list[tuple[str, int]] = []
-    for raw_line in answer.splitlines():
-        if not raw_line.strip():
-            continue
-        expanded = raw_line.replace("\t", "    ")
-        stripped = expanded.lstrip(" ")
-        leading_spaces = len(expanded) - len(stripped)
-        layout.append((stripped.strip(), leading_spaces // 4))
-    return layout
-
-
-def _parsons(question: Question, content: dict, answer: str) -> ScoredAnswer:
-    """Score a Parsons puzzle on block order and indentation."""
-    correct_order = content.get("correct_order")
-    if not isinstance(correct_order, list) or not correct_order:
-        raise _unmarkable(question, "no correct block order is recorded")
-    blocks = content.get("blocks")
-    if not isinstance(blocks, list) or not blocks:
-        raise _unmarkable(question, "no blocks are recorded")
-
-    blocks_by_id = {
-        str(block.get("id")): block
-        for block in blocks
-        if isinstance(block, dict) and block.get("id") is not None
-    }
-    expected_layout: list[tuple[str, int]] = []
-    for block_id in correct_order:
-        block = blocks_by_id.get(str(block_id))
-        indent = block.get("indent") if isinstance(block, dict) else None
-        if not isinstance(indent, int) or isinstance(indent, bool) or indent < 0:
-            raise _unmarkable(question, f"block {block_id!r} has no valid indentation recorded")
-        expected_layout.append((str(block_id), indent))
-
-    return _discrete(correct=_parsons_layout(answer) == expected_layout, content=content)
-
-
-def _executable(
-    question: Question, content: dict, answer: str, runner: LocalCodeRunner
-) -> ScoredAnswer:
-    """Run the student's code against the question's own test cases.
-
-    The score is the fraction of cases that passed, which is the fixed rule for
-    a testable programming question. A submission that does not parse, crashes,
-    or loops forever simply fails its cases and scores accordingly -- there is no
-    separate error path, because a student's broken program is a wrong answer.
-    """
-    cases = parse_test_cases(content.get("tests")) or parse_test_cases(question.tests)
-    if cases is None:
-        raise _unmarkable(question, "no usable test cases are stored")
-
-    if not answer.strip():
-        # Nothing to run. Skip the subprocess and record the zero directly.
-        return ScoredAnswer(
-            score=MIN_SCORE, passed_tests=0, total_tests=len(cases), detail="No answer submitted."
+    score = result.score * MAX_SCORE
+    if plan.capability in _TESTED_CAPABILITIES:
+        passed = sum(1 for test in result.tests if test.passed)
+        logger.info(
+            "Scored question %s: %s/%s tests passed.", question.id, passed, len(result.tests)
         )
-
-    summary = runner.run_tests(answer, cases)
-    score = score_from_tests(summary.passed_count, summary.total)
-    detail = summary.evidence
-    if summary.timed_out and not detail:
-        detail = "The submission did not finish in time."
-    logger.info(
-        "Scored question %s: %s/%s tests passed.", question.id, summary.passed_count, summary.total
-    )
-    return ScoredAnswer(
-        score=score,
-        passed_tests=summary.passed_count,
-        total_tests=summary.total,
-        detail=detail,
-    )
+        return ScoredAnswer(
+            score=score,
+            passed_tests=passed,
+            total_tests=len(result.tests),
+            detail=result.feedback,
+        )
+    return ScoredAnswer(score=score, detail=result.feedback)
 
 
 __all__ = ["ScoredAnswer", "score_answer"]

@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.assessment.executor import configure_executor
 from app.auth.seed import seed_dev_user
 from app.config import Settings, get_settings
 from app.errors import register_error_handlers
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Prepare storage and report configuration on startup."""
     settings: Settings = app.state.settings
     init_db()
+    configure_executor(settings)
     await seed_dev_user(settings)
     logger.info(
         "%s v%s ready (environment=%s, llm=%s)",

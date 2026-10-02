@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Annotated
 
 from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
-from app.errors import NotFoundError
+from app.assessment.catalog import TYPES_BY_ID, course_question_types
+from app.errors import DomainRuleError, NotFoundError
 from app.persistence.database import get_session
 from app.persistence.repositories import CourseRepository
 
@@ -37,6 +39,29 @@ def _course_scope(
 #: ``None`` means unscoped -- every course -- which is what callers outside the
 #: Studio (scripts, the existing test suite) get by not sending the header.
 CourseScope = Annotated[int | None, Depends(_course_scope)]
+
+
+def ensure_question_types_allowed(
+    session: Session, course: int | None, question_types: Iterable[str]
+) -> None:
+    """Refuse to generate a question type the course did not choose (ADR-054).
+
+    Unscoped calls (no course) are not checked, which keeps scripts and the existing tests able
+    to generate anything, as before courses existed.
+    """
+    if course is None:
+        return
+    row = CourseRepository(session).get(course)
+    allowed = set(course_question_types(row.subject, row.question_types))
+    refused = sorted({str(type_id) for type_id in question_types} - allowed)
+    if refused:
+        labels = ", ".join(
+            TYPES_BY_ID[type_id].label if type_id in TYPES_BY_ID else type_id for type_id in refused
+        )
+        raise DomainRuleError(
+            "This course does not use these question types.",
+            detail=f"Not chosen for {row.name}: {labels}.",
+        )
 
 
 def ensure_in_course(row_course_id: int | None, scope: int | None, what: str) -> None:

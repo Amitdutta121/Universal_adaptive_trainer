@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { useApprovedCurriculum, useGenerateQuestions, useSection } from "@/lib/api/queries";
 import { DIFFICULTIES, QUESTION_TYPES } from "../spec-sheet-types";
+import { useCourseQuestionTypes } from "../use-course-question-types";
 import { type SheetFilters, useSheetRows } from "../use-sheet-rows";
 import { GenerateControls } from "./components/generate-controls";
 import { OutlinePanel } from "./components/outline-panel";
@@ -45,6 +46,11 @@ export function GenerateSingleScreen() {
     "type",
     parseAsStringLiteral(QUESTION_TYPES).withDefault("multiple_choice"),
   );
+  // A link may name a type this course did not choose; fall back to one it did.
+  const offered = useCourseQuestionTypes();
+  useEffect(() => {
+    if (offered.length > 0 && !offered.includes(type)) void setType(offered[0] ?? null);
+  }, [offered, type, setType]);
   const [difficulty, setDifficulty] = useQueryState(
     "difficulty",
     parseAsStringLiteral(DIFFICULTIES).withDefault("medium"),

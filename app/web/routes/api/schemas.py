@@ -18,6 +18,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.assessment.catalog import (
+    LEGACY_SUBJECT,
+    capabilities_for,
+    course_question_types,
+)
 from app.calibration import (
     MIN_PANEL_SAMPLE,
     AgreementTrend,
@@ -225,10 +230,18 @@ class CourseOut(BaseModel):
     book_count: int = 0
     curriculum_version_count: int = 0
     question_count: int = 0
+    #: Subject preset id (``app.assessment.catalog``); the legacy subject when none was recorded.
+    subject: str
+    #: The question types the AI may generate for this course.
+    question_types: list[str]
+    #: Worked out from ``question_types``; never chosen directly (ADR-054).
+    capabilities: list[str]
 
     @classmethod
     def from_row(cls, row: CourseRow, counts: tuple[int, int, int] = (0, 0, 0)) -> CourseOut:
         books, versions, questions = counts
+        subject = row.subject or LEGACY_SUBJECT
+        types = course_question_types(row.subject, row.question_types)
         return cls(
             id=row.id,
             name=row.name,
@@ -237,6 +250,9 @@ class CourseOut(BaseModel):
             book_count=books,
             curriculum_version_count=versions,
             question_count=questions,
+            subject=subject,
+            question_types=types,
+            capabilities=capabilities_for(types),
         )
 
 
@@ -283,6 +299,55 @@ class CoursesOverviewResponse(BaseModel):
     activity: list[ActivityEventOut]
 
 
+class CapabilityOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    deterministic: bool
+    built: bool
+
+
+class QuestionTypeOut(BaseModel):
+    id: str
+    label: str
+    widget: str
+    group: str
+    graded_by: list[str]
+    also_needs: list[str]
+    #: Built end to end and its graders exist: a professor may pick it.
+    offerable: bool
+    #: Graded by AI only, so its scores never count toward mastery.
+    ai_graded: bool
+
+
+class QuestionTypeGroupOut(BaseModel):
+    id: str
+    title: str
+    hint: str
+
+
+class SubjectPresetOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    #: Offerable types ticked by default.
+    default_types: list[str]
+    #: Default types that are not built yet, shown as "coming soon".
+    coming_soon_types: list[str]
+    primary_groups: list[str]
+    #: An example question per type id, in this subject's terms.
+    examples: dict[str, str]
+
+
+class AssessmentCatalogResponse(BaseModel):
+    """What a course can assess: the registry option D's course creation reads."""
+
+    capabilities: list[CapabilityOut]
+    question_types: list[QuestionTypeOut]
+    groups: list[QuestionTypeGroupOut]
+    subjects: list[SubjectPresetOut]
+
+
 class CourseListResponse(BaseModel):
     courses: list[CourseOut]
 
@@ -290,6 +355,10 @@ class CourseListResponse(BaseModel):
 class CourseCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
+    #: A subject preset id. Omitted: the legacy Intro Python subject.
+    subject: str | None = Field(default=None, max_length=50)
+    #: The question types to allow. Omitted: the subject's defaults. Each must be offerable.
+    question_types: list[str] | None = None
 
     @field_validator("name")
     @classmethod

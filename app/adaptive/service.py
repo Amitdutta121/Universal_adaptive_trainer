@@ -46,7 +46,6 @@ from app.persistence.repositories import (
     StudentStateRepository,
     TrainingSessionRepository,
 )
-from app.validation.runner import LocalCodeRunner
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +78,8 @@ class AnsweredAttempt:
 class AdaptiveTrainingEngine:
     """Selects the next question for a student and folds in the resulting score."""
 
-    def __init__(self, session: Session, runner: LocalCodeRunner | None = None) -> None:
+    def __init__(self, session: Session) -> None:
         self._session = session
-        self._runner = runner
         self._runs = TrainingSessionRepository(session)
         self._attempts = StudentAttemptRepository(session)
         self._state = StudentStateRepository(session)
@@ -357,7 +355,7 @@ class AdaptiveTrainingEngine:
             )
 
         row = self._questions.get(attempt.question_id)
-        scored = score_answer(Question.model_validate(row), answer, runner=self._runner)
+        scored = score_answer(Question.model_validate(row), answer)
 
         mastery_before, mastery_after = self._update_mastery(
             student_id=attempt.student_id, topic_id=row.topic_id, score=scored.score

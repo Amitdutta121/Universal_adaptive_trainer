@@ -37,7 +37,7 @@ from app.persistence.repositories import (
     CurriculumRepository,
     QuestionRepository,
 )
-from app.web.routes.api.deps import CourseScope, DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_question_types_allowed
 from app.web.routes.api.schemas import (
     BatchPlanResponse,
     BatchPlanTotals,
@@ -130,6 +130,7 @@ def generate_questions(
             "No source sections were selected.",
             detail="Provide section_ids, or set all_sections_of_book with a book_id.",
         )
+    ensure_question_types_allowed(session, course, [payload.question_type.value])
     # Resolved before the service is built so that a missing curriculum reports
     # the fixable problem rather than an LLM-configuration error raised first.
     curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
@@ -229,6 +230,9 @@ def generate_batch(
     and the console warns before submitting one.
     """
     chunks = [chunk.to_request() for chunk in payload.chunks]
+    ensure_question_types_allowed(
+        session, course, [qt.value for chunk in chunks for qt in chunk.question_types]
+    )
     # Compiled before the service is built so an unusable sheet reports the
     # fixable problem rather than an LLM-configuration error raised first.
     planned = compile_chunk_requests(chunks)

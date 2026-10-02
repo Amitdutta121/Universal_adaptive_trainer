@@ -268,3 +268,75 @@ def test_the_review_queue_follows_the_chosen_taxonomy(client: TestClient, sessio
     ).json()
     assert queue["total"] == 1
     assert queue["question"]["question"]["prompt"] == f"q{first}"
+
+
+def test_the_catalog_lists_subjects_and_only_built_types_are_offerable(client: TestClient) -> None:
+    body = client.get("/api/courses/catalog").json()
+    types = {item["id"]: item for item in body["question_types"]}
+    assert types["coding"]["offerable"] is True
+    assert types["coding"]["also_needs"] == ["code.python.execute"]
+    # Listed so a professor sees what is coming, but not pickable yet.
+    assert types["numeric_response"]["offerable"] is False
+    assert types["short_explanation"]["ai_graded"] is True
+    subjects = {item["id"]: item for item in body["subjects"]}
+    assert subjects["physics"]["default_types"] == ["multiple_choice", "true_false"]
+    assert subjects["physics"]["coming_soon_types"] == ["numeric_response", "equation_response"]
+    # Examples are in the subject's own terms, not Python's.
+    assert "elastic collision" in subjects["physics"]["examples"]["multiple_choice"]
+
+
+def test_a_course_stores_its_question_types_and_derives_capabilities(client: TestClient) -> None:
+    created = client.post(
+        "/api/courses",
+        json={"name": "Physics 101", "subject": "physics", "question_types": ["multiple_choice"]},
+    )
+    assert created.status_code == 201, created.text
+    course = created.json()
+    assert course["subject"] == "physics"
+    assert course["question_types"] == ["multiple_choice"]
+    assert course["capabilities"] == ["structured.choice"]
+
+    coding = client.post(
+        "/api/courses",
+        json={"name": "CS 1", "subject": "intro_python", "question_types": ["coding"]},
+    ).json()
+    # Ticking a code type turns on what grades it and what it needs; the professor never picks.
+    assert coding["capabilities"] == ["code.python.execute", "code.python.tests"]
+
+    # A course created by name only keeps the legacy behaviour: all seven Python types.
+    legacy = client.post("/api/courses", json={"name": "Old style"}).json()
+    assert legacy["subject"] == "intro_python"
+    assert len(legacy["question_types"]) == 7
+
+
+def test_a_type_that_is_not_built_cannot_be_chosen(client: TestClient) -> None:
+    refused = client.post(
+        "/api/courses",
+        json={"name": "Physics", "subject": "physics", "question_types": ["numeric_response"]},
+    )
+    assert refused.status_code == 422
+    assert "numeric_response" in refused.json()["error"]["detail"]
+    assert client.post("/api/courses", json={"name": "X", "question_types": []}).status_code == 422
+    assert client.post("/api/courses", json={"name": "X", "subject": "nope"}).status_code == 422
+
+
+def test_generation_refuses_a_type_the_course_did_not_choose(client: TestClient) -> None:
+    course_id = client.post(
+        "/api/courses",
+        json={"name": "Physics", "subject": "physics", "question_types": ["multiple_choice"]},
+    ).json()["id"]
+    response = client.post(
+        "/api/questions/generate",
+        headers=_in(course_id),
+        json={"section_ids": [1], "question_type": "coding", "difficulty": "easy"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["message"] == "This course does not use these question types."
+    assert "Coding" in response.json()["error"]["detail"]
+
+    batch = client.post(
+        "/api/questions/generate-batch",
+        headers=_in(course_id),
+        json={"chunks": [{"section_id": 1, "easy": 1, "question_types": ["parsons"]}]},
+    )
+    assert batch.status_code == 422, batch.text

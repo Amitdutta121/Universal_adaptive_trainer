@@ -134,6 +134,17 @@ class SchemaOutOfDateError(AdaptiveTrainerError):
     code = "schema_out_of_date"
 
 
+class CodeExecutionUnavailableError(AdaptiveTrainerError):
+    """Code could not be run at all -- the sandbox is unreachable or refused the run.
+
+    Raised instead of scoring, so an outage is never recorded as a student's wrong answer or a
+    question's failing reference solution. Nothing is saved; the request can be retried.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "code_execution_unavailable"
+
+
 class FeatureNotAvailableError(AdaptiveTrainerError):
     """A module boundary exists but the feature behind it is not implemented yet.
 

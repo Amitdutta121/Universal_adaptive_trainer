@@ -2233,3 +2233,72 @@ So several taxonomies can be taught at once. `POST /api/question-sets/taxonomy/{
 (professor, course-scoped) and `GET /api/question-sets/taxonomy/{id}` (public) implement it.
 
 Old `?set={id}` and `?set=prod` links keep working; the UI no longer creates prod links.
+
+---
+
+## ADR-054 — A course chooses its question types; capabilities follow from them
+
+**Status:** accepted. First step of the grader plan (G0/G3); the graders themselves are not moved yet.
+
+`app/assessment/catalog.py` is the one registry of what the product can assess:
+
+- **Capabilities** (checking abilities, each implemented by a grader) and **question types** (what
+  the student answers with) are defined **once, for every subject**. A question type is gradable
+  by any one of its `graded_by` capabilities and always needs its `also_needs` ones (the code
+  types need Run Python to prove their answer at creation).
+- **Subject presets** are the only per-subject data: default ticked types, which groups show
+  first, and example questions in that subject's terms.
+
+Creating a course is two steps (design "option D"): subject, then question types. The professor
+never picks graders; `capabilities_for(types)` works them out on the server and both lists are
+stored on the course (`subject`, `question_types_json`, `capabilities_json`; migration 0003
+gives every existing course the Intro Python subject and all seven types).
+
+A type is **offerable** only if it is built end to end -- generated, validated and scored by
+this app. Today that is the seven Python types. Short answer, numeric, equation and short
+explanation are listed as "Coming soon" and refused by the API.
+
+Generation is held to the choice: `POST /api/questions/generate`, `/generate-batch` and coverage
+gap filling refuse a type the course did not choose (422), and the generate screens only offer
+the course's types. Calls without a course header are unchecked, as before courses existed.
+
+**Not yet:** changing a course's question types after creation; the taxonomy drafter and the
+generator prompts do not read the course's capabilities yet; the graders still live in
+`app.validation` and `app.adaptive.scoring` (extraction is G1).
+
+## ADR-055 — Graders are an isolated package; code runs through a switchable executor
+
+**Status:** accepted. Track C of `docs/GENERIC_ASSESSMENT_MILESTONES.md` (C0–C7).
+
+**Context.** Marking lived inside the app (`app.adaptive.scoring`, `app.validation.runner`) and
+was Python-only. A subject other than Python needs other kinds of checking (numbers with units,
+formulas), and student code must eventually run somewhere safer than a local subprocess.
+
+**Decision.**
+- `graders/` is a standalone package: one grader per capability id (`structured.choice`,
+  `structured.ordering`, `text.normalized_match`, `code.python.execute`, `code.python.tests`,
+  `quantity.units`, `symbolic.expression_equivalence`), each with `check_spec` and `grade`, scoring
+  0–1. It may not import `app` (enforced by `tests/graders/test_isolation.py`).
+- The app owns question types. `app/assessment/specs.py` is the one translation from a stored
+  question to `(capability, spec, answer rewrite)`; `app.adaptive.scoring` reports the result on
+  the 0–100 scale. Whether a capability is "built" is read from the registry, never hand-set.
+- Code runs through an `Executor`: `LocalExecutor` (a subprocess, not a sandbox) or
+  `PistonExecutor` (Piston over HTTP; `docker/piston/`). `EXECUTOR=local|piston` picks one at
+  startup (`app/assessment/executor.py`); one shared instance (`graders.get_executor`) serves
+  scoring and the authoring checks, and `app/validation/runner.py` is a thin shim over
+  `graders.python`.
+- A run the executor could not perform at all (sandbox unreachable or refusing) is flagged
+  `RunResult.infra_error`; graders raise `ExecutorError` and the app answers 503
+  (`CodeExecutionUnavailableError`). It is never scored as a wrong answer or recorded, and its
+  internals are logged, not shown to the student.
+
+**Evidence the move changed nothing.** Every stored attempt (345) scores identically through a
+frozen copy of the old scorer and the new path (`scripts/replay_grading.py`); 37 synthetic cases
+across all seven types agree (`tests/test_grader_replay.py`), also with code run in Piston; all
+342 stored questions re-validate with identical reports (`scripts/revalidate_questions.py`).
+The oracle runs code with its own frozen copy of the old runner (`tests/frozen_runner.py`).
+
+**Not yet.** The default stays `local` in development; production should set `piston`. Numeric
+and formula graders exist but no question type uses them yet (the app cannot generate or map
+them), so they stay "Coming soon". AI rubric grading (`semantic.source_grounded`) is not built.
+

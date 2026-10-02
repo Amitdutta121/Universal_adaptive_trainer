@@ -5,7 +5,8 @@
 import type * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Difficulty, QuestionKind, QuestionType } from "@/lib/api/types";
-import { DIFFICULTIES, QUESTION_TYPE_LABEL, QUESTION_TYPES } from "../../spec-sheet-types";
+import { DIFFICULTIES, QUESTION_TYPE_LABEL } from "../../spec-sheet-types";
+import { useCourseQuestionTypes } from "../../use-course-question-types";
 
 /** Not exposed as a client constant elsewhere — mirrors `app.domain.enums`'s split. */
 const QUESTION_TYPE_KIND: Record<QuestionType, QuestionKind> = {
@@ -57,6 +58,8 @@ export function GenerateControls({
   onGenerate: () => void;
   isGenerating: boolean;
 }) {
+  // Only the types this course chose; the backend refuses any other (ADR-054).
+  const offered = useCourseQuestionTypes();
   return (
     <Card className="border">
       <CardHeader>
@@ -69,7 +72,7 @@ export function GenerateControls({
             Question type
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {QUESTION_TYPES.map((value) => (
+            {offered.map((value) => (
               <Pill key={value} active={value === type} onClick={() => onTypeChange(value)}>
                 {QUESTION_TYPE_LABEL[value]}
               </Pill>

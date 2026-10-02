@@ -29,9 +29,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { useCoursesOverview, useCreateCourse, useUpdateCourse } from "@/lib/api/queries";
+import { useCoursesOverview, useUpdateCourse } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 import { coursePath } from "@/lib/course";
+import { NewCourseDialog } from "./new-course-dialog";
 
 type CourseProgress = Schemas["CourseProgressOut"];
 type ActivityEvent = Schemas["ActivityEventOut"];
@@ -263,37 +264,28 @@ function RecentActivity({ events }: { events: ActivityEvent[] }) {
 
 // -------------------------------------------------------------------- dialogs
 
+/** Rename a course or change its description. Creating one is the New course page. */
 function CourseFormDialog({
   course,
   onOpenChange,
 }: {
-  /** The course to edit, or `null` to create one. */
-  course: Schemas["CourseOut"] | null;
+  course: Schemas["CourseOut"];
   onOpenChange: (open: boolean) => void;
 }) {
-  const createCourse = useCreateCourse();
   const updateCourse = useUpdateCourse();
-  const mutation = course ? updateCourse : createCourse;
+  const mutation = updateCourse;
   const nameId = useId();
   const descriptionId = useId();
-  const [name, setName] = useState(course?.name ?? "");
-  const [description, setDescription] = useState(course?.description ?? "");
+  const [name, setName] = useState(course.name);
+  const [description, setDescription] = useState(course.description ?? "");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
     const body = { name: name.trim(), description: description.trim() };
     try {
-      if (course) {
-        await updateCourse.mutateAsync({ courseId: course.id, body });
-        onOpenChange(false);
-      } else {
-        const created = await createCourse.mutateAsync({
-          ...body,
-          description: body.description || null,
-        });
-        openCourse(created.id);
-      }
+      await updateCourse.mutateAsync({ courseId: course.id, body });
+      onOpenChange(false);
     } catch {
       // Rendered below with the backend's own message.
     }
@@ -304,12 +296,8 @@ function CourseFormDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>{course ? "Course settings" : "New course"}</DialogTitle>
-            <DialogDescription>
-              {course
-                ? "Rename the course or change its description."
-                : "A course holds its own books, taxonomies and questions. You can rename it later."}
-            </DialogDescription>
+            <DialogTitle>Course settings</DialogTitle>
+            <DialogDescription>Rename the course or change its description.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2">
@@ -345,7 +333,7 @@ function CourseFormDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={!name.trim() || mutation.isPending}>
-              {mutation.isPending ? "Saving…" : course ? "Save changes" : "Create course"}
+              {mutation.isPending ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>
         </form>
@@ -358,8 +346,9 @@ function CourseFormDialog({
 
 export function CoursesScreen() {
   const overview = useCoursesOverview();
-  // `undefined`: closed. `null`: creating. A course: editing that one.
-  const [editing, setEditing] = useState<Schemas["CourseOut"] | null | undefined>(undefined);
+  // The course whose settings are open, if any.
+  const [editing, setEditing] = useState<Schemas["CourseOut"] | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const courses = overview.data?.courses ?? [];
   const questions = courses.reduce((sum, c) => sum + c.course.question_count, 0);
@@ -375,7 +364,7 @@ export function CoursesScreen() {
     <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 p-6">
       <header className="flex items-center gap-3">
         <h1 className="font-semibold text-2xl tracking-[-0.02em]">My courses</h1>
-        <Button className="ml-auto" onClick={() => setEditing(null)}>
+        <Button className="ml-auto" onClick={() => setCreating(true)}>
           <Plus />
           New course
         </Button>
@@ -418,7 +407,7 @@ export function CoursesScreen() {
                   <p className="mt-1 text-muted-foreground text-sm">
                     Create your first course, then add its books and taxonomy.
                   </p>
-                  <Button className="mt-4" onClick={() => setEditing(null)}>
+                  <Button className="mt-4" onClick={() => setCreating(true)}>
                     <Plus />
                     New course
                   </Button>
@@ -438,9 +427,11 @@ export function CoursesScreen() {
         </>
       ) : null}
 
-      {editing !== undefined ? (
-        <CourseFormDialog course={editing} onOpenChange={() => setEditing(undefined)} />
+      {editing !== null ? (
+        <CourseFormDialog course={editing} onOpenChange={() => setEditing(null)} />
       ) : null}
+      {/* Mounted only while open, so each opening starts from a blank form. */}
+      {creating ? <NewCourseDialog onOpenChange={setCreating} /> : null}
     </div>
   );
 }
