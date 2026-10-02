@@ -130,3 +130,22 @@ def test_an_unbuilt_capability_is_unmarkable_not_a_crash(monkeypatch) -> None:
     monkeypatch.setattr(scoring, "get_grader", missing)
     with pytest.raises(DomainRuleError):
         score_answer(CODING, "print(1)")
+
+
+def test_a_maths_answer_that_cannot_be_read_tells_the_student_why() -> None:
+    question = Question(
+        id=4,
+        prompt="Speed after 1 s of free fall?",
+        question_type=QuestionType.NUMERIC_RESPONSE,
+        kind=QuestionKind.DISCRETE,
+        difficulty=Difficulty.EASY,
+        content={
+            "value": 9.81,
+            "unit": "m/s",
+            "relative_tolerance": 0.01,
+            "explanation": "v = g t.",
+        },
+    )
+    scored = score_answer(question, "9.81 kg")
+    assert scored.score == 0
+    assert scored.detail and scored.detail.endswith("v = g t.") and len(scored.detail) > 8

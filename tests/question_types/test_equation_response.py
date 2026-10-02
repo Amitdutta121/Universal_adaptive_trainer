@@ -213,7 +213,12 @@ def test_a_fake_llm_draft_is_generated_stored_and_validated(session: Session, se
 def test_answers_are_scored_by_equivalence(answer: str, score: float) -> None:
     result = score_answer(_question(_content()), answer)
     assert result.score == score
-    assert result.detail == "Product rule: (uv)' = u'v + uv'."
+    explanation = "Product rule: (uv)' = u'v + uv'."
+    if answer.startswith("__"):
+        # An answer that cannot be read says why, ahead of the explanation.
+        assert result.detail == f"'__' is not allowed in an answer. {explanation}"
+    else:
+        assert result.detail == explanation
 
 
 def test_an_injection_attempt_is_a_format_error_not_a_grade() -> None:

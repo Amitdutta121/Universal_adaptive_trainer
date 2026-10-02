@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { reviewReasonOptions } from "../review-reasons";
 import {
   DECISIONS,
   type QuestionDetail,
@@ -11,7 +12,6 @@ import {
   type RejectionReason,
   type ReviewDecision,
 } from "../review-types";
-import { reviewReasonOptions } from "../review-utils";
 
 type ReviewActionBarProps = {
   detail: QuestionDetail;

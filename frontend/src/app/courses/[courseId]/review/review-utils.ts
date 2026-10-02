@@ -1,6 +1,4 @@
-import { questionTypeUI } from "@/lib/question-types/registry";
-import type { QuestionCheck, QuestionDetail, RejectionReason } from "./review-types";
-import { REJECTION_REASONS } from "./review-types";
+import type { QuestionCheck, QuestionDetail } from "./review-types";
 
 export function labelize(value: string) {
   return value.replace(/_/g, " ");
@@ -102,13 +100,3 @@ export function explanation(detail: QuestionDetail) {
   return presentText(detail.content?.explanation);
 }
 
-export function reviewReasonOptions(
-  questionType: QuestionDetail["question"]["question_type"],
-): RejectionReason[] {
-  const ui = questionTypeUI(questionType);
-  const base = REJECTION_REASONS.filter((reason) => reason !== "poor_distractors");
-  if (ui?.hasDistractors) return REJECTION_REASONS.slice();
-  return base.filter(
-    (reason) => !((reason === "incorrect_tests" || reason === "poor_tests") && !ui?.hasTests),
-  );
-}

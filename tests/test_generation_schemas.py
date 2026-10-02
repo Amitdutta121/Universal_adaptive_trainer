@@ -26,7 +26,7 @@ from app.question_types import implemented_types
 
 def test_every_built_type_has_a_response_model() -> None:
     built = implemented_types()
-    assert len(built) == 7
+    assert len(built) == 9  # the seven Python types, numeric_response, equation_response
     assert all(issubclass(response_model_for(qtype), TaxonomyClaim) for qtype in built)
 
 

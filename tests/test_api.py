@@ -90,6 +90,8 @@ def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient
         "debugging",
         "parsons",
         "coding",
+        "numeric_response",
+        "equation_response",
     }
     # Rejection reasons carry the professor-facing label, not the raw code.
     labels = {option["value"]: option["label"] for option in payload["rejection_reasons"]}

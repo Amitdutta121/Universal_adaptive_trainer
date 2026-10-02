@@ -275,12 +275,19 @@ def test_the_catalog_lists_subjects_and_only_built_types_are_offerable(client: T
     types = {item["id"]: item for item in body["question_types"]}
     assert types["coding"]["offerable"] is True
     assert types["coding"]["also_needs"] == ["code.python.execute"]
+    assert types["numeric_response"]["offerable"] is True
+    assert types["equation_response"]["offerable"] is True
     # Listed so a professor sees what is coming, but not pickable yet.
-    assert types["numeric_response"]["offerable"] is False
+    assert types["short_explanation"]["offerable"] is False
     assert types["short_explanation"]["ai_graded"] is True
     subjects = {item["id"]: item for item in body["subjects"]}
-    assert subjects["physics"]["default_types"] == ["multiple_choice", "true_false"]
-    assert subjects["physics"]["coming_soon_types"] == ["numeric_response", "equation_response"]
+    assert subjects["physics"]["default_types"] == [
+        "multiple_choice",
+        "true_false",
+        "numeric_response",
+        "equation_response",
+    ]
+    assert subjects["physics"]["coming_soon_types"] == []
     # Examples are in the subject's own terms, not Python's.
     assert "elastic collision" in subjects["physics"]["examples"]["multiple_choice"]
 
@@ -312,10 +319,10 @@ def test_a_course_stores_its_question_types_and_derives_capabilities(client: Tes
 def test_a_type_that_is_not_built_cannot_be_chosen(client: TestClient) -> None:
     refused = client.post(
         "/api/courses",
-        json={"name": "Physics", "subject": "physics", "question_types": ["numeric_response"]},
+        json={"name": "Physics", "subject": "physics", "question_types": ["short_explanation"]},
     )
     assert refused.status_code == 422
-    assert "numeric_response" in refused.json()["error"]["detail"]
+    assert "short_explanation" in refused.json()["error"]["detail"]
     assert client.post("/api/courses", json={"name": "X", "question_types": []}).status_code == 422
     assert client.post("/api/courses", json={"name": "X", "subject": "nope"}).status_code == 422
 

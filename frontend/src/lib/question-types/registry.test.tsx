@@ -73,15 +73,15 @@ function built(type: (typeof SEVEN)[number]): QuestionTypeUI {
 }
 
 describe("QUESTION_TYPE_UI", () => {
-  it("builds the seven existing types, in canonical order", () => {
-    expect(BUILT_QUESTION_TYPES).toEqual(SEVEN);
+  it("builds the seven Python types and the two maths types, in canonical order", () => {
+    expect(BUILT_QUESTION_TYPES).toEqual([...SEVEN, "numeric_response", "equation_response"]);
   });
 
-  it("keeps numeric and equation response as unbuilt placeholders", () => {
-    expect(numericResponse).toBeNull();
-    expect(equationResponse).toBeNull();
-    expect(QUESTION_TYPE_UI.numeric_response).toBeNull();
-    expect(QUESTION_TYPE_UI.equation_response).toBeNull();
+  it("registers numeric and equation response (T1, T2)", () => {
+    expect(QUESTION_TYPE_UI.numeric_response).toBe(numericResponse);
+    expect(QUESTION_TYPE_UI.equation_response).toBe(equationResponse);
+    expect(numericResponse).not.toBeNull();
+    expect(equationResponse).not.toBeNull();
   });
 
   it.each(SEVEN)("%s renders its answer input", (type) => {

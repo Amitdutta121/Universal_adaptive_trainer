@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 #: Capabilities whose result is a fraction of tests, reported with test counts.
 _TESTED_CAPABILITIES = frozenset({"code.python.tests"})
+#: Capabilities whose "could not read your answer" message is shown to the student, ahead of the
+#: explanation. Only those with no stored history: the older ones keep exactly the feedback they
+#: gave before the move to ``graders/`` (the replay requires it).
+_SHOWS_FORMAT_ERROR = frozenset({"quantity.units", "symbolic.expression_equivalence"})
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,10 @@ def score_answer(question: Question, answer: str) -> ScoredAnswer:
             total_tests=len(result.tests),
             detail=result.feedback,
         )
-    return ScoredAnswer(score=score, detail=result.feedback)
+    detail = result.feedback
+    if result.format_error and plan.capability in _SHOWS_FORMAT_ERROR:
+        detail = f"{result.format_error} {detail}" if detail else result.format_error
+    return ScoredAnswer(score=score, detail=detail)
 
 
 __all__ = ["ScoredAnswer", "score_answer"]
