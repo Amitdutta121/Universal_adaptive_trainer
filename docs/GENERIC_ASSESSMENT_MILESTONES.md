@@ -295,4 +295,4 @@ cd frontend; pnpm exec tsc --noEmit; pnpm exec biome lint .; pnpm exec vitest ru
 - Multi-language code types via the same executor (Piston already supports other languages).
 - Changing a course's question types after creation.
 
-**Active:** wave 0 (S0 → T0a ∥ T0b). Track C (C0–C7) is done.
+**Status (2026-10-02):** track C and phase 2 waves 0–2 are done (S0–S5, T0–T2, C8, C9; ADR-055, ADR-056). Open: a live LLM run per new type (needs a go), course-scoping of the question-detail, review and student routes (found by S5), and a browser pass over the new answer inputs.
