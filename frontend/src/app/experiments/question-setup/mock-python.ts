@@ -1,0 +1,555 @@
+/**
+ * Intro Python. TODO(real): mining output, templates and examples come from the mining and
+ * suggestion calls; nothing here is generated.
+ *
+ * The taxonomy and the "have" counts are copied from the local dev database (curriculum
+ * version 7, "Python for Data Science - Intro Programming Module", approved questions only)
+ * so the plan shows the real gap: no hard questions anywhere, Recursion empty.
+ */
+
+import type { Domain } from "./mock-types";
+
+const h = (easy: number, medium: number, hard = 0) => ({ easy, medium, hard });
+
+export const PYTHON: Domain = {
+  id: "python",
+  subjectLabel: "Intro programming (Python)",
+  course: "CS 110 · Intro Programming",
+  book: {
+    title: "Think Python, 2nd edition",
+    author: "Allen B. Downey",
+    pages: 244,
+    chapters: 21,
+    sections: 228,
+  },
+  taxonomy: {
+    label: "Python for Data Science - Intro Programming Module",
+    topics: 9,
+    subtopics: 38,
+  },
+  questionTypes: {
+    multiple_choice: "Multiple choice",
+    true_false: "True / false",
+    parsons: "Parsons",
+    output_prediction: "Output prediction",
+    code_completion: "Code completion",
+    debugging: "Debugging",
+    coding: "Coding",
+  },
+  mining: {
+    tocTokens: 2_510,
+    sectionsRouted: 38,
+    sections: [
+      { title: "Exercises", count: 19, kind: "exercises" },
+      { title: "Glossary", count: 19, kind: "objectives" },
+    ],
+    itemsFound: 97,
+    level: "Intro undergraduate, no prior programming",
+    taskMix: [
+      { label: "Write a function or program", share: 0.58 },
+      { label: "Trace code / predict what it prints", share: 0.14 },
+      { label: "Explain or compare", share: 0.12 },
+      { label: "Find and fix a bug", share: 0.08 },
+      { label: "Change given code", share: 0.08 },
+    ],
+    difficultyMix: { easy: 31, medium: 44, hard: 22 },
+    samples: [
+      {
+        text: "Write right_justify(s) that prints s with enough leading spaces that its last letter lands in column 70.",
+        source: "Ch 3 · Exercises · Ex 3.1",
+        inferredType: "Coding",
+        difficulty: "easy",
+      },
+      {
+        text: "Draw a stack diagram for the program below. What does it print?",
+        source: "Ch 6 · Exercises · Ex 6.1",
+        inferredType: "Output prediction",
+        difficulty: "medium",
+      },
+      {
+        text: "Write is_triangle(a, b, c) that prints Yes if three sticks of those lengths can form a triangle, and No otherwise.",
+        source: "Ch 5 · Exercises · Ex 5.3",
+        inferredType: "Coding",
+        difficulty: "medium",
+      },
+      {
+        text: "Rewrite print_n from Section 5.8 using iteration instead of recursion.",
+        source: "Ch 7 · Exercises · Ex 7.1",
+        inferredType: "Code completion",
+        difficulty: "medium",
+      },
+      {
+        text: "Write has_duplicates(t) that returns True if any element of a list appears more than once.",
+        source: "Ch 10 · Exercises · Ex 10.7",
+        inferredType: "Coding",
+        difficulty: "medium",
+      },
+      {
+        text: "Write the Ackermann function ack(m, n) and use it to evaluate ack(3, 4).",
+        source: "Ch 6 · Exercises · Ex 6.2",
+        inferredType: "Coding",
+        difficulty: "hard",
+      },
+    ],
+    notes: [
+      "Every chapter has its exercises in their own outline section, so nothing had to be guessed from body text.",
+      "Glossary sections were read for terminology only. They hold no questions.",
+      "The book has no answer key. Its exercises are used as level and style references and are never copied into your bank.",
+    ],
+  },
+  wishes: [
+    "More code writing",
+    "Tracing before writing",
+    "Fewer true / false",
+    "Real-world scenarios",
+  ],
+  templates: [
+    {
+      id: "py-e-mcq",
+      name: "Check one concept on a tiny snippet",
+      summary: "Students read one or two lines and pick what is true about them.",
+      questionType: "multiple_choice",
+      difficulty: "easy",
+      checkedBy: "Choice: one correct option",
+      evidence: "Matches the short checks after each section in the book.",
+      examples: [
+        {
+          prompt: "After this line runs, what is the type of x?",
+          code: "x = 7 / 2",
+          options: [
+            { text: "int" },
+            { text: "float", correct: true },
+            { text: "str" },
+            { text: "It raises an error" },
+          ],
+          grounding: "§2.5 Expressions and statements",
+        },
+        {
+          prompt: "What does this expression evaluate to?",
+          code: "'abc' * 2",
+          options: [
+            { text: "'abcabc'", correct: true },
+            { text: "'aabbcc'" },
+            { text: "'abc2'" },
+            { text: "TypeError" },
+          ],
+          grounding: "§2.7 String operations",
+        },
+      ],
+    },
+    {
+      id: "py-e-out",
+      name: "Predict the output of a short snippet",
+      summary: "Students read up to five lines and type exactly what is printed.",
+      questionType: "output_prediction",
+      difficulty: "easy",
+      checkedBy: "Exact output, proved by running Python when the question is made",
+      evidence: "14% of the book's exercises ask what code prints.",
+      examples: [
+        {
+          prompt: "What does this code print?",
+          code: 'word = "banana"\nprint(word[1:4])',
+          answer: "ana",
+          grounding: "§8.4 String slices",
+        },
+        {
+          prompt: "What does this code print?",
+          code: "total = 0\nfor n in [3, 1, 4]:\n    total = total + n\nprint(total)",
+          answer: "8",
+          grounding: "§10.3 Traversing a list",
+        },
+      ],
+    },
+    {
+      id: "py-e-tf",
+      name: "Catch a common misconception",
+      summary: "One true-or-false statement built around a mistake beginners often make.",
+      questionType: "true_false",
+      difficulty: "easy",
+      checkedBy: "Choice: true or false",
+      evidence: "Several Debugging sections in the book name these mistakes.",
+      examples: [
+        {
+          prompt: "True or false: = and == do the same thing in an if statement.",
+          options: [{ text: "True" }, { text: "False", correct: true }],
+          grounding: "§5.2 Boolean expressions",
+        },
+        {
+          prompt: "True or false: a function with no return statement returns None.",
+          options: [{ text: "True", correct: true }, { text: "False" }],
+          grounding: "§6.1 Return values",
+        },
+      ],
+    },
+    {
+      id: "py-m-trace",
+      name: "Trace a loop or call over several steps",
+      summary: "Students follow the values through a loop or a few calls, then give the output.",
+      questionType: "output_prediction",
+      difficulty: "medium",
+      checkedBy: "Exact output, proved by running Python when the question is made",
+      evidence: "Like Ex 6.1, where students trace a stack of calls.",
+      examples: [
+        {
+          prompt: "What does this code print?",
+          code: "def f(n):\n    result = 1\n    while n > 1:\n        result = result * n\n        n = n - 2\n    return result\n\nprint(f(7))",
+          answer: "105",
+          grounding: "§7.3 The while statement",
+        },
+        {
+          prompt: "What does this code print?",
+          code: "t = [1, 2, 3]\nu = t\nu.append(4)\nprint(len(t), t[-1])",
+          answer: "4 4",
+          grounding: "§10.10 Aliasing",
+        },
+      ],
+    },
+    {
+      id: "py-m-parsons",
+      name: "Put the lines of a short function in order",
+      summary: "Students drag 4 to 6 lines into the right order and indentation.",
+      questionType: "parsons",
+      difficulty: "medium",
+      checkedBy: "Ordering, with indentation",
+      evidence: "A gentler step towards the book's write-a-function exercises.",
+      examples: [
+        {
+          prompt: "Arrange the lines so count_vowels(s) returns how many vowels s has.",
+          lines: [
+            "def count_vowels(s):",
+            "    count = 0",
+            "    for ch in s:",
+            "        if ch in 'aeiou':",
+            "            count = count + 1",
+            "    return count",
+          ],
+          grounding: "§8.7 Looping and counting",
+        },
+        {
+          prompt: "Arrange the lines so is_sorted(t) returns True when t is in ascending order.",
+          lines: [
+            "def is_sorted(t):",
+            "    for i in range(len(t) - 1):",
+            "        if t[i] > t[i + 1]:",
+            "            return False",
+            "    return True",
+          ],
+          grounding: "§10.3 Traversing a list",
+        },
+      ],
+    },
+    {
+      id: "py-m-debug",
+      name: "Fix one bug in a short function",
+      summary: "The function is almost right. Students find the one wrong line and fix it.",
+      questionType: "debugging",
+      difficulty: "medium",
+      checkedBy: "Running hidden tests on the fixed code",
+      evidence: "8% of the book's exercises are find-and-fix.",
+      excludeTopics: ["io"],
+      excludeReason: "Hidden tests cannot read or write files yet",
+      examples: [
+        {
+          prompt: "average(t) should return the mean of a non-empty list, but average([2, 3]) returns 1.5. Fix it.",
+          code: "def average(t):\n    total = 0\n    for x in t:\n        total = x\n    return total / len(t)",
+          answer: "Line 4 should add to the running total: total = total + x",
+          tests: 4,
+          grounding: "§10.7 Map, filter and reduce",
+        },
+        {
+          prompt: "countdown(n) should print n down to 1, but it never stops. Fix it.",
+          code: "def countdown(n):\n    while n > 0:\n        print(n)\n    n = n - 1",
+          answer: "Indent n = n - 1 so it runs inside the loop",
+          tests: 3,
+          grounding: "§7.3 The while statement",
+        },
+      ],
+    },
+    {
+      id: "py-m-complete",
+      name: "Fill in the missing line",
+      summary: "A working function with one key line blanked out.",
+      questionType: "code_completion",
+      difficulty: "medium",
+      checkedBy: "Running hidden tests on the completed code",
+      evidence: "Like Ex 7.1, which asks students to change part of given code.",
+      excludeTopics: ["io"],
+      excludeReason: "Hidden tests cannot read or write files yet",
+      examples: [
+        {
+          prompt: "Complete the function so it returns the largest value in t, without using max().",
+          code: "def largest(t):\n    best = t[0]\n    for x in t:\n        ________\n    return best",
+          answer: "if x > best: best = x",
+          tests: 5,
+          grounding: "§10.7 Map, filter and reduce",
+        },
+        {
+          prompt: "Complete invert(d) so it maps each value to the list of keys that had it.",
+          code: "def invert(d):\n    inverse = {}\n    for key in d:\n        val = d[key]\n        ________\n    return inverse",
+          answer: "if val not in inverse: inverse[val] = [key]  else: inverse[val].append(key)",
+          tests: 4,
+          grounding: "§11.5 Dictionaries and lists",
+        },
+      ],
+    },
+    {
+      id: "py-h-code",
+      name: "Write a complete function from a short spec",
+      summary: "Students write the whole function. Hidden tests give partial credit.",
+      questionType: "coding",
+      difficulty: "hard",
+      checkedBy: "Running hidden tests: score is tests passed out of total",
+      evidence: "58% of the book's exercises are write-a-function, most of them at this level.",
+      excludeTopics: ["io"],
+      excludeReason: "Hidden tests cannot read or write files yet",
+      examples: [
+        {
+          prompt: "Write has_duplicates(t) that returns True if any element appears more than once in t. Do not change t.",
+          tests: 6,
+          answer: "Reference: return len(set(t)) < len(t), or a loop with a dict of seen items",
+          grounding: "§10 Exercises, §11.2 Dictionary as a collection of counters",
+        },
+        {
+          prompt: "Write is_palindrome(word) using recursion: a word is a palindrome if its first and last letters match and the middle is a palindrome.",
+          tests: 7,
+          answer: "Reference: base case len(word) <= 1; else compare ends and recurse on word[1:-1]",
+          grounding: "§6.5 More recursion",
+        },
+      ],
+    },
+    {
+      id: "py-h-subtle",
+      name: "Predict output where one subtle rule decides it",
+      summary: "Scope, aliasing or mutation decides the answer. Built to separate tracing from guessing.",
+      questionType: "output_prediction",
+      difficulty: "hard",
+      checkedBy: "Exact output, proved by running Python when the question is made",
+      evidence: "The book's Debugging sections flag these as the usual traps.",
+      examples: [
+        {
+          prompt: "What does this code print?",
+          code: "x = 10\n\ndef bump(x):\n    x = x + 1\n    return x\n\ny = bump(x)\nprint(x, y)",
+          answer: "10 11",
+          grounding: "§3.9 Variables and parameters are local",
+        },
+        {
+          prompt: "What does this code print?",
+          code: "def chop(t):\n    t = t[1:]\n\ndef pop_first(t):\n    del t[0]\n\na = [1, 2, 3]\nchop(a)\npop_first(a)\nprint(a)",
+          answer: "[2, 3]",
+          grounding: "§10.12 List arguments",
+        },
+      ],
+    },
+    {
+      id: "py-h-bug",
+      name: "Find a bug that only shows on some inputs",
+      summary: "The code passes the obvious case. Students have to find the input that breaks it.",
+      questionType: "debugging",
+      difficulty: "hard",
+      checkedBy: "Running hidden tests on the fixed code",
+      evidence: "Matches the book's advice on testing edge cases.",
+      excludeTopics: ["io"],
+      excludeReason: "Hidden tests cannot read or write files yet",
+      examples: [
+        {
+          prompt: "find_index(t, target) should return the index of target, or -1 if it is missing. It fails one of the tests. Fix it.",
+          code: "def find_index(t, target):\n    for i in range(len(t)):\n        if t[i] == target:\n            return i\n        else:\n            return -1",
+          answer: "Move return -1 after the loop; it currently gives up after the first item",
+          tests: 6,
+          grounding: "§8.6 Searching",
+        },
+        {
+          prompt: "fact(n) should return n! for every n >= 0, but it crashes for one valid input. Fix it.",
+          code: "def fact(n):\n    if n == 1:\n        return 1\n    return n * fact(n - 1)",
+          answer: "Base case should be n == 0 (fact(0) recurses forever)",
+          tests: 5,
+          grounding: "§6.5 More recursion",
+        },
+      ],
+    },
+  ],
+  reserve: [
+    {
+      id: "py-h-parsons",
+      name: "Order a longer function, with a decoy line",
+      summary: "Like the medium Parsons, but longer, with one wrong line students must leave out.",
+      questionType: "parsons",
+      difficulty: "hard",
+      checkedBy: "Ordering, with indentation",
+      evidence: "A hard style that does not need students to type code.",
+      examples: [
+        {
+          prompt: "Arrange the lines so total(t) returns the sum of t using recursion. One line is not needed.",
+          lines: [
+            "def total(t):",
+            "    if len(t) == 0:",
+            "        return 0",
+            "    return t[0] + total(t[1:])",
+          ],
+          answer: "Decoy: return t[0] + total(t)",
+          grounding: "§6.5 More recursion",
+        },
+        {
+          prompt: "Arrange the lines so count_down(n) prints n to 1 using recursion. One line is not needed.",
+          lines: ["def count_down(n):", "    if n > 0:", "        print(n)", "        count_down(n - 1)"],
+          answer: "Decoy: count_down(n)",
+          grounding: "§5.8 Recursion",
+        },
+      ],
+    },
+    {
+      id: "py-h-complete",
+      name: "Write the one line that makes it work",
+      summary: "The scaffold is given; students write the line that carries the logic: the recursive call, the loop update, or the key condition.",
+      questionType: "code_completion",
+      difficulty: "hard",
+      checkedBy: "Running hidden tests on the completed code",
+      evidence: "A hard style that does not need a whole function typed.",
+      excludeTopics: ["io"],
+      excludeReason: "Hidden tests cannot read or write files yet",
+      examples: [
+        {
+          prompt: "Complete power(b, n) so it returns b to the power n for n >= 0.",
+          code: "def power(b, n):\n    if n == 0:\n        return 1\n    ________",
+          answer: "return b * power(b, n - 1)",
+          tests: 5,
+          grounding: "§6.5 More recursion",
+        },
+        {
+          prompt: "Complete digits(n) so it returns how many digits a positive integer has.",
+          code: "def digits(n):\n    if n < 10:\n        return 1\n    ________",
+          answer: "return 1 + digits(n // 10)",
+          tests: 5,
+          grounding: "§6.5 More recursion",
+        },
+      ],
+    },
+    {
+      id: "py-e-mcq-line",
+      name: "Which line causes the error?",
+      summary: "A short program with one error. Students pick the line.",
+      questionType: "multiple_choice",
+      difficulty: "easy",
+      checkedBy: "Choice: one correct option",
+      evidence: "The book's Debugging sections walk through these.",
+      examples: [
+        {
+          prompt: "Which line raises an error?",
+          code: "1  name = 'Ada'\n2  age = 36\n3  print(name + ' is ' + age)\n4  print('done')",
+          options: [
+            { text: "Line 1" },
+            { text: "Line 2" },
+            { text: "Line 3", correct: true },
+            { text: "Line 4" },
+          ],
+          grounding: "§2.7 String operations",
+        },
+        {
+          prompt: "Which line raises an error?",
+          code: "1  t = [1, 2, 3]\n2  t.append(4)\n3  print(t[4])\n4  print(len(t))",
+          options: [
+            { text: "Line 1" },
+            { text: "Line 2" },
+            { text: "Line 3", correct: true },
+            { text: "Line 4" },
+          ],
+          grounding: "§10.2 Lists are mutable",
+        },
+      ],
+    },
+  ],
+  topics: [
+    {
+      id: "fund",
+      name: "Programming Fundamentals",
+      subtopics: [
+        { id: "fund-1", name: "Print statements and formatted printing", have: h(2, 1) },
+        { id: "fund-2", name: "Variables, assignment, and data types", have: h(2, 2) },
+        { id: "fund-3", name: "Arithmetic operators and expression evaluation", have: h(2, 2) },
+        { id: "fund-4", name: "String basics and formatting output", have: h(2, 1) },
+        { id: "fund-5", name: "input() and interactive programs", have: h(2, 0) },
+      ],
+    },
+    {
+      id: "func",
+      name: "Functions",
+      subtopics: [
+        { id: "func-1", name: "Defining functions with def", have: h(4, 1) },
+        { id: "func-2", name: "Parameters and arguments", have: h(1, 4) },
+        { id: "func-3", name: "return values vs. print side effects", have: h(2, 1) },
+        { id: "func-4", name: "Variable scope (local vs. global)", have: h(2, 2) },
+        { id: "func-5", name: "Calling and composing functions", have: h(2, 2) },
+      ],
+    },
+    {
+      id: "cond",
+      name: "Conditional Logic: Fundamentals",
+      subtopics: [
+        { id: "cond-1", name: "Boolean expressions and comparison operators", have: h(2, 1) },
+        { id: "cond-2", name: "Logical operators (and/or/not)", have: h(2, 2) },
+        { id: "cond-3", name: "Simple if/if-else statements", have: h(2, 0) },
+        { id: "cond-4", name: "if-elif-else chains", have: h(3, 3) },
+      ],
+    },
+    {
+      id: "cond2",
+      name: "Conditional Logic: Applied Problems",
+      subtopics: [
+        { id: "cond2-1", name: "Nested conditionals", have: h(3, 3) },
+        { id: "cond2-2", name: "Input validation and error-checking", have: h(0, 1) },
+        { id: "cond2-3", name: "Combining multiple conditions", have: h(0, 0) },
+        { id: "cond2-4", name: "Common patterns (menus, range checks)", have: h(0, 0) },
+      ],
+    },
+    {
+      id: "for",
+      name: "Lists and Iteration: For Loops",
+      subtopics: [
+        { id: "for-1", name: "Creating, indexing, and slicing lists", have: h(2, 3) },
+        { id: "for-2", name: "List methods (append, insert, remove, sort)", have: h(3, 2) },
+        { id: "for-3", name: "for loops over sequences", have: h(1, 1) },
+        { id: "for-4", name: "Nested lists / 2D data", have: h(2, 1) },
+      ],
+    },
+    {
+      id: "while",
+      name: "Lists and Iteration: While Loops",
+      subtopics: [
+        { id: "while-1", name: "while loops and loop conditions", have: h(2, 3) },
+        { id: "while-2", name: "Accumulator patterns (sum, count, running max)", have: h(2, 1) },
+        { id: "while-3", name: "Loop control (break/continue)", have: h(2, 3) },
+        { id: "while-4", name: "Searching/building lists with loops", have: h(0, 0) },
+      ],
+    },
+    {
+      id: "dict",
+      name: "Dictionaries and Tuples",
+      subtopics: [
+        { id: "dict-1", name: "Creating and accessing dictionaries", have: h(0, 1) },
+        { id: "dict-2", name: "Dictionary methods (keys, values, items, get)", have: h(4, 1) },
+        { id: "dict-3", name: "Iterating over dictionaries", have: h(1, 1) },
+        { id: "dict-4", name: "Creating and using tuples", have: h(2, 0) },
+      ],
+    },
+    {
+      id: "io",
+      name: "File I/O and Error Handling",
+      subtopics: [
+        { id: "io-1", name: "Opening/reading/closing text files", have: h(2, 0) },
+        { id: "io-2", name: "Writing and appending data", have: h(1, 2) },
+        { id: "io-3", name: "Iterating over lines and parsing", have: h(1, 1) },
+        { id: "io-4", name: "Basic exception handling (try/except)", have: h(1, 1) },
+      ],
+    },
+    {
+      id: "rec",
+      name: "Recursion",
+      subtopics: [
+        { id: "rec-1", name: "Base cases and recursive cases", have: h(0, 0) },
+        { id: "rec-2", name: "Tracing recursive function calls", have: h(0, 0) },
+        { id: "rec-3", name: "Recursion vs. iteration", have: h(0, 0) },
+        { id: "rec-4", name: "Common recursive patterns", have: h(0, 0) },
+      ],
+    },
+  ],
+};
