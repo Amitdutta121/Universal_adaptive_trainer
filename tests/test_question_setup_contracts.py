@@ -172,15 +172,8 @@ def test_a_style_needs_two_examples_and_a_difficulty() -> None:
         QuestionStyle.model_validate({**style.model_dump(), "examples": [example]})
 
 
+# The setup routes (agent A) are implemented: tests/test_setup_routes.py.
 STUB_ROUTES = [
-    ("GET", "/api/styles", None),
-    ("POST", "/api/setup/suggest", {"curriculum_version_id": 1}),
-    ("GET", "/api/setup?curriculum_version_id=1", None),
-    (
-        "POST",
-        "/api/setup",
-        {"curriculum_version_id": 1, "approved_styles": [], "cell_targets": []},
-    ),
     ("POST", "/api/rounds", {"setup_id": 1}),
     ("GET", "/api/rounds/1", None),
     ("GET", "/api/custom-judges?curriculum_version_id=1", None),
