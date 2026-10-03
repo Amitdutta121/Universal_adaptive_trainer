@@ -53,7 +53,7 @@ type AppTheme = "light" | "dark" | "system";
 
 /** Presentational grouping only — every key still comes from the single `NAV_SECTIONS` source of truth. */
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
-  { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "generate", "review"] },
+  { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "review"] },
   { label: "Calibration", keys: ["judges", "coverage"] },
   { label: "Adaptive Training", keys: ["classrooms", "roster"] },
 ];

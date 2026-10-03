@@ -14,7 +14,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.domain.enums import CurriculumStatus, JudgeMetricId, QuestionType, ReviewDecision
+from app.domain.enums import (
+    CurriculumStatus,
+    JudgeMetricId,
+    QuestionStatus,
+    QuestionType,
+    ReviewDecision,
+)
 from app.generation.prompts import base_type_instruction
 from app.persistence.repositories import (
     BookRepository,
@@ -480,6 +486,26 @@ def test_question_list_filters_by_curriculum_version_across_the_whole_bank(
     assert payload["curriculum_version_id"] == 1
     assert payload["total"] == 4
     assert payload["curriculum_version_counts"] == {"1": 1, "2": 3}
+
+
+def test_question_list_filters_by_any_of_several_statuses(
+    client: TestClient, session: Session
+) -> None:
+    """``status`` repeats: the listing keeps a question in any of the named statuses."""
+    from app.persistence.models import QuestionRow
+
+    approved = QuestionRow(prompt="Approved.", status=QuestionStatus.APPROVED)
+    rejected = QuestionRow(prompt="Rejected.", status=QuestionStatus.REJECTED)
+    session.add_all([approved, rejected, QuestionRow(prompt="Generated.")])
+    session.commit()
+
+    response = client.get("/api/questions", params={"status": ["approved", "rejected"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert sorted(q["id"] for q in payload["questions"]) == sorted([approved.id, rejected.id])
+    assert sorted(payload["status"]) == ["approved", "rejected"]
+    assert payload["total"] == 3
 
 
 def test_question_list_filters_by_section_across_the_whole_bank(

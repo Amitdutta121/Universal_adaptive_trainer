@@ -74,15 +74,16 @@ def list_questions(
     session: DbSession,
     course: CourseScope,
     limit: int = 50,
-    status: QuestionStatus | None = None,
+    status: Annotated[list[QuestionStatus] | None, Query()] = None,
     curriculum_version_id: int | None = None,
     section_id: int | None = None,
     run_id: str | None = None,
 ) -> QuestionListResponse:
     """The question bank, newest first, with counts by lifecycle status.
 
-    ``status``, ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow
-    the listing; without them nothing is hidden. The API does not filter by
+    ``status`` (repeatable: ``?status=a&status=b`` keeps either),
+    ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
+    listing; without them nothing is hidden. The API does not filter by
     default even though the page does, because a caller reading the bank over
     JSON has no way to discover rows an unrequested default removed.
     ``status_counts``, ``curriculum_version_counts`` and ``total`` always
@@ -92,7 +93,7 @@ def list_questions(
     repo = QuestionRepository(session)
     rows = repo.list_recent(
         limit=limit,
-        statuses=None if status is None else [status],
+        statuses=status or None,
         curriculum_version_id=curriculum_version_id,
         section_id=section_id,
         run_id=run_id,
@@ -103,7 +104,7 @@ def list_questions(
         status_counts=repo.count_by_status(course_id=course),
         curriculum_version_counts=repo.count_by_curriculum_version(course_id=course),
         total=repo.count(course_id=course),
-        status=status,
+        status=status or None,
         curriculum_version_id=curriculum_version_id,
         run_id=run_id,
     )

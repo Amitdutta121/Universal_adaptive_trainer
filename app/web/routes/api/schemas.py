@@ -1030,9 +1030,9 @@ class QuestionListResponse(BaseModel):
     #: generated before that column existed is counted under ``"none"``.
     curriculum_version_counts: dict[str, int]
     total: int
-    #: The status filter that produced ``questions``, echoed back so a client can
-    #: tell a narrowed listing from a bank that happens to hold only these rows.
-    status: QuestionStatus | None = None
+    #: The status filter that produced ``questions`` (any of these), echoed back so a
+    #: client can tell a narrowed listing from a bank that happens to hold only these rows.
+    status: list[QuestionStatus] | None = None
     curriculum_version_id: int | None = None
     run_id: str | None = None
 

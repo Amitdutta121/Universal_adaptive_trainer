@@ -29,9 +29,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
+import { StartCard } from "@/components/start-card";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -88,37 +89,6 @@ function matches(version: CurriculumVersionSummary, search: string): boolean {
   if (!needle) return true;
   return [version.label, generatedByLabel(version)].some((value) =>
     value.toLowerCase().includes(needle),
-  );
-}
-
-function StartCard({
-  icon,
-  title,
-  description,
-  action,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  action: string;
-  onClick: () => void;
-}) {
-  return (
-    <Card className="gap-4">
-      <CardHeader className="gap-1.5">
-        <CardTitle className="flex items-center gap-2 text-base">
-          {icon}
-          {title}
-        </CardTitle>
-        <CardDescription className="leading-6">{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="mt-auto">
-        <Button variant="outline" size="sm" onClick={onClick}>
-          {action}
-        </Button>
-      </CardContent>
-    </Card>
   );
 }
 

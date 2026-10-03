@@ -5,8 +5,9 @@
  * read this list, so a section cannot appear in one place and be missing from
  * another.
  *
- * `review` and `generate` are distinct routes because they are screens of their
- * own in the React console, even though their data hangs off the questions API.
+ * `review` is a distinct route because it is a screen of its own in the React
+ * console, even though its data hangs off the questions API. The generate
+ * screens are not in the nav: they open from cards at the top of Questions.
  *
  * Every `path` is relative to the open course: the sidebar and dashboard turn
  * `/books` into `/courses/{id}/books` with `coursePath` (`lib/course.ts`).
@@ -22,7 +23,6 @@ import {
   Network,
   Scale,
   Users,
-  Wand2,
 } from "lucide-react";
 
 /** A sidebar-only sub-link, nested under a `NavSection` that has more than one screen. */
@@ -71,25 +71,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     path: "/questions",
     summary: "Generate, validate and review assessment questions.",
     icon: ListChecks,
-  },
-  {
-    key: "generate",
-    label: "Generate",
-    path: "/questions/generate",
-    summary: "Generate one question at a time from a chunk, or produce a whole sheet in bulk.",
-    icon: Wand2,
-    children: [
-      {
-        key: "generate-single",
-        label: "Generate questions",
-        path: "/questions/generate/single",
-      },
-      {
-        key: "generate-bulk",
-        label: "Bulk generate",
-        path: "/questions/generate",
-      },
-    ],
   },
   {
     key: "review",

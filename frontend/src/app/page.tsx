@@ -164,7 +164,7 @@ export default function LandingPage() {
           <Row title="Generating questions">
             Multiple choice, Parsons and code-completion questions, drafted from a chunk you pick or
             in bulk for a whole sheet. Your review decisions feed back into the next round of
-            generation. See <StudioLink section="generate" />.
+            generation. See <StudioLink section="questions" />.
           </Row>
           <Row title="Review">
             Each question gets deterministic checks, where the generated code is actually run with a
@@ -269,7 +269,7 @@ export default function LandingPage() {
 
               <p className={prose}>
                 Once you are in, the sidebar runs in the order you will use it: <StudioLink section="books" />,{" "}
-                <StudioLink section="curriculum" />, <StudioLink section="generate" />,{" "}
+                <StudioLink section="curriculum" />, <StudioLink section="questions" />,{" "}
                 <StudioLink section="review" />, <StudioLink section="coverage" /> and{" "}
                 <StudioLink section="classrooms" />.
               </p>

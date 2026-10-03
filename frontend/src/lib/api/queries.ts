@@ -38,7 +38,7 @@ export const qk = {
   },
   questions: {
     all: ["questions"] as const,
-    list: (params: { limit?: number; status?: QuestionStatus; run_id?: string }) =>
+    list: (params: { limit?: number; status?: QuestionStatus[]; run_id?: string }) =>
       ["questions", "list", params] as const,
     detail: (id: number) => ["questions", "detail", id] as const,
     evaluations: (id: number) => ["questions", "evaluations", id] as const,
@@ -275,7 +275,8 @@ export const useConfig = () => useQuery(configQuery());
 
 type QuestionListParams = {
   limit?: number;
-  status?: QuestionStatus;
+  /** Any of these; the API takes the parameter repeated. */
+  status?: QuestionStatus[];
   curriculum_version_id?: number;
   section_id?: number;
   run_id?: string;

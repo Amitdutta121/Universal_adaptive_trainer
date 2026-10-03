@@ -18,12 +18,19 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, CheckCircle2, Database, Search, Sparkles, X } from "lucide-react";
-import { parseAsInteger, parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpDown, ChevronDown, Layers, Search, Wand2, X } from "lucide-react";
+import {
+  parseAsArrayOf,
+  parseAsInteger,
+  parseAsString,
+  parseAsStringLiteral,
+  useQueryState,
+} from "nuqs";
+import { useDeferredValue, useMemo, useState } from "react";
 import { QuestionReview } from "@/app/courses/[courseId]/questions/generate/single/components/question-review";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
+import { StartCard } from "@/components/start-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +44,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -61,24 +69,13 @@ import {
   useApprovedCurriculum,
   useAssessmentCatalog,
   useCourse,
-  useCurriculumVersions,
   useQuestions,
 } from "@/lib/api/queries";
-import type {
-  Difficulty,
-  QuestionStatus,
-  QuestionSummary,
-  QuestionType,
-  Schemas,
-} from "@/lib/api/types";
+import type { Difficulty, QuestionStatus, QuestionSummary } from "@/lib/api/types";
 import { CourseLink } from "@/components/course-link";
-import { BUILT_QUESTION_TYPES } from "@/lib/question-types/registry";
+import { BUILT_QUESTION_TYPES, questionTypeLabel } from "@/lib/question-types/registry";
 import { useCourseId } from "@/lib/use-course";
 import { questionsSummary, subjectLabel } from "./questions-summary";
-
-type GeneratorKind = Schemas["GeneratorKind"];
-type QuestionKind = Schemas["QuestionKind"];
-type InstructionSource = NonNullable<QuestionSummary["instruction"]>["source"];
 
 // The row click-through is handed to the columns through TanStack's `meta`, so the
 // column defs can stay module-level constants instead of closing over component state.
@@ -98,20 +95,18 @@ const STATUSES = [
 
 const DIFFICULTIES = ["easy", "medium", "hard"] as const satisfies readonly Difficulty[];
 const QUESTION_TYPES = BUILT_QUESTION_TYPES;
-const QUESTION_KINDS = ["testable_program", "discrete"] as const satisfies readonly QuestionKind[];
-const GENERATOR_KINDS = ["base", "personalized"] as const satisfies readonly GeneratorKind[];
-const INSTRUCTION_SOURCES = ["learned", "shipped"] as const satisfies readonly InstructionSource[];
-const VALIDATION_FILTERS = ["passed", "failed", "unknown"] as const;
-const EDIT_FILTERS = ["edited", "unedited"] as const;
 const LIMIT_OPTIONS = [25, 50, 100, 250] as const;
+// The defaults fit the page width, so the page is the only scroller; anything wider is
+// opt-in from the Columns menu. Curriculum is off because every row is the header's taxonomy.
 const DEFAULT_HIDDEN_COLUMNS: Record<string, boolean> = {
   kind: false,
   is_edited: false,
   priority: false,
   times_used: false,
-  curriculum_version_id: true,
+  curriculum_version_id: false,
   topic_id: false,
   subtopic_ids: false,
+  generator_kind: false,
   generator_name: false,
   generator_version: false,
   generator_label: false,
@@ -164,7 +159,7 @@ function SortableHeader({
   );
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, withTime = true) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -172,9 +167,17 @@ function formatDate(value: string | null) {
     year: "numeric",
     month: "short",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
   }).format(date);
+}
+
+/** The date in the cell, the full timestamp on hover: keeps the column narrow. */
+function DateCell({ value }: { value: string | null }) {
+  return (
+    <span className="whitespace-nowrap text-muted-foreground text-xs" title={formatDate(value)}>
+      {formatDate(value, false)}
+    </span>
+  );
 }
 
 function textOrDash(value: string | number | null | undefined) {
@@ -190,30 +193,79 @@ function FilterLabel({ children }: { children: string }) {
   );
 }
 
-function StatCard({
+/**
+ * One filter as a button that names the filter and what it keeps ("Status: Approved +1"),
+ * opening a checklist so several values can be kept at once. The menu stays open while
+ * ticking; no values ticked means the filter is off.
+ */
+function FilterMultiSelect<T extends string>({
   label,
+  allLabel,
   value,
-  hint,
-  icon,
+  options,
+  onChange,
 }: {
   label: string;
-  value: string;
-  hint: string;
-  icon: React.ReactNode;
+  allLabel: string;
+  value: readonly T[];
+  options: readonly { value: T; label: string; count?: number }[];
+  onChange: (value: T[]) => void;
 }) {
+  const chosen = options.filter((option) => value.includes(option.value));
+  const toggle = (option: T, on: boolean) =>
+    // Kept in the options' order so the URL and the button read the same every time.
+    onChange(
+      options
+        .map((each) => each.value)
+        .filter((each) => (each === option ? on : value.includes(each))),
+    );
   return (
-    <div className="rounded-2xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(255,255,255,0.56))] p-4 shadow-[0_10px_30px_-24px_rgba(19,26,28,0.55)] backdrop-blur dark:bg-[linear-gradient(180deg,rgba(21,28,30,0.94),rgba(21,28,30,0.72))]">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <FilterLabel>{label}</FilterLabel>
-        <span className="rounded-full border border-border/80 bg-background/70 p-2 text-muted-foreground">
-          {icon}
-        </span>
-      </div>
-      <div className="font-heading text-2xl text-foreground leading-none tracking-[-0.03em]">
-        {value}
-      </div>
-      <p className="mt-2 text-muted-foreground text-sm">{hint}</p>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="h-9 min-w-40 justify-between font-normal">
+          <span>
+            <span className="text-muted-foreground">{label}:</span>{" "}
+            {chosen.length === 0 ? (
+              allLabel
+            ) : (
+              <span className="capitalize">
+                {chosen[0].label}
+                {chosen.length > 1 ? (
+                  <span className="text-muted-foreground"> +{chosen.length - 1}</span>
+                ) : null}
+              </span>
+            )}
+          </span>
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-56">
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option.value}
+            checked={value.includes(option.value)}
+            onCheckedChange={(on) => toggle(option.value, on)}
+            onSelect={(event) => event.preventDefault()}
+            className="capitalize"
+          >
+            {option.label}
+            {option.count !== undefined ? (
+              <span className="ml-auto pl-3 text-muted-foreground tabular-nums">
+                {option.count}
+              </span>
+            ) : null}
+          </DropdownMenuCheckboxItem>
+        ))}
+        {value.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => onChange([])}>
+              Clear {label.toLowerCase()}
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -262,7 +314,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
       <button
         type="button"
         onClick={() => table.options.meta?.openPreview(row.original.id)}
-        className="block min-w-72 max-w-lg whitespace-normal text-left"
+        className="block min-w-48 max-w-lg whitespace-normal text-left"
       >
         <p className="line-clamp-3 text-foreground text-sm leading-6 underline-offset-4 hover:underline">
           {row.original.prompt}
@@ -410,16 +462,12 @@ const columns: ColumnDef<QuestionSummary>[] = [
   {
     accessorKey: "created_at",
     header: ({ column }) => <SortableHeader column={column} label="Created" />,
-    cell: ({ row }) => (
-      <span className="text-muted-foreground text-xs">{formatDate(row.original.created_at)}</span>
-    ),
+    cell: ({ row }) => <DateCell value={row.original.created_at} />,
   },
   {
     accessorKey: "updated_at",
     header: ({ column }) => <SortableHeader column={column} label="Updated" />,
-    cell: ({ row }) => (
-      <span className="text-muted-foreground text-xs">{formatDate(row.original.updated_at)}</span>
-    ),
+    cell: ({ row }) => <DateCell value={row.original.updated_at} />,
   },
 ];
 
@@ -427,82 +475,53 @@ export function QuestionsBrowser() {
   const course = useCourse(useCourseId());
   const catalog = useAssessmentCatalog();
   const summary = questionsSummary(subjectLabel(course.data?.subject, catalog.data?.subjects));
-  const [status, setStatus] = useQueryState("status", parseAsStringLiteral(STATUSES));
+  // Each multi-select keeps "any of these" in the URL as a comma list; empty means off.
+  const [status, setStatus] = useQueryState(
+    "status",
+    parseAsArrayOf(parseAsStringLiteral(STATUSES)).withDefault([]),
+  );
   const [limit, setLimit] = useQueryState("limit", parseAsInteger.withDefault(50));
   const [query, setQuery] = useQueryState("q", parseAsString.withDefault(""));
   const [difficulty, setDifficulty] = useQueryState(
     "difficulty",
-    parseAsStringLiteral(DIFFICULTIES),
+    parseAsArrayOf(parseAsStringLiteral(DIFFICULTIES)).withDefault([]),
   );
   const [questionType, setQuestionType] = useQueryState(
     "question_type",
-    parseAsStringLiteral(QUESTION_TYPES),
+    parseAsArrayOf(parseAsStringLiteral(QUESTION_TYPES)).withDefault([]),
   );
-  const [kind, setKind] = useQueryState("kind", parseAsStringLiteral(QUESTION_KINDS));
-  const [generatorKind, setGeneratorKind] = useQueryState(
-    "generator_kind",
-    parseAsStringLiteral(GENERATOR_KINDS),
-  );
-  const [validation, setValidation] = useQueryState(
-    "validation",
-    parseAsStringLiteral(VALIDATION_FILTERS),
-  );
-  const [edited, setEdited] = useQueryState("edited", parseAsStringLiteral(EDIT_FILTERS));
-  const [instructionSource, setInstructionSource] = useQueryState(
-    "instruction_source",
-    parseAsStringLiteral(INSTRUCTION_SOURCES),
-  );
-  const [taxonomyVersionId, setTaxonomyVersionId] = useQueryState("taxonomy", parseAsInteger);
   const [runId, setRunId] = useQueryState("run_id", parseAsString);
   const [previewId, setPreviewId] = useQueryState("preview", parseAsInteger);
   const [sorting, setSorting] = useState<SortingState>([{ id: "created_at", desc: true }]);
   const [columnVisibility, setColumnVisibility] =
     useState<Record<string, boolean>>(DEFAULT_HIDDEN_COLUMNS);
 
+  // The bank shows the taxonomy chosen in the header, like every other page.
+  const selectedTaxonomy = useApprovedCurriculum();
+  const selectedTaxonomyId = selectedTaxonomy.data?.version.id ?? null;
+
   const deferredQuery = useDeferredValue(query);
   const params = useMemo(
     () => ({
       limit,
-      ...(status ? { status } : {}),
-      ...(taxonomyVersionId !== null ? { curriculum_version_id: taxonomyVersionId } : {}),
+      ...(status.length > 0 ? { status } : {}),
+      ...(selectedTaxonomyId !== null ? { curriculum_version_id: selectedTaxonomyId } : {}),
       ...(runId ? { run_id: runId } : {}),
     }),
-    [limit, status, taxonomyVersionId, runId],
+    [limit, status, selectedTaxonomyId, runId],
   );
   const { data, isPending, isError, error } = useQuestions(params);
-  const curriculumVersions = useCurriculumVersions();
-
-  // The bank opens on the taxonomy chosen in the header, and follows it when it changes.
-  // "Any taxonomy" below still widens it; a link that names a taxonomy is respected.
-  const selectedTaxonomy = useApprovedCurriculum();
-  const selectedTaxonomyId = selectedTaxonomy.data?.version.id ?? null;
-  const followedOnce = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follow the header's choice only when it changes
-  useEffect(() => {
-    if (selectedTaxonomyId === null) return;
-    const first = !followedOnce.current;
-    followedOnce.current = true;
-    if (first && taxonomyVersionId !== null) return;
-    void setTaxonomyVersionId(selectedTaxonomyId);
-  }, [selectedTaxonomyId]);
-  const taxonomyLabel = (versionId: number) =>
-    curriculumVersions.data?.versions.find((version) => version.id === versionId)?.label ??
-    `v${versionId}`;
 
   const filteredQuestions = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();
 
     return (data?.questions ?? []).filter((question) => {
-      if (difficulty && question.difficulty !== difficulty) return false;
-      if (questionType && question.question_type !== questionType) return false;
-      if (kind && question.kind !== kind) return false;
-      if (generatorKind && question.generator_kind !== generatorKind) return false;
-      if (instructionSource && question.instruction?.source !== instructionSource) return false;
-      if (edited === "edited" && !question.is_edited) return false;
-      if (edited === "unedited" && question.is_edited) return false;
-      if (validation === "passed" && question.validation_passed !== true) return false;
-      if (validation === "failed" && question.validation_passed !== false) return false;
-      if (validation === "unknown" && question.validation_passed !== null) return false;
+      if (difficulty.length > 0 && !difficulty.includes(question.difficulty)) return false;
+      if (
+        questionType.length > 0 &&
+        (question.question_type === null || !questionType.includes(question.question_type))
+      )
+        return false;
       if (!needle) return true;
 
       const searchable = [
@@ -532,74 +551,31 @@ export function QuestionsBrowser() {
 
       return searchable.includes(needle);
     });
-  }, [
-    data?.questions,
-    deferredQuery,
-    difficulty,
-    edited,
-    generatorKind,
-    instructionSource,
-    kind,
-    questionType,
-    validation,
-  ]);
-
-  const approvedCount = filteredQuestions.filter(
-    (question) => question.status === "approved",
-  ).length;
-  const editedCount = filteredQuestions.filter((question) => question.is_edited).length;
-  const learnedCount = filteredQuestions.filter(
-    (question) => question.instruction?.source === "learned",
-  ).length;
+  }, [data?.questions, deferredQuery, difficulty, questionType]);
 
   const activeFilters = [
-    status
-      ? { label: "status", value: status.replace(/_/g, " "), onClear: () => void setStatus(null) }
-      : null,
-    query ? { label: "search", value: query, onClear: () => void setQuery("") } : null,
-    taxonomyVersionId !== null
+    status.length > 0
       ? {
-          label: "taxonomy",
-          value: taxonomyLabel(taxonomyVersionId),
-          onClear: () => void setTaxonomyVersionId(null),
+          label: "status",
+          value: status.map((value) => value.replace(/_/g, " ")).join(", "),
+          onClear: () => void setStatus(null),
         }
       : null,
-    difficulty
-      ? { label: "difficulty", value: difficulty, onClear: () => void setDifficulty(null) }
+    query ? { label: "search", value: query, onClear: () => void setQuery("") } : null,
+    difficulty.length > 0
+      ? {
+          label: "difficulty",
+          value: difficulty.join(", "),
+          onClear: () => void setDifficulty(null),
+        }
       : null,
-    questionType
+    questionType.length > 0
       ? {
           label: "type",
-          value: questionType.replace(/_/g, " "),
+          value: questionType.map(questionTypeLabel).join(", "),
           onClear: () => void setQuestionType(null),
         }
       : null,
-    kind
-      ? { label: "kind", value: kind.replace(/_/g, " "), onClear: () => void setKind(null) }
-      : null,
-    generatorKind
-      ? {
-          label: "generator",
-          value: generatorKind,
-          onClear: () => void setGeneratorKind(null),
-        }
-      : null,
-    validation
-      ? {
-          label: "validation",
-          value: validation,
-          onClear: () => void setValidation(null),
-        }
-      : null,
-    edited ? { label: "edited", value: edited, onClear: () => void setEdited(null) } : null,
-    instructionSource
-      ? {
-          label: "instruction",
-          value: instructionSource,
-          onClear: () => void setInstructionSource(null),
-        }
-      : null,
-    limit !== 50 ? { label: "rows", value: String(limit), onClear: () => void setLimit(50) } : null,
     runId ? { label: "run", value: runId, onClear: () => void setRunId(null) } : null,
   ].filter((value): value is NonNullable<typeof value> => value !== null);
 
@@ -639,355 +615,84 @@ export function QuestionsBrowser() {
       />
 
       <section className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            label="Loaded"
-            value={String(data?.questions.length ?? 0)}
-            hint={`${data?.total ?? 0} questions exist on the server`}
-            icon={<Database className="size-4" />}
+        {/* The two ways questions are made. Each opens its own generate screen. */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <StartCard
+            icon={<Wand2 className="size-4" />}
+            title="Generate questions"
+            description="Pick a chunk of a book and generate questions from it one at a time, reviewing each as it arrives."
+            action="Generate questions"
+            href="/questions/generate/single"
           />
-          <StatCard
-            label="Visible"
-            value={String(filteredQuestions.length)}
-            hint={activeFilters.length > 0 ? "Narrowed by active filters" : "Default live view"}
-            icon={<Search className="size-4" />}
-          />
-          <StatCard
-            label="Approved"
-            value={String(approvedCount)}
-            hint="Professor-approved rows in the current slice"
-            icon={<CheckCircle2 className="size-4" />}
-          />
-          <StatCard
-            label="Learned"
-            value={String(learnedCount)}
-            hint={`${editedCount} edited questions in this view`}
-            icon={<Sparkles className="size-4" />}
+          <StartCard
+            icon={<Layers className="size-4" />}
+            title="Bulk generate"
+            description="Plan a whole sheet across the approved taxonomy and generate every row in one run."
+            action="Bulk generate"
+            href="/questions/generate"
           />
         </div>
 
-        <div className="overflow-hidden rounded-[1.4rem] border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.78),rgba(255,255,255,0.56))] shadow-[0_20px_45px_-32px_rgba(19,26,28,0.55)] backdrop-blur dark:bg-[linear-gradient(180deg,rgba(21,28,30,0.94),rgba(21,28,30,0.76))]">
-          <div className="border-border/70 border-b bg-[radial-gradient(circle_at_top_left,rgba(46,111,106,0.14),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.6),transparent)] px-5 py-4 dark:bg-[radial-gradient(circle_at_top_left,rgba(102,184,176,0.16),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)]">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-end">
-              <div className="flex flex-wrap items-center gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-border/80 bg-background/80"
-                    >
-                      Columns
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel>Visible columns</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {table
-                      .getAllColumns()
-                      .filter((column) => column.getCanHide())
-                      .map((column) => (
-                        <DropdownMenuCheckboxItem
-                          key={column.id}
-                          checked={column.getIsVisible()}
-                          onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                        >
-                          {column.id.replace(/_/g, " ")}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <Select
-                  value={String(limit)}
-                  onValueChange={(value) => void setLimit(Number(value))}
-                >
-                  <SelectTrigger
-                    className="w-28 border-border/80 bg-background/80 shadow-[0_1px_0_rgba(255,255,255,0.48)_inset]"
-                    size="sm"
-                  >
-                    <SelectValue placeholder="Rows" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LIMIT_OPTIONS.map((value) => (
-                      <SelectItem key={value} value={String(value)}>
-                        {value} rows
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 border-border/70 border-b bg-background/55 p-5 md:grid-cols-2 xl:grid-cols-5">
-            <div className="space-y-2 md:col-span-2">
-              <FilterLabel>Search</FilterLabel>
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => void setQuery(event.target.value)}
-                  placeholder="Search prompt, ids, generator, fingerprint..."
-                  className="h-10 border-border/80 bg-background/85 pl-9 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                />
-              </div>
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          <div className="space-y-3 border-border border-b p-4">
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => void setQuery(event.target.value)}
+                placeholder="Search prompt, ids, generator, fingerprint..."
+                aria-label="Search questions"
+                className="h-9 pl-9"
+              />
             </div>
 
-            <div className="space-y-2">
-              <FilterLabel>Status</FilterLabel>
-              <Select
-                value={status ?? "all"}
-                onValueChange={(value) =>
-                  setStatus(value === "all" ? null : (value as QuestionStatus))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  {STATUSES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value.replace(/_/g, " ")}
-                      {data ? ` (${data.status_counts[value] ?? 0})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Taxonomy</FilterLabel>
-              <Select
-                value={taxonomyVersionId !== null ? String(taxonomyVersionId) : "all"}
-                onValueChange={(value) =>
-                  void setTaxonomyVersionId(value === "all" ? null : Number(value))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="Any taxonomy" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Any taxonomy</SelectItem>
-                  {(curriculumVersions.data?.versions ?? []).map((version) => (
-                    <SelectItem key={version.id} value={String(version.id)}>
-                      {version.label} (v{version.id})
-                      {data ? ` — ${data.curriculum_version_counts[String(version.id)] ?? 0}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Difficulty</FilterLabel>
-              <Select
-                value={difficulty ?? "all"}
-                onValueChange={(value) =>
-                  setDifficulty(value === "all" ? null : (value as Difficulty))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="All difficulties" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All difficulties</SelectItem>
-                  {DIFFICULTIES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Question Type</FilterLabel>
-              <Select
-                value={questionType ?? "all"}
-                onValueChange={(value) =>
-                  setQuestionType(value === "all" ? null : (value as QuestionType))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="All types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All types</SelectItem>
-                  {QUESTION_TYPES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value.replace(/_/g, " ")}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Generator</FilterLabel>
-              <Select
-                value={generatorKind ?? "all"}
-                onValueChange={(value) =>
-                  setGeneratorKind(value === "all" ? null : (value as GeneratorKind))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="All generators" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All generators</SelectItem>
-                  {GENERATOR_KINDS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Kind</FilterLabel>
-              <Select
-                value={kind ?? "all"}
-                onValueChange={(value) => setKind(value === "all" ? null : (value as QuestionKind))}
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="All kinds" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All kinds</SelectItem>
-                  {QUESTION_KINDS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value.replace(/_/g, " ")}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Validation</FilterLabel>
-              <Select
-                value={validation ?? "all"}
-                onValueChange={(value) =>
-                  setValidation(
-                    value === "all" ? null : (value as (typeof VALIDATION_FILTERS)[number]),
-                  )
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="Any validation" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Any validation</SelectItem>
-                  {VALIDATION_FILTERS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Edit State</FilterLabel>
-              <Select
-                value={edited ?? "all"}
-                onValueChange={(value) =>
-                  setEdited(value === "all" ? null : (value as (typeof EDIT_FILTERS)[number]))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="Edited or original" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Edited or original</SelectItem>
-                  {EDIT_FILTERS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <FilterLabel>Instruction</FilterLabel>
-              <Select
-                value={instructionSource ?? "all"}
-                onValueChange={(value) =>
-                  setInstructionSource(value === "all" ? null : (value as InstructionSource))
-                }
-              >
-                <SelectTrigger
-                  className="h-10 border-border/80 bg-background/85 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]"
-                  size="sm"
-                >
-                  <SelectValue placeholder="Any instruction" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Any instruction</SelectItem>
-                  {INSTRUCTION_SOURCES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-end">
+            <div className="flex flex-wrap items-center gap-2">
+              <FilterMultiSelect
+                label="Status"
+                allLabel="All"
+                value={status}
+                options={STATUSES.map((value) => ({
+                  value,
+                  label: value.replace(/_/g, " "),
+                  count: data?.status_counts[value],
+                }))}
+                onChange={(value) => void setStatus(value.length > 0 ? value : null)}
+              />
+              <FilterMultiSelect
+                label="Difficulty"
+                allLabel="All"
+                value={difficulty}
+                options={DIFFICULTIES.map((value) => ({ value, label: value }))}
+                onChange={(value) => void setDifficulty(value.length > 0 ? value : null)}
+              />
+              <FilterMultiSelect
+                label="Type"
+                allLabel="All types"
+                value={questionType}
+                options={QUESTION_TYPES.map((value) => ({
+                  value,
+                  label: questionTypeLabel(value),
+                }))}
+                onChange={(value) => void setQuestionType(value.length > 0 ? value : null)}
+              />
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                className="h-10 w-full border-border/80 bg-background/85"
                 disabled={!canClear}
                 onClick={() => {
                   void setStatus(null);
-                  void setLimit(50);
                   void setQuery("");
-                  void setTaxonomyVersionId(null);
                   void setDifficulty(null);
                   void setQuestionType(null);
-                  void setKind(null);
-                  void setGeneratorKind(null);
-                  void setValidation(null);
-                  void setEdited(null);
-                  void setInstructionSource(null);
                   void setRunId(null);
                 }}
               >
-                Clear filters
+                Clear
               </Button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-border/70 border-b bg-muted/20 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-border border-b bg-muted/30 px-4 py-2.5">
             <FilterLabel>Active view</FilterLabel>
             {activeFilters.length > 0 ? (
               activeFilters.map((filter) => (
@@ -999,13 +704,50 @@ export function QuestionsBrowser() {
                 />
               ))
             ) : (
-              <span className="text-muted-foreground text-sm">
-                No filters applied. You are looking at the default view.
-              </span>
+              <span className="text-muted-foreground text-sm">No filters applied.</span>
             )}
+
+            <div className="ml-auto flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    Columns
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Visible columns</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {table
+                    .getAllColumns()
+                    .filter((column) => column.getCanHide())
+                    .map((column) => (
+                      <DropdownMenuCheckboxItem
+                        key={column.id}
+                        checked={column.getIsVisible()}
+                        onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                      >
+                        {column.id.replace(/_/g, " ")}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Select value={String(limit)} onValueChange={(value) => void setLimit(Number(value))}>
+                <SelectTrigger className="w-28" size="sm" aria-label="Rows to load">
+                  <SelectValue placeholder="Rows" />
+                </SelectTrigger>
+                <SelectContent>
+                  {LIMIT_OPTIONS.map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value} rows
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="rounded-b-[1.4rem] bg-background/70">
+          <div>
             {isError ? <QueryError error={error} /> : null}
             {isPending ? <TableSkeleton /> : null}
 
@@ -1020,7 +762,7 @@ export function QuestionsBrowser() {
 
             {data && filteredQuestions.length > 0 ? (
               <>
-                <div className="max-h-[68vh] overflow-auto">
+                <div>
                   <Table className="table-auto">
                     <TableHeader className="[&_tr]:border-b-0">
                       {table.getHeaderGroups().map((headerGroup) => (
@@ -1032,9 +774,11 @@ export function QuestionsBrowser() {
                               <TableHead
                                 key={header.id}
                                 className={[
-                                  "sticky top-0 z-10 border-border/80 border-b bg-[color-mix(in_oklch,var(--background),white_55%)] py-3 text-[0.72rem] text-muted-foreground uppercase tracking-[0.14em] backdrop-blur",
+                                  "border-border/80 border-b bg-muted/30 py-3 text-[0.72rem] text-muted-foreground uppercase tracking-[0.14em]",
                                   numeric ? "text-right" : "",
-                                  stickyLeft ? "left-0 z-20 shadow-[1px_0_0_var(--border)]" : "",
+                                  stickyLeft
+                                    ? "sticky left-0 z-20 shadow-[1px_0_0_var(--border)]"
+                                    : "",
                                 ].join(" ")}
                               >
                                 {header.isPlaceholder
@@ -1088,9 +832,6 @@ export function QuestionsBrowser() {
                     <span className="font-semibold text-foreground">{data.questions.length}</span>{" "}
                     loaded and <span className="font-semibold text-foreground">{data.total}</span>{" "}
                     total on the server.
-                  </p>
-                  <p className="font-mono text-[0.72rem] uppercase tracking-[0.14em]">
-                    Sticky header + active filter state
                   </p>
                 </div>
               </>

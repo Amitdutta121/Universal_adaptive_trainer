@@ -392,7 +392,7 @@ def test_a_failed_question_is_listed_only_when_asked_for(
     assert filtered["questions"] == []
     # The counts still describe the whole bank, so a filtered listing says what it hid.
     assert filtered["status_counts"] == {"validation_failed": 1}
-    assert filtered["status"] == "validation_passed"
+    assert filtered["status"] == ["validation_passed"]
 
 
 # --- a provider failure mid-batch ----------------------------------------
