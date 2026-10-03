@@ -76,6 +76,7 @@ import { CourseLink } from "@/components/course-link";
 import { BUILT_QUESTION_TYPES, questionTypeLabel } from "@/lib/question-types/registry";
 import { useCourseId } from "@/lib/use-course";
 import { questionsSummary, subjectLabel } from "./questions-summary";
+import { QuestionSetupButton } from "./setup/question-setup-button";
 
 // The row click-through is handed to the columns through TanStack's `meta`, so the
 // column defs can stay module-level constants instead of closing over component state.
@@ -607,6 +608,7 @@ export function QuestionsBrowser() {
             <Button asChild variant="outline" size="sm" className="h-9 border-border/80">
               <CourseLink href="/coverage">Show coverage</CourseLink>
             </Button>
+            <QuestionSetupButton />
             <Badge variant="outline" className="h-7 rounded-full px-3 font-mono tracking-[0.08em]">
               live bank
             </Badge>

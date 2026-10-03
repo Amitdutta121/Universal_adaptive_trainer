@@ -21,8 +21,8 @@ import {
   type Template,
 } from "../mock-types";
 import { approvedByDifficulty, type Decision } from "../plan";
-import { DifficultyBadge, TypeBadge } from "./badges";
-import { ExampleQuestionView } from "./example-question";
+import { DifficultyBadge, TypeBadge } from "@/components/question-setup/badges";
+import { ExampleQuestionView } from "@/components/question-setup/example-question";
 
 function topicNames(domain: Domain, ids: readonly string[]): string {
   return ids.map((id) => domain.topics.find((topic) => topic.id === id)?.name ?? id).join(", ");

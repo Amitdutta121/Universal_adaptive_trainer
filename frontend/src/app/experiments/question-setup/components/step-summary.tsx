@@ -8,7 +8,7 @@
 import { Button } from "@/components/ui/button";
 import { DIFFICULTIES, DIFFICULTY_LABEL, type Domain, type Template } from "../mock-types";
 import { type Decision, rulesFromSkips } from "../plan";
-import { DifficultyBadge, TypeBadge } from "./badges";
+import { DifficultyBadge, TypeBadge } from "@/components/question-setup/badges";
 
 export function StepSummary({
   domain,

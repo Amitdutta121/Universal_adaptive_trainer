@@ -5,7 +5,7 @@
 
 import { CheckIcon, GripVerticalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ExampleQuestion } from "../mock-types";
+import type { ExampleQuestion } from "./types";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -25,6 +25,9 @@ export function CodeBlock({ code }: { code: string }) {
 }
 
 export function ExampleQuestionView({ example, label }: { example: ExampleQuestion; label: string }) {
+  // The API sends empty lists where the prototype leaves a field out.
+  const lines = example.lines?.length ? example.lines : null;
+  const options = example.options?.length ? example.options : null;
   return (
     <figure className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-3.5">
       <figcaption className="text-muted-foreground text-xs">{label}</figcaption>
@@ -32,11 +35,11 @@ export function ExampleQuestionView({ example, label }: { example: ExampleQuesti
 
       {example.code ? <CodeBlock code={example.code} /> : null}
 
-      {example.lines ? (
+      {lines ? (
         <div className="flex flex-col gap-1">
           <p className="text-muted-foreground text-xs">Students get these lines shuffled:</p>
           <ul className="flex flex-col gap-1">
-            {shuffled(example.lines).map((line) => (
+            {shuffled(lines).map((line) => (
               <li
                 key={line}
                 className="flex items-center gap-2 rounded-md border bg-background px-2 py-1 font-mono text-[12.5px]"
@@ -49,9 +52,9 @@ export function ExampleQuestionView({ example, label }: { example: ExampleQuesti
         </div>
       ) : null}
 
-      {example.options ? (
+      {options ? (
         <ul className="flex flex-col gap-1.5">
-          {example.options.map((option, index) => (
+          {options.map((option, index) => (
             <li
               key={option.text}
               className={cn(
@@ -72,10 +75,10 @@ export function ExampleQuestionView({ example, label }: { example: ExampleQuesti
       ) : null}
 
       <div className="mt-auto flex flex-col gap-1 border-t pt-2.5 text-xs">
-        {example.lines ? (
+        {lines ? (
           <div>
             <span className="text-muted-foreground">Solution: </span>
-            <CodeBlock code={example.lines.join("\n")} />
+            <CodeBlock code={lines.join("\n")} />
           </div>
         ) : null}
         {example.answer ? (
@@ -89,7 +92,9 @@ export function ExampleQuestionView({ example, label }: { example: ExampleQuesti
         {example.tests ? (
           <p className="text-muted-foreground">Graded by {example.tests} hidden tests, partial credit per test.</p>
         ) : null}
-        <p className="text-muted-foreground">Grounded in {example.grounding}</p>
+        {example.grounding ? (
+          <p className="text-muted-foreground">Grounded in {example.grounding}</p>
+        ) : null}
       </div>
     </figure>
   );

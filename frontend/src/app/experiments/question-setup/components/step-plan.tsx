@@ -11,7 +11,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { DIFFICULTIES, type Difficulty, type Domain, type Template } from "../mock-types";
 import { EXPECTED_APPROVAL, FLOOR_PER_CELL, type Plan, type PlanCell } from "../plan";
-import { DifficultyBadge, TypeBadge } from "./badges";
+import { DifficultyBadge, TypeBadge } from "@/components/question-setup/badges";
 
 function CellView({ cell, templateName }: { cell: PlanCell; templateName(id: string): string }) {
   if (cell.blocked) {

@@ -12,32 +12,10 @@
  *   adaptive engine needs, and which approved templates fill each gap.
  */
 
-export type Difficulty = "easy" | "medium" | "hard";
+import type { Difficulty, ExampleQuestion } from "@/components/question-setup/types";
 
-export const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard"];
-
-export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
-  easy: "Easy",
-  medium: "Medium",
-  hard: "Hard",
-};
-
-/** One example question shown on a template card. The professor sees the answer key. */
-export interface ExampleQuestion {
-  prompt: string;
-  /** A code listing shown under the prompt. */
-  code?: string;
-  /** Choice options; `correct` marks the key. */
-  options?: readonly { text: string; correct?: boolean }[];
-  /** Parsons: the solution lines in their correct order (shown shuffled to the student). */
-  lines?: readonly string[];
-  /** The answer key in words: expected output, value with unit, expression, accepted text. */
-  answer?: string;
-  /** Hidden test count, for code types graded by tests. */
-  tests?: number;
-  /** The book section the example is grounded in. */
-  grounding: string;
-}
+export { DIFFICULTIES, DIFFICULTY_LABEL } from "@/components/question-setup/types";
+export type { Difficulty, ExampleQuestion };
 
 export interface Template {
   id: string;

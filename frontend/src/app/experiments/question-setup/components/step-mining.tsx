@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { DIFFICULTIES, DIFFICULTY_LABEL, type Domain, type MinedSection } from "../mock-types";
-import { DifficultyBadge } from "./badges";
+import { DifficultyBadge } from "@/components/question-setup/badges";
 
 const STAGE_MS = 850;
 

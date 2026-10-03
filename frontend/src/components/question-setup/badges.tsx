@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty } from "../mock-types";
+import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty } from "./types";
 
 /** Difficulty as a 1-3 bar meter, so it reads without relying on colour. */
 export function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
