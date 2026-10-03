@@ -1,7 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { QuestionDetail, RejectionReason, ReviewDecision } from "./review-types";
+import type { Difficulty, QuestionDetail, RejectionReason, ReviewDecision } from "./review-types";
+
+function judgeMetric(detail: QuestionDetail, metric: "difficulty" | "subtopic") {
+  return detail.pedagogical_eval?.metrics?.find((item) => item.metric === metric) ?? null;
+}
+
+/** The difficulty the form opens on: the judge's proposal, else the question's own. */
+export function presetDifficulty(detail: QuestionDetail): Difficulty {
+  return judgeMetric(detail, "difficulty")?.proposed_difficulty ?? detail.question.difficulty;
+}
+
+/** The subtopics the form opens on: the judge's proposal, else the question's own. */
+export function presetSubtopicIds(detail: QuestionDetail): number[] {
+  const proposed = judgeMetric(detail, "subtopic")?.proposed_subtopic_ids ?? [];
+  return proposed.length > 0 ? [...proposed] : [...detail.question.subtopic_ids];
+}
 
 export function useReviewForm(detail: QuestionDetail | null) {
   const [decision, setDecision] = useState<ReviewDecision>("approve");
@@ -10,6 +25,10 @@ export function useReviewForm(detail: QuestionDetail | null) {
   const [promptEdit, setPromptEdit] = useState("");
   const [referenceEdit, setReferenceEdit] = useState("");
   const [testsEdit, setTestsEdit] = useState("");
+  // The professor's final difficulty and subtopics. Always sent with the review; the
+  // backend compares them to the judges' answers to decide who was right.
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+  const [subtopicIds, setSubtopicIds] = useState<number[]>([]);
 
   useEffect(() => {
     if (!detail) return;
@@ -19,6 +38,8 @@ export function useReviewForm(detail: QuestionDetail | null) {
     setPromptEdit(detail.question.prompt);
     setReferenceEdit(detail.reference_solution ?? "");
     setTestsEdit(detail.tests ?? "");
+    setDifficulty(presetDifficulty(detail));
+    setSubtopicIds(presetSubtopicIds(detail));
   }, [detail]);
 
   const changedFields = useMemo(() => {
@@ -46,6 +67,10 @@ export function useReviewForm(detail: QuestionDetail | null) {
     setReferenceEdit,
     testsEdit,
     setTestsEdit,
+    difficulty,
+    setDifficulty,
+    subtopicIds,
+    setSubtopicIds,
     changedFields,
     effectiveDecision,
     isInlineEditing: decision === "edit" || effectiveDecision === "edit",

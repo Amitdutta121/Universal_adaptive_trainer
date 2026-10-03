@@ -4,8 +4,7 @@ import { AlertCircle, CheckCircle2, ChevronDown, CircleSlash } from "lucide-reac
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MetricResult, QuestionDetail, ReviewOut } from "../review-types";
-import { METRIC_LABEL } from "../review-types";
-import { labelize } from "../review-utils";
+import { DIFFICULTY_LABEL } from "../review-types";
 import { ReviewChip, statusTone } from "./review-primitives";
 
 function ExpandableText({ text, preview = 96 }: { text: string; preview?: number }) {
@@ -104,87 +103,115 @@ export function ValidationSummary({ detail }: { detail: QuestionDetail }) {
   );
 }
 
-function MetricCard({ metric }: { metric: MetricResult }) {
-  const issueCodes = metric.issue_codes ?? [];
+/** One row of the judge rail: a label, a pass/fail chip, and what the judge said. */
+function JudgeRow({
+  label,
+  passed,
+  verdict,
+  rationale,
+}: {
+  label: string;
+  passed: boolean | null | undefined;
+  verdict?: string | null;
+  rationale?: string | null;
+}) {
   return (
-    <div className="review-judge-row" data-status={statusTone(metric.passed)}>
+    <div className="review-judge-row" data-status={statusTone(passed)} data-testid="judge-row">
       <div className="min-w-0 grow">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="font-medium text-sm">{METRIC_LABEL[metric.metric] ?? metric.metric}</p>
-          <ReviewChip tone={statusTone(metric.passed)}>
-            {metric.passed === null ? "not measured" : metric.passed ? "pass" : "fail"}
+          <p className="font-medium text-sm">{label}</p>
+          <ReviewChip tone={statusTone(passed)}>
+            {passed == null ? "not measured" : passed ? "pass" : "fail"}
           </ReviewChip>
         </div>
-        {metric.rationale ? <ExpandableText text={metric.rationale} /> : null}
-        {issueCodes.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {issueCodes.map((code) => (
-              <ReviewChip key={code}>{code}</ReviewChip>
-            ))}
-          </div>
-        ) : null}
+        {verdict ? <p className="mt-1 text-[var(--review-muted)] text-xs">{verdict}</p> : null}
+        {rationale ? <ExpandableText text={rationale} /> : null}
       </div>
     </div>
   );
 }
 
-export function JudgeRail({ detail }: { detail: QuestionDetail }) {
-  const [showDescription, setShowDescription] = useState(false);
+function answerCheck(detail: QuestionDetail) {
+  const checks = detail.validation_checks;
+  const failed = checks.filter((check) => !check.passed);
+  const passed = checks.length > 0 ? failed.length === 0 : detail.validation_passed;
+  const verdict =
+    failed.length > 0
+      ? `Failed: ${failed.map((check) => check.name).join(", ")}`
+      : checks.length > 0
+        ? `${checks.length} check${checks.length === 1 ? "" : "s"} passed`
+        : null;
+  return { passed, verdict };
+}
+
+function metricOf(detail: QuestionDetail, id: MetricResult["metric"]) {
+  return detail.pedagogical_eval?.metrics?.find((metric) => metric.metric === id) ?? null;
+}
+
+/**
+ * The judges a professor weighs a question against: the deterministic answer check, the
+ * difficulty and topic judges, and one row per custom rule. Issues and generatability are
+ * not shown even when an older question still carries them.
+ */
+export function JudgeRail({
+  detail,
+  subtopicNames,
+}: {
+  detail: QuestionDetail;
+  /** Taxonomy subtopic id → name, to spell out the topic judge's proposal. */
+  subtopicNames?: ReadonlyMap<number, string>;
+}) {
   const evaluation = detail.pedagogical_eval;
-  const metrics = evaluation?.metrics ?? [];
-  const gateTone =
-    evaluation?.gate === "approved"
-      ? "ok"
-      : evaluation?.gate === "needs_review"
-        ? "warn"
-        : evaluation?.gate
-          ? "critical"
-          : "muted";
+  const answer = answerCheck(detail);
+  const difficulty = metricOf(detail, "difficulty");
+  const subtopic = metricOf(detail, "subtopic");
+  const customResults = detail.custom_results ?? [];
+
+  const proposedSubtopics = (subtopic?.proposed_subtopic_ids ?? []).map(
+    (id) => subtopicNames?.get(id) ?? `#${id}`,
+  );
 
   return (
     <Card className="review-panel border">
       <CardHeader>
         <div className="review-eyebrow">Panel</div>
-        <CardTitle>Advisory judges</CardTitle>
-        <CardDescription>
-          Advisory only.
-          {!showDescription ? (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="text-[var(--review-accent)] underline-offset-2 hover:underline"
-                onClick={() => setShowDescription(true)}
-              >
-                See more
-              </button>
-            </>
-          ) : (
-            <>
-              {" "}
-              Secondary on purpose; the professor review remains the authority.{" "}
-              <button
-                type="button"
-                className="text-[var(--review-accent)] underline-offset-2 hover:underline"
-                onClick={() => setShowDescription(false)}
-              >
-                Show less
-              </button>
-            </>
-          )}
-        </CardDescription>
+        <CardTitle>Judges</CardTitle>
+        <CardDescription>Advisory only; your verdict below is what counts.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {evaluation?.gate ? (
-          <ReviewChip tone={gateTone}>judges: {labelize(evaluation.gate)}</ReviewChip>
-        ) : null}
-        {metrics.length === 0 ? (
-          <p className="text-[var(--review-muted)] text-sm">
-            Nothing was measured{evaluation?.skip_reason ? ` - ${evaluation.skip_reason}` : ""}.
+        <JudgeRow label="Answer check" passed={answer.passed} verdict={answer.verdict} />
+        <JudgeRow
+          label="Difficulty"
+          passed={difficulty?.passed}
+          verdict={
+            difficulty?.proposed_difficulty
+              ? `Judge says ${DIFFICULTY_LABEL[difficulty.proposed_difficulty]}`
+              : null
+          }
+          rationale={difficulty?.rationale ?? difficulty?.error_detail}
+        />
+        <JudgeRow
+          label="Topic"
+          passed={subtopic?.passed}
+          verdict={
+            proposedSubtopics.length > 0 ? `Judge says ${proposedSubtopics.join(", ")}` : null
+          }
+          rationale={subtopic?.rationale ?? subtopic?.error_detail}
+        />
+        {customResults.map((result) => (
+          <JudgeRow
+            key={result.judge_id}
+            label={result.rule_text}
+            passed={result.passed}
+            verdict={result.kind === "pattern" ? "Custom rule - pattern" : "Custom rule"}
+            rationale={result.reason}
+          />
+        ))}
+        {!difficulty && !subtopic && evaluation?.skip_reason ? (
+          <p className="text-[var(--review-muted)] text-xs">
+            Judges did not run - {evaluation.skip_reason}.
           </p>
-        ) : (
-          metrics.map((metric) => <MetricCard key={metric.metric} metric={metric} />)
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );

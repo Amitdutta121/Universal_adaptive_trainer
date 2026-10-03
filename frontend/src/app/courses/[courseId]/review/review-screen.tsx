@@ -2,6 +2,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
+import { useMemo } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
@@ -17,15 +18,18 @@ import {
 } from "@/components/ui/select";
 import { useApprovedCurriculum, useReviewQueue, useSubmitReview } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
-import { ReviewActionBar } from "./components/review-action-bar";
 import { JudgeRail, ValidationSummary } from "./components/review-feedback";
 import { ReviewQuestionContent, ReviewQuestionSurface } from "./components/review-question-content";
+import { ReviewVerdictBar } from "./components/review-verdict-bar";
+import { NextRoundButton, RoundProgressStrip } from "./components/round-progress";
 import {
   REVIEW_MODES,
   REVIEW_THEMES,
   type ReviewQueueMode,
   type ReviewTheme,
+  type SubtopicOption,
 } from "./review-types";
+import { useNextRound } from "./use-next-round";
 import { useReviewForm } from "./use-review-form";
 import { CourseLink } from "@/components/course-link";
 
@@ -41,29 +45,44 @@ export function ReviewScreen() {
   );
   // Only the questions of the taxonomy chosen in the header are offered.
   const selectedTaxonomy = useApprovedCurriculum();
+  const curriculumVersionId = selectedTaxonomy.data?.version.id ?? null;
   const { data, isPending, isError, error } = useReviewQueue({
     mode,
     after,
-    curriculumVersionId: selectedTaxonomy.data?.version.id ?? null,
+    curriculumVersionId,
   });
   const submitReview = useSubmitReview();
+  const nextRound = useNextRound(curriculumVersionId);
+
+  const subtopicOptions = useMemo<SubtopicOption[]>(
+    () =>
+      (selectedTaxonomy.data?.topics ?? []).flatMap((topic) =>
+        topic.subtopics.map((subtopic) => ({
+          id: subtopic.id,
+          name: subtopic.name,
+          topicName: topic.name,
+        })),
+      ),
+    [selectedTaxonomy.data],
+  );
+  const subtopicNames = useMemo(
+    () => new Map(subtopicOptions.map((option) => [option.id, option.name])),
+    [subtopicOptions],
+  );
 
   const detail = data?.question ?? null;
   const form = useReviewForm(detail);
-  const canReject = form.reasons.length > 0;
-  const canSubmit =
-    form.effectiveDecision === "reject"
-      ? canReject
-      : form.effectiveDecision === "edit"
-        ? form.changedFields.length > 0
-        : true;
+  // Reject needs no reason any more; an edit needs an actual change.
+  const canSubmit = form.effectiveDecision === "edit" ? form.changedFields.length > 0 : true;
 
   async function onSubmit() {
     if (!detail || !canSubmit || submitReview.isPending) return;
     const body: Schemas["ReviewRequest"] = {
       decision: form.effectiveDecision,
-      ...(form.reasons.length > 0 ? { reasons: form.reasons } : {}),
-      ...(form.comment.trim() ? { comment: form.comment } : {}),
+      ...(form.comment.trim() ? { comment: form.comment.trim() } : {}),
+      // The final values, always; the backend compares them with the judges' answers.
+      corrected_difficulty: form.difficulty,
+      corrected_subtopic_ids: form.subtopicIds.length > 0 ? form.subtopicIds : null,
       ...(form.effectiveDecision === "edit"
         ? {
             prompt: form.promptEdit,
@@ -118,6 +137,12 @@ export function ReviewScreen() {
           summary="Professor feedback lives here now. Review the student-facing surface first, then decide."
           actions={
             <>
+              <NextRoundButton
+                canStart={nextRound.canStart}
+                isStarting={nextRound.isStarting}
+                disabledReason={nextRound.disabledReason}
+                onStart={() => void nextRound.startNext()}
+              />
               <Select
                 value={mode}
                 onValueChange={(value) => void setMode(value as ReviewQueueMode)}
@@ -142,6 +167,16 @@ export function ReviewScreen() {
             </>
           }
         />
+        {nextRound.roundId != null ? (
+          <div className="mt-3">
+            <RoundProgressStrip
+              roundId={nextRound.roundId}
+              round={nextRound.round}
+              error={nextRound.roundError}
+              onDismiss={nextRound.dismiss}
+            />
+          </div>
+        ) : null}
       </div>
 
       {isError ? <QueryError error={error} /> : null}
@@ -216,7 +251,7 @@ export function ReviewScreen() {
             </div>
 
             <div className="min-w-0 space-y-4">
-              <JudgeRail detail={detail} />
+              <JudgeRail detail={detail} subtopicNames={subtopicNames} />
               <Card className="review-panel border">
                 <CardHeader>
                   <div className="review-eyebrow">Context</div>
@@ -237,18 +272,18 @@ export function ReviewScreen() {
             </div>
           </div>
 
-          <ReviewActionBar
-            detail={detail}
+          <ReviewVerdictBar
             decision={form.decision}
             effectiveDecision={form.effectiveDecision}
-            reasons={form.reasons}
-            changedFields={form.changedFields}
+            difficulty={form.difficulty}
+            subtopicIds={form.subtopicIds}
+            subtopicOptions={subtopicOptions}
             comment={form.comment}
             isSubmitting={submitReview.isPending}
             canSubmit={canSubmit}
-            canReject={canReject}
             onDecisionChange={form.setDecision}
-            onReasonsChange={form.setReasons}
+            onDifficultyChange={form.setDifficulty}
+            onSubtopicsChange={form.setSubtopicIds}
             onCommentChange={form.setComment}
             onSubmit={onSubmit}
             onSkip={() => void setAfter(detail.question.id)}

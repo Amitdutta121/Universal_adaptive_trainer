@@ -52,3 +52,17 @@ export const METRIC_LABEL: Record<string, string> = {
   difficulty: "Difficulty",
   generatability: "Generatability",
 };
+
+export type Difficulty = Schemas["Difficulty"];
+export type CustomJudgeResult = Schemas["CustomJudgeResult"];
+export type GenerationRound = Schemas["GenerationRoundOut"];
+
+export const DIFFICULTIES = ["easy", "medium", "hard"] as const satisfies readonly Difficulty[];
+export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+};
+
+/** One taxonomy subtopic a professor can tag a question with, grouped under its topic. */
+export type SubtopicOption = { id: number; name: string; topicName: string };
