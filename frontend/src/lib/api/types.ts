@@ -74,3 +74,25 @@ export type TypeInstructionRefreshResponse = Schemas["TypeInstructionRefreshResp
 export type JudgeMetricId = Schemas["JudgeMetricId"];
 export type JudgePromptListResponse = Schemas["JudgePromptListResponse"];
 export type JudgePrompt = Schemas["JudgePromptOut"];
+
+// Question setup, rounds and custom judges (docs/QUESTION_SETUP_PLAN.md).
+export type QuestionStyle = Schemas["QuestionStyle"];
+export type ExampleQuestion = Schemas["ExampleQuestion"];
+export type StyleListResponse = Schemas["StyleListResponse"];
+export type SetupSuggestion = Schemas["SetupSuggestion"];
+export type SubtopicStyleSuggestion = Schemas["SubtopicStyleSuggestion"];
+export type CellTarget = Schemas["CellTarget"];
+export type SubtopicStyles = Schemas["SubtopicStyles"];
+export type SaveSetupRequest = Schemas["SaveSetupRequest"];
+export type SaveSetupResponse = Schemas["SaveSetupResponse"];
+export type QuestionSetup = Schemas["QuestionSetupOut"];
+export type CurrentSetupResponse = Schemas["CurrentSetupResponse"];
+export type GenerationRound = Schemas["GenerationRoundOut"];
+export type RoundStatus = Schemas["RoundStatus"];
+export type StartRoundRequest = Schemas["StartRoundRequest"];
+export type CustomJudge = Schemas["CustomJudgeOut"];
+export type CustomJudgeKind = Schemas["CustomJudgeKind"];
+export type CustomJudgeResult = Schemas["CustomJudgeResult"];
+export type CreateCustomJudgeRequest = Schemas["CreateCustomJudgeRequest"];
+export type UpdateCustomJudgeRequest = Schemas["UpdateCustomJudgeRequest"];
+export type ReviewRequest = Schemas["ReviewRequest"];

@@ -50,6 +50,7 @@ from app.domain.enums import (
     ConceptConfidence,
     CurriculumItemStatus,
     CurriculumStatus,
+    CustomJudgeKind,
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
@@ -61,6 +62,7 @@ from app.domain.enums import (
     QuestionType,
     RejectionReason,
     ReviewDecision,
+    RoundStatus,
     SourceFormat,
     StructureConfidence,
     StructureSource,
@@ -68,16 +70,20 @@ from app.domain.enums import (
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
+from app.evaluation.custom import CustomJudgeResult
 from app.generation import ChunkQuestionRequest, PlannedQuestion
 from app.ingestion import VocabularyTerm
 from app.persistence.models import (
     BookRow,
     CourseRow,
     CurriculumVersionRow,
+    CustomJudgeRow,
+    GenerationRoundRow,
     JudgeBatchRunRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
+    QuestionSetupRow,
     QuestionSetVersionRow,
     ReviewOutcomeRow,
     StudentAttemptRow,
@@ -88,6 +94,7 @@ from app.persistence.models import (
     TrainingSessionRow,
 )
 from app.retrieval import RetrievedSection
+from app.styles import CellTarget, QuestionStyle, SetupSuggestion
 
 
 class EnumOption(BaseModel):
@@ -939,6 +946,11 @@ class QuestionSummary(BaseModel):
     possible_duplicate_of: list[PossibleDuplicateOut]
     created_at: datetime
     updated_at: datetime | None
+    #: Question setup provenance (docs/QUESTION_SETUP_PLAN.md): the library style, the round
+    #: and the subtopic the generator was asked for. ``None`` outside setup rounds.
+    style_id: str | None = None
+    round_id: int | None = None
+    target_subtopic_id: int | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -976,6 +988,9 @@ class QuestionSummary(BaseModel):
             ],
             created_at=row.created_at,
             updated_at=row.updated_at,
+            style_id=row.style_id,
+            round_id=row.round_id,
+            target_subtopic_id=row.target_subtopic_id,
         )
 
 
@@ -1015,6 +1030,10 @@ class QuestionDetail(BaseModel):
     generation_attempts: list[GenerationAttempt]
     pedagogical_eval: PedagogicalEvaluation | None
     pedagogical_error_message: str | None
+    #: Custom rule judge results of the current evaluation (``app.evaluation.custom``). Empty
+    #: until the detail builder fills it (Phase 1, agent C) and for questions judged before
+    #: custom judges existed.
+    custom_results: list[CustomJudgeResult] = Field(default_factory=list)
     personalization: PersonalizationEvidence | None
     original_prompt: str | None
     original_reference_solution: str | None
@@ -1255,6 +1274,12 @@ class ReviewRequest(BaseModel):
     reference_solution: str | None = None
     tests: str | None = None
     professor_id: int | None = None
+    #: The difficulty the professor says the question really is. Omitted by older clients;
+    #: when present, the difficulty judge is at fault iff its verdict differs.
+    corrected_difficulty: Difficulty | None = None
+    #: The subtopic ids the professor says the question exercises. Omitted by older clients;
+    #: when present it must name at least one subtopic.
+    corrected_subtopic_ids: list[int] | None = Field(default=None, min_length=1)
 
 
 class ReviewOutcomeOut(BaseModel):
@@ -1335,6 +1360,9 @@ class ReviewOut(BaseModel):
     #: Absent when the question carried no completed judge evaluation, so there
     #: was no judge verdict for this review to agree or disagree with.
     outcome: ReviewOutcomeOut | None = None
+    #: The professor's corrections, when the review carried any.
+    corrected_difficulty: Difficulty | None = None
+    corrected_subtopic_ids: list[int] = Field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: ProfessorReviewRow) -> ReviewOut:
@@ -1356,6 +1384,8 @@ class ReviewOut(BaseModel):
                 else "unknown"
             ),
             created_at=row.created_at,
+            corrected_difficulty=row.corrected_difficulty,
+            corrected_subtopic_ids=list(row.corrected_subtopic_ids or []),
         )
 
 
@@ -2460,3 +2490,179 @@ class RetrievedSectionOut(BaseModel):
 
 SubtopicDetail.model_rebuild()
 QuestionDetail.model_rebuild()
+
+
+# -------------------------------------------------------------- question setup
+# docs/QUESTION_SETUP_PLAN.md. Styles, suggestions and cell targets reuse the
+# ``app.styles`` models directly: they are already API-shaped pure data.
+
+
+class StyleListResponse(BaseModel):
+    """``GET /api/styles``: one subject's style library."""
+
+    subject: str
+    styles: list[QuestionStyle]
+
+
+class SuggestSetupRequest(BaseModel):
+    """``POST /api/setup/suggest``."""
+
+    curriculum_version_id: int
+
+
+#: ``POST /api/setup/suggest`` returns the suggester's own model unchanged.
+SetupSuggestionResponse = SetupSuggestion
+
+
+class SubtopicStyles(BaseModel):
+    """The styles approved for one subtopic."""
+
+    subtopic_id: int
+    style_ids: list[str]
+
+
+class SaveSetupRequest(BaseModel):
+    """``POST /api/setup``: the professor's approved setup.
+
+    ``cell_targets`` is the suggester's, passed back unchanged -- the professor does not edit
+    counts. A subtopic with no approved styles is simply absent from ``approved_styles``.
+    """
+
+    curriculum_version_id: int
+    approved_styles: list[SubtopicStyles]
+    cell_targets: list[CellTarget]
+    round_size: int = Field(default=10, ge=1, le=50)
+
+
+class SaveSetupResponse(BaseModel):
+    """The saved setup and the first round it started."""
+
+    setup_id: int
+    round_id: int
+
+
+class GenerationRoundOut(BaseModel):
+    """``GET /api/rounds/{id}``: one round's status and progress."""
+
+    id: int
+    setup_id: int
+    number: int
+    status: RoundStatus
+    requested: int
+    produced: int
+    dropped: int
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: GenerationRoundRow) -> GenerationRoundOut:
+        return cls(
+            id=row.id,
+            setup_id=row.setup_id,
+            number=row.number,
+            status=row.status,
+            requested=row.requested,
+            produced=row.produced,
+            dropped=row.dropped,
+            error=row.error,
+            created_at=row.created_at,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
+
+
+class QuestionSetupOut(BaseModel):
+    """A saved setup, with its newest round."""
+
+    id: int
+    curriculum_version_id: int
+    approved_styles: list[SubtopicStyles]
+    cell_targets: list[CellTarget]
+    created_at: datetime
+    latest_round: GenerationRoundOut | None
+
+    @classmethod
+    def from_row(
+        cls, row: QuestionSetupRow, *, latest_round: GenerationRoundRow | None
+    ) -> QuestionSetupOut:
+        return cls(
+            id=row.id,
+            curriculum_version_id=row.curriculum_version_id,
+            approved_styles=[
+                SubtopicStyles(subtopic_id=int(subtopic_id), style_ids=list(style_ids))
+                for subtopic_id, style_ids in (row.approved_styles or {}).items()
+            ],
+            cell_targets=[CellTarget.model_validate(cell) for cell in row.cell_targets or []],
+            created_at=row.created_at,
+            latest_round=(
+                GenerationRoundOut.from_row(latest_round) if latest_round is not None else None
+            ),
+        )
+
+
+class CurrentSetupResponse(BaseModel):
+    """``GET /api/setup``: the current setup of a taxonomy, ``None`` when never set up."""
+
+    setup: QuestionSetupOut | None
+
+
+class StartRoundRequest(BaseModel):
+    """``POST /api/rounds``: generate the next round of a setup."""
+
+    setup_id: int
+    size: int = Field(default=10, ge=1, le=50)
+
+
+class StartRoundResponse(BaseModel):
+    round_id: int
+
+
+class CustomJudgeOut(BaseModel):
+    """One custom rule judge."""
+
+    id: int
+    curriculum_version_id: int
+    rule_text: str
+    kind: CustomJudgeKind
+    pattern: str | None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: CustomJudgeRow) -> CustomJudgeOut:
+        return cls(
+            id=row.id,
+            curriculum_version_id=row.curriculum_version_id,
+            rule_text=row.rule_text,
+            kind=row.kind,
+            pattern=row.pattern,
+            enabled=row.enabled,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class CustomJudgeListResponse(BaseModel):
+    judges: list[CustomJudgeOut]
+
+
+class CreateCustomJudgeRequest(BaseModel):
+    """``POST /api/custom-judges``. ``pattern`` is required for a ``pattern`` rule."""
+
+    curriculum_version_id: int
+    rule_text: str = Field(min_length=1, max_length=2000)
+    kind: CustomJudgeKind = CustomJudgeKind.LLM
+    pattern: str | None = None
+    enabled: bool = True
+
+
+class UpdateCustomJudgeRequest(BaseModel):
+    """``PATCH /api/custom-judges/{id}``: only the fields sent are changed."""
+
+    rule_text: str | None = Field(default=None, min_length=1, max_length=2000)
+    kind: CustomJudgeKind | None = None
+    pattern: str | None = None
+    enabled: bool | None = None

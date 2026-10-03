@@ -364,3 +364,31 @@ class JudgeBatchStatus(StrEnum):
             JudgeBatchStatus.FAILED,
             JudgeBatchStatus.EXPIRED,
         )
+
+
+class RoundStatus(StrEnum):
+    """Lifecycle of one generation round of a question setup.
+
+    A round runs in the background (the ``/api/*`` proxy would time out on a synchronous
+    one), so the client polls it until it reaches ``DONE`` or ``FAILED``.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+    def is_terminal(self) -> bool:
+        """True when no further polling can change this round."""
+        return self in (RoundStatus.DONE, RoundStatus.FAILED)
+
+
+class CustomJudgeKind(StrEnum):
+    """How a professor-written rule judge checks a question.
+
+    ``LLM`` asks the model one yes/no question per rule; ``PATTERN`` is a deterministic
+    regex/AST check over the question's code, with no model call.
+    """
+
+    LLM = "llm"
+    PATTERN = "pattern"

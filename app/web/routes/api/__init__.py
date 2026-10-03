@@ -16,12 +16,15 @@ from app.web.routes.api import (
     courses,
     coverage,
     curriculum,
+    custom_judges,
     evaluation,
     feedback,
     instructions,
     judge_prompts,
     questions,
     retrieval,
+    rounds,
+    setup,
     students,
     system,
 )
@@ -45,6 +48,9 @@ _professor_only = [
     calibration.router,
     coverage.router,
     retrieval.router,
+    setup.router,
+    rounds.router,
+    custom_judges.router,
 ]
 for professor_router in _professor_only:
     router.include_router(professor_router, dependencies=[Depends(current_active_user)])
@@ -61,13 +67,16 @@ __all__ = [
     "courses",
     "coverage",
     "curriculum",
+    "custom_judges",
     "evaluation",
     "feedback",
     "instructions",
     "judge_prompts",
     "questions",
     "retrieval",
+    "rounds",
     "router",
+    "setup",
     "students",
     "system",
 ]

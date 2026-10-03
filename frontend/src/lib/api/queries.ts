@@ -113,6 +113,19 @@ export const qk = {
   auth: {
     me: () => ["auth", "me"] as const,
   },
+  setup: {
+    all: ["setup"] as const,
+    styles: (subject?: string | null) => ["setup", "styles", subject ?? null] as const,
+    current: (curriculumVersionId: number) => ["setup", "current", curriculumVersionId] as const,
+  },
+  rounds: {
+    all: ["rounds"] as const,
+    detail: (roundId: number) => ["rounds", "detail", roundId] as const,
+  },
+  customJudges: {
+    all: ["custom-judges"] as const,
+    list: (curriculumVersionId: number) => ["custom-judges", "list", curriculumVersionId] as const,
+  },
   courses: {
     all: ["courses"] as const,
     list: () => ["courses", "list"] as const,
@@ -1264,5 +1277,143 @@ export function useBatchRun(runId: string, { enabled = true } = {}) {
       // the whole terminal set.
       return status === "completed" || status === "failed" || status === "expired" ? false : 5_000;
     },
+  });
+}
+
+// --- Question setup, rounds and custom judges -------------------------------
+// docs/QUESTION_SETUP_PLAN.md. Until Phase 1 lands every one of these endpoints
+// answers 501 (`feature_not_available`).
+
+/** The style library of a subject; the course's own subject when `subject` is omitted. */
+export const useStyles = (subject?: string | null, { enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.setup.styles(subject),
+    enabled,
+    queryFn: () =>
+      unwrap(api.GET("/api/styles", { params: { query: subject ? { subject } : {} } })),
+    // The library is code data shipped with the backend; it does not change while a page is open.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/** Ask the AI for styles per subtopic and a target per cell. Persists nothing, so no invalidation. */
+export function useSetupSuggestion() {
+  return useMutation({
+    mutationFn: (curriculumVersionId: number) =>
+      unwrap(
+        api.POST("/api/setup/suggest", {
+          body: { curriculum_version_id: curriculumVersionId },
+        }),
+      ),
+  });
+}
+
+/** The newest saved setup of a taxonomy, with its newest round; `setup` is null when none. */
+export const useCurrentSetup = (curriculumVersionId: number | null | undefined) =>
+  useQuery({
+    queryKey: qk.setup.current(curriculumVersionId ?? 0),
+    enabled: curriculumVersionId != null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/setup", {
+          params: { query: { curriculum_version_id: curriculumVersionId as number } },
+        }),
+      ),
+  });
+
+/** Save the approved setup; the backend starts round 1 in the background. */
+export function useSaveSetup() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["SaveSetupRequest"]) => unwrap(api.POST("/api/setup", { body })),
+    onSuccess: (_result, body) => {
+      client.invalidateQueries({ queryKey: qk.setup.current(body.curriculum_version_id) });
+      client.invalidateQueries({ queryKey: qk.rounds.all });
+    },
+  });
+}
+
+/** Queue the next round of a setup, for cells still below target. */
+export function useStartNextRound() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["StartRoundRequest"]) => unwrap(api.POST("/api/rounds", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.setup.all });
+      client.invalidateQueries({ queryKey: qk.rounds.all });
+    },
+  });
+}
+
+const ROUND_POLL_MS = 2_000;
+
+/**
+ * One round's status and progress.
+ *
+ * Polls every two seconds while the round is queued or running and stops once it is `done` or
+ * `failed`, unless the caller passes its own `refetchInterval` (a number, or `false` to never
+ * poll).
+ */
+export function useRound(
+  roundId: number | null | undefined,
+  { enabled = true, refetchInterval }: { enabled?: boolean; refetchInterval?: number | false } = {},
+) {
+  return useQuery({
+    queryKey: qk.rounds.detail(roundId ?? 0),
+    enabled: enabled && roundId != null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/rounds/{round_id}", {
+          params: { path: { round_id: roundId as number } },
+        }),
+      ),
+    refetchInterval:
+      refetchInterval !== undefined
+        ? refetchInterval
+        : (query) => {
+            const status = query.state.data?.status;
+            return status === "done" || status === "failed" ? false : ROUND_POLL_MS;
+          },
+  });
+}
+
+/** Every custom rule judge of a taxonomy, enabled or not. */
+export const useCustomJudges = (curriculumVersionId: number | null | undefined) =>
+  useQuery({
+    queryKey: qk.customJudges.list(curriculumVersionId ?? 0),
+    enabled: curriculumVersionId != null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/custom-judges", {
+          params: { query: { curriculum_version_id: curriculumVersionId as number } },
+        }),
+      ),
+  });
+
+export function useCreateCustomJudge() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CreateCustomJudgeRequest"]) =>
+      unwrap(api.POST("/api/custom-judges", { body })),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.customJudges.all }),
+  });
+}
+
+export function useUpdateCustomJudge() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      judgeId,
+      body,
+    }: {
+      judgeId: number;
+      body: Schemas["UpdateCustomJudgeRequest"];
+    }) =>
+      unwrap(
+        api.PATCH("/api/custom-judges/{judge_id}", {
+          params: { path: { judge_id: judgeId } },
+          body,
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.customJudges.all }),
   });
 }

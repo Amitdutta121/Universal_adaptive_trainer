@@ -102,6 +102,13 @@ class Settings(BaseSettings):
     #: question -- enough to manufacture the disagreements that trigger a repair.
     judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
+    #: Which of the four metric judges run on newly generated questions
+    #: (docs/QUESTION_SETUP_PLAN.md). ``JudgeMetricId`` itself is not shrunk -- stored rows and
+    #: calibration depend on it -- and calibration already skips a metric a judge did not
+    #: answer. Values are ``JudgeMetricId`` values; ``JUDGE_METRICS_ENABLED=difficulty,subtopic``
+    #: in a ``.env`` file. Not yet read by the judge service (Phase 1, agent C).
+    judge_metrics_enabled: Annotated[list[str], NoDecode] = ["difficulty", "subtopic"]
+
     # -- Learning loops (ADR-042) -------------------------------------------
     # Both loops can be frozen independently. A judge cannot be measured while
     # the generator is also adapting: the question population moves under the
@@ -166,6 +173,21 @@ class Settings(BaseSettings):
         """Treat ``KEY=`` in a ``.env`` file as "not configured"."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("judge_metrics_enabled", mode="before")
+    @classmethod
+    def _split_metrics(cls, value: object) -> object:
+        """Accept ``JUDGE_METRICS_ENABLED=difficulty,subtopic``; reject unknown metric ids."""
+        from app.domain.enums import JudgeMetricId
+
+        if isinstance(value, str):
+            value = [item.strip().lower() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            known = {metric.value for metric in JudgeMetricId}
+            unknown = [item for item in value if str(item) not in known]
+            if unknown:
+                raise ValueError(f"unknown judge metric(s): {', '.join(map(str, unknown))}")
         return value
 
     @field_validator("cors_allow_origins", mode="before")

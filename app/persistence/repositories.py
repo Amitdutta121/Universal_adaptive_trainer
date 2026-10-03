@@ -34,6 +34,8 @@ from app.persistence.models import (
     BookSectionRow,
     CourseRow,
     CurriculumVersionRow,
+    CustomJudgeRow,
+    GenerationRoundRow,
     JudgeBatchRunRow,
     JudgePromptRow,
     ProfessorReviewRow,
@@ -41,6 +43,7 @@ from app.persistence.models import (
     QuestionRow,
     QuestionSetAliasRow,
     QuestionSetMemberRow,
+    QuestionSetupRow,
     QuestionSetVersionRow,
     QuestionSubtopicRow,
     ReviewOutcomeRow,
@@ -2057,3 +2060,140 @@ class StudentAttemptRepository:
             )
             for student_id, score, answered_at, created_at, ordinal in self._session.execute(stmt)
         ]
+
+
+# ------------------------------------------------------------------ question setup
+
+
+class QuestionSetupRepository:
+    """Approved question setups (docs/QUESTION_SETUP_PLAN.md). Append-only.
+
+    The newest row for a curriculum version is its current setup; saving again adds a row
+    rather than editing one, so a round always points at the setup it was planned from.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: QuestionSetupRow) -> QuestionSetupRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, setup_id: int) -> QuestionSetupRow:
+        row = self._session.get(QuestionSetupRow, setup_id)
+        if row is None:
+            raise NotFoundError(f"Question setup {setup_id} does not exist.")
+        return row
+
+    def current(self, curriculum_version_id: int) -> QuestionSetupRow | None:
+        """The newest setup for this taxonomy, or ``None`` when it was never set up."""
+        stmt = (
+            select(QuestionSetupRow)
+            .where(QuestionSetupRow.curriculum_version_id == curriculum_version_id)
+            .order_by(QuestionSetupRow.created_at.desc(), QuestionSetupRow.id.desc())
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def list_for_version(self, curriculum_version_id: int) -> list[QuestionSetupRow]:
+        stmt = (
+            select(QuestionSetupRow)
+            .where(QuestionSetupRow.curriculum_version_id == curriculum_version_id)
+            .order_by(QuestionSetupRow.created_at.desc(), QuestionSetupRow.id.desc())
+        )
+        return list(self._session.scalars(stmt))
+
+
+class GenerationRoundRepository:
+    """Background generation rounds of a setup, and their progress counters."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: GenerationRoundRow) -> GenerationRoundRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, round_id: int) -> GenerationRoundRow:
+        row = self._session.get(GenerationRoundRow, round_id)
+        if row is None:
+            raise NotFoundError(f"Generation round {round_id} does not exist.")
+        return row
+
+    def list_for_setup(self, setup_id: int) -> list[GenerationRoundRow]:
+        stmt = (
+            select(GenerationRoundRow)
+            .where(GenerationRoundRow.setup_id == setup_id)
+            .order_by(GenerationRoundRow.number)
+        )
+        return list(self._session.scalars(stmt))
+
+    def latest(self, setup_id: int) -> GenerationRoundRow | None:
+        stmt = (
+            select(GenerationRoundRow)
+            .where(GenerationRoundRow.setup_id == setup_id)
+            .order_by(GenerationRoundRow.number.desc())
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def next_number(self, setup_id: int) -> int:
+        """The number the next round of this setup takes: 1 for the first."""
+        highest = self._session.scalar(
+            select(func.max(GenerationRoundRow.number)).where(
+                GenerationRoundRow.setup_id == setup_id
+            )
+        )
+        return (highest or 0) + 1
+
+    def update(self, round_id: int, **fields: object) -> GenerationRoundRow:
+        """Set the named columns (``status``, ``produced``, ``dropped``, ``error``, ...)."""
+        row = self.get(round_id)
+        for name, value in fields.items():
+            if not hasattr(GenerationRoundRow, name):
+                raise AttributeError(f"GenerationRoundRow has no column {name!r}.")
+            setattr(row, name, value)
+        self._session.flush()
+        return row
+
+
+class CustomJudgeRepository:
+    """Professor-written rule judges, per taxonomy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: CustomJudgeRow) -> CustomJudgeRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, judge_id: int) -> CustomJudgeRow:
+        row = self._session.get(CustomJudgeRow, judge_id)
+        if row is None:
+            raise NotFoundError(f"Custom judge {judge_id} does not exist.")
+        return row
+
+    def list_for_version(
+        self, curriculum_version_id: int, *, enabled_only: bool = False
+    ) -> list[CustomJudgeRow]:
+        stmt = select(CustomJudgeRow).where(
+            CustomJudgeRow.curriculum_version_id == curriculum_version_id
+        )
+        if enabled_only:
+            stmt = stmt.where(CustomJudgeRow.enabled.is_(True))
+        stmt = stmt.order_by(CustomJudgeRow.created_at, CustomJudgeRow.id)
+        return list(self._session.scalars(stmt))
+
+    def update(self, judge_id: int, **fields: object) -> CustomJudgeRow:
+        """Set the named columns (``rule_text``, ``kind``, ``pattern``, ``enabled``)."""
+        row = self.get(judge_id)
+        for name, value in fields.items():
+            if not hasattr(CustomJudgeRow, name):
+                raise AttributeError(f"CustomJudgeRow has no column {name!r}.")
+            setattr(row, name, value)
+        row.updated_at = datetime.now(UTC)
+        self._session.flush()
+        return row

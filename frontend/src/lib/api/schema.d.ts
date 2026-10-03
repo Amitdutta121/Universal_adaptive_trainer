@@ -1232,6 +1232,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/styles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Styles
+         * @description The style library of ``subject``, or of the course's subject when omitted.
+         */
+        get: operations["list_styles_api_styles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest
+         * @description AI-suggested styles per subtopic and a target per cell. Persists nothing.
+         */
+        post: operations["suggest_api_setup_suggest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current Setup
+         * @description The newest saved setup of a taxonomy, with its newest round; ``setup`` is null if none.
+         */
+        get: operations["current_setup_api_setup_get"];
+        put?: never;
+        /**
+         * Save Setup
+         * @description Save the approved setup and start round 1 in the background.
+         */
+        post: operations["save_setup_api_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Next Round
+         * @description Queue the next round of a setup, for cells still below target.
+         */
+        post: operations["start_next_round_api_rounds_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds/{round_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Round
+         * @description One round's status and progress counters.
+         */
+        get: operations["get_round_api_rounds__round_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/custom-judges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Custom Judges
+         * @description Every custom judge of a taxonomy, enabled or not, oldest first.
+         */
+        get: operations["list_custom_judges_api_custom_judges_get"];
+        put?: never;
+        /**
+         * Create Custom Judge
+         * @description Add a rule. A ``pattern`` rule must carry a compilable ``pattern``.
+         */
+        post: operations["create_custom_judge_api_custom_judges_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/custom-judges/{judge_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Custom Judge
+         * @description Change a rule's text, kind, pattern, or enabled flag.
+         */
+        patch: operations["update_custom_judge_api_custom_judges__judge_id__patch"];
+        trace?: never;
+    };
     "/api/question-sets/prod": {
         parameters: {
             query?: never;
@@ -2117,6 +2265,17 @@ export interface components {
             built: boolean;
         };
         /**
+         * CellTarget
+         * @description How many approved questions one subtopic x difficulty cell should reach.
+         */
+        CellTarget: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            difficulty: components["schemas"]["Difficulty"];
+            /** Target */
+            target: number;
+        };
+        /**
          * ChapterOut
          * @description One chapter and the sections beneath it.
          */
@@ -2489,6 +2648,25 @@ export interface components {
             difficulty: components["schemas"]["Difficulty"];
         };
         /**
+         * CreateCustomJudgeRequest
+         * @description ``POST /api/custom-judges``. ``pattern`` is required for a ``pattern`` rule.
+         */
+        CreateCustomJudgeRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Rule Text */
+            rule_text: string;
+            /** @default llm */
+            kind: components["schemas"]["CustomJudgeKind"];
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
          * CreateQuestionSetRequest
          * @description Freeze the currently approved questions under a name.
          */
@@ -2507,6 +2685,13 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * CurrentSetupResponse
+         * @description ``GET /api/setup``: the current setup of a taxonomy, ``None`` when never set up.
+         */
+        CurrentSetupResponse: {
+            setup: components["schemas"]["QuestionSetupOut"] | null;
         };
         /**
          * CurriculumItemLabelUpdate
@@ -2643,6 +2828,59 @@ export interface components {
             attempt_count: number;
             /** Is Approved */
             is_approved: boolean;
+        };
+        /**
+         * CustomJudgeKind
+         * @description How a professor-written rule judge checks a question.
+         *
+         *     ``LLM`` asks the model one yes/no question per rule; ``PATTERN`` is a deterministic
+         *     regex/AST check over the question's code, with no model call.
+         * @enum {string}
+         */
+        CustomJudgeKind: "llm" | "pattern";
+        /** CustomJudgeListResponse */
+        CustomJudgeListResponse: {
+            /** Judges */
+            judges: components["schemas"]["CustomJudgeOut"][];
+        };
+        /**
+         * CustomJudgeOut
+         * @description One custom rule judge.
+         */
+        CustomJudgeOut: {
+            /** Id */
+            id: number;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Rule Text */
+            rule_text: string;
+            kind: components["schemas"]["CustomJudgeKind"];
+            /** Pattern */
+            pattern: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * CustomJudgeResult
+         * @description What one rule said about one question.
+         */
+        CustomJudgeResult: {
+            /** Judge Id */
+            judge_id: number;
+            /** Rule Text */
+            rule_text: string;
+            kind: components["schemas"]["CustomJudgeKind"];
+            /** Passed */
+            passed: boolean | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * Difficulty
@@ -2788,6 +3026,44 @@ export interface components {
          * @enum {string}
          */
         EvaluationTrigger: "generation" | "batch_rerun";
+        /**
+         * ExampleOption
+         * @description One choice of a choice-type example.
+         */
+        ExampleOption: {
+            /** Text */
+            text: string;
+            /**
+             * Correct
+             * @default false
+             */
+            correct: boolean;
+        };
+        /**
+         * ExampleQuestion
+         * @description One worked example shown on a style card, answer key included.
+         *
+         *     Mirrors ``ExampleQuestion`` in ``frontend/src/app/experiments/question-setup/mock-types.ts``.
+         */
+        ExampleQuestion: {
+            /** Prompt */
+            prompt: string;
+            /** Code */
+            code?: string | null;
+            /** Options */
+            options?: components["schemas"]["ExampleOption"][];
+            /** Lines */
+            lines?: string[];
+            /** Answer */
+            answer?: string | null;
+            /** Tests */
+            tests?: number | null;
+            /**
+             * Grounding
+             * @default
+             */
+            grounding: string;
+        };
         /**
          * ExtractionWarning
          * @description One thing that went wrong, or could not be determined, during extraction.
@@ -3047,6 +3323,36 @@ export interface components {
             judge_calls: number;
             /** Source Chars */
             source_chars: number;
+        };
+        /**
+         * GenerationRoundOut
+         * @description ``GET /api/rounds/{id}``: one round's status and progress.
+         */
+        GenerationRoundOut: {
+            /** Id */
+            id: number;
+            /** Setup Id */
+            setup_id: number;
+            /** Number */
+            number: number;
+            status: components["schemas"]["RoundStatus"];
+            /** Requested */
+            requested: number;
+            /** Produced */
+            produced: number;
+            /** Dropped */
+            dropped: number;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
         };
         /**
          * GenerationRunResponse
@@ -3534,6 +3840,8 @@ export interface components {
             pedagogical_eval: components["schemas"]["PedagogicalEvaluation"] | null;
             /** Pedagogical Error Message */
             pedagogical_error_message: string | null;
+            /** Custom Results */
+            custom_results?: components["schemas"]["CustomJudgeResult"][];
             personalization: components["schemas"]["PersonalizationEvidence"] | null;
             /** Original Prompt */
             original_prompt: string | null;
@@ -3617,11 +3925,61 @@ export interface components {
             is_prod: boolean;
         };
         /**
+         * QuestionSetupOut
+         * @description A saved setup, with its newest round.
+         */
+        QuestionSetupOut: {
+            /** Id */
+            id: number;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved Styles */
+            approved_styles: components["schemas"]["SubtopicStyles"][];
+            /** Cell Targets */
+            cell_targets: components["schemas"]["CellTarget"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            latest_round: components["schemas"]["GenerationRoundOut"] | null;
+        };
+        /**
          * QuestionStatus
          * @description Lifecycle of a generated question through validation and review.
          * @enum {string}
          */
         QuestionStatus: "generated" | "validation_passed" | "validation_failed" | "approved" | "rejected";
+        /**
+         * QuestionStyle
+         * @description One style in a subject's library.
+         *
+         *     ``id`` is stable and namespaced by subject (``py.trace_output``): it is stored on every
+         *     question generated in this style and on every approved setup, so renaming a style must not
+         *     change it.
+         */
+        QuestionStyle: {
+            /** Id */
+            id: string;
+            /** Subject */
+            subject: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            question_type: components["schemas"]["QuestionType"];
+            /** Difficulty Range */
+            difficulty_range: components["schemas"]["Difficulty"][];
+            /** Checked By */
+            checked_by: string;
+            /** Applies To */
+            applies_to?: string[];
+            /** Examples */
+            examples: [
+                components["schemas"]["ExampleQuestion"],
+                components["schemas"]["ExampleQuestion"]
+            ];
+        };
         /**
          * QuestionSummary
          * @description One generated question, without its solution, tests or reports.
@@ -3668,6 +4026,12 @@ export interface components {
             created_at: string;
             /** Updated At */
             updated_at: string | null;
+            /** Style Id */
+            style_id?: string | null;
+            /** Round Id */
+            round_id?: number | null;
+            /** Target Subtopic Id */
+            target_subtopic_id?: number | null;
         };
         /**
          * QuestionTaxonomy
@@ -3830,6 +4194,9 @@ export interface components {
              */
             created_at: string;
             outcome?: components["schemas"]["ReviewOutcomeOut"] | null;
+            corrected_difficulty?: components["schemas"]["Difficulty"] | null;
+            /** Corrected Subtopic Ids */
+            corrected_subtopic_ids?: number[];
         };
         /**
          * ReviewOutcomeOut
@@ -3900,6 +4267,9 @@ export interface components {
             tests?: string | null;
             /** Professor Id */
             professor_id?: number | null;
+            corrected_difficulty?: components["schemas"]["Difficulty"] | null;
+            /** Corrected Subtopic Ids */
+            corrected_subtopic_ids?: number[] | null;
         };
         /** ReviewStatsResponse */
         ReviewStatsResponse: {
@@ -3913,6 +4283,45 @@ export interface components {
             edited: number;
             /** Reason Distribution */
             reason_distribution: components["schemas"]["ReasonCount"][];
+        };
+        /**
+         * RoundStatus
+         * @description Lifecycle of one generation round of a question setup.
+         *
+         *     A round runs in the background (the ``/api/*`` proxy would time out on a synchronous
+         *     one), so the client polls it until it reaches ``DONE`` or ``FAILED``.
+         * @enum {string}
+         */
+        RoundStatus: "queued" | "running" | "done" | "failed";
+        /**
+         * SaveSetupRequest
+         * @description ``POST /api/setup``: the professor's approved setup.
+         *
+         *     ``cell_targets`` is the suggester's, passed back unchanged -- the professor does not edit
+         *     counts. A subtopic with no approved styles is simply absent from ``approved_styles``.
+         */
+        SaveSetupRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved Styles */
+            approved_styles: components["schemas"]["SubtopicStyles"][];
+            /** Cell Targets */
+            cell_targets: components["schemas"]["CellTarget"][];
+            /**
+             * Round Size
+             * @default 10
+             */
+            round_size: number;
+        };
+        /**
+         * SaveSetupResponse
+         * @description The saved setup and the first round it started.
+         */
+        SaveSetupResponse: {
+            /** Setup Id */
+            setup_id: number;
+            /** Round Id */
+            round_id: number;
         };
         /**
          * SectionDetail
@@ -4057,6 +4466,20 @@ export interface components {
             done: boolean;
         };
         /**
+         * SetupSuggestion
+         * @description What ``suggest_setup`` returns: styles per subtopic and a target per cell.
+         */
+        SetupSuggestion: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Subject */
+            subject: string;
+            /** Subtopics */
+            subtopics: components["schemas"]["SubtopicStyleSuggestion"][];
+            /** Cell Targets */
+            cell_targets: components["schemas"]["CellTarget"][];
+        };
+        /**
          * SkippedRunTarget
          * @description A gap target the run did not generate for, and why.
          */
@@ -4077,6 +4500,24 @@ export interface components {
          * @enum {string}
          */
         SourceFormat: "book_json" | "book_pdf";
+        /**
+         * StartRoundRequest
+         * @description ``POST /api/rounds``: generate the next round of a setup.
+         */
+        StartRoundRequest: {
+            /** Setup Id */
+            setup_id: number;
+            /**
+             * Size
+             * @default 10
+             */
+            size: number;
+        };
+        /** StartRoundResponse */
+        StartRoundResponse: {
+            /** Round Id */
+            round_id: number;
+        };
         /** StartTrainingSessionRequest */
         StartTrainingSessionRequest: {
             /** Student Id */
@@ -4232,6 +4673,16 @@ export interface components {
             /** Score Series */
             score_series?: number[];
         };
+        /**
+         * StyleListResponse
+         * @description ``GET /api/styles``: one subject's style library.
+         */
+        StyleListResponse: {
+            /** Subject */
+            subject: string;
+            /** Styles */
+            styles: components["schemas"]["QuestionStyle"][];
+        };
         /** SubjectPresetOut */
         SubjectPresetOut: {
             /** Id */
@@ -4359,6 +4810,28 @@ export interface components {
             stable_id: string | null;
         };
         /**
+         * SubtopicStyleSuggestion
+         * @description The styles suggested for one subtopic, and why.
+         */
+        SubtopicStyleSuggestion: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Style Ids */
+            style_ids: string[];
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * SubtopicStyles
+         * @description The styles approved for one subtopic.
+         */
+        SubtopicStyles: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Style Ids */
+            style_ids: string[];
+        };
+        /**
          * SubtopicSummary
          * @description One approved subtopic: the unit the adaptive engine tracks weakness for.
          */
@@ -4392,6 +4865,14 @@ export interface components {
             weakness: number;
             /** Observations */
             observations: number;
+        };
+        /**
+         * SuggestSetupRequest
+         * @description ``POST /api/setup/suggest``.
+         */
+        SuggestSetupRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
         };
         /**
          * TaxonomyDocumentGuide
@@ -4708,6 +5189,19 @@ export interface components {
             review_count: number;
             /** Instruction */
             instruction: string;
+        };
+        /**
+         * UpdateCustomJudgeRequest
+         * @description ``PATCH /api/custom-judges/{id}``: only the fields sent are changed.
+         */
+        UpdateCustomJudgeRequest: {
+            /** Rule Text */
+            rule_text?: string | null;
+            kind?: components["schemas"]["CustomJudgeKind"] | null;
+            /** Pattern */
+            pattern?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -6775,6 +7269,299 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievedSectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_styles_api_styles_get: {
+        parameters: {
+            query?: {
+                subject?: string | null;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_api_setup_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupSuggestion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    current_setup_api_setup_get: {
+        parameters: {
+            query: {
+                curriculum_version_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentSetupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_setup_api_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveSetupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_next_round_api_rounds_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartRoundRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartRoundResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_round_api_rounds__round_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                round_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRoundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_custom_judges_api_custom_judges_get: {
+        parameters: {
+            query: {
+                curriculum_version_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomJudgeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_custom_judge_api_custom_judges_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCustomJudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomJudgeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_custom_judge_api_custom_judges__judge_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                judge_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCustomJudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomJudgeOut"];
                 };
             };
             /** @description Validation Error */
