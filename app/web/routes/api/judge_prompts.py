@@ -15,23 +15,30 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter
+from sqlalchemy import select
 
+from app.config import get_settings
 from app.domain.enums import JudgeMetricId
 from app.errors import DomainRuleError, NotFoundError
-from app.evaluation.judge_learning import disagreements_for, refresh_judge_prompt
+from app.evaluation.judge_learning import disagreements_for, held_out_for, refresh_judge_prompt
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
 from app.evaluation.prompts import rubric_version_for, system_prompt_for
-from app.evaluation.trust_scope import trusted_scopes
-from app.persistence.models import JudgePromptRow
+from app.evaluation.trust_scope import style_trust_under_current_panel, trusted_scopes
+from app.persistence.models import CurriculumVersionRow, JudgePromptRow
 from app.persistence.repositories import JudgePromptRepository
+from app.styles import get_library
 from app.subjects import SubjectProfile
-from app.web.routes.api.deps import CourseProfile, DbSession
+from app.web.routes.api.deps import CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import (
     JudgePromptListResponse,
     JudgePromptOut,
     JudgePromptRefreshResponse,
     JudgePromptRequest,
     JudgePromptSaveResponse,
+    JudgeStatsOut,
+    JudgeStatsResponse,
+    MetricTrustOut,
+    StyleTrustOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +89,87 @@ def list_judge_prompts(session: DbSession, profile: CourseProfile) -> JudgePromp
         ],
         rubric_version=effective_rubric_version(session, profile=profile),
         shipped_rubric_version=rubric_version_for(profile),
+    )
+
+
+SHOWN_JUDGES = (JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC)
+
+
+@router.get("/stats", response_model=JudgeStatsResponse)
+def judge_stats(
+    session: DbSession, profile: CourseProfile, course: CourseScope
+) -> JudgeStatsResponse:
+    """Agreement per judge and trust per style under the panel in force now.
+
+    Styles are this course's; the learning pause is the subject's, because a rewrite renames
+    the panel for every course that shares these judges.
+    """
+    settings = get_settings()
+    version_ids = (
+        set(
+            session.scalars(
+                select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course)
+            )
+        )
+        if course is not None
+        else None
+    )
+    scoped = style_trust_under_current_panel(session, profile, curriculum_version_ids=version_ids)
+    subject_wide = (
+        scoped if version_ids is None else style_trust_under_current_panel(session, profile)
+    )
+    names = {style.id: style.name for style in get_library(profile.storage_key)}
+
+    judges = []
+    for metric in SHOWN_JUDGES:
+        windows = [
+            item.report.metrics[metric.value]
+            for item in scoped
+            if metric.value in item.report.metrics
+        ]
+        observations = sum(window.observations for window in windows)
+        agreements = sum(window.agreements for window in windows)
+        judges.append(
+            JudgeStatsOut(
+                metric=metric,
+                observations=observations,
+                agreements=agreements,
+                agreement_rate=agreements / observations if observations else None,
+                learnable_disagreements=len(disagreements_for(session, metric, profile=profile)),
+                disagreements_needed=settings.judge_repair_min_disagreements,
+            )
+        )
+    trusted_count = sum(item.report.trusted for item in subject_wide)
+    return JudgeStatsResponse(
+        rubric_version=effective_rubric_version(session, profile=profile),
+        judges=judges,
+        styles=[
+            StyleTrustOut(
+                curriculum_version_id=item.curriculum_version_id,
+                style_id=item.style_id,
+                style_name=names.get(item.style_id),
+                trusted=item.report.trusted,
+                metrics={
+                    name: MetricTrustOut(
+                        observations=value.observations,
+                        agreements=value.agreements,
+                        agreement_rate=value.agreement_rate,
+                        trusted=value.trusted,
+                        audit_revoked=value.audit_revoked,
+                    )
+                    for name, value in item.report.metrics.items()
+                },
+            )
+            for item in scoped
+        ],
+        held_out_pairs=held_out_for(session, profile=profile),
+        held_out_needed=settings.judge_repair_min_scoring_pairs,
+        learning_enabled=settings.judge_learning_enabled,
+        learning_paused=trusted_count > 0,
+        trusted_style_count=trusted_count,
+        min_observations=settings.judge_trust_min_observations,
+        min_agreement=settings.judge_trust_min_agreement,
+        min_acceptance=settings.judge_trust_min_acceptance,
     )
 
 
