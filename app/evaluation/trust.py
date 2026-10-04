@@ -26,6 +26,9 @@ from app.persistence.models import (
     SubtopicRow,
 )
 
+#: The professor's own accept/reject, tracked like a judge so trust needs it too.
+ACCEPTANCE = "acceptance"
+
 
 @dataclass(frozen=True)
 class MetricTrust:
@@ -190,7 +193,7 @@ def judge_trust(
             snapshot["rule_versions"],
         ]
     )
-    names = ["difficulty", "subtopic", *(f"custom:{rule.id}" for rule in rules)]
+    names = ["difficulty", "subtopic", ACCEPTANCE, *(f"custom:{rule.id}" for rule in rules)]
     observations: dict[str, list[tuple[bool, int]]] = {name: [] for name in names}
     seen: dict[str, set[int]] = {name: set() for name in names}
     failed_audit: dict[str, int] = dict.fromkeys(names, -1)
@@ -225,6 +228,9 @@ def judge_trust(
             if answer is not None and question.id not in seen[name]:
                 observations[name].append((answer, event))
                 seen[name].add(question.id)
+        if question.id not in seen[ACCEPTANCE]:
+            observations[ACCEPTANCE].append((review.decision == ReviewDecision.APPROVE, event))
+            seen[ACCEPTANCE].add(question.id)
         results = {item.get("judge_id"): item for item in old.get("custom_results", [])}
         for rule in rules:
             result = results.get(rule.id)
@@ -261,6 +267,11 @@ def judge_trust(
         recent = list(reversed(values))[:window]
         count, agrees = len(recent), sum(value[0] for value in recent)
         rate = agrees / count if count else 0.0
+        minimum = (
+            settings.judge_trust_min_acceptance
+            if name == ACCEPTANCE
+            else settings.judge_trust_min_agreement
+        )
         revoked = (
             failed_audit[name] >= 0
             and sum(event > failed_audit[name] for _, event in values)
@@ -271,7 +282,7 @@ def judge_trust(
             agrees,
             rate,
             count >= settings.judge_trust_min_observations
-            and rate >= settings.judge_trust_min_agreement
+            and rate >= minimum
             and not revoked,
             revoked,
         )

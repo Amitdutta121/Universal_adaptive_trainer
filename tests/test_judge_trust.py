@@ -105,7 +105,12 @@ def test_null_corrections_are_not_implicit_confirmations(session, taxonomy):
     seed(session, taxonomy, explicit=False)
     report = judge_trust(session, question(session, taxonomy), [])
     assert not report.trusted
-    assert all(metric.observations == 0 for metric in report.metrics.values())
+    assert all(
+        metric.observations == 0
+        for name, metric in report.metrics.items()
+        if name != "acceptance"
+    )
+    assert report.metrics["acceptance"].observations == 20
 
 
 @pytest.mark.parametrize("change", ["style", "taxonomy", "model", "rubric"])
@@ -479,3 +484,37 @@ def test_sqlite_0005_upgrade_preserves_rows_and_adds_only_trust_schema(engine):
             "Old",
             None,
         )
+
+
+def seed_decisions(session, taxonomy, decisions):
+    for decision in decisions:
+        row = question(session, taxonomy)
+        route_generated_question(session, row, [])
+        review(session, row, decision=decision)
+
+
+@pytest.mark.parametrize("rejects,trusted", [(2, True), (3, False)])
+def test_rejects_block_trust_even_when_judges_agree(session, taxonomy, rejects, trusted):
+    seed_decisions(
+        session,
+        taxonomy,
+        [ReviewDecision.REJECT] * rejects + [ReviewDecision.APPROVE] * (20 - rejects),
+    )
+    report = judge_trust(session, question(session, taxonomy), [])
+    assert report.metrics["difficulty"].agreement_rate == 1.0
+    assert report.metrics["acceptance"].observations == 20
+    assert report.metrics["acceptance"].agreements == 20 - rejects
+    assert report.trusted is trusted
+
+
+def test_an_edit_is_not_an_acceptance(session, taxonomy):
+    seed_decisions(session, taxonomy, [ReviewDecision.EDIT] * 3 + [ReviewDecision.APPROVE] * 17)
+    report = judge_trust(session, question(session, taxonomy), [])
+    assert report.metrics["acceptance"].agreements == 17
+    assert not report.trusted
+
+
+def test_acceptance_window_needs_the_minimum_observations(session, taxonomy):
+    seed_decisions(session, taxonomy, [ReviewDecision.APPROVE] * 19)
+    report = judge_trust(session, question(session, taxonomy), [])
+    assert not report.metrics["acceptance"].trusted
