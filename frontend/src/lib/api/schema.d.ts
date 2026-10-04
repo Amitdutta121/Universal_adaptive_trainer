@@ -1689,10 +1689,34 @@ export interface paths {
          *     outstanding: asking again returns the same one rather than drawing another.
          *     A GET is still the honest verb, because what a client wants here is the
          *     session's current question.
+         *
+         *     When the bank has nothing new for this student, a question is generated live
+         *     (:mod:`app.generation.live`) and this answers ``question_generating`` until it is ready;
+         *     the client keeps polling.
          */
         get: operations["next_question_api_training_sessions__training_session_id__next_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}/live-question": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Live Question
+         * @description ``/next``, but generate even right after a failed attempt: the student asked to retry.
+         */
+        post: operations["request_live_question_api_training_sessions__training_session_id__live_question_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4138,6 +4162,11 @@ export interface components {
             target_subtopic_id?: number | null;
             /** Trust Provenance */
             trust_provenance?: string | null;
+            /**
+             * Live Generated
+             * @default false
+             */
+            live_generated: boolean;
         };
         /**
          * QuestionTaxonomy
@@ -4544,6 +4573,11 @@ export interface components {
             resumed: boolean;
             /** Fallback Used */
             fallback_used: boolean;
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
             requested_difficulty: components["schemas"]["Difficulty"];
             served_difficulty: components["schemas"]["Difficulty"];
             /** Subtopic Id */
@@ -8181,6 +8215,37 @@ export interface operations {
         };
     };
     next_question_api_training_sessions__training_session_id__next_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServedQuestionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_live_question_api_training_sessions__training_session_id__live_question_post: {
         parameters: {
             query?: never;
             header?: never;

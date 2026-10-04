@@ -191,6 +191,9 @@ export function JudgeRail({
           {detail.question.trust_provenance === "audit"
             ? "Spot check: one in ten questions from trusted judges comes back for your review."
             : "Confirm or correct the judges, then give your verdict."}
+          {detail.question.live_generated
+            ? " Generated live for a student who had nothing left to answer, so they may already have seen it. Rejecting it stops it from being served again."
+            : null}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

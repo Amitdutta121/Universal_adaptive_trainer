@@ -23,6 +23,7 @@ import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adaptive.inventory import StudentBank
@@ -38,7 +39,12 @@ from app.domain.enums import Difficulty, QuestionStatus
 from app.domain.mastery import TOPIC_ADVANCE_CEILING, difficulty_for_mastery
 from app.domain.questions import LOWEST_PRIORITY, Question
 from app.errors import CurriculumCompletedError, DomainRuleError, NoQuestionAvailableError
-from app.persistence.models import QuestionRow, StudentAttemptRow, TrainingSessionRow
+from app.persistence.models import (
+    LiveQuestionJobRow,
+    QuestionRow,
+    StudentAttemptRow,
+    TrainingSessionRow,
+)
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionRepository,
@@ -49,6 +55,35 @@ from app.persistence.repositories import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: A question generated live for one student may be served to that student while it
+#: waits for the professor. A reject (or a failed validation) withdraws it.
+LIVE_SERVABLE_STATUSES = frozenset(
+    {QuestionStatus.APPROVED, QuestionStatus.VALIDATION_PASSED, QuestionStatus.GENERATED}
+)
+
+
+def is_servable(question: QuestionRow) -> bool:
+    """Approved, or generated live and not yet withdrawn by the professor."""
+    if question.status == QuestionStatus.APPROVED:
+        return True
+    return bool(question.live_generated) and question.status in LIVE_SERVABLE_STATUSES
+
+
+@dataclass(frozen=True)
+class DrawPlan:
+    """What :meth:`AdaptiveTrainingEngine.plan_draw` would serve, before anything is written."""
+
+    question: QuestionRow
+    ordinal: int
+    subtopic_id: int
+    requested: Difficulty
+    served: Difficulty
+    mastery: float
+    fallback_used: bool
+    #: The best candidate is one this student has already answered: the bank has nothing
+    #: new for them in the cell the draw settled on.
+    repeat: bool
 
 
 @dataclass(frozen=True)
@@ -64,6 +99,8 @@ class ServedQuestion:
     #: Set when this is a question the session was already waiting on rather than
     #: a fresh draw.
     resumed: bool = False
+    #: Generated on demand for this student rather than drawn from the bank.
+    live: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,6 +142,14 @@ class AdaptiveTrainingEngine:
             DomainRuleError: if the session has ended, or lost its question set.
             NoQuestionAvailableError: if no subtopic in the set can be served.
         """
+        run = self.open_run(training_session_id)
+        resumed = self.resume(run)
+        if resumed is not None:
+            return resumed
+        return self.serve_plan(run, self.plan_draw(run))
+
+    def open_run(self, training_session_id: int) -> TrainingSessionRow:
+        """The session, refused if it has ended or lost its question set."""
         run = self._runs.get(training_session_id)
         if run.ended_at is not None:
             raise DomainRuleError(
@@ -119,22 +164,28 @@ class AdaptiveTrainingEngine:
                     "Start a new session against a current set."
                 ),
             )
+        return run
 
+    def resume(self, run: TrainingSessionRow) -> ServedQuestion | None:
+        """The question this session is already waiting on, if any."""
         open_attempt = self._attempts.open_attempt(run.id)
-        if open_attempt is not None:
-            question = self._questions.get(open_attempt.question_id)
-            if question.status != QuestionStatus.APPROVED:
-                raise NoQuestionAvailableError("The outstanding question is no longer approved.")
-            return ServedQuestion(
-                attempt=open_attempt,
-                question=question,
-                resumed=True,
-            )
+        if open_attempt is None:
+            return None
+        question = self._questions.get(open_attempt.question_id)
+        if not is_servable(question):
+            raise NoQuestionAvailableError("The outstanding question is no longer approved.")
+        live = self._session.scalar(
+            select(LiveQuestionJobRow.id).where(LiveQuestionJobRow.attempt_id == open_attempt.id)
+        )
+        return ServedQuestion(
+            attempt=open_attempt, question=question, resumed=True, live=live is not None
+        )
 
-        return self._draw(run)
+    def plan_draw(self, run: TrainingSessionRow) -> DrawPlan:
+        """Roulette, difficulty, candidate -- with the ADR-041 fallbacks. Writes nothing.
 
-    def _draw(self, run: TrainingSessionRow) -> ServedQuestion:
-        """Roulette, difficulty, candidate -- with the ADR-041 fallbacks."""
+        Except that a student past every topic has their session ended, as when serving.
+        """
         set_version_id = run.set_version_id
         assert set_version_id is not None  # checked by the caller
 
@@ -211,8 +262,7 @@ class AdaptiveTrainingEngine:
                 )
                 fallback_used = True
 
-            return self._serve(
-                run,
+            return DrawPlan(
                 question=question,
                 ordinal=ordinal,
                 subtopic_id=subtopic_id,
@@ -220,6 +270,7 @@ class AdaptiveTrainingEngine:
                 served=served_difficulty,
                 mastery=mastery,
                 fallback_used=fallback_used,
+                repeat=question.id in answered,
             )
 
         raise NoQuestionAvailableError(
@@ -301,17 +352,89 @@ class AdaptiveTrainingEngine:
             return self._questions.get(ranked[0].question_id), difficulty
         return None
 
+    def serve_plan(self, run: TrainingSessionRow, plan: DrawPlan) -> ServedQuestion:
+        return self._serve(
+            run,
+            question=plan.question,
+            ordinal=plan.ordinal,
+            subtopic_id=plan.subtopic_id,
+            requested=plan.requested,
+            served=plan.served,
+            mastery=plan.mastery,
+            fallback_used=plan.fallback_used,
+        )
+
+    def serve_live(
+        self,
+        run: TrainingSessionRow,
+        question: QuestionRow,
+        *,
+        subtopic_id: int | None,
+        requested: Difficulty,
+        mastery: float,
+    ) -> ServedQuestion:
+        """Serve a question generated on demand for this session.
+
+        Raises:
+            NoQuestionAvailableError: the professor withdrew it before it was served.
+        """
+        if not is_servable(question):
+            raise NoQuestionAvailableError("The question generated for you was withdrawn.")
+        served = Difficulty(question.difficulty)
+        return self._serve(
+            run,
+            question=question,
+            ordinal=self._attempts.next_ordinal(run.id),
+            subtopic_id=subtopic_id,
+            requested=requested,
+            served=served,
+            mastery=mastery,
+            fallback_used=served is not requested,
+            live=True,
+        )
+
+    def live_target(
+        self, run: TrainingSessionRow, candidates: set[int]
+    ) -> tuple[int, Difficulty, float] | None:
+        """The (subtopic, difficulty, mastery) to generate for when the bank has nothing.
+
+        The same choice a draw makes -- the student's current topic, a weakness-weighted
+        subtopic in it, the difficulty its mastery calls for -- over the subtopics the
+        caller can generate for rather than the ones the bank can serve. ``None`` when no
+        topic short of the advance ceiling has one.
+        """
+        set_version_id = run.set_version_id
+        assert set_version_id is not None
+        curriculum_version_id = self._sets.get(set_version_id).curriculum_version_id
+        if curriculum_version_id is None:
+            return None
+        for topic_id, subtopic_ids in self._curriculum.topics_with_subtopics_in_order(
+            curriculum_version_id
+        ):
+            mastery = self._state.mastery_for(run.student_id, topic_id)
+            if mastery >= TOPIC_ADVANCE_CEILING:
+                continue
+            pool = candidates.intersection(subtopic_ids)
+            if not pool:
+                continue
+            ordinal = self._attempts.next_ordinal(run.id)
+            rng = random.Random(f"{run.rng_seed}:{ordinal}")
+            subtopic_id = choose_subtopic(self._state.weaknesses_for(run.student_id, pool), rng)
+            return subtopic_id, difficulty_for_mastery(mastery), mastery
+        return None
+
     def _serve(
         self,
         run: TrainingSessionRow,
         *,
         question: QuestionRow,
         ordinal: int,
-        subtopic_id: int,
+        subtopic_id: int | None,
         requested: Difficulty,
         served: Difficulty,
         mastery: float,
         fallback_used: bool,
+        live: bool = False,
     ) -> ServedQuestion:
         """Record the serve: drop the question's priority, open an attempt."""
         # The fixed rule: a served question sinks to the back of the bank so
@@ -340,7 +463,11 @@ class AdaptiveTrainingEngine:
             attempt.ordinal,
         )
         return ServedQuestion(
-            attempt=attempt, question=question, fallback_used=fallback_used, resumed=False
+            attempt=attempt,
+            question=question,
+            fallback_used=fallback_used,
+            resumed=False,
+            live=live,
         )
 
     # ---------------------------------------------------------------- scoring
@@ -423,4 +550,10 @@ class AdaptiveTrainingEngine:
             )
 
 
-__all__ = ["AdaptiveTrainingEngine", "AnsweredAttempt", "ServedQuestion"]
+__all__ = [
+    "AdaptiveTrainingEngine",
+    "AnsweredAttempt",
+    "DrawPlan",
+    "ServedQuestion",
+    "is_servable",
+]

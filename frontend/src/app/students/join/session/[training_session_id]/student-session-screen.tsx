@@ -9,6 +9,8 @@ import {
   CircleDashed,
   Flame,
   Lightbulb,
+  Loader2,
+  Sparkles,
   XCircle,
 } from "lucide-react";
 import type { Route } from "next";
@@ -35,6 +37,7 @@ import {
   useAttemptReview,
   useEndTrainingSession,
   useNextQuestion,
+  useRequestLiveQuestion,
   useTrainingSession,
   useTrainingSessionProgress,
 } from "@/lib/api/queries";
@@ -612,6 +615,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   });
   const endTrainingSession = useEndTrainingSession();
   const answerAttempt = useAnswerAttempt();
+  const requestLiveQuestion = useRequestLiveQuestion();
 
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<AnsweredOut | null>(null);
@@ -640,6 +644,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   const unavailable =
     currentQuestion.error instanceof ApiError &&
     (currentQuestion.error.code === "no_question_available" ||
+      currentQuestion.error.code === "question_generating" ||
       currentQuestion.error.code === "curriculum_completed")
       ? currentQuestion.error
       : null;
@@ -838,7 +843,16 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             ) : null}
             {answerAttempt.isError ? <QueryError error={answerAttempt.error} /> : null}
 
-            {unavailable ? (
+            {unavailable?.code === "question_generating" ? (
+              <Alert>
+                <Loader2 className="animate-spin" />
+                <AlertTitle>{unavailable.message}</AlertTitle>
+                <AlertDescription>
+                  {unavailable.detail ? <p>{unavailable.detail}</p> : null}
+                  <p>It will appear here as soon as it is ready.</p>
+                </AlertDescription>
+              </Alert>
+            ) : unavailable ? (
               <Alert>
                 <AlertCircle />
                 <AlertTitle>
@@ -852,14 +866,24 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                   {unavailable.code === "no_question_available" ? (
                     <div className="space-y-2">
                       <p>This page checks for approved questions automatically.</p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={currentQuestion.isFetching}
-                        onClick={() => void currentQuestion.refetch()}
-                      >
-                        Check again
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={currentQuestion.isFetching}
+                          onClick={() => void currentQuestion.refetch()}
+                        >
+                          Check again
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={requestLiveQuestion.isPending}
+                          onClick={() => requestLiveQuestion.mutate(trainingSessionId)}
+                        >
+                          <Sparkles />
+                          Make me a new question
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
                 </AlertDescription>
@@ -894,6 +918,15 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                         className="rounded-full bg-amber-50 px-3 py-1 text-amber-900"
                       >
                         Resumed
+                      </Badge>
+                    ) : null}
+                    {currentQuestion.data.live ? (
+                      <Badge
+                        variant="outline"
+                        className="rounded-full bg-sky-50 px-3 py-1 text-sky-900"
+                      >
+                        <Sparkles className="size-3.5" />
+                        Made for you
                       </Badge>
                     ) : null}
                   </div>

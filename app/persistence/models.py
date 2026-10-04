@@ -565,6 +565,10 @@ class QuestionRow(TimestampMixin, Base):
     target_subtopic_id: Mapped[int | None] = mapped_column(
         ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
     )
+    #: Generated on demand for one student who had nothing left to answer. Such a question
+    #: may be served to that student before the professor reviews it; to anyone else only
+    #: once approved.
+    live_generated: Mapped[bool] = mapped_column(Boolean, default=False)
 
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
@@ -1126,6 +1130,52 @@ class GenerationRoundRow(TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     setup: Mapped[QuestionSetupRow] = relationship(back_populates="rounds")
+
+
+class LiveQuestionJobRow(TimestampMixin, Base):
+    """One question generated on demand for a student with nothing left to answer.
+
+    ``app.generation.live`` creates the row ``QUEUED`` for the cell the adaptive engine
+    wanted (``subtopic_id`` at ``requested_difficulty``) and runs it in the background with
+    the setup's aligned generator. ``difficulty`` is what was actually generated: a hard
+    cell the lesson cannot support is generated at medium instead. ``DONE`` carries the
+    stored ``question_id``; ``attempt_id`` is set once that question is served, so a job
+    is served at most once. ``FAILED`` carries ``error`` in the student's terms.
+    """
+
+    __tablename__ = "live_question_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    training_session_id: Mapped[int] = mapped_column(
+        ForeignKey("training_sessions.id", ondelete="CASCADE"), index=True
+    )
+    setup_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_setups.id", ondelete="SET NULL"), default=None
+    )
+    subtopic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
+    )
+    requested_difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+    style_id: Mapped[str | None] = mapped_column(String(100), default=None)
+    #: The topic mastery the engine read when it asked for this cell.
+    mastery: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[RoundStatus] = mapped_column(
+        StrEnumType(RoundStatus, 16), default=RoundStatus.QUEUED
+    )
+    question_id: Mapped[int | None] = mapped_column(
+        ForeignKey("questions.id", ondelete="SET NULL"), default=None
+    )
+    attempt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("student_attempts.id", ondelete="SET NULL"), default=None
+    )
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class CustomJudgeRow(TimestampMixin, Base):

@@ -25,6 +25,7 @@ from app.domain.enums import (
     QuadrantCell,
     QuestionStatus,
     QuestionType,
+    RoundStatus,
 )
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.errors import NotFoundError
@@ -38,6 +39,7 @@ from app.persistence.models import (
     GenerationRoundRow,
     JudgeBatchRunRow,
     JudgePromptRow,
+    LiveQuestionJobRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
@@ -2157,6 +2159,60 @@ class GenerationRoundRepository:
             setattr(row, name, value)
         self._session.flush()
         return row
+
+
+class LiveQuestionJobRepository:
+    """On-demand questions for one training session, newest last."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: LiveQuestionJobRow) -> LiveQuestionJobRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, job_id: int) -> LiveQuestionJobRow:
+        row = self._session.get(LiveQuestionJobRow, job_id)
+        if row is None:
+            raise NotFoundError(f"Live question job {job_id} does not exist.")
+        return row
+
+    def latest(self, training_session_id: int) -> LiveQuestionJobRow | None:
+        stmt = (
+            select(LiveQuestionJobRow)
+            .where(LiveQuestionJobRow.training_session_id == training_session_id)
+            .order_by(LiveQuestionJobRow.id.desc())
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def active(self, training_session_id: int) -> LiveQuestionJobRow | None:
+        stmt = (
+            select(LiveQuestionJobRow)
+            .where(
+                LiveQuestionJobRow.training_session_id == training_session_id,
+                LiveQuestionJobRow.status.in_((RoundStatus.QUEUED, RoundStatus.RUNNING)),
+            )
+            .order_by(LiveQuestionJobRow.id)
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def ready(self, training_session_id: int) -> LiveQuestionJobRow | None:
+        """A finished job whose question has not been served yet."""
+        stmt = (
+            select(LiveQuestionJobRow)
+            .where(
+                LiveQuestionJobRow.training_session_id == training_session_id,
+                LiveQuestionJobRow.status == RoundStatus.DONE,
+                LiveQuestionJobRow.question_id.is_not(None),
+                LiveQuestionJobRow.attempt_id.is_(None),
+            )
+            .order_by(LiveQuestionJobRow.id)
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
 
 
 class CustomJudgeRepository:
