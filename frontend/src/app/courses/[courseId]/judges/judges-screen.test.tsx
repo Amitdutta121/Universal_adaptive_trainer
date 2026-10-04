@@ -11,7 +11,7 @@ vi.mock("@/app/courses/[courseId]/questions/setup/custom-rules", () => ({
 const prompt = (metric: "difficulty" | "subtopic") => ({
   metric,
   label: metric,
-  system_prompt: "p",
+  system_prompt: `${metric} prompt text`,
   shipped_prompt: "p",
   edited: false,
   learned: false,
@@ -96,9 +96,21 @@ describe("JudgesScreen stats", () => {
   it("shows professor agreement and rewrite progress per judge", () => {
     paused = false;
     render(<JudgesScreen />);
-    expect(screen.getByText("18/20 agreed (90%)")).toBeInTheDocument();
+    expect(screen.getByText("90%")).toBeInTheDocument();
+    expect(screen.getByText("18/20 agreed")).toBeInTheDocument();
     expect(screen.getByText("No reviewed questions under this prompt yet")).toBeInTheDocument();
     expect(screen.getAllByText("Next rewrite: 3 of 5 disagreements")[0]).toBeInTheDocument();
+  });
+
+  it("keeps the prompt behind More", async () => {
+    paused = false;
+    render(<JudgesScreen />);
+    expect(screen.queryByText("difficulty prompt text")).not.toBeInTheDocument();
+    expect(screen.queryByText(/rubric version/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "More" })[0]);
+    expect(screen.getByText("difficulty prompt text")).toBeInTheDocument();
+    expect(screen.queryByText("subtopic prompt text")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Less" })).toBeInTheDocument();
   });
 
   it("lists trust per style with what is still missing", () => {

@@ -5,17 +5,14 @@
  * `GET /api/judge-prompts`. Issues and generatability still come back from that
  * list; this screen does not show them.
  *
- * A built-in judge is changed by rewriting its system prompt (ADR-038). Saving
- * re-names the panel, so the rubric version the panel currently answers under
- * is shown against the version it shipped with. Custom rules for the approved
- * taxonomy sit under the two cards.
- *
- * `GET /api/judge-prompts/stats` adds how often the professor agreed with each
- * judge under the current panel, how close the next automatic rewrite is, and
- * which styles have earned trust (skip review) and what each still lacks.
+ * Each card leads with how often the professor agreed with that judge
+ * (`GET /api/judge-prompts/stats`); the prompt in force and its learned rules
+ * open under "More". A built-in judge is changed by rewriting its system prompt
+ * (ADR-038). Below the cards: which styles have earned trust (skip review) and
+ * what each still lacks, then the taxonomy's custom rules.
  */
 
-import { Gavel, Scale, Sparkles, TrendingUp, Undo2 } from "lucide-react";
+import { ChevronDown, Gavel, Scale, TrendingUp, Undo2 } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { CustomRules } from "@/app/courses/[courseId]/questions/setup/custom-rules";
@@ -99,35 +96,6 @@ function occurrenceKeys(values: readonly string[]): string[] {
   });
 }
 
-function SummaryCard({
-  title,
-  value,
-  hint,
-  icon: Icon,
-}: {
-  title: string;
-  value: number;
-  hint: string;
-  icon: typeof Sparkles;
-}) {
-  return (
-    <Card className="review-panel">
-      <CardHeader className="gap-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="review-eyebrow">{title}</div>
-            <CardTitle className="mt-2 text-3xl">{value}</CardTitle>
-          </div>
-          <div className="rounded-xl border border-border bg-muted p-2 text-muted-foreground">
-            <Icon className="size-4" />
-          </div>
-        </div>
-        <CardDescription>{hint}</CardDescription>
-      </CardHeader>
-    </Card>
-  );
-}
-
 function JudgeStatusBadges({ prompt }: { prompt: JudgePrompt }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -147,11 +115,14 @@ function percent(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-function agreementText(stat: JudgeStat | undefined): string {
+function agreement(stat: JudgeStat | undefined): { value: string; caption: string } {
   if (!stat || stat.observations === 0 || stat.agreement_rate == null) {
-    return "No reviewed questions under this prompt yet";
+    return { value: "–", caption: "No reviewed questions under this prompt yet" };
   }
-  return `${stat.agreements}/${stat.observations} agreed (${percent(stat.agreement_rate)})`;
+  return {
+    value: percent(stat.agreement_rate),
+    caption: `${stat.agreements}/${stat.observations} agreed`,
+  };
 }
 
 function rewriteText(stat: JudgeStat | undefined, stats: JudgeStats | undefined): string | null {
@@ -246,10 +217,13 @@ function JudgeCard({
   onRevert: (prompt: JudgePrompt) => void;
   isReverting: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
   const ruleKeys = occurrenceKeys(prompt.rules);
-  const agreement = parseHeldOutAgreement(prompt.note);
+  const heldOut = parseHeldOutAgreement(prompt.note);
   const label = judgeLabel(prompt);
   const rewrite = rewriteText(stat, stats);
+  const agreed = agreement(stat);
 
   return (
     <Card className="review-panel h-full">
@@ -261,15 +235,6 @@ function JudgeCard({
               <Gavel className="size-4 text-muted-foreground" />
               {label}
             </CardTitle>
-            <JudgeStatusBadges prompt={prompt} />
-            {agreement ? (
-              <div className="flex items-center gap-1.5 font-semibold text-emerald-700 text-sm dark:text-emerald-300">
-                <TrendingUp className="size-4" />
-                Held-out agreement {agreement.before}%
-                <span className="text-muted-foreground">&rarr;</span>
-                {agreement.after}%
-              </div>
-            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -294,38 +259,78 @@ function JudgeCard({
             ) : null}
           </div>
         </div>
-        <CardDescription className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-          <span>{agreementText(stat)}</span>
-          {rewrite ? <span>{rewrite}</span> : null}
-          {prompt.revision > 0 ? <span>revision {prompt.revision}</span> : null}
-          {prompt.learned ? <span>{prompt.evidence_count} disagreements learned from</span> : null}
-          <span>{formatUpdatedAt(prompt.updated_at)}</span>
-        </CardDescription>
-        {prompt.note ? (
-          <p className="text-muted-foreground text-xs italic">“{prompt.note}”</p>
-        ) : null}
+        <div>
+          <div className="review-eyebrow">professor agreement</div>
+          <div className="mt-1 font-semibold text-5xl tabular-nums tracking-tight">
+            {agreed.value}
+          </div>
+          <p className="mt-1 text-muted-foreground text-sm">{agreed.caption}</p>
+        </div>
+        {rewrite ? <CardDescription className="text-xs">{rewrite}</CardDescription> : null}
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded-xl border border-border bg-muted/55 p-4">
-          <p className="review-eyebrow mb-2">prompt in force</p>
-          <p className="whitespace-pre-wrap text-foreground/90 text-sm leading-6">
-            {prompt.system_prompt}
-          </p>
-        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-2"
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          <ChevronDown
+            className={
+              expanded
+                ? "size-3.5 rotate-180 transition-transform"
+                : "size-3.5 transition-transform"
+            }
+          />
+          {expanded ? "Less" : "More"}
+        </Button>
 
-        {prompt.rules.length > 0 ? (
-          <div className="space-y-2">
-            <p className="review-eyebrow">learned rules</p>
-            <ul className="space-y-2">
-              {prompt.rules.map((rule, ruleIndex) => (
-                <li
-                  key={`${prompt.metric}-${ruleKeys[ruleIndex]}`}
-                  className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
-                >
-                  {rule}
-                </li>
-              ))}
-            </ul>
+        {expanded ? (
+          <div id={detailsId} className="space-y-4">
+            <JudgeStatusBadges prompt={prompt} />
+            {heldOut ? (
+              <div className="flex items-center gap-1.5 font-semibold text-emerald-700 text-sm dark:text-emerald-300">
+                <TrendingUp className="size-4" />
+                Held-out agreement {heldOut.before}%
+                <span className="text-muted-foreground">&rarr;</span>
+                {heldOut.after}%
+              </div>
+            ) : null}
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground text-xs">
+              {prompt.revision > 0 ? <span>revision {prompt.revision}</span> : null}
+              {prompt.learned ? (
+                <span>{prompt.evidence_count} disagreements learned from</span>
+              ) : null}
+              <span>{formatUpdatedAt(prompt.updated_at)}</span>
+            </p>
+            {prompt.note ? (
+              <p className="text-muted-foreground text-xs italic">“{prompt.note}”</p>
+            ) : null}
+
+            <div className="rounded-xl border border-border bg-muted/55 p-4">
+              <p className="review-eyebrow mb-2">prompt in force</p>
+              <p className="whitespace-pre-wrap text-foreground/90 text-sm leading-6">
+                {prompt.system_prompt}
+              </p>
+            </div>
+
+            {prompt.rules.length > 0 ? (
+              <div className="space-y-2">
+                <p className="review-eyebrow">learned rules</p>
+                <ul className="space-y-2">
+                  {prompt.rules.map((rule, ruleIndex) => (
+                    <li
+                      key={`${prompt.metric}-${ruleKeys[ruleIndex]}`}
+                      className="rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      {rule}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </CardContent>
@@ -368,7 +373,7 @@ function JudgeEditDialog({
       });
       toast.success(`Saved the ${judgeLabel(prompt)} judge`, {
         description: result.rubric_version_changed
-          ? `The panel now answers under ${result.rubric_version}.`
+          ? "New questions are judged with this prompt from now on."
           : "The submitted text matched what was already in force.",
       });
       onOpenChange(false);
@@ -386,8 +391,8 @@ function JudgeEditDialog({
           <DialogHeader>
             <DialogTitle>Edit the {judgeLabel(prompt)} judge</DialogTitle>
             <DialogDescription>
-              This replaces the whole system prompt and re-names the panel. Existing evaluations are
-              left alone — re-judging the bank under the new prompt is a separate step.
+              This replaces the whole system prompt. Existing evaluations are left alone —
+              re-judging the bank under the new prompt is a separate step.
             </DialogDescription>
           </DialogHeader>
 
@@ -475,10 +480,6 @@ export function JudgesScreen() {
     const prompt = shown.find((item) => item.metric === metric);
     return prompt ? [prompt] : [];
   });
-  const editedCount = prompts.filter((prompt) => prompt.edited).length;
-  const learnedCount = prompts.filter((prompt) => prompt.learned).length;
-  const diverged = data != null && data.rubric_version !== data.shipped_rubric_version;
-
   function openEditor(prompt: JudgePrompt) {
     setEditing(prompt);
     setEditOpen(true);
@@ -486,9 +487,9 @@ export function JudgesScreen() {
 
   async function handleRevert(prompt: JudgePrompt) {
     try {
-      const result = await revertPrompt.mutateAsync(prompt.metric);
+      await revertPrompt.mutateAsync(prompt.metric);
       toast.success(`Reverted the ${judgeLabel(prompt)} judge`, {
-        description: `Running the shipped prompt again — panel ${result.rubric_version}.`,
+        description: "Running the shipped prompt again.",
       });
     } catch (error) {
       toast.error(`Could not revert the ${judgeLabel(prompt)} judge`, {
@@ -510,40 +511,6 @@ export function JudgesScreen() {
         />
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <SummaryCard
-              title="Edited"
-              value={editedCount}
-              hint="Judges running a prompt other than the one they shipped with."
-              icon={Scale}
-            />
-            <SummaryCard
-              title="Learned"
-              value={learnedCount}
-              hint="Judges whose current prompt was rewritten from disagreements, not typed."
-              icon={Sparkles}
-            />
-          </div>
-
-          <Card className="review-panel">
-            <CardHeader className="gap-2">
-              <div className="review-eyebrow">Rubric version</div>
-              <CardTitle className="text-lg">
-                {data?.rubric_version}
-                {diverged ? (
-                  <Badge variant="outline" className="ml-2 align-middle">
-                    shipped: {data?.shipped_rubric_version}
-                  </Badge>
-                ) : null}
-              </CardTitle>
-              <CardDescription>
-                Every evaluation written from now on carries this name. Editing a judge below
-                changes it, which is what lets calibration report a repaired judge separately from
-                the one it replaced.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
           <div className="grid gap-4 xl:grid-cols-2">
             {prompts.map((prompt) => (
               <JudgeCard
