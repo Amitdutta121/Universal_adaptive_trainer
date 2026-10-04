@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     # performed by the router. A rolling window makes recent errors visible.
     judge_trust_min_observations: int = Field(default=20, ge=20)
     judge_trust_min_agreement: float = Field(default=0.9, ge=0.9, le=1.0)
+    #: Share of the window's questions the professor approved unedited. Judges can agree on
+    #: difficulty and topic while the questions are still not worth keeping.
+    judge_trust_min_acceptance: float = Field(default=0.9, ge=0.9, le=1.0)
     judge_trust_window: int = Field(default=20, ge=20)
 
     #: Which of the four metric judges run on newly generated questions
