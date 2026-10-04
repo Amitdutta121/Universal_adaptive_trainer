@@ -935,6 +935,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/judge-prompts/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Judge Stats
+         * @description Agreement per judge and trust per style under the panel in force now.
+         *
+         *     Styles are this course's; the learning pause is the subject's, because a rewrite renames
+         *     the panel for every course that shares these judges.
+         */
+        get: operations["judge_stats_api_judge_prompts_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/judge-prompts/{metric}": {
         parameters: {
             query?: never;
@@ -2267,6 +2290,8 @@ export interface components {
         /**
          * CellTarget
          * @description How many approved questions one subtopic x difficulty cell should reach.
+         *
+         *     Hard may be 0 when the lesson teaches one idea. Easy and medium stay at least one.
          */
         CellTarget: {
             /** Subtopic Id */
@@ -3342,10 +3367,13 @@ export interface components {
             produced: number;
             /** Dropped */
             dropped: number;
-            /** Skipped */
+            /**
+             * Skipped
+             * @default 0
+             */
             skipped: number;
             /** Skip Reason */
-            skip_reason: string | null;
+            skip_reason?: string | null;
             /** Error */
             error: string | null;
             /**
@@ -3565,6 +3593,48 @@ export interface components {
             rubric_version_changed: boolean;
         };
         /**
+         * JudgeStatsOut
+         * @description Step 13: how often the professor agreed with one judge, pooled over styles' windows.
+         */
+        JudgeStatsOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** Observations */
+            observations: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement Rate */
+            agreement_rate: number | null;
+            /** Learnable Disagreements */
+            learnable_disagreements: number;
+            /** Disagreements Needed */
+            disagreements_needed: number;
+        };
+        /** JudgeStatsResponse */
+        JudgeStatsResponse: {
+            /** Rubric Version */
+            rubric_version: string;
+            /** Judges */
+            judges: components["schemas"]["JudgeStatsOut"][];
+            /** Styles */
+            styles: components["schemas"]["StyleTrustOut"][];
+            /** Held Out Pairs */
+            held_out_pairs: number;
+            /** Held Out Needed */
+            held_out_needed: number;
+            /** Learning Enabled */
+            learning_enabled: boolean;
+            /** Learning Paused */
+            learning_paused: boolean;
+            /** Trusted Style Count */
+            trusted_style_count: number;
+            /** Min Observations */
+            min_observations: number;
+            /** Min Agreement */
+            min_agreement: number;
+            /** Min Acceptance */
+            min_acceptance: number;
+        };
+        /**
          * MasteryBand
          * @description Coarse band derived from a BKT mastery probability.
          * @enum {string}
@@ -3651,6 +3721,19 @@ export interface components {
              * Audit Revoked
              * @default false
              */
+            audit_revoked: boolean;
+        };
+        /** MetricTrustOut */
+        MetricTrustOut: {
+            /** Observations */
+            observations: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement Rate */
+            agreement_rate: number;
+            /** Trusted */
+            trusted: boolean;
+            /** Audit Revoked */
             audit_revoked: boolean;
         };
         /** MostMissedOut */
@@ -4705,6 +4788,24 @@ export interface components {
             subject: string;
             /** Styles */
             styles: components["schemas"]["QuestionStyle"][];
+        };
+        /**
+         * StyleTrustOut
+         * @description One (taxonomy, style) scope: whether its questions skip review, and why not.
+         */
+        StyleTrustOut: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Style Id */
+            style_id: string;
+            /** Style Name */
+            style_name: string | null;
+            /** Trusted */
+            trusted: boolean;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["MetricTrustOut"];
+            };
         };
         /** SubjectPresetOut */
         SubjectPresetOut: {
@@ -6864,6 +6965,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JudgePromptListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judge_stats_api_judge_prompts_stats_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeStatsResponse"];
                 };
             };
             /** @description Validation Error */

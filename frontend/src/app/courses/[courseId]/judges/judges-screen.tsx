@@ -9,6 +9,10 @@
  * re-names the panel, so the rubric version the panel currently answers under
  * is shown against the version it shipped with. Custom rules for the approved
  * taxonomy sit under the two cards.
+ *
+ * `GET /api/judge-prompts/stats` adds how often the professor agreed with each
+ * judge under the current panel, how close the next automatic rewrite is, and
+ * which styles have earned trust (skip review) and what each still lacks.
  */
 
 import { Gavel, Scale, Sparkles, TrendingUp, Undo2 } from "lucide-react";
@@ -34,10 +38,11 @@ import { ApiError } from "@/lib/api/client";
 import {
   useApprovedCurriculum,
   useJudgePrompts,
+  useJudgeStats,
   useRevertJudgePrompt,
   useSaveJudgePrompt,
 } from "@/lib/api/queries";
-import type { JudgePrompt } from "@/lib/api/types";
+import type { JudgePrompt, JudgeStat, JudgeStats, StyleTrust } from "@/lib/api/types";
 
 const SHOWN_METRICS = ["difficulty", "subtopic"] as const;
 
@@ -138,13 +143,105 @@ function JudgeStatusBadges({ prompt }: { prompt: JudgePrompt }) {
   );
 }
 
+function percent(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
+function agreementText(stat: JudgeStat | undefined): string {
+  if (!stat || stat.observations === 0 || stat.agreement_rate == null) {
+    return "No reviewed questions under this prompt yet";
+  }
+  return `${stat.agreements}/${stat.observations} agreed (${percent(stat.agreement_rate)})`;
+}
+
+function rewriteText(stat: JudgeStat | undefined, stats: JudgeStats | undefined): string | null {
+  if (!stat || !stats) return null;
+  if (!stats.learning_enabled) return "Automatic rewrites are off";
+  if (stats.learning_paused) {
+    const n = stats.trusted_style_count;
+    return `Rewrites paused while ${n} style${n === 1 ? "" : "s"} skip${n === 1 ? "s" : ""} review`;
+  }
+  const have = Math.min(stat.learnable_disagreements, stat.disagreements_needed);
+  return `Next rewrite: ${have} of ${stat.disagreements_needed} disagreements`;
+}
+
+// Every window, custom rules included, must be trusted before a style skips review,
+// so the shortest one is what the style is still waiting on.
+function styleStatus(style: StyleTrust, minimum: number): string {
+  const windows = Object.values(style.metrics);
+  if (style.trusted) return "Skips review";
+  if (windows.some((metric) => metric.audit_revoked)) return "Audit failed";
+  const fewest = Math.min(...windows.map((metric) => metric.observations));
+  if (fewest < minimum) return `Building trust: ${fewest} of ${minimum} reviews`;
+  return "Below 90% agreement";
+}
+
+function StyleTrustCard({ stats }: { stats: JudgeStats }) {
+  return (
+    <Card className="review-panel">
+      <CardHeader className="gap-2">
+        <div className="review-eyebrow">Trust by style</div>
+        <CardTitle className="text-lg">Which styles skip your review</CardTitle>
+        <CardDescription>
+          A style skips review once, over its last {stats.min_observations} reviewed questions, the
+          judges agreed with you and you accepted at least {percent(stats.min_acceptance)} of them.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {stats.styles.length === 0 ? (
+          <p className="text-muted-foreground text-sm">No reviewed round questions yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-left text-muted-foreground">
+              <tr>
+                <th className="py-1 font-medium">Style</th>
+                <th className="font-medium">Difficulty</th>
+                <th className="font-medium">Topic</th>
+                <th className="font-medium">Accepted</th>
+                <th className="font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.styles.map((style) => (
+                <tr
+                  key={`${style.curriculum_version_id}-${style.style_id}`}
+                  className="border-border border-t"
+                >
+                  <td className="py-2">{style.style_name ?? style.style_id}</td>
+                  {(["difficulty", "subtopic", "acceptance"] as const).map((name) => {
+                    const metric = style.metrics[name];
+                    return (
+                      <td key={name} className="tabular-nums">
+                        {metric ? `${metric.agreements}/${metric.observations}` : "–"}
+                      </td>
+                    );
+                  })}
+                  <td>
+                    <Badge variant={style.trusted ? "secondary" : "outline"}>
+                      {styleStatus(style, stats.min_observations)}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function JudgeCard({
   prompt,
+  stat,
+  stats,
   onEdit,
   onRevert,
   isReverting,
 }: {
   prompt: JudgePrompt & { metric: (typeof SHOWN_METRICS)[number] };
+  stat?: JudgeStat;
+  stats?: JudgeStats;
   onEdit: (prompt: JudgePrompt) => void;
   onRevert: (prompt: JudgePrompt) => void;
   isReverting: boolean;
@@ -152,6 +249,7 @@ function JudgeCard({
   const ruleKeys = occurrenceKeys(prompt.rules);
   const agreement = parseHeldOutAgreement(prompt.note);
   const label = judgeLabel(prompt);
+  const rewrite = rewriteText(stat, stats);
 
   return (
     <Card className="review-panel h-full">
@@ -197,6 +295,8 @@ function JudgeCard({
           </div>
         </div>
         <CardDescription className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          <span>{agreementText(stat)}</span>
+          {rewrite ? <span>{rewrite}</span> : null}
           {prompt.revision > 0 ? <span>revision {prompt.revision}</span> : null}
           {prompt.learned ? <span>{prompt.evidence_count} disagreements learned from</span> : null}
           <span>{formatUpdatedAt(prompt.updated_at)}</span>
@@ -237,10 +337,12 @@ function JudgeEditDialog({
   prompt,
   open,
   onOpenChange,
+  trustedStyles,
 }: {
   prompt: JudgePrompt | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  trustedStyles: number;
 }) {
   const savePrompt = useSaveJudgePrompt();
   const promptId = useId();
@@ -323,6 +425,13 @@ function JudgeEditDialog({
             />
           </div>
 
+          {trustedStyles > 0 ? (
+            <p className="text-amber-700 text-sm dark:text-amber-300">
+              Saving resets trust: {trustedStyles} style{trustedStyles === 1 ? " goes" : "s go"}{" "}
+              back to your review until the edited judge earns it again.
+            </p>
+          ) : null}
+
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
@@ -356,6 +465,7 @@ function TaxonomyCustomRules() {
 export function JudgesScreen() {
   const { data, error, isPending } = useJudgePrompts();
   const revertPrompt = useRevertJudgePrompt();
+  const stats = useJudgeStats().data;
 
   const [editing, setEditing] = useState<JudgePrompt | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -439,12 +549,16 @@ export function JudgesScreen() {
               <JudgeCard
                 key={prompt.metric}
                 prompt={prompt}
+                stat={stats?.judges.find((item) => item.metric === prompt.metric)}
+                stats={stats}
                 onEdit={openEditor}
                 onRevert={handleRevert}
                 isReverting={revertPrompt.isPending && revertPrompt.variables === prompt.metric}
               />
             ))}
           </div>
+
+          {stats ? <StyleTrustCard stats={stats} /> : null}
         </>
       )}
 
@@ -455,6 +569,7 @@ export function JudgesScreen() {
         prompt={editing}
         open={editOpen}
         onOpenChange={setEditOpen}
+        trustedStyles={stats?.trusted_style_count ?? 0}
       />
     </div>
   );

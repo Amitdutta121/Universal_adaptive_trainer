@@ -74,6 +74,9 @@ export type TypeInstructionRefreshResponse = Schemas["TypeInstructionRefreshResp
 export type JudgeMetricId = Schemas["JudgeMetricId"];
 export type JudgePromptListResponse = Schemas["JudgePromptListResponse"];
 export type JudgePrompt = Schemas["JudgePromptOut"];
+export type JudgeStats = Schemas["JudgeStatsResponse"];
+export type JudgeStat = Schemas["JudgeStatsOut"];
+export type StyleTrust = Schemas["StyleTrustOut"];
 
 // Question setup, rounds and custom judges (docs/QUESTION_SETUP_PLAN.md).
 export type QuestionStyle = Schemas["QuestionStyle"];
