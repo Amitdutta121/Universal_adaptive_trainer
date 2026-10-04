@@ -60,6 +60,10 @@ Near-duplicate filtering is a separate feature, outside the original 20-step wor
   **Edit stays** as a secondary action (existing feature, not dropped).
 - Style library is curated code data (Python first), versioned in repo: `app/styles/python.py`.
   Seeded from `mock-python.ts` templates. Not mock: it is the library content.
+- Trust needs 90% professor acceptance (approve, unedited) over the same window, as well as judge
+  agreement (docs/TRUST_AND_JUDGE_STATS_PLAN.md).
+- Automatic judge rewrites pause while any style of the subject is trusted under the current panel;
+  manual prompt edits stay allowed and the Judges page warns that they reset trust.
 
 ## Phase 0 — contracts (one agent, sequential, must land first)
 
