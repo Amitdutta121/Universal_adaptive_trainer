@@ -953,6 +953,9 @@ class QuestionSummary(BaseModel):
     round_id: int | None = None
     target_subtopic_id: int | None = None
     trust_provenance: str | None = None
+    #: Generated on demand for a student who had nothing left to answer; that student may
+    #: have seen it before the professor did.
+    live_generated: bool = False
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -994,6 +997,7 @@ class QuestionSummary(BaseModel):
             round_id=row.round_id,
             target_subtopic_id=row.target_subtopic_id,
             trust_provenance=row.trust_provenance,
+            live_generated=bool(row.live_generated),
         )
 
 
@@ -2345,6 +2349,8 @@ class ServedQuestionOut(BaseModel):
     resumed: bool
     #: True when the requested difficulty was unavailable (ADR-041).
     fallback_used: bool
+    #: True when the question was generated on demand for this student.
+    live: bool = False
     requested_difficulty: Difficulty
     served_difficulty: Difficulty
     subtopic_id: int | None
@@ -2372,6 +2378,7 @@ class ServedQuestionOut(BaseModel):
             ordinal=attempt.ordinal,
             resumed=served.resumed,
             fallback_used=served.fallback_used,
+            live=getattr(served, "live", False),
             requested_difficulty=attempt.requested_difficulty,
             served_difficulty=attempt.served_difficulty,
             subtopic_id=attempt.subtopic_id,

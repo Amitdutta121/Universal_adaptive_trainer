@@ -255,7 +255,7 @@ class GenerationService:
         spec: QuestionSpec,
         *,
         version: CurriculumVersionRow,
-        round_id: int,
+        round_id: int | None,
         rules: Sequence[CustomRule] = (),
         examples: list[str] | None = None,
         run_id: str | None = None,

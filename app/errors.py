@@ -170,6 +170,16 @@ class NoQuestionAvailableError(AdaptiveTrainerError):
     code = "no_question_available"
 
 
+class QuestionGeneratingError(AdaptiveTrainerError):
+    """Nothing to serve yet: a question is being generated live for this student.
+
+    A state, not a failure. The client polls ``/next`` until the question is ready.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "question_generating"
+
+
 class CurriculumCompletedError(AdaptiveTrainerError):
     """Sequential topic progression reached the end of the curriculum.
 

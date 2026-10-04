@@ -1193,10 +1193,12 @@ export const useNextQuestion = (trainingSessionId: number | null, { enabled = tr
     enabled: enabled && trainingSessionId !== null,
     retry: false,
     refetchOnWindowFocus: false,
-    refetchInterval: (query) =>
-      query.state.error instanceof ApiError && query.state.error.code === "no_question_available"
-        ? 10000
-        : false,
+    refetchInterval: (query) => {
+      const error = query.state.error;
+      if (!(error instanceof ApiError)) return false;
+      if (error.code === "question_generating") return 3000;
+      return error.code === "no_question_available" ? 10000 : false;
+    },
     queryFn: () =>
       unwrap(
         api.GET("/api/training-sessions/{training_session_id}/next", {
@@ -1204,6 +1206,26 @@ export const useNextQuestion = (trainingSessionId: number | null, { enabled = tr
         }),
       ),
   });
+
+/**
+ * Ask for a question generated live, even right after one failed. Answers like `/next`:
+ * the question when one is ready, otherwise `question_generating` -- either way the
+ * next-question query picks it up from here.
+ */
+export function useRequestLiveQuestion() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (trainingSessionId: number) =>
+      unwrap(
+        api.POST("/api/training-sessions/{training_session_id}/live-question", {
+          params: { path: { training_session_id: trainingSessionId } },
+        }),
+      ),
+    onSettled: (_result, _error, trainingSessionId) => {
+      client.invalidateQueries({ queryKey: qk.trainingSessions.next(trainingSessionId) });
+    },
+  });
+}
 
 /** The learner's own progress, keyed by their run (no instructor login on the student page). */
 export const useTrainingSessionProgress = (

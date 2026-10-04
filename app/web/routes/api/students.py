@@ -33,14 +33,19 @@ from fastapi.responses import JSONResponse
 from app.adaptive import AdaptiveTrainingEngine
 from app.auth.backend import current_active_user
 from app.coverage import get_prod_question_set, get_taxonomy_question_set
+from app.domain.enums import RoundStatus
 from app.domain.mastery import difficulty_for_mastery, mastery_band
 from app.errors import (
     ActiveSessionExistsError,
+    AdaptiveTrainerError,
     DomainRuleError,
     NoQuestionAvailableError,
     NotFoundError,
+    QuestionGeneratingError,
 )
+from app.generation.live import next_for_session, run_live_job
 from app.generation.refill import plan_refill, schedule_refill
+from app.persistence.models import LiveQuestionJobRow
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionSetRepository,
@@ -544,23 +549,68 @@ def next_question(
     outstanding: asking again returns the same one rather than drawing another.
     A GET is still the honest verb, because what a client wants here is the
     session's current question.
+
+    When the bank has nothing new for this student, a question is generated live
+    (:mod:`app.generation.live`) and this answers ``question_generating`` until it is ready;
+    the client keeps polling.
     """
+    return _next_or_generate(session, training_session_id, background_tasks, force=False)
+
+
+@router.post(
+    "/training-sessions/{training_session_id}/live-question", response_model=ServedQuestionOut
+)
+def request_live_question(
+    session: DbSession,
+    training_session_id: int,
+    background_tasks: BackgroundTasks,
+) -> ServedQuestionOut | JSONResponse:
+    """``/next``, but generate even right after a failed attempt: the student asked to retry."""
+    return _next_or_generate(session, training_session_id, background_tasks, force=True)
+
+
+def _error_response(exc: AdaptiveTrainerError, background_tasks: BackgroundTasks) -> JSONResponse:
+    # Raising would discard the injected BackgroundTasks. Return the same
+    # error contract explicitly so depletion still schedules replenishment.
+    error = {"code": exc.code, "message": exc.message}
+    if exc.detail is not None:
+        error["detail"] = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": error},
+        background=background_tasks,
+    )
+
+
+def _next_or_generate(
+    session: DbSession,
+    training_session_id: int,
+    background_tasks: BackgroundTasks,
+    *,
+    force: bool,
+) -> ServedQuestionOut | JSONResponse:
     try:
-        served = AdaptiveTrainingEngine(session).serve_next(training_session_id)
+        result = next_for_session(session, training_session_id, force=force)
     except NoQuestionAvailableError as exc:
         if plan_refill(session, training_session_id) is not None:
             background_tasks.add_task(schedule_refill, training_session_id)
         session.commit()
-        # Raising would discard the injected BackgroundTasks. Return the same
-        # error contract explicitly so depletion still schedules replenishment.
-        error = {"code": exc.code, "message": exc.message}
-        if exc.detail is not None:
-            error["detail"] = exc.detail
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": error},
-            background=background_tasks,
+        return _error_response(exc, background_tasks)
+    if isinstance(result, LiveQuestionJobRow):
+        if RoundStatus(result.status) is RoundStatus.QUEUED:
+            background_tasks.add_task(run_live_job, result.id)
+        session.commit()
+        return _error_response(
+            QuestionGeneratingError(
+                "Generating a new question for you.",
+                detail=(
+                    "You have answered everything available at this point, so a question is "
+                    "being written for you now. This usually takes under a minute."
+                ),
+            ),
+            background_tasks,
         )
+    served = result
     if plan_refill(session, training_session_id) is not None:
         background_tasks.add_task(schedule_refill, training_session_id)
     session.commit()

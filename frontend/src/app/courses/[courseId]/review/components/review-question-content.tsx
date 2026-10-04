@@ -23,6 +23,7 @@ export function ReviewQuestionSurface({
           <ReviewChip tone="accent">
             {detail.question.question_type ?? detail.question.kind}
           </ReviewChip>
+          {detail.question.live_generated ? <ReviewChip tone="warn">Live</ReviewChip> : null}
         </CardTitle>
         <CardDescription>
           {detail.taxonomy.topic} - {detail.taxonomy.subtopics.join(", ")}
