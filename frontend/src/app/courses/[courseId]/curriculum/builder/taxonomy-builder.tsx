@@ -224,6 +224,7 @@ export function TaxonomyBuilder({
   const [sentDocument, setSentDocument] = useState<NamedDocument | null>(null);
   /** Whether something of this draft is currently kept in storage, so going back to clean forgets it. */
   const kept = useRef(false);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The saved taxonomy this draft was opened from, if any. */
   const [origin, setOrigin] = useState<DraftOrigin | null>(null);
   /** What the draft looked like when it was loaded; anything else is an unsaved change. */
@@ -249,6 +250,7 @@ export function TaxonomyBuilder({
         kept.current = false;
       }
     }, 400);
+    autosaveTimer.current = timer;
     return () => clearTimeout(timer);
   }, [draft, dirty, origin]);
 
@@ -497,6 +499,8 @@ export function TaxonomyBuilder({
       });
       clearDraft(origin);
       kept.current = false;
+      if (autosaveTimer.current !== null) clearTimeout(autosaveTimer.current);
+      setBaseline(draftSignature(draft));
       toast.success(`Saved changes to “${detail.version.label}”`, {
         description:
           `${pluralise(detail.topic_count, "topic")} and ` +
@@ -526,6 +530,8 @@ export function TaxonomyBuilder({
       // Only now is the draft dropped: a refused save leaves it exactly as typed.
       clearDraft(origin);
       kept.current = false;
+      if (autosaveTimer.current !== null) clearTimeout(autosaveTimer.current);
+      setBaseline(draftSignature(draft));
       toast.success(`Saved “${detail.version.label}”`, {
         description:
           `${pluralise(detail.topic_count, "topic")} and ` +

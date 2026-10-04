@@ -20,6 +20,9 @@ export function QuestionSetupButton() {
   // A failed read (e.g. not implemented yet) is treated as "no setup yet": the modal still opens.
   const current = useCurrentSetup(curriculum.data?.version.id);
   const [open, setOpen] = useState(false);
+  // A new number each opening. The suggestion query uses it so a remount of this
+  // opening shares one request, and the next opening asks again.
+  const [suggestionSession, setSuggestionSession] = useState(0);
   const hintId = useId();
 
   const existing = current.data?.setup ?? null;
@@ -53,7 +56,14 @@ export function QuestionSetupButton() {
 
   return (
     <>
-      <Button size="sm" className="h-9" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        className="h-9"
+        onClick={() => {
+          setSuggestionSession((session) => session + 1);
+          setOpen(true);
+        }}
+      >
         <ListChecks data-icon="inline-start" />
         {label}
       </Button>
@@ -61,6 +71,7 @@ export function QuestionSetupButton() {
         <QuestionSetupDialog
           curriculum={curriculum.data}
           currentSetup={existing}
+          suggestionSession={suggestionSession}
           onOpenChange={setOpen}
         />
       ) : null}

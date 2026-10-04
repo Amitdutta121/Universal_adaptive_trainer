@@ -175,18 +175,33 @@ Also return one rationale of at most two sentences. If you changed the tags, say
 what the question actually assesses."""
 
 
-def _difficulty_system(profile: SubjectProfile) -> str:
+def difficulty_bands(profile: SubjectProfile) -> str:
+    """What easy, medium, and hard mean.
+
+    The difficulty judge and the generator both use this text, so the generator
+    is not told only the word "hard".
+    """
     if profile.has_code_types:
-        expert = "a professional programmer"
         hard = """  hard    Several taught ideas composed, or careful reasoning about an edge case,
           execution order, or a subtle behaviour -- while still using only what
           the section teaches."""
-        surface = "the amount of code shown, or unfamiliar variable names."
     else:
-        expert = "an expert in the field"
         hard = """  hard    Several taught ideas composed, or careful reasoning about an edge case
           or a subtle effect -- while still using only what the section
           teaches."""
+    return f"""  easy    One taught step, applied directly. The student recalls or applies a
+          single idea from the section with no composition.
+  medium  Two or three taught ideas combined, or one idea applied to a case the
+          section did not walk through directly.
+{hard}"""
+
+
+def _difficulty_system(profile: SubjectProfile) -> str:
+    if profile.has_code_types:
+        expert = "a professional programmer"
+        surface = "the amount of code shown, or unfamiliar variable names."
+    else:
+        expert = "an expert in the field"
         surface = "the amount of detail shown, or unfamiliar names."
     return f"""You check whether one {profile.phrase} assessment question matches its
 requested difficulty: easy, medium, or hard.
@@ -194,11 +209,7 @@ requested difficulty: easy, medium, or hard.
 Judge relative to a student who has just studied the supplied textbook section
 and nothing beyond it -- not relative to {expert}.
 
-  easy    One taught step, applied directly. The student recalls or applies a
-          single idea from the section with no composition.
-  medium  Two or three taught ideas combined, or one idea applied to a case the
-          section did not walk through directly.
-{hard}
+{difficulty_bands(profile)}
 
 Difficulty comes from the reasoning the question demands, not from its length,
 {surface}

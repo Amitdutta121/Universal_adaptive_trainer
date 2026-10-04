@@ -177,7 +177,7 @@ def test_a_failed_check_triggers_a_retry(session: Session, settings) -> None:
     """
     version, topic, subtopic, section_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
-    broken.expected_output = "this is not what print(3) writes"
+    broken.code = "print("
     client = MetricJudgeClient(draft=broken)
 
     rows = _generate(session, version, client, section_ids[:1])
@@ -189,7 +189,7 @@ def test_a_failed_check_triggers_a_retry(session: Session, settings) -> None:
     # The claim was accepted every time -- the retry was driven by the check.
     assert all(attempt.accepted for attempt in attempts)
     assert all(attempt.failed_checks for attempt in attempts)
-    assert "expected_output_verified" in {
+    assert "output_code_parses" in {
         check.name for attempt in attempts for check in attempt.failed_checks
     }
 
@@ -197,7 +197,7 @@ def test_a_failed_check_triggers_a_retry(session: Session, settings) -> None:
 def test_a_repaired_check_stops_the_retries(session: Session, settings) -> None:
     version, topic, subtopic, section_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
-    broken.expected_output = "wrong"
+    broken.code = "print("
     client = SequencedDraftClient(drafts=[broken, _draft(topic.id, [subtopic.id])])
 
     rows = _generate(session, version, client, section_ids[:1])
@@ -212,14 +212,32 @@ def test_a_repaired_check_stops_the_retries(session: Session, settings) -> None:
 def test_the_retry_prompt_states_the_failed_check(session: Session, settings) -> None:
     version, topic, subtopic, section_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
-    broken.expected_output = "wrong"
+    broken.code = "print("
     client = MetricJudgeClient(draft=broken)
 
     _generate(session, version, client, section_ids[:1])
 
     second = client.generation_calls[1]["prompt"]
     assert "--- correction ---" in second
-    assert "failed the check 'expected_output_verified'" in second
+    assert "failed the check 'output_code_parses'" in second
+
+
+def test_output_prediction_uses_the_run_as_the_answer(session: Session, settings) -> None:
+    """A wrong expected_output is replaced by what the code actually prints.
+
+    The answer check used to drop the question when those two texts differed.
+    """
+    version, topic, subtopic, section_ids = _seed(session, settings)
+    draft = _draft(topic.id, [subtopic.id])
+    draft.expected_output = "this is not what print(3) writes"
+    client = MetricJudgeClient(draft=draft)
+
+    rows = _generate(session, version, client, section_ids[:1])
+
+    assert len(client.generation_calls) == 1
+    assert rows[0].status is QuestionStatus.VALIDATION_PASSED
+    assert rows[0].content["expected_output"] == "3"
+    assert rows[0].reference_solution == "3"
 
 
 # --- a malformed reply is retried, not fatal -------------------------------

@@ -1,17 +1,20 @@
 "use client";
 
 /**
- * The four advisory judges, one card each, backed by `GET /api/judge-prompts`.
+ * The difficulty and topic-alignment judges, one card each, backed by
+ * `GET /api/judge-prompts`. Issues and generatability still come back from that
+ * list; this screen does not show them.
  *
- * A judge is repaired by rewriting its system prompt (ADR-038) or by re-learning
- * it from the questions it got wrong (ADR-039). Saving either way re-names the
- * panel, so the rubric version the panel currently answers under is shown
- * against the version it shipped with.
+ * A built-in judge is changed by rewriting its system prompt (ADR-038). Saving
+ * re-names the panel, so the rubric version the panel currently answers under
+ * is shown against the version it shipped with. Custom rules for the approved
+ * taxonomy sit under the two cards.
  */
 
-import { Gavel, RefreshCw, Scale, Sparkles, TrendingUp, Undo2 } from "lucide-react";
+import { Gavel, Scale, Sparkles, TrendingUp, Undo2 } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import { CustomRules } from "@/app/courses/[courseId]/questions/setup/custom-rules";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,21 +32,37 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api/client";
 import {
+  useApprovedCurriculum,
   useJudgePrompts,
-  useRefreshJudgePrompt,
   useRevertJudgePrompt,
   useSaveJudgePrompt,
 } from "@/lib/api/queries";
 import type { JudgePrompt } from "@/lib/api/types";
 
+const SHOWN_METRICS = ["difficulty", "subtopic"] as const;
+
+const JUDGE_LABELS: Record<(typeof SHOWN_METRICS)[number], string> = {
+  difficulty: "Difficulty",
+  subtopic: "Topic alignment",
+};
+
+function isShownJudge(
+  prompt: JudgePrompt,
+): prompt is JudgePrompt & { metric: (typeof SHOWN_METRICS)[number] } {
+  return (SHOWN_METRICS as readonly string[]).includes(prompt.metric);
+}
+
+function judgeLabel(prompt: JudgePrompt): string {
+  if (prompt.metric === "difficulty" || prompt.metric === "subtopic") {
+    return JUDGE_LABELS[prompt.metric];
+  }
+  return prompt.label;
+}
+
 function describeError(error: unknown): string | undefined {
   if (error instanceof ApiError) return error.detail ?? error.message;
   if (error instanceof Error) return error.message;
   return undefined;
-}
-
-function capitalize(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // Matches the fixed detail string `_gate` writes in judge_learning.py, e.g.
@@ -105,7 +124,6 @@ function SummaryCard({
 }
 
 function JudgeStatusBadges({ prompt }: { prompt: JudgePrompt }) {
-  const unlearned = Math.max(0, prompt.available_disagreements - prompt.evidence_count);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Badge variant={prompt.edited ? "secondary" : "outline"}>
@@ -116,13 +134,6 @@ function JudgeStatusBadges({ prompt }: { prompt: JudgePrompt }) {
           {prompt.rules.length} rule{prompt.rules.length === 1 ? "" : "s"}
         </Badge>
       ) : null}
-      {prompt.available_disagreements > 0 ? (
-        <Badge variant={unlearned > 0 ? "outline" : "secondary"}>
-          {unlearned > 0
-            ? `${unlearned} new disagreement${unlearned === 1 ? "" : "s"}`
-            : "up to date"}
-        </Badge>
-      ) : null}
     </div>
   );
 }
@@ -131,30 +142,26 @@ function JudgeCard({
   prompt,
   onEdit,
   onRevert,
-  onRefresh,
   isReverting,
-  isRefreshing,
 }: {
-  prompt: JudgePrompt;
+  prompt: JudgePrompt & { metric: (typeof SHOWN_METRICS)[number] };
   onEdit: (prompt: JudgePrompt) => void;
   onRevert: (prompt: JudgePrompt) => void;
-  onRefresh: (prompt: JudgePrompt) => void;
   isReverting: boolean;
-  isRefreshing: boolean;
 }) {
-  const busy = isReverting || isRefreshing;
   const ruleKeys = occurrenceKeys(prompt.rules);
   const agreement = parseHeldOutAgreement(prompt.note);
+  const label = judgeLabel(prompt);
 
   return (
     <Card className="review-panel h-full">
       <CardHeader className="gap-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2">
-            <div className="review-eyebrow">advisory judge</div>
+            <div className="review-eyebrow">built-in judge</div>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Gavel className="size-4 text-muted-foreground" />
-              {capitalize(prompt.label)}
+              {label}
             </CardTitle>
             <JudgeStatusBadges prompt={prompt} />
             {agreement ? (
@@ -167,20 +174,24 @@ function JudgeCard({
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => onEdit(prompt)} disabled={busy}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onEdit(prompt)}
+              disabled={isReverting}
+            >
               <Scale className="size-3.5" />
               Edit prompt
             </Button>
             {prompt.edited ? (
-              <Button variant="ghost" size="sm" onClick={() => onRevert(prompt)} disabled={busy}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onRevert(prompt)}
+                disabled={isReverting}
+              >
                 <Undo2 className={isReverting ? "size-3.5 animate-spin" : "size-3.5"} />
                 {isReverting ? "Reverting" : "Revert"}
-              </Button>
-            ) : null}
-            {prompt.available_disagreements > 0 ? (
-              <Button variant="outline" size="sm" onClick={() => onRefresh(prompt)} disabled={busy}>
-                <RefreshCw className={isRefreshing ? "size-3.5 animate-spin" : "size-3.5"} />
-                {isRefreshing ? "Re-learning" : "Re-learn"}
               </Button>
             ) : null}
           </div>
@@ -188,7 +199,6 @@ function JudgeCard({
         <CardDescription className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
           {prompt.revision > 0 ? <span>revision {prompt.revision}</span> : null}
           {prompt.learned ? <span>{prompt.evidence_count} disagreements learned from</span> : null}
-          <span>{prompt.available_disagreements} available to learn from</span>
           <span>{formatUpdatedAt(prompt.updated_at)}</span>
         </CardDescription>
         {prompt.note ? (
@@ -254,14 +264,14 @@ function JudgeEditDialog({
         metric: prompt.metric,
         body: { system_prompt: text, note: note.trim() || null },
       });
-      toast.success(`Saved the ${prompt.label} judge`, {
+      toast.success(`Saved the ${judgeLabel(prompt)} judge`, {
         description: result.rubric_version_changed
           ? `The panel now answers under ${result.rubric_version}.`
           : "The submitted text matched what was already in force.",
       });
       onOpenChange(false);
     } catch (error) {
-      toast.error(`Could not save the ${prompt.label} judge`, {
+      toast.error(`Could not save the ${judgeLabel(prompt)} judge`, {
         description: describeError(error),
       });
     }
@@ -272,7 +282,7 @@ function JudgeEditDialog({
       <DialogContent className="sm:max-w-2xl">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Edit the {prompt.label} judge</DialogTitle>
+            <DialogTitle>Edit the {judgeLabel(prompt)} judge</DialogTitle>
             <DialogDescription>
               This replaces the whole system prompt and re-names the panel. Existing evaluations are
               left alone — re-judging the bank under the new prompt is a separate step.
@@ -327,18 +337,36 @@ function JudgeEditDialog({
   );
 }
 
+function TaxonomyCustomRules() {
+  const curriculum = useApprovedCurriculum();
+  if (curriculum.isPending) return null;
+  if (!curriculum.data) {
+    return (
+      <Card className="review-panel">
+        <CardHeader>
+          <CardTitle className="text-lg">Custom rules</CardTitle>
+          <CardDescription>Approve a taxonomy first.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+  return <CustomRules curriculumVersionId={curriculum.data.version.id} />;
+}
+
 export function JudgesScreen() {
   const { data, error, isPending } = useJudgePrompts();
   const revertPrompt = useRevertJudgePrompt();
-  const refreshPrompt = useRefreshJudgePrompt();
 
   const [editing, setEditing] = useState<JudgePrompt | null>(null);
   const [editOpen, setEditOpen] = useState(false);
 
-  const prompts = data?.prompts ?? [];
+  const shown = (data?.prompts ?? []).filter(isShownJudge);
+  const prompts = SHOWN_METRICS.flatMap((metric) => {
+    const prompt = shown.find((item) => item.metric === metric);
+    return prompt ? [prompt] : [];
+  });
   const editedCount = prompts.filter((prompt) => prompt.edited).length;
   const learnedCount = prompts.filter((prompt) => prompt.learned).length;
-  const refreshReadyCount = prompts.filter((prompt) => prompt.available_disagreements > 0).length;
   const diverged = data != null && data.rubric_version !== data.shipped_rubric_version;
 
   function openEditor(prompt: JudgePrompt) {
@@ -349,32 +377,11 @@ export function JudgesScreen() {
   async function handleRevert(prompt: JudgePrompt) {
     try {
       const result = await revertPrompt.mutateAsync(prompt.metric);
-      toast.success(`Reverted the ${prompt.label} judge`, {
+      toast.success(`Reverted the ${judgeLabel(prompt)} judge`, {
         description: `Running the shipped prompt again — panel ${result.rubric_version}.`,
       });
     } catch (error) {
-      toast.error(`Could not revert the ${prompt.label} judge`, {
-        description: describeError(error),
-      });
-    }
-  }
-
-  async function handleRefresh(prompt: JudgePrompt) {
-    try {
-      const result = await refreshPrompt.mutateAsync(prompt.metric);
-      if (!result.learned) {
-        toast.info(`Nothing new to learn for the ${prompt.label} judge`, {
-          description: "No attributable disagreement was available, so the prompt is unchanged.",
-        });
-        return;
-      }
-      toast.success(`Re-learned the ${prompt.label} judge`, {
-        description: `${result.rule_count} rule${
-          result.rule_count === 1 ? "" : "s"
-        } from ${result.evidence_count} disagreement${result.evidence_count === 1 ? "" : "s"}.`,
-      });
-    } catch (error) {
-      toast.error(`Could not re-learn the ${prompt.label} judge`, {
+      toast.error(`Could not revert the ${judgeLabel(prompt)} judge`, {
         description: describeError(error),
       });
     }
@@ -385,15 +392,15 @@ export function JudgesScreen() {
       {error ? <QueryError error={error} /> : null}
 
       {isPending ? (
-        <TableSkeleton rows={4} />
+        <TableSkeleton rows={2} />
       ) : prompts.length === 0 ? (
         <EmptyState
           title="No judge prompts yet"
-          hint="The API returned no judges, so there is nothing to display."
+          hint="The API returned no difficulty or topic-alignment judge, so there is nothing to display."
         />
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <SummaryCard
               title="Edited"
               value={editedCount}
@@ -405,12 +412,6 @@ export function JudgesScreen() {
               value={learnedCount}
               hint="Judges whose current prompt was rewritten from disagreements, not typed."
               icon={Sparkles}
-            />
-            <SummaryCard
-              title="Refresh ready"
-              value={refreshReadyCount}
-              hint="Judges with at least one attributable disagreement available to learn from."
-              icon={RefreshCw}
             />
           </div>
 
@@ -426,9 +427,9 @@ export function JudgesScreen() {
                 ) : null}
               </CardTitle>
               <CardDescription>
-                Every evaluation written from now on carries this name. Editing or re-learning any
-                judge below changes it, which is what lets calibration report a repaired judge
-                separately from the one it replaced.
+                Every evaluation written from now on carries this name. Editing a judge below
+                changes it, which is what lets calibration report a repaired judge separately from
+                the one it replaced.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -440,14 +441,14 @@ export function JudgesScreen() {
                 prompt={prompt}
                 onEdit={openEditor}
                 onRevert={handleRevert}
-                onRefresh={handleRefresh}
                 isReverting={revertPrompt.isPending && revertPrompt.variables === prompt.metric}
-                isRefreshing={refreshPrompt.isPending && refreshPrompt.variables === prompt.metric}
               />
             ))}
           </div>
         </>
       )}
+
+      <TaxonomyCustomRules />
 
       <JudgeEditDialog
         key={editing?.metric ?? "none"}

@@ -102,6 +102,12 @@ class Settings(BaseSettings):
     #: question -- enough to manufacture the disagreements that trigger a repair.
     judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
+    # Trust is learned only from explicit professor observations, never approvals
+    # performed by the router. A rolling window makes recent errors visible.
+    judge_trust_min_observations: int = Field(default=20, ge=20)
+    judge_trust_min_agreement: float = Field(default=0.9, ge=0.9, le=1.0)
+    judge_trust_window: int = Field(default=20, ge=20)
+
     #: Which of the four metric judges run on newly generated questions
     #: (docs/QUESTION_SETUP_PLAN.md). ``JudgeMetricId`` itself is not shrunk -- stored rows and
     #: calibration depend on it -- and calibration already skips a metric a judge did not

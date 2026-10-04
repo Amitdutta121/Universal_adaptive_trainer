@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { toast } from "sonner";
+import { CourseLink } from "@/components/course-link";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,6 @@ import {
 } from "./review-types";
 import { useNextRound } from "./use-next-round";
 import { useReviewForm } from "./use-review-form";
-import { CourseLink } from "@/components/course-link";
 
 export function ReviewScreen() {
   const [mode, setMode] = useQueryState(
@@ -73,7 +73,11 @@ export function ReviewScreen() {
   const detail = data?.question ?? null;
   const form = useReviewForm(detail);
   // Reject needs no reason any more; an edit needs an actual change.
-  const canSubmit = form.effectiveDecision === "edit" ? form.changedFields.length > 0 : true;
+  const canSubmit =
+    form.difficultyConfirmed &&
+    form.subtopicsConfirmed &&
+    form.subtopicIds.length > 0 &&
+    (form.effectiveDecision !== "edit" || form.changedFields.length > 0);
 
   async function onSubmit() {
     if (!detail || !canSubmit || submitReview.isPending) return;
@@ -278,6 +282,10 @@ export function ReviewScreen() {
             difficulty={form.difficulty}
             subtopicIds={form.subtopicIds}
             subtopicOptions={subtopicOptions}
+            difficultyConfirmed={form.difficultyConfirmed}
+            subtopicsConfirmed={form.subtopicsConfirmed}
+            onConfirmDifficulty={form.confirmDifficulty}
+            onConfirmSubtopics={form.confirmSubtopics}
             comment={form.comment}
             isSubmitting={submitReview.isPending}
             canSubmit={canSubmit}

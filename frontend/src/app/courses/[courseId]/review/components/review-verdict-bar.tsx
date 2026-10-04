@@ -133,6 +133,10 @@ type ReviewVerdictBarProps = {
   difficulty: Difficulty;
   subtopicIds: number[];
   subtopicOptions: readonly SubtopicOption[];
+  difficultyConfirmed: boolean;
+  subtopicsConfirmed: boolean;
+  onConfirmDifficulty: () => void;
+  onConfirmSubtopics: () => void;
   comment: string;
   isSubmitting: boolean;
   canSubmit: boolean;
@@ -155,6 +159,10 @@ export function ReviewVerdictBar({
   difficulty,
   subtopicIds,
   subtopicOptions,
+  difficultyConfirmed,
+  subtopicsConfirmed,
+  onConfirmDifficulty,
+  onConfirmSubtopics,
   comment,
   isSubmitting,
   canSubmit,
@@ -180,6 +188,15 @@ export function ReviewVerdictBar({
           <div className="flex items-center gap-2">
             <span className="review-eyebrow">Difficulty</span>
             <DifficultyControl value={difficulty} onChange={onDifficultyChange} />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={difficultyConfirmed}
+              onClick={onConfirmDifficulty}
+            >
+              {difficultyConfirmed ? "Difficulty confirmed" : "Confirm difficulty"}
+            </Button>
           </div>
           <div className="flex min-w-0 items-center gap-2">
             <span className="review-eyebrow">Topic</span>
@@ -188,8 +205,23 @@ export function ReviewVerdictBar({
               value={subtopicIds}
               onChange={onSubtopicsChange}
             />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={subtopicsConfirmed || subtopicIds.length === 0}
+              onClick={onConfirmSubtopics}
+            >
+              {subtopicsConfirmed ? "Subtopics confirmed" : "Confirm subtopics"}
+            </Button>
           </div>
         </div>
+
+        {!difficultyConfirmed || !subtopicsConfirmed ? (
+          <p className="text-[var(--review-muted)] text-xs">
+            Confirm or correct the difficulty and subtopics before submitting.
+          </p>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <Button

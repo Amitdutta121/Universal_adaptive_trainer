@@ -29,15 +29,22 @@ from app.evaluation import (
     PedagogicalEvaluation,
     humanize_judge_error_detail,
 )
+from app.evaluation.trust import judge_trust
 from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
 from app.ingestion import SourceRetrieval
-from app.persistence.models import QuestionRow
+from app.persistence.models import CurriculumVersionRow, QuestionRow
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
+    QuestionEvaluationRepository,
     QuestionRepository,
 )
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_question_types_allowed
+from app.web.routes.api.deps import (
+    CourseScope,
+    DbSession,
+    ensure_in_course,
+    ensure_question_types_allowed,
+)
 from app.web.routes.api.schemas import (
     BatchPlanResponse,
     BatchPlanTotals,
@@ -377,7 +384,7 @@ def review_queue(
         reviewed=reviewed,
         remaining=total - reviewed,
         scoreable_remaining=len(scoreable),
-        question=get_question(session, candidates[0].id) if candidates else None,
+        question=get_question(session, course, candidates[0].id) if candidates else None,
     )
 
 
@@ -398,9 +405,17 @@ def _is_scoreable(question: QuestionRow) -> bool:
 
 
 @router.get("/{question_id}", response_model=QuestionDetail)
-def get_question(session: DbSession, question_id: int) -> QuestionDetail:
+def get_question(session: DbSession, course: CourseScope, question_id: int) -> QuestionDetail:
     """One question with its validation report, judge evaluation and provenance."""
     question = QuestionRepository(session).get(question_id)
+    version = (
+        session.get(CurriculumVersionRow, question.curriculum_version_id)
+        if question.curriculum_version_id is not None
+        else None
+    )
+    ensure_in_course(version.course_id if version is not None else None, course, "Question")
+    history = QuestionEvaluationRepository(session).list_for_question(question.id)
+    current = next((row for row in history if row.evaluation == question.pedagogical_eval), None)
     report = question.validation_report
 
     evaluation: PedagogicalEvaluation | None = None
@@ -423,6 +438,14 @@ def get_question(session: DbSession, question_id: int) -> QuestionDetail:
         validation_checks=report.checks if report is not None else [],
         generation_attempts=list(question.generation_attempts),
         pedagogical_eval=evaluation,
+        custom_results=(current.custom_results or []) if current is not None else [],
+        judge_trust=(
+            judge_trust(
+                session, question, custom_results=(current.custom_results or []) if current else []
+            )
+            if question.style_id is not None
+            else None
+        ),
         pedagogical_error_message=(
             humanize_judge_error_detail(evaluation.error_detail)
             if evaluation is not None and evaluation.status is PedagogicalEvalStatus.ERROR

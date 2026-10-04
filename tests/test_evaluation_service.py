@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import book_documents as docs
+import pytest
 from llm_fakes import FlakyJudgeClient, MetricJudgeClient, RaisingJudgeClient
 from sqlalchemy.orm import Session
 
@@ -211,3 +212,32 @@ def test_subtopic_judge_sees_the_whole_taxonomy(session: Session, settings: Any)
 
     assert "For loops" in payload
     assert "claimed_taxonomy" in payload
+
+
+@pytest.fixture(autouse=True)
+def four_metric_panel(monkeypatch, settings):
+    from app.config import get_settings
+
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "issues,subtopic,difficulty,generatability")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("failing", [False, True])
+def test_two_enabled_metrics_determine_gate(session, settings, monkeypatch, failing):
+    from app.config import get_settings
+
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "difficulty,subtopic")
+    get_settings.cache_clear()
+    question = _seed_question(session, settings)
+    client = _agreeing_client(question)
+    client.issue_codes = [RejectionReason.POOR_WORDING]
+    client.should_have_generated = False
+    if failing:
+        client.difficulty = Difficulty.HARD
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+    assert client.calls == 2
+    assert {m.metric for m in result.metrics} == {JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC}
+    assert result.status is PedagogicalEvalStatus.COMPLETED
+    assert result.gate is (JudgeGate.NEEDS_REVIEW if failing else JudgeGate.APPROVED)

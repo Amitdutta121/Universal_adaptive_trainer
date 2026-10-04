@@ -3342,6 +3342,10 @@ export interface components {
             produced: number;
             /** Dropped */
             dropped: number;
+            /** Skipped */
+            skipped: number;
+            /** Skip Reason */
+            skip_reason: string | null;
             /** Error */
             error: string | null;
             /**
@@ -3633,6 +3637,22 @@ export interface components {
          * @enum {string}
          */
         MetricStatus: "completed" | "error";
+        /** MetricTrust */
+        MetricTrust: {
+            /** Observations */
+            observations: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement Rate */
+            agreement_rate: number;
+            /** Trusted */
+            trusted: boolean;
+            /**
+             * Audit Revoked
+             * @default false
+             */
+            audit_revoked: boolean;
+        };
         /** MostMissedOut */
         MostMissedOut: {
             /** Subtopic */
@@ -3842,6 +3862,7 @@ export interface components {
             pedagogical_error_message: string | null;
             /** Custom Results */
             custom_results?: components["schemas"]["CustomJudgeResult"][];
+            judge_trust?: components["schemas"]["TrustReport"] | null;
             personalization: components["schemas"]["PersonalizationEvidence"] | null;
             /** Original Prompt */
             original_prompt: string | null;
@@ -4032,6 +4053,8 @@ export interface components {
             round_id?: number | null;
             /** Target Subtopic Id */
             target_subtopic_id?: number | null;
+            /** Trust Provenance */
+            trust_provenance?: string | null;
         };
         /**
          * QuestionTaxonomy
@@ -4196,7 +4219,7 @@ export interface components {
             outcome?: components["schemas"]["ReviewOutcomeOut"] | null;
             corrected_difficulty?: components["schemas"]["Difficulty"] | null;
             /** Corrected Subtopic Ids */
-            corrected_subtopic_ids?: number[];
+            corrected_subtopic_ids?: number[] | null;
         };
         /**
          * ReviewOutcomeOut
@@ -5133,6 +5156,19 @@ export interface components {
             small_sample: boolean;
             /** Metrics */
             metrics: components["schemas"]["MetricFaultsOut"][];
+        };
+        /** TrustReport */
+        TrustReport: {
+            /** Trusted */
+            trusted: boolean;
+            /** Eligible */
+            eligible: boolean;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["MetricTrust"];
+            };
+            /** Scope Key */
+            scope_key: string;
         };
         /**
          * TypeCalibrationOut
@@ -6548,7 +6584,9 @@ export interface operations {
     get_question_api_questions__question_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };
@@ -6579,7 +6617,9 @@ export interface operations {
     create_review_api_questions__question_id__review_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };
@@ -6616,7 +6656,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6645,7 +6687,9 @@ export interface operations {
     review_stats_api_reviews_stats_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6658,6 +6702,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7318,7 +7371,9 @@ export interface operations {
     suggest_api_setup_suggest_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7353,7 +7408,9 @@ export interface operations {
             query: {
                 curriculum_version_id: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7382,7 +7439,9 @@ export interface operations {
     save_setup_api_setup_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7415,7 +7474,9 @@ export interface operations {
     start_next_round_api_rounds_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7448,7 +7509,9 @@ export interface operations {
     get_round_api_rounds__round_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 round_id: number;
             };
@@ -7481,7 +7544,9 @@ export interface operations {
             query: {
                 curriculum_version_id: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7510,7 +7575,9 @@ export interface operations {
     create_custom_judge_api_custom_judges_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7543,7 +7610,9 @@ export interface operations {
     update_custom_judge_api_custom_judges__judge_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 judge_id: number;
             };

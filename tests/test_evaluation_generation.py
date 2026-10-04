@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import book_documents as docs
+import pytest
 from llm_fakes import verdict_for
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -152,3 +153,13 @@ def test_generated_question_stores_its_claimed_subtopics(session: Session, setti
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.topic_id == topic.id
     assert list(loaded.subtopic_ids) == [subtopic.id]
+
+
+@pytest.fixture(autouse=True)
+def four_metric_panel(monkeypatch, settings):
+    from app.config import get_settings
+
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "issues,subtopic,difficulty,generatability")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()

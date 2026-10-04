@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from app.adaptive.inventory import StudentBank
 from app.adaptive.scoring import ScoredAnswer, score_answer
 from app.adaptive.selection import (
     Candidate,
@@ -33,7 +34,7 @@ from app.adaptive.selection import (
     rank_candidates,
 )
 from app.adaptive.state import update_mastery, update_weakness
-from app.domain.enums import Difficulty
+from app.domain.enums import Difficulty, QuestionStatus
 from app.domain.mastery import TOPIC_ADVANCE_CEILING, difficulty_for_mastery
 from app.domain.questions import LOWEST_PRIORITY, Question
 from app.errors import CurriculumCompletedError, DomainRuleError, NoQuestionAvailableError
@@ -84,6 +85,7 @@ class AdaptiveTrainingEngine:
         self._attempts = StudentAttemptRepository(session)
         self._state = StudentStateRepository(session)
         self._sets = QuestionSetRepository(session)
+        self._bank = StudentBank(session)
         self._questions = QuestionRepository(session)
         self._curriculum = CurriculumRepository(session)
 
@@ -120,9 +122,12 @@ class AdaptiveTrainingEngine:
 
         open_attempt = self._attempts.open_attempt(run.id)
         if open_attempt is not None:
+            question = self._questions.get(open_attempt.question_id)
+            if question.status != QuestionStatus.APPROVED:
+                raise NoQuestionAvailableError("The outstanding question is no longer approved.")
             return ServedQuestion(
                 attempt=open_attempt,
-                question=self._questions.get(open_attempt.question_id),
+                question=question,
                 resumed=True,
             )
 
@@ -133,7 +138,7 @@ class AdaptiveTrainingEngine:
         set_version_id = run.set_version_id
         assert set_version_id is not None  # checked by the caller
 
-        servable = self._sets.servable_subtopic_ids(set_version_id)
+        servable = self._bank.servable_subtopic_ids(set_version_id)
         if not servable:
             raise NoQuestionAvailableError(
                 "This question set has no approved questions to serve.",
@@ -277,7 +282,7 @@ class AdaptiveTrainingEngine:
     ) -> tuple[QuestionRow, Difficulty] | None:
         """Best question for this subtopic, relaxing difficulty if the cell is empty."""
         for difficulty in difficulty_fallback_order(requested):
-            rows = self._sets.candidates_for_cell(
+            rows = self._bank.candidates_for_cell(
                 set_version_id, subtopic_id=subtopic_id, difficulty=difficulty
             )
             if not rows:

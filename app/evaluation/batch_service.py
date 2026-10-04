@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -38,6 +39,7 @@ from app.config import Settings, get_settings
 from app.domain.enums import EvaluationTrigger, JudgeBatchStatus, JudgeMetricId
 from app.domain.questions import Question
 from app.errors import AdaptiveTrainerError, ConfigurationError, DomainRuleError
+from app.evaluation.custom import CustomJudgeResult
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
 from app.evaluation.prompts import RUBRIC_VERSION, build_user_prompt
 from app.evaluation.schema import (
@@ -99,8 +101,13 @@ def record_evaluation(
     *,
     run_id: str,
     trigger: EvaluationTrigger,
+    custom_results: Sequence[CustomJudgeResult] = (),
 ) -> QuestionEvaluationRow:
     """Append one evaluation to a question's history, and usually make it current.
+
+    ``custom_results`` are the professor's rule judges on the same question
+    (:func:`app.evaluation.custom.run_custom_judges`), stored beside the metric
+    evaluation on the history row because they are not ``JudgeMetricId`` metrics.
 
     History is always appended: every evaluation is retained, including the
     failures, because "the judge could not answer on this date" is part of the
@@ -131,6 +138,7 @@ def record_evaluation(
             run_id=run_id,
             trigger=trigger,
             created_at=evaluation.created_at,
+            custom_results=[result.model_dump(mode="json") for result in custom_results],
         )
     )
     question = session.get(QuestionRow, question_id)

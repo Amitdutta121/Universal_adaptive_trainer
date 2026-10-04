@@ -117,6 +117,9 @@ export const qk = {
     all: ["setup"] as const,
     styles: (subject?: string | null) => ["setup", "styles", subject ?? null] as const,
     current: (curriculumVersionId: number) => ["setup", "current", curriculumVersionId] as const,
+    // One key per opening. A remount of that opening reads the same in-flight request.
+    suggestion: (curriculumVersionId: number, session: number) =>
+      ["setup", "suggestion", curriculumVersionId, session] as const,
   },
   rounds: {
     all: ["rounds"] as const,
@@ -368,6 +371,7 @@ export function useSubmitReview() {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: ["calibration"] });
       client.invalidateQueries({ queryKey: ["instructions"] });
+      client.invalidateQueries({ queryKey: qk.judgePrompts.all });
     },
   });
 }
@@ -1005,6 +1009,9 @@ export const judgePromptsQuery = () =>
   queryOptions({
     queryKey: qk.judgePrompts.list(),
     queryFn: () => unwrap(api.GET("/api/judge-prompts")),
+    // A review in another tab can relearn a judge; this tab cannot see that mutation.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
 export const useJudgePrompts = () => useQuery(judgePromptsQuery());
@@ -1174,6 +1181,10 @@ export const useNextQuestion = (trainingSessionId: number | null, { enabled = tr
     enabled: enabled && trainingSessionId !== null,
     retry: false,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.error instanceof ApiError && query.state.error.code === "no_question_available"
+        ? 10000
+        : false,
     queryFn: () =>
       unwrap(
         api.GET("/api/training-sessions/{training_session_id}/next", {
@@ -1295,10 +1306,21 @@ export const useStyles = (subject?: string | null, { enabled = true } = {}) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-/** Ask the AI for styles per subtopic and a target per cell. Persists nothing, so no invalidation. */
-export function useSetupSuggestion() {
-  return useMutation({
-    mutationFn: (curriculumVersionId: number) =>
+/**
+ * Ask the AI for styles per subtopic and a target per cell. Persists nothing.
+ *
+ * This is a query, not a mutation. The dialog mounts twice in development, and a
+ * mutation result from the first mount is discarded while a one-shot flag stops
+ * the second mount from asking again. A shared query keeps that one request and
+ * gives the result to the mount that stays on screen. `session` changes each
+ * time the professor opens the dialog, so the next opening asks again.
+ */
+export function useSetupSuggestion(curriculumVersionId: number, session: number) {
+  return useQuery({
+    queryKey: qk.setup.suggestion(curriculumVersionId, session),
+    enabled: session > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    queryFn: () =>
       unwrap(
         api.POST("/api/setup/suggest", {
           body: { curriculum_version_id: curriculumVersionId },

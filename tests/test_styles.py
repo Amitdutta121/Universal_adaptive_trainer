@@ -7,15 +7,25 @@ import contextlib
 import io
 from typing import Any
 
+import book_documents as docs
 import pytest
 from llm_fakes import as_live
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.coverage.schema import MIN_QUESTIONS_PER_CELL
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionType
 from app.errors import DomainRuleError, FeatureNotAvailableError, NotFoundError
-from app.persistence.models import CourseRow, CurriculumVersionRow, SubtopicRow, TopicRow
+from app.ingestion import BookImportService
+from app.persistence.models import (
+    CourseRow,
+    CurriculumVersionRow,
+    SubtopicEvidenceRow,
+    SubtopicRow,
+    TopicRow,
+)
+from app.persistence.repositories import BookStructureRepository
 from app.styles import MAX_CELL_TARGET, MIN_CELL_TARGET, get_library, suggest_setup
 from app.styles.python import PYTHON_STYLES
 
@@ -230,13 +240,9 @@ def test_suggestion_drops_unknown_styles_clamps_and_fills_gaps(session: Session)
         assert suggestion.style_ids, suggestion
         assert set(suggestion.style_ids) <= set(library)
         assert len(suggestion.style_ids) == len(set(suggestion.style_ids))
-        for difficulty in Difficulty:
-            assert any(
-                difficulty in library[style_id].difficulty_range
-                for style_id in suggestion.style_ids
-            ), (suggestion.subtopic_id, difficulty)
 
-    # The model's valid pick stays first; easy-only, so medium and hard styles were added.
+    # The model's valid pick stays first; easy-only, so a medium style was added.
+    # Hard was below zero, so it stays 0 and no hard style is added for that cell.
     assert by_id[while_loops.id].style_ids[0] == "py.predict_output"
     assert "py.made_up" not in by_id[while_loops.id].style_ids
     # No valid pick at all: chosen by fit, and said so.
@@ -246,9 +252,17 @@ def test_suggestion_drops_unknown_styles_clamps_and_fills_gaps(session: Session)
     targets = {(c.subtopic_id, c.difficulty): c.target for c in result.cell_targets}
     assert targets[(while_loops.id, Difficulty.EASY)] == MIN_CELL_TARGET
     assert targets[(while_loops.id, Difficulty.MEDIUM)] == MAX_CELL_TARGET
-    assert targets[(while_loops.id, Difficulty.HARD)] == MIN_CELL_TARGET
+    assert targets[(while_loops.id, Difficulty.HARD)] == 0
     assert targets[(for_loops.id, Difficulty.EASY)] == 4
-    assert all(MIN_CELL_TARGET <= t <= MAX_CELL_TARGET for t in targets.values())
+    for suggestion in result.subtopics:
+        for difficulty in Difficulty:
+            if targets[(suggestion.subtopic_id, difficulty)] == 0:
+                continue
+            assert any(
+                difficulty in library[style_id].difficulty_range
+                for style_id in suggestion.style_ids
+            ), (suggestion.subtopic_id, difficulty)
+    assert all(0 <= t <= MAX_CELL_TARGET for t in targets.values())
 
 
 def test_fallback_prefers_styles_whose_hints_match(session: Session) -> None:
@@ -286,3 +300,40 @@ def test_suggestion_refuses_unapproved_missing_and_unsupported(session: Session)
     with pytest.raises(FeatureNotAvailableError):
         suggest_setup(session, physics.id, client=fake)
     assert fake.calls == []
+
+
+def test_the_suggester_sees_the_lesson_and_keeps_hard_at_zero(
+    session: Session, settings: Settings
+) -> None:
+    version, (while_loops, *_rest) = make_taxonomy(session)
+    doc = {
+        "schema_version": "1",
+        "title": "One idea",
+        "chapters": [
+            {"sections": [{"text": "A name holds one value. Assigning again replaces that value."}]}
+        ],
+    }
+    book = BookImportService(session, settings).import_upload(
+        filename="one_idea.json", data=docs.to_bytes(doc)
+    )
+    session.commit()
+    section = BookStructureRepository(session).sections_in_book(book.id)[0]
+    session.add(
+        SubtopicEvidenceRow(
+            subtopic_id=while_loops.id,
+            book_id=book.id,
+            section_id=section.id,
+            candidate_label="assignment",
+        )
+    )
+    session.commit()
+    fake = FakeSuggester(
+        {"subtopics": [_entry(while_loops, ["py.predict_output"], easy=1, medium=1, hard=0)]}
+    )
+
+    result = suggest_setup(session, version.id, client=fake)
+
+    assert "A name holds one value." in fake.calls[0]["prompt"]
+    assert "set hard to 0" in fake.calls[0]["system"]
+    targets = {(c.subtopic_id, c.difficulty): c.target for c in result.cell_targets}
+    assert targets[(while_loops.id, Difficulty.HARD)] == 0

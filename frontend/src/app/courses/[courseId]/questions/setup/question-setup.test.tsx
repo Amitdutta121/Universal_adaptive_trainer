@@ -21,7 +21,6 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 
-const suggestMutate = vi.fn();
 const saveMutate = vi.fn();
 const hooks = {
   useApprovedCurriculum: vi.fn(),
@@ -33,14 +32,23 @@ const hooks = {
 vi.mock("@/lib/api/queries", () => ({
   useApprovedCurriculum: () => hooks.useApprovedCurriculum(),
   useCurrentSetup: (id: number | undefined) => hooks.useCurrentSetup(id),
-  useSetupSuggestion: () => hooks.useSetupSuggestion(),
+  useSetupSuggestion: (id: number, session: number) => hooks.useSetupSuggestion(id, session),
   useStyles: () => hooks.useStyles(),
   useSaveSetup: () => hooks.useSaveSetup(),
+  useCustomJudges: () => ({ data: { judges: [] }, isPending: false, error: null }),
+  useCreateCustomJudge: () => ({ error: null, isPending: false }),
+  useUpdateCustomJudge: () => ({ error: null, isPending: false }),
 }));
 
 import { QuestionSetupButton } from "./question-setup-button";
 
-const example = (prompt: string) => ({ prompt, answer: "42", grounding: "Section 3.1", lines: [], options: [] });
+const example = (prompt: string) => ({
+  prompt,
+  answer: "42",
+  grounding: "Section 3.1",
+  lines: [],
+  options: [],
+});
 
 const style = (id: string, name: string): QuestionStyle => ({
   id,
@@ -90,7 +98,11 @@ const SUGGESTION: SetupSuggestion = {
   curriculum_version_id: 3,
   subject: "intro_python",
   subtopics: [
-    { subtopic_id: 11, style_ids: ["py.trace"], reason: "Loops are learned by tracing iterations." },
+    {
+      subtopic_id: 11,
+      style_ids: ["py.trace"],
+      reason: "Loops are learned by tracing iterations.",
+    },
     { subtopic_id: 12, style_ids: ["py.fill"], reason: "String methods fit fill-in-the-line." },
   ],
   cell_targets: [
@@ -111,12 +123,15 @@ function mockReady({
   hooks.useApprovedCurriculum.mockReturnValue({ data: CURRICULUM, isPending: false });
   hooks.useCurrentSetup.mockReturnValue({ data: { setup: current } });
   hooks.useSetupSuggestion.mockReturnValue({
-    mutate: suggestMutate,
     data: suggestion,
     error: suggestError,
-    isPending: false,
+    isPending: !suggestion && !suggestError,
+    refetch: vi.fn(),
   });
-  hooks.useStyles.mockReturnValue({ data: { subject: "intro_python", styles: LIBRARY }, error: null });
+  hooks.useStyles.mockReturnValue({
+    data: { subject: "intro_python", styles: LIBRARY },
+    error: null,
+  });
   hooks.useSaveSetup.mockReturnValue({ mutate: saveMutate, isPending: false, error: null });
 }
 
@@ -137,7 +152,6 @@ async function openModal() {
 
 beforeEach(() => {
   for (const hook of Object.values(hooks)) hook.mockReset();
-  suggestMutate.mockReset();
   saveMutate.mockReset();
   push.mockReset();
 });
@@ -174,8 +188,7 @@ describe("QuestionSetupDialog", () => {
     mockReady();
     const { user, dialog } = await openModal();
 
-    expect(suggestMutate).toHaveBeenCalledTimes(1);
-    expect(suggestMutate).toHaveBeenCalledWith(3);
+    expect(hooks.useSetupSuggestion).toHaveBeenCalledWith(3, 1);
 
     const loops = within(dialog).getByRole("article", { name: "Loops" });
     expect(within(loops).getByText("Predict what the code prints")).toBeInTheDocument();
@@ -211,7 +224,9 @@ describe("QuestionSetupDialog", () => {
     mockReady();
     const { user, dialog } = await openModal();
 
-    await user.click(within(dialog).getByRole("button", { name: /use all remaining suggestions/i }));
+    await user.click(
+      within(dialog).getByRole("button", { name: /use all remaining suggestions/i }),
+    );
     expect(within(dialog).queryByRole("alert")).toBeNull();
 
     await user.click(within(dialog).getByRole("button", { name: /review targets/i }));

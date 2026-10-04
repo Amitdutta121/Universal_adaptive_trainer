@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 
 from app.domain.enums import QuestionType
+from app.evaluation.prompts import difficulty_bands
 from app.generation.principles import common_system
 from app.generation.spec import MAX_CLAIMED_SUBTOPICS, QuestionSpec
-from app.persistence.models import CurriculumVersionRow
+from app.persistence.models import CurriculumVersionRow, SubtopicRow
+from app.styles.schema import QuestionStyle
 from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 CLASSIFICATION_INSTRUCTION = f"""Classify your own question.
@@ -75,6 +77,52 @@ def render_taxonomy(version: CurriculumVersionRow) -> str:
     return "\n".join(lines)
 
 
+#: Characters of one accepted example question shown to the generator. Enough to show the
+#: level and shape the professor accepted, not so much that it is copied.
+EXAMPLE_PROMPT_CHARS = 600
+
+
+def render_round_target(
+    *,
+    subtopic: SubtopicRow,
+    topic_name: str,
+    style: QuestionStyle | None,
+    examples: list[str] | None = None,
+) -> str:
+    """The block a round spec adds: the subtopic to assess, the style, accepted examples.
+
+    A round is aimed (docs/QUESTION_SETUP_PLAN.md): unlike section-only generation, the
+    subtopic is part of the request, and the topic judge then checks the question really
+    assesses it. The model still classifies its own question; it is told the target id must
+    be among the ones it names.
+    """
+    description = f" -- {subtopic.description}" if subtopic.description else ""
+    lines = [
+        "--- target ---",
+        f"The question must assess this subtopic: [subtopic {subtopic.id}] {subtopic.name}"
+        f"{description} (topic: {topic_name}).",
+        f"Set topic_id to its topic and include {subtopic.id} in subtopic_ids.",
+    ]
+    if style is not None:
+        lines += [
+            "",
+            f"Write it in this question style: {style.name}.",
+            f"What the student does: {style.summary}",
+            f"How the answer is checked: {style.checked_by}",
+        ]
+    shown = [text.strip() for text in examples or [] if text and text.strip()]
+    if shown:
+        lines += [
+            "",
+            "The professor accepted these questions for the same subtopic and difficulty. "
+            "Match their level and quality; do not copy or paraphrase them.",
+        ]
+        for number, text in enumerate(shown, start=1):
+            lines.append(f"Example {number}: {text[:EXAMPLE_PROMPT_CHARS]}")
+    lines.append("--- end target ---")
+    return "\n".join(lines)
+
+
 def build_prompt(
     spec: QuestionSpec,
     *,
@@ -84,6 +132,8 @@ def build_prompt(
     type_instruction: str | None = None,
     instructor_feedback: str | None = None,
     profile: SubjectProfile = PYTHON_PROFILE,
+    target_block: str | None = None,
+    follow_up: str | None = None,
 ) -> tuple[str, str]:
     """Build the shared system instruction and one format-specific user prompt.
 
@@ -99,6 +149,13 @@ def build_prompt(
     prompt rather than seeded into the retry loop's ``--- correction ---`` block
     (:mod:`app.generation.attempts`), which is framed as "your previous answer
     was rejected" and is the wrong lifecycle for instructor intent.
+
+    ``target_block`` (:func:`render_round_target`) is set only for a round spec and goes
+    after the source text, before classification. Absent, the prompt is byte-for-byte the
+    section-only prompt.
+
+    ``follow_up`` is the hard-cell second step: a question that already passed the answer
+    check, with the instruction to make it harder. Absent, the prompt is unchanged.
     """
     feedback_block = ""
     if instructor_feedback and instructor_feedback.strip():
@@ -113,7 +170,18 @@ rule above. Do not reproduce the earlier question.
 {instructor_feedback.strip()}
 --- end instructor feedback ---"""
 
+    target_text = f"\n\n{target_block}" if target_block else ""
+    follow_up_block = ""
+    if follow_up and follow_up.strip():
+        follow_up_block = f"""
+
+--- make it harder ---
+{follow_up.strip()}
+--- end make it harder ---"""
     user = f"""Create a {spec.difficulty.value} {spec.question_type.value} question.
+
+Difficulty, for a student who has just studied the section below and nothing beyond it:
+{difficulty_bands(profile)}
 
 Source citation: {citation}
 
@@ -123,7 +191,7 @@ Type-specific requirements:
 Use this section text as the grounding source:
 --- section text ---
 {section_text}
---- end section text ---{feedback_block}
+--- end section text ---{feedback_block}{target_text}{follow_up_block}
 
 {CLASSIFICATION_INSTRUCTION}
 

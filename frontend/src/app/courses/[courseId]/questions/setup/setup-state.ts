@@ -80,7 +80,9 @@ export function initialChoices(
   const verdicts: Record<number, Record<string, Verdict>> = {};
   const added: Record<number, string[]> = {};
   if (!current) return { verdicts, added };
-  const previous = new Map(current.approved_styles.map((entry) => [entry.subtopic_id, entry.style_ids]));
+  const previous = new Map(
+    current.approved_styles.map((entry) => [entry.subtopic_id, entry.style_ids]),
+  );
   for (const topic of topics) {
     for (const subtopic of topic.subtopics) {
       const styleIds = previous.get(subtopic.id) ?? [];
@@ -118,7 +120,11 @@ export function addStyle(choices: SetupChoices, subtopicId: number, styleId: str
   return { ...choices, added: { ...choices.added, [subtopicId]: [...current, styleId] } };
 }
 
-export function removeStyle(choices: SetupChoices, subtopicId: number, styleId: string): SetupChoices {
+export function removeStyle(
+  choices: SetupChoices,
+  subtopicId: number,
+  styleId: string,
+): SetupChoices {
   const current = choices.added[subtopicId] ?? [];
   return {
     ...choices,
@@ -127,7 +133,10 @@ export function removeStyle(choices: SetupChoices, subtopicId: number, styleId: 
 }
 
 /** Approve every suggested style the professor has not decided yet; skips are kept. */
-export function approveAllUndecided(choices: SetupChoices, topics: readonly SetupTopic[]): SetupChoices {
+export function approveAllUndecided(
+  choices: SetupChoices,
+  topics: readonly SetupTopic[],
+): SetupChoices {
   const verdicts: Record<number, Record<string, Verdict>> = { ...choices.verdicts };
   for (const topic of topics) {
     for (const subtopic of topic.subtopics) {

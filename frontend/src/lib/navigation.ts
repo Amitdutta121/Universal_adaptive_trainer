@@ -84,7 +84,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "judges",
     label: "Judges",
     path: "/judges",
-    summary: "The four advisory reviewers, and the prompt each one follows.",
+    summary: "The difficulty judge, the topic-alignment judge, and this taxonomy's custom rules.",
     icon: Scale,
   },
   {

@@ -142,6 +142,20 @@ describe("JudgeRail", () => {
 });
 
 describe("ReviewScreen verdict", () => {
+  it("requires explicit confirmation even when both judge presets look correct", async () => {
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+    const submit = screen.getByRole("button", { name: /Accept and continue/ });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(submit);
+    expect(submitReview).toHaveBeenCalledWith({
+      questionId: 42,
+      body: { decision: "approve", corrected_difficulty: "hard", corrected_subtopic_ids: [2] },
+    });
+  });
   it("presets the judge's difficulty and subtopics and sends the corrected values", async () => {
     const user = userEvent.setup();
     render(<ReviewScreen />);
@@ -154,6 +168,7 @@ describe("ReviewScreen verdict", () => {
     expect(screen.getByRole("button", { name: "Subtopics" })).toHaveTextContent("Printing");
 
     await user.click(within(difficulty).getByRole("radio", { name: "Medium" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
     await user.click(screen.getByRole("button", { name: /Accept and continue/ }));
 
     expect(submitReview).toHaveBeenCalledWith({
@@ -173,6 +188,9 @@ describe("ReviewScreen verdict", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reject" }));
     const submit = screen.getByRole("button", { name: /Reject and continue/ });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
     expect(submit).toBeEnabled();
     await user.type(screen.getByRole("textbox", { name: "Comment" }), "Off topic");
     await user.click(submit);

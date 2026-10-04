@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The child review components render deep trees that need a full QuestionDetail;
 // this test is about QuestionReview's own wiring (optional onGenerateAnother, the
@@ -14,26 +15,29 @@ vi.mock("@/app/courses/[courseId]/review/components/review-feedback", () => ({
   ValidationSummary: () => null,
 }));
 vi.mock("@/app/courses/[courseId]/review/use-review-form", () => ({
-  useReviewForm: () => ({
-    decision: "approve",
-    effectiveDecision: "approve",
-    reasons: [],
-    changedFields: [],
-    comment: "",
-    isInlineEditing: false,
-    promptEdit: "",
-    referenceEdit: "",
-    testsEdit: "",
-    setDecision: vi.fn(),
-    setReasons: vi.fn(),
-    setComment: vi.fn(),
-    setPromptEdit: vi.fn(),
-    setReferenceEdit: vi.fn(),
-    setTestsEdit: vi.fn(),
-  }),
+  useReviewForm: () => {
+    const [decision, setDecision] = useState<"approve" | "reject" | "edit">("approve");
+    const [comment, setComment] = useState("");
+    return {
+      decision,
+      effectiveDecision: decision,
+      changedFields: [] as string[],
+      comment,
+      isInlineEditing: decision === "edit",
+      promptEdit: "",
+      referenceEdit: "",
+      testsEdit: "",
+      setDecision,
+      setComment,
+      setPromptEdit: vi.fn(),
+      setReferenceEdit: vi.fn(),
+      setTestsEdit: vi.fn(),
+    };
+  },
 }));
 
 const regenerateMutateAsync = vi.fn();
+const submitReview = vi.fn();
 const useRegenerateWithFeedback = vi.fn(() => ({
   mutateAsync: regenerateMutateAsync,
   isPending: false,
@@ -54,7 +58,7 @@ vi.mock("@/lib/api/queries", () => ({
     isError: false,
     error: null,
   }),
-  useSubmitReview: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSubmitReview: () => ({ mutateAsync: submitReview, isPending: false }),
   useRegenerateWithFeedback: () => useRegenerateWithFeedback(),
 }));
 
@@ -63,6 +67,12 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { QuestionReview } from "./question-review";
 
 describe("QuestionReview", () => {
+  beforeEach(() => {
+    submitReview.mockReset();
+    submitReview.mockResolvedValue({});
+    regenerateMutateAsync.mockReset();
+  });
+
   it("hides Skip when onGenerateAnother is not given", () => {
     render(<QuestionReview questionId={1} />);
     expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
@@ -95,5 +105,27 @@ describe("QuestionReview", () => {
       feedback: "make the distractors subtler",
     });
     expect(onRegenerated).toHaveBeenCalledWith(42);
+  });
+
+  it("rejects with an optional one-line comment and no reason checklist", async () => {
+    const user = userEvent.setup();
+    render(<QuestionReview questionId={1} />);
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/why are you rejecting/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    const submit = screen.getByRole("button", { name: /Reject and continue/ });
+    expect(submit).toBeEnabled();
+
+    await user.type(screen.getByRole("textbox", { name: "Comment" }), "Off topic");
+    await user.click(submit);
+
+    expect(submitReview).toHaveBeenCalledWith({
+      questionId: 1,
+      body: { decision: "reject", comment: "Off topic" },
+    });
+    expect(submitReview.mock.calls[0][0].body).not.toHaveProperty("reasons");
   });
 });

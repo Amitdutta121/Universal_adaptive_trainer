@@ -2,53 +2,49 @@
 
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { reviewReasonOptions } from "../review-reasons";
-import {
-  DECISIONS,
-  type QuestionDetail,
-  REASON_LABEL,
-  type RejectionReason,
-  type ReviewDecision,
-} from "../review-types";
+import { Input } from "@/components/ui/input";
+import { DECISIONS, type ReviewDecision } from "../review-types";
 
 type ReviewActionBarProps = {
-  detail: QuestionDetail;
   decision: ReviewDecision;
   effectiveDecision: ReviewDecision;
-  reasons: RejectionReason[];
   changedFields: string[];
   comment: string;
   isSubmitting: boolean;
   canSubmit: boolean;
-  canReject: boolean;
   onDecisionChange: (decision: ReviewDecision) => void;
-  onReasonsChange: (reasons: RejectionReason[]) => void;
   onCommentChange: (value: string) => void;
   onSubmit: () => void;
   onSkip?: () => void;
 };
 
+/**
+ * Verdict controls for a single generated question (outside the review queue).
+ * Reject takes an optional one-line comment. Edit stays a peer action.
+ */
 export function ReviewActionBar({
-  detail,
   decision,
   effectiveDecision,
-  reasons,
   changedFields,
   comment,
   isSubmitting,
   canSubmit,
-  canReject,
   onDecisionChange,
-  onReasonsChange,
   onCommentChange,
   onSubmit,
   onSkip,
 }: ReviewActionBarProps) {
+  const submitLabel = isSubmitting
+    ? "Saving..."
+    : effectiveDecision === "reject"
+      ? "Reject and continue"
+      : effectiveDecision === "edit"
+        ? "Save and approve"
+        : "Approve and continue";
+
   return (
     <div className="review-sticky rounded-[1rem] border px-5 py-4">
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           {DECISIONS.map((value) => {
             const active = decision === value;
@@ -73,71 +69,29 @@ export function ReviewActionBar({
           <div className="ml-auto flex flex-wrap items-center gap-2 text-[var(--review-muted)] text-xs">
             <span>decision: {effectiveDecision}</span>
             <span>-</span>
-            <span>reasons: {reasons.length}</span>
-            <span>-</span>
             <span>changed_fields: {changedFields.join(", ") || "none"}</span>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="review-panel border">
-            <CardHeader>
-              <div className="review-eyebrow">Reasons</div>
-              <CardTitle>Why are you rejecting?</CardTitle>
-              <CardDescription>Required to reject, optional to edit.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-2 sm:grid-cols-2">
-              {reviewReasonOptions(detail.question.question_type).map((reason) => {
-                const checked = reasons.includes(reason);
-                return (
-                  <label key={reason} className="review-reason-option" data-checked={checked}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(event) =>
-                        onReasonsChange(
-                          event.target.checked
-                            ? [...reasons, reason]
-                            : reasons.filter((item) => item !== reason),
-                        )
-                      }
-                    />
-                    <span className="text-sm">{REASON_LABEL[reason]}</span>
-                  </label>
-                );
-              })}
-            </CardContent>
-          </Card>
+        <div className="flex flex-wrap items-center gap-2">
+          {effectiveDecision === "reject" || effectiveDecision === "edit" ? (
+            <Input
+              value={comment}
+              onChange={(event) => onCommentChange(event.target.value)}
+              placeholder={
+                effectiveDecision === "reject"
+                  ? "Why reject? (optional)"
+                  : "What did you change? (optional)"
+              }
+              aria-label="Comment"
+              className="h-9 min-w-56 flex-1"
+            />
+          ) : (
+            <div className="flex-1" />
+          )}
 
-          <Card className="review-panel border">
-            <CardHeader>
-              <div className="review-eyebrow">Comment</div>
-              <CardTitle>What should change?</CardTitle>
-              <CardDescription>
-                Quoted back to the learners later; say what should change.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                rows={5}
-                value={comment}
-                onChange={(event) => onCommentChange(event.target.value)}
-                placeholder="Say what is wrong or what should be better."
-                className="review-textarea"
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
           <Button onClick={onSubmit} disabled={!canSubmit || isSubmitting}>
-            {isSubmitting
-              ? "Saving..."
-              : effectiveDecision === "reject"
-                ? "Reject and continue"
-                : effectiveDecision === "edit"
-                  ? "Save and approve"
-                  : "Approve and continue"}
+            {submitLabel}
             <span className="review-kbd">Enter</span>
           </Button>
           {onSkip ? (
@@ -146,12 +100,12 @@ export function ReviewActionBar({
               <ChevronRight className="size-4" />
             </Button>
           ) : null}
-          {effectiveDecision === "reject" && !canReject ? (
-            <span className="text-[var(--review-muted)] text-xs">
-              Reject stays disabled until you choose at least one reason.
-            </span>
-          ) : null}
         </div>
+        {effectiveDecision === "edit" && !canSubmit ? (
+          <p className="text-[var(--review-muted)] text-xs">
+            Change the prompt, solution or tests above to save an edit.
+          </p>
+        ) : null}
       </div>
     </div>
   );

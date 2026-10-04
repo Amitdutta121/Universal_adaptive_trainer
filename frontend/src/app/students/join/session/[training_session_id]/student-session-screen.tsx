@@ -240,9 +240,7 @@ function PastQuestionSheet({
               <Badge variant="outline">Attempt #{attempt.id}</Badge>
               <Badge variant="outline">{attempt.served_difficulty}</Badge>
               {attempt.question_type ? (
-                <Badge variant="outline">
-                  {questionTypeLabel(attempt.question_type)}
-                </Badge>
+                <Badge variant="outline">{questionTypeLabel(attempt.question_type)}</Badge>
               ) : null}
               <Badge
                 variant={
@@ -843,10 +841,27 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             {unavailable ? (
               <Alert>
                 <AlertCircle />
-                <AlertTitle>Nothing to serve</AlertTitle>
+                <AlertTitle>
+                  {unavailable.code === "curriculum_completed"
+                    ? "Curriculum completed"
+                    : "Waiting for more questions"}
+                </AlertTitle>
                 <AlertDescription>
                   <p>{unavailable.message}</p>
                   {unavailable.detail ? <p>{unavailable.detail}</p> : null}
+                  {unavailable.code === "no_question_available" ? (
+                    <div className="space-y-2">
+                      <p>This page checks for approved questions automatically.</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentQuestion.isFetching}
+                        onClick={() => void currentQuestion.refetch()}
+                      >
+                        Check again
+                      </Button>
+                    </div>
+                  ) : null}
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -869,10 +884,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                       {currentQuestion.data.served_difficulty}
                     </Badge>
                     {currentQuestion.data.question_type ? (
-                      <Badge
-                        variant="outline"
-                        className="rounded-full bg-background/80 px-3 py-1"
-                      >
+                      <Badge variant="outline" className="rounded-full bg-background/80 px-3 py-1">
                         {questionTypeLabel(currentQuestion.data.question_type)}
                       </Badge>
                     ) : null}

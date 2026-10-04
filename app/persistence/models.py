@@ -10,8 +10,9 @@ needs them.
 from __future__ import annotations
 
 import secrets
+import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
@@ -19,6 +20,7 @@ from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Dialect,
     Float,
     ForeignKey,
     Integer,
@@ -68,9 +70,25 @@ from app.persistence.types import (
     StrEnumType,
 )
 
+_now_lock = threading.Lock()
+_last_now = datetime.min.replace(tzinfo=UTC)
+
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    """UTC time strictly later than the previous stamp from this process.
+
+    Professor reviews are paired with the evaluation that preceded them by
+    ``created_at``. A stalled clock (Windows often repeats a timestamp for about
+    a millisecond) would let a later re-judge share the review's stamp and be
+    read as the verdict the professor actually saw.
+    """
+    global _last_now
+    with _now_lock:
+        current = datetime.now(UTC)
+        if current <= _last_now:
+            current = _last_now + timedelta(microseconds=1)
+        _last_now = current
+        return current
 
 
 def _new_resume_token() -> str:
@@ -83,6 +101,18 @@ def _new_resume_token() -> str:
     would then reject.
     """
     return secrets.token_urlsafe(32)
+
+
+class _NullableReviewIds(JsonList):
+    """Only explicit review corrections preserve SQL NULL as no observation."""
+
+    cache_ok = True
+
+    def process_bind_param(self, value: list | None, dialect: Dialect) -> str | None:
+        return None if value is None else super().process_bind_param(value, dialect)
+
+    def process_result_value(self, value: str | None, dialect: Dialect) -> list | None:
+        return None if value is None else super().process_result_value(value, dialect)
 
 
 class TimestampMixin:
@@ -474,6 +504,15 @@ class QuestionRow(TimestampMixin, Base):
         StrEnumType(QuestionStatus, 32), default=QuestionStatus.GENERATED
     )
 
+    #: Router provenance, independent of later professor approval/rejection.
+    trust_provenance: Mapped[str | None] = mapped_column(String(32), default=None)
+    trust_scope_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    trust_sequence: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Frozen judge/rule evidence at routing, protected from later re-evaluation.
+    trust_snapshot: Mapped[dict | None] = mapped_column(
+        "trust_snapshot_json", JsonObject, default=None
+    )
+
     prompt: Mapped[str] = mapped_column(Text)
     reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     tests: Mapped[str | None] = mapped_column(Text, default=None)
@@ -691,6 +730,14 @@ class QuestionEvaluationRow(TimestampMixin, Base):
     question: Mapped[QuestionRow] = relationship(back_populates="evaluations")
 
 
+class JudgeTrustCounterRow(Base):
+    """Atomic eligible-question sequence per versioned course/taxonomy/style scope."""
+
+    __tablename__ = "judge_trust_counters"
+    scope_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    eligible_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class JudgeBatchRunRow(TimestampMixin, Base):
     """One bulk judge re-run over the question bank (ADR-030).
 
@@ -753,11 +800,10 @@ class ProfessorReviewRow(TimestampMixin, Base):
     corrected_difficulty: Mapped[Difficulty | None] = mapped_column(
         StrEnumType(Difficulty, 16), default=None
     )
-    #: The subtopic ids the professor says the question exercises. Empty means no
-    #: correction was given: a question always has at least one subtopic, so an empty
-    #: correction is not a value the API accepts.
-    corrected_subtopic_ids: Mapped[list[int]] = mapped_column(
-        "corrected_subtopic_ids_json", JsonList, default=list, nullable=True
+    #: Explicit professor classification. NULL means it was not confirmed;
+    #: historical empty lists also carry no observation.
+    corrected_subtopic_ids: Mapped[list[int] | None] = mapped_column(
+        "corrected_subtopic_ids_json", _NullableReviewIds, default=None, nullable=True
     )
 
     question: Mapped[QuestionRow] = relationship(back_populates="reviews")
@@ -1046,6 +1092,8 @@ class GenerationRoundRow(TimestampMixin, Base):
     ``targets`` holds one entry per question to generate:
     ``{"subtopic_id": int, "difficulty": str, "style_id": str}``. ``produced`` counts stored
     questions, ``dropped`` the targets abandoned after the last retry (never stored).
+    ``skipped`` counts hard targets the lesson cannot support: one judge call, no drafts,
+    and not a drop. ``skip_reason`` is that judge's reason.
     """
 
     __tablename__ = "generation_rounds"
@@ -1068,6 +1116,10 @@ class GenerationRoundRow(TimestampMixin, Base):
     requested: Mapped[int] = mapped_column(Integer, default=0)
     produced: Mapped[int] = mapped_column(Integer, default=0)
     dropped: Mapped[int] = mapped_column(Integer, default=0)
+    #: Hard targets the lesson cannot support. Not stored, and not a drop.
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    #: Why those hard targets were skipped, in the judge's words.
+    skip_reason: Mapped[str | None] = mapped_column(Text, default=None)
     #: Why the round failed, in the professor's terms. Never a credential.
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

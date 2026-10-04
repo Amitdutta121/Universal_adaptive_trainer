@@ -858,31 +858,6 @@
     line-height: 1.55;
   }
 
-  .review-reason-option {
-    display: flex;
-    gap: 0.65rem;
-    align-items: flex-start;
-    border: 1px solid var(--review-border);
-    border-radius: 0.75rem;
-    padding: 0.8rem 0.9rem;
-    background: var(--review-panel);
-    transition:
-      border-color 140ms ease,
-      background-color 140ms ease,
-      box-shadow 140ms ease;
-  }
-
-  .review-reason-option[data-checked="true"] {
-    background: var(--review-critical-soft);
-    border-color: color-mix(in oklch, var(--review-critical) 28%, var(--review-border));
-    box-shadow: var(--review-shadow);
-  }
-
-  .review-reason-option input {
-    margin-top: 0.12rem;
-    accent-color: var(--review-critical);
-  }
-
   .review-kbd {
     font-family: var(--font-plex-mono), monospace;
     font-size: 0.68rem;

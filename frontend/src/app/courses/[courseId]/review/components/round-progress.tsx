@@ -27,6 +27,12 @@ export function NextRoundButton({
   );
 }
 
+function counts(round: GenerationRound): string {
+  const skipped = round.skipped ?? 0;
+  const skip = skipped > 0 ? `, skipped ${skipped}` : "";
+  return `produced ${round.produced}, dropped ${round.dropped}${skip} of ${round.requested}`;
+}
+
 /** One line under the header while a round generates, and its outcome once it ends. */
 export function RoundProgressStrip({
   roundId,
@@ -42,7 +48,7 @@ export function RoundProgressStrip({
   if (roundId == null) return null;
 
   const active = round ? round.status === "queued" || round.status === "running" : !error;
-  const settled = round ? round.produced + round.dropped : 0;
+  const settled = round ? round.produced + round.dropped + (round.skipped ?? 0) : 0;
   const tone =
     error || round?.status === "failed" ? "critical" : round?.status === "done" ? "ok" : "muted";
 
@@ -54,9 +60,10 @@ export function RoundProgressStrip({
   } else if (round.status === "queued") {
     message = `Round ${round.number} queued: ${round.requested} questions requested`;
   } else if (round.status === "running") {
-    message = `Generating round ${round.number}: produced ${round.produced}, dropped ${round.dropped} of ${round.requested}`;
+    message = `Generating round ${round.number}: ${counts(round)}`;
   } else if (round.status === "done") {
-    message = `Round ${round.number} done: produced ${round.produced}, dropped ${round.dropped} of ${round.requested}. New questions are in the queue.`;
+    const why = round.skip_reason ? ` ${round.skip_reason}` : "";
+    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.`;
   } else {
     message = `Round ${round.number} failed${round.error ? `: ${round.error}` : "."}`;
   }

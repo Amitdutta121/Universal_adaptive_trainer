@@ -86,7 +86,7 @@ class TestMigrations:
     def test_a_fresh_database_is_stamped_at_head(self, engine: Engine) -> None:
         with engine.connect() as connection:
             version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "0005_question_setup"
+        assert version == "0006_judge_trust"
 
     def test_a_pre_migration_database_is_upgraded_keeping_its_rows(self, engine: Engine) -> None:
         # Rebuild the shape a pre-Alembic database had -- no courses table, no

@@ -99,4 +99,3 @@ export function presentTests(
 export function explanation(detail: QuestionDetail) {
   return presentText(detail.content?.explanation);
 }
-

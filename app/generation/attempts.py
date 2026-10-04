@@ -25,7 +25,8 @@ those failures back fixed them.
 What this is *not*: repair. Nothing here edits the model's answer. The defect is
 stated and the model writes again, so a corrected question is still its own. A
 question still defective after the cap is returned as it stands, because the
-caller stores it either way.
+caller stores it either way -- except a question-setup round, which judges inside
+the loop and drops what is still defective (``app.generation.rounds``).
 """
 
 from __future__ import annotations
@@ -71,6 +72,11 @@ MALFORMED_CORRECTION = (
     "object whose fields are the question itself, with every required field "
     "filled in."
 )
+
+
+#: Judges one otherwise-clean question inside the loop and returns the checks it failed;
+#: empty means it passes. See ``review`` on :func:`generate_with_retries`.
+QuestionReview = Callable[[Question], list[QuestionCheck]]
 
 
 class QuestionValidator(Protocol):
@@ -185,6 +191,7 @@ def generate_with_retries(
     build_question: Callable[[TaxonomyClaim, TaxonomyClaimOutcome], Question],
     validator: QuestionValidator | None = None,
     max_attempts: int = MAX_GENERATION_ATTEMPTS,
+    review: QuestionReview | None = None,
 ) -> tuple[Question, list[GenerationAttempt]]:
     """Return the final question, carrying its attempts and validation report.
 
@@ -197,6 +204,13 @@ def generate_with_retries(
     Returns as soon as an attempt is clean. After ``max_attempts`` the last
     question is returned with its defects recorded -- the question is real, and
     both what is wrong with it and how it got there are the caller's to store.
+
+    ``review`` is the question-setup round hook (docs/QUESTION_SETUP_PLAN.md): it runs only
+    once an attempt has passed the claim and deterministic checks, and returns the judge
+    checks that attempt failed (difficulty, topic, custom rules). A failed review is retried
+    with its reason like any other defect and recorded on the attempt's ``failed_checks``.
+    Callers that pass none -- every path outside a round -- behave exactly as before. Whether
+    the returned question is usable is ``attempts[-1].usable``.
 
     A reply that is not a question at all costs an attempt like any other defect,
     and is recorded as one. Only if *every* attempt was malformed is there no
@@ -283,6 +297,11 @@ def generate_with_retries(
             attempt.failed_checks = failed
 
         problems = _claim_instructions(outcome) + _check_instructions(failed)
+        if not problems and review is not None:
+            # Judges cost calls, so they only see an attempt that is otherwise clean.
+            judged = review(question)
+            attempt.failed_checks = failed + judged
+            problems = _check_instructions(judged)
         if not problems:
             break
 

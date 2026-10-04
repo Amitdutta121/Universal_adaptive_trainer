@@ -35,9 +35,9 @@ from app.calibration.schema import (
     professor_label,
     quadrant_cell,
 )
-from app.domain.enums import CalibrationLabel, JudgeMetricId, QuadrantCell
-from app.evaluation import MetricStatus, PedagogicalEvaluation
-from app.persistence.models import ProfessorReviewRow, ReviewOutcomeRow
+from app.domain.enums import CalibrationLabel, Difficulty, JudgeMetricId, QuadrantCell
+from app.evaluation import MetricResult, MetricStatus, PedagogicalEvaluation
+from app.persistence.models import ProfessorReviewRow, QuestionRow, ReviewOutcomeRow
 from app.persistence.repositories import ReviewOutcomeRepository
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,10 @@ class ReviewOutcome:
     @property
     def calls_for_judge_repair(self) -> bool:
         """The two sides disagreed, so a judge is wrong about something."""
-        return self.cell in (QuadrantCell.MISSED, QuadrantCell.FALSE_ALARM)
+        return bool(self.attributed_metrics) or self.cell in (
+            QuadrantCell.MISSED,
+            QuadrantCell.FALSE_ALARM,
+        )
 
 
 def route_review_outcome(session: Session, review: ProfessorReviewRow) -> ReviewOutcome | None:
@@ -110,7 +113,14 @@ def route_review_outcome(session: Session, review: ProfessorReviewRow) -> Review
 
     professor = professor_label(review.decision)
     cell = quadrant_cell(judge, professor)
-    attributed = _attributed_metrics(cell, evaluation, set(review.reasons))
+    observed = _observed_faults(evaluation, review, question)
+    explicit = review.corrected_difficulty is not None or bool(review.corrected_subtopic_ids)
+    inferred = [] if explicit else _attributed_metrics(cell, evaluation, set(review.reasons))
+    # Explicit reviews measure only confirmed judges; reason-code inference is
+    # retained for legacy reviews without observed confirmations.
+    attributed = [
+        metric for metric in PROFESSOR_OBJECTIONS if observed.get(metric, metric in inferred)
+    ]
 
     row = repository.add(
         ReviewOutcomeRow(
@@ -168,6 +178,53 @@ def _attributed_metrics(
         if at_fault:
             attributed.append(metric)
     return attributed
+
+
+def _observed_faults(
+    evaluation: PedagogicalEvaluation, review: ProfessorReviewRow, question: QuestionRow
+) -> dict[JudgeMetricId, bool]:
+    """Fault per judge, read from what the professor *corrected* rather than cited.
+
+    The review form presets difficulty and subtopics to the judges' own answers, so a
+    submitted correction is a direct observation: the difficulty judge is at fault iff it
+    would assign a different level than ``corrected_difficulty``, and the subtopic judge
+    iff its set differs from ``corrected_subtopic_ids``. Unlike the reason-code inference
+    this holds in every cell -- a professor who approves a question while moving it from
+    easy to medium has still contradicted the difficulty judge.
+
+    Only the judges with a correction to compare against appear in the result; a judge
+    that did not answer, or that was not run, is absent (no measurement, no fault).
+    An empty dict means the review carried no corrections (an older client or row).
+    """
+    faults: dict[JudgeMetricId, bool] = {}
+    if review.corrected_difficulty is not None:
+        result = _answered(evaluation, JudgeMetricId.DIFFICULTY)
+        if result is not None:
+            judged = result.proposed_difficulty
+            if judged is None and result.passed and question.difficulty is not None:
+                # A passing verdict without the level it would assign agreed with the
+                # question's own difficulty (older blobs did not store the level).
+                judged = Difficulty((question.spec or {}).get("difficulty", question.difficulty))
+            if judged is not None:
+                faults[JudgeMetricId.DIFFICULTY] = judged != Difficulty(review.corrected_difficulty)
+    corrected_subtopics = set(review.corrected_subtopic_ids or [])
+    if corrected_subtopics:
+        result = _answered(evaluation, JudgeMetricId.SUBTOPIC)
+        if result is not None:
+            proposed = set(result.proposed_subtopic_ids)
+            if not proposed and result.passed:
+                proposed = set((question.spec or {}).get("subtopic_ids", question.subtopic_ids))
+            if proposed:
+                faults[JudgeMetricId.SUBTOPIC] = proposed != corrected_subtopics
+    return faults
+
+
+def _answered(evaluation: PedagogicalEvaluation, metric: JudgeMetricId) -> MetricResult | None:
+    """The metric's result when its judge ran and answered, else ``None``."""
+    result = evaluation.metric(metric)
+    if result is None or result.status is not MetricStatus.COMPLETED or result.passed is None:
+        return None
+    return result
 
 
 def _rationales_for(

@@ -47,6 +47,26 @@ class QuestionSpec(BaseModel):
     difficulty: Difficulty
     source_section_ids: list[int] = Field(min_length=1, max_length=1)
     seed: str | None = None
+    #: Question setup rounds only (docs/QUESTION_SETUP_PLAN.md): the subtopic the question is
+    #: *asked* to assess, and the library style it must be written in. ``None`` on every
+    #: section-only request, which is generated exactly as before. A spec with a target is a
+    #: *round spec*: the generator states the target, and the round pipeline judges it inside
+    #: the retry loop and drops it on final failure instead of storing it.
+    target_subtopic_id: int | None = None
+    style_id: str | None = None
+
+    @property
+    def is_round_spec(self) -> bool:
+        return self.target_subtopic_id is not None
+
+    def stored(self) -> dict[str, object]:
+        """The spec as frozen on the question.
+
+        A section-only spec omits the two round fields, so questions generated outside a
+        round keep exactly the ``spec_json`` they had before rounds existed.
+        """
+        exclude = None if self.is_round_spec else {"target_subtopic_id", "style_id"}
+        return self.model_dump(mode="json", exclude=exclude)
 
 
 class SubtopicOwner(BaseModel):
@@ -111,12 +131,18 @@ def build_question_spec(
     difficulty: Difficulty,
     source_section_ids: list[int],
     seed: str | None = None,
+    target_subtopic_id: int | None = None,
+    style_id: str | None = None,
 ) -> QuestionSpec:
     """Resolve and validate one generation request before the model runs.
 
+    ``target_subtopic_id`` / ``style_id`` make it a round spec; the target must be a
+    subtopic of this version.
+
     Raises:
         InvalidQuestionSpecError: the curriculum is not approved, a source
-            section is missing, or the question type is not built yet.
+            section is missing, the target subtopic is not in the version, or the
+            question type is not built yet.
     """
     from app.question_types import implemented_types
 
@@ -125,7 +151,16 @@ def build_question_spec(
             "This question type cannot be generated yet.",
             detail=f"{question_type.value} has no module in app/question_types.",
         )
-    require_approved_version(session, curriculum_version_id)
+    version = require_approved_version(session, curriculum_version_id)
+    if target_subtopic_id is not None and not any(
+        subtopic.id == target_subtopic_id
+        for topic in version.topics
+        for subtopic in topic.subtopics
+    ):
+        raise InvalidQuestionSpecError(
+            "The target subtopic is not part of this taxonomy.",
+            detail=f"Subtopic {target_subtopic_id} is not in version {curriculum_version_id}.",
+        )
     structure = BookStructureRepository(session)
 
     for section_id in source_section_ids:
@@ -144,6 +179,8 @@ def build_question_spec(
             difficulty=difficulty,
             source_section_ids=source_section_ids,
             seed=seed,
+            target_subtopic_id=target_subtopic_id,
+            style_id=style_id,
         )
     except ValidationError as exc:
         raise InvalidQuestionSpecError(

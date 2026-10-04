@@ -17,8 +17,17 @@
    weighted down for that cell; accepted questions become examples for that cell.
 7. Review queue → **"Generate next round"** button: 10 more, only for cells still below target.
 
-Out of this plan (later milestone): trusted-judge auto-accept + 10% audit (steps 16–18),
-look-alike filter, live student refill.
+The full implementation also includes trusted-judge auto-accept with a 10% professor audit
+(steps 16–18), approved-bank student serving, and background live refill (steps 19–20).
+Trust starts at 90% agreement over at least 20 explicit observations, scoped to the taxonomy,
+style and judge version. An audit disagreement removes trust. Automatic approvals are never
+professor observations. Difficulty/subtopics must be explicitly confirmed or corrected before
+review submission; untouched presets are not agreement evidence.
+
+Live classroom inventories may include newly approved bank questions; ordinary frozen sets
+keep their snapshots. Refill targets scarce unseen cells even when the professor's total
+coverage target is already met. Pending review and audit questions are never student-eligible.
+Near-duplicate filtering is a separate feature, outside the original 20-step workflow.
 
 ## Current state (verified 2026-10-03)
 
@@ -130,3 +139,21 @@ Phase 0 stubs, so agents code against the stub.
 Merge worktrees; run `pytest`, typecheck, `biome lint`, vitest; end-to-end in Chrome on Python sample:
 setup → round 1 lands in queue → correct one difficulty, reject one → next round → confirm rejected style
 weighted down and attribution rows observed. Record in `docs/` + commit.
+
+## Observed drop rate (2026-10-03)
+
+Course **Python setup check** (course 8, curriculum version 13 “Two skills”, setup 2). A drop is a
+generation target that failed its checks three times and was never stored. Professor rejections of
+questions that did reach the queue are not drops.
+
+| Round | Dropped | Asked for | Rate |
+|---|---|---|---|
+| 1 | 2 | 10 | 20% |
+| 2 | 4 | 7 | 57% |
+| 3 | 3 | 5 | 60% |
+| All three | 9 | 22 | 41% |
+
+The rate rose because later rounds were filling cells still below target, mostly the hard ones.
+Those kept failing the difficulty judge (rated easier than the target) or producing a reference
+solution that did not pass its own tests. Round 1’s two drops were an output mismatch (extra
+newline) and a hard target the judge called easy.

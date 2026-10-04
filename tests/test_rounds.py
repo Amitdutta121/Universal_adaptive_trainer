@@ -1,0 +1,835 @@
+"""Question setup rounds (docs/QUESTION_SETUP_PLAN.md, agent B).
+
+Round questions are judged inside the retry loop and dropped after the last attempt; rounds
+target only cells below their target and draw styles by reject-weighted chance; ``run_round``
+moves a round through its statuses; the routes queue and report a round.
+"""
+
+from __future__ import annotations
+
+import random
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any
+
+import book_documents as docs
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from llm_fakes import MetricJudgeClient
+from pydantic import BaseModel
+from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session
+
+from app.config import Settings
+from app.domain.enums import (
+    CurriculumStatus,
+    CustomJudgeKind,
+    Difficulty,
+    QuestionStatus,
+    QuestionType,
+    RoundStatus,
+)
+from app.errors import DomainRuleError, LLMRequestError
+from app.evaluation import DifficultyVerdict, GeneratabilityVerdict
+from app.evaluation import custom as custom_module
+from app.evaluation.custom import CustomJudgeResult
+from app.generation import rounds as rounds_module
+from app.generation.attempts import MAX_GENERATION_ATTEMPTS
+from app.generation.prompts import build_prompt
+from app.generation.rounds import (
+    next_round,
+    plan_targets,
+    run_round,
+    start_round,
+    style_weights,
+)
+from app.generation.schemas import MultipleChoiceDraft
+from app.generation.spec import QuestionSpec
+from app.ingestion import BookImportService
+from app.persistence.models import (
+    CurriculumVersionRow,
+    CustomJudgeRow,
+    GenerationRoundRow,
+    QuestionEvaluationRow,
+    QuestionRow,
+    QuestionSetupRow,
+    SubtopicEvidenceRow,
+    SubtopicRow,
+    TopicRow,
+)
+from app.persistence.repositories import BookStructureRepository, GenerationRoundRepository
+from app.retrieval import SectionEmbeddingStore
+from app.styles import QuestionStyle
+from app.web.routes.api.coverage import get_generation_client
+
+# ------------------------------------------------------------------ fixtures
+
+
+def _style(style_id: str, name: str) -> QuestionStyle:
+    example = {"prompt": "Which loop repeats while a condition holds?", "answer": "while"}
+    return QuestionStyle(
+        id=style_id,
+        subject="intro_python",
+        name=name,
+        summary=f"{name}: pick the one right option.",
+        question_type=QuestionType.MULTIPLE_CHOICE,
+        difficulty_range=[Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD],
+        checked_by="Compares the chosen option with the key",
+        examples=(example, example),
+    )
+
+
+STYLE_A = _style("py.concept_choice", "Pick the right concept")
+STYLE_B = _style("py.code_choice", "Pick what the code does")
+LIBRARY = [STYLE_A, STYLE_B]
+
+
+@pytest.fixture(autouse=True)
+def fake_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent A owns the real library; these tests run against two fake styles."""
+    import app.styles
+
+    monkeypatch.setattr(rounds_module, "get_library", lambda subject: list(LIBRARY))
+    monkeypatch.setattr(app.styles, "get_library", lambda subject: list(LIBRARY))
+
+
+class KeywordEmbedder:
+    """Bag-of-words embedder, as in tests/test_coverage.py."""
+
+    model = "keyword-test-v1"
+    VOCAB = ("loop", "while", "range", "variable", "string", "slice")
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[float(t.lower().count(word)) for word in self.VOCAB] for t in texts]
+
+
+def _book(session: Session, settings: Settings):
+    sections = [
+        "A while loop repeats while a condition holds. Use a while loop to loop again.",
+        "A string can be sliced. Take a slice of a string. string slice string.",
+    ]
+    doc = {
+        "schema_version": "1",
+        "title": "Round Book",
+        "chapters": [{"sections": [{"text": text} for text in sections]}],
+    }
+    book = BookImportService(session, settings).import_upload(
+        filename="round_book.json", data=docs.to_bytes(doc)
+    )
+    session.commit()
+    return book
+
+
+@pytest.fixture
+def env(session: Session, settings: Settings) -> SimpleNamespace:
+    book = _book(session, settings)
+    version = CurriculumVersionRow(
+        label="Rounds v1",
+        status=CurriculumStatus.APPROVED,
+        approved_at=datetime.now(UTC),
+        source_book_ids=[book.id],
+    )
+    session.add(version)
+    session.flush()
+    loops = TopicRow(curriculum_version_id=version.id, name="Loops", position=0)
+    strings = TopicRow(curriculum_version_id=version.id, name="Strings", position=1)
+    session.add_all([loops, strings])
+    session.flush()
+    while_loops = SubtopicRow(
+        topic_id=loops.id, name="While loops", description="Using a while loop.", position=0
+    )
+    slicing = SubtopicRow(
+        topic_id=strings.id, name="Slicing", description="Taking a slice of a string.", position=0
+    )
+    session.add_all([while_loops, slicing])
+    session.commit()
+    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
+    session.commit()
+    sections = BookStructureRepository(session).sections_in_book(book.id)
+    return SimpleNamespace(
+        version=version,
+        while_loops=while_loops,
+        slicing=slicing,
+        sections=sections,
+        book=book,
+    )
+
+
+def _setup(
+    session: Session,
+    env: SimpleNamespace,
+    cells: list[tuple[int, str, int]],
+    styles: dict[int, list[str]] | None = None,
+) -> QuestionSetupRow:
+    styles = styles or {
+        env.while_loops.id: [STYLE_A.id, STYLE_B.id],
+        env.slicing.id: [STYLE_A.id],
+    }
+    setup = QuestionSetupRow(
+        curriculum_version_id=env.version.id,
+        approved_styles={str(k): v for k, v in styles.items()},
+        cell_targets=[{"subtopic_id": s, "difficulty": d, "target": t} for s, d, t in cells],
+    )
+    session.add(setup)
+    session.commit()
+    return setup
+
+
+def _question(
+    session: Session,
+    env: SimpleNamespace,
+    subtopic: SubtopicRow,
+    difficulty: str,
+    status: QuestionStatus,
+    *,
+    style_id: str | None = None,
+    prompt: str = "Q?",
+) -> QuestionRow:
+    row = QuestionRow(
+        curriculum_version_id=env.version.id,
+        topic_id=subtopic.topic_id,
+        subtopic_ids=[subtopic.id],
+        difficulty=Difficulty(difficulty),
+        status=status,
+        prompt=prompt,
+        style_id=style_id,
+        target_subtopic_id=subtopic.id if style_id else None,
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def _mcq(topic_id: int, subtopic_id: int) -> MultipleChoiceDraft:
+    return MultipleChoiceDraft(
+        topic_id=topic_id,
+        subtopic_ids=[subtopic_id],
+        prompt="Which loop repeats while a condition holds?",
+        options=["while loop", "for loop", "do loop", "no loop"],
+        correct_option_index=0,
+        explanation="A while loop runs while its condition is true.",
+    )
+
+
+class DifficultySequenceClient(MetricJudgeClient):
+    """Answers the difficulty judge from a sequence (the last answer repeats)."""
+
+    def __init__(self, *, difficulties: list[Difficulty], **kwargs: Any) -> None:
+        super().__init__(difficulty=difficulties[0], **kwargs)
+        self.difficulties = difficulties
+        self.difficulty_calls = 0
+
+    def complete_structured(
+        self, *, system: str, prompt: str, response_model: type[BaseModel], **kwargs: Any
+    ) -> BaseModel:
+        if response_model is DifficultyVerdict:
+            self.difficulty = self.difficulties[
+                min(self.difficulty_calls, len(self.difficulties) - 1)
+            ]
+            self.difficulty_calls += 1
+        return super().complete_structured(
+            system=system, prompt=prompt, response_model=response_model, **kwargs
+        )
+
+
+def _queue(session: Session, setup: QuestionSetupRow, targets: list[dict]) -> GenerationRoundRow:
+    row = GenerationRoundRepository(session).add(
+        GenerationRoundRow(setup_id=setup.id, number=1, targets=targets, requested=len(targets))
+    )
+    session.commit()
+    return row
+
+
+def _run(engine: Engine, round_id: int, client: object, embedder: object = None) -> None:
+    run_round(
+        round_id,
+        client=client,  # type: ignore[arg-type]
+        embedder=embedder or KeywordEmbedder(),  # type: ignore[arg-type]
+        session_factory=lambda: Session(engine, expire_on_commit=False),
+    )
+
+
+def _round(engine: Engine, round_id: int) -> GenerationRoundRow:
+    with Session(engine) as fresh:
+        return fresh.get(GenerationRoundRow, round_id)
+
+
+def _round_questions(engine: Engine, round_id: int) -> list[QuestionRow]:
+    with Session(engine) as fresh:
+        return list(fresh.scalars(select(QuestionRow).where(QuestionRow.round_id == round_id)))
+
+
+def _target(env: SimpleNamespace, difficulty: str = "medium", style: str = STYLE_A.id) -> dict:
+    return {"subtopic_id": env.while_loops.id, "difficulty": difficulty, "style_id": style}
+
+
+# ------------------------------------------------------------------ retry loop
+
+
+def test_a_judge_failure_is_retried_with_its_reason_then_stored(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    client = DifficultySequenceClient(
+        difficulties=[Difficulty.HARD, Difficulty.MEDIUM],
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+    )
+
+    _run(engine, row.id, client)
+
+    assert len(client.generation_calls) == 2
+    retry_prompt = client.generation_calls[1]["prompt"]
+    assert "--- correction ---" in retry_prompt
+    assert "difficulty_judge" in retry_prompt and "must be medium" in retry_prompt
+    first_prompt = client.generation_calls[0]["prompt"]
+    assert "--- target ---" in first_prompt
+    assert f"[subtopic {env.while_loops.id}] While loops" in first_prompt
+    assert STYLE_A.name in first_prompt and STYLE_A.checked_by in first_prompt
+
+    (question,) = _round_questions(engine, row.id)
+    assert question.style_id == STYLE_A.id
+    assert question.target_subtopic_id == env.while_loops.id
+    assert question.status is QuestionStatus.VALIDATION_PASSED
+    assert question.spec["target_subtopic_id"] == env.while_loops.id
+    assert [check.name for check in question.generation_attempts[0].failed_checks] == [
+        "difficulty_judge"
+    ]
+    assert question.generation_attempts[-1].usable
+    assert question.pedagogical_eval["metrics"]
+    done = _round(engine, row.id)
+    assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 1, 0)
+
+
+def test_a_hard_cell_hardens_a_question_that_passed_the_answer_check(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    """A hard cell first stores nothing from a medium question that passes, then makes it harder."""
+    setup = _setup(session, env, [(env.while_loops.id, "hard", 1)])
+    row = _queue(session, setup, [_target(env, "hard")])
+    client = DifficultySequenceClient(
+        difficulties=[Difficulty.EASY, Difficulty.HARD],
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+    )
+
+    _run(engine, row.id, client)
+
+    prompts = [call["prompt"] for call in client.generation_calls]
+    assert "Create a medium " in prompts[0]
+    assert "--- make it harder ---" not in prompts[0]
+    assert "Create a hard " in prompts[1]
+    assert "--- make it harder ---" in prompts[1]
+    assert "This question already passes the answer check." in prompts[1]
+    assert "Which loop repeats while a condition holds?" in prompts[1]
+    # The seed is not judged. The first harder draft is easy, so it is retried once.
+    assert client.difficulty_calls == 2
+    assert len(prompts) == 3
+    (question,) = _round_questions(engine, row.id)
+    assert question.difficulty is Difficulty.HARD
+    assert question.status is QuestionStatus.VALIDATION_PASSED
+    done = _round(engine, row.id)
+    assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 1, 0)
+
+
+def test_a_hard_cell_does_not_harden_a_question_that_fails_the_answer_check(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "hard", 1)])
+    row = _queue(session, setup, [_target(env, "hard")])
+    draft = _mcq(env.while_loops.topic_id, env.while_loops.id)
+    draft.options = ["same", "same", "other", "else"]
+    client = DifficultySequenceClient(difficulties=[Difficulty.HARD], draft=draft)
+
+    _run(engine, row.id, client)
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    assert client.difficulty_calls == 0
+    assert all("--- make it harder ---" not in call["prompt"] for call in client.generation_calls)
+    assert _round_questions(engine, row.id) == []
+    done = _round(engine, row.id)
+    assert (done.produced, done.dropped) == (0, 1)
+
+
+def test_a_hard_cell_the_lesson_cannot_support_is_skipped(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "hard", 1)])
+    row = _queue(session, setup, [_target(env, "hard")])
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        should_have_generated=False,
+    )
+
+    _run(engine, row.id, client)
+
+    assert client.generation_calls == []
+    assert _round_questions(engine, row.id) == []
+    done = _round(engine, row.id)
+    assert (done.status, done.produced, done.dropped, done.skipped) == (RoundStatus.DONE, 0, 0, 1)
+    assert done.skip_reason
+
+
+def test_a_hard_cell_still_generates_when_the_generatability_judge_cannot_answer(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    class SilentGeneratability(MetricJudgeClient):
+        def complete_structured(self, *, response_model, **kwargs):
+            if response_model is GeneratabilityVerdict:
+                raise LLMRequestError("Generatability judge unavailable")
+            return super().complete_structured(response_model=response_model, **kwargs)
+
+    setup = _setup(session, env, [(env.while_loops.id, "hard", 1)])
+    row = _queue(session, setup, [_target(env, "hard")])
+    client = SilentGeneratability(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        difficulty=Difficulty.HARD,
+    )
+
+    _run(engine, row.id, client)
+
+    assert client.generation_calls
+    done = _round(engine, row.id)
+    assert done.skipped == 0
+    assert done.produced == 1
+
+
+def test_a_question_still_failing_after_the_last_attempt_is_dropped(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    client = DifficultySequenceClient(
+        difficulties=[Difficulty.HARD],
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+    )
+
+    _run(engine, row.id, client)
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    assert _round_questions(engine, row.id) == []
+    with Session(engine) as fresh:
+        assert fresh.scalars(select(QuestionRow)).all() == []
+    done = _round(engine, row.id)
+    assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 0, 1)
+
+
+def test_a_topic_judge_that_names_another_subtopic_fails_the_attempt(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        difficulty=Difficulty.MEDIUM,
+        topic_id=env.slicing.topic_id,
+        subtopic_ids=[env.slicing.id],
+    )
+
+    _run(engine, row.id, client)
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    assert "topic_judge" in client.generation_calls[1]["prompt"]
+    assert _round(engine, row.id).dropped == 1
+
+
+def test_a_failed_custom_rule_is_retried_and_its_results_are_stored(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    rule = CustomJudgeRow(curriculum_version_id=env.version.id, rule_text="No global variables")
+    disabled = CustomJudgeRow(
+        curriculum_version_id=env.version.id, rule_text="Disabled rule", enabled=False
+    )
+    session.add_all([rule, disabled])
+    session.commit()
+    row = _queue(session, setup, [_target(env)])
+    calls: list[list[str]] = []
+
+    def fake_run(question, rules, *, client=None):
+        calls.append([r.rule_text for r in rules])
+        passed = len(calls) > 1
+        return [
+            CustomJudgeResult(
+                judge_id=r.id,
+                rule_text=r.rule_text,
+                kind=r.kind,
+                passed=passed,
+                reason=None if passed else "It uses a global counter.",
+            )
+            for r in rules
+        ]
+
+    monkeypatch.setattr(custom_module, "run_custom_judges", fake_run)
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    _run(engine, row.id, client)
+
+    assert calls == [["No global variables"], ["No global variables"]]
+    assert "It uses a global counter." in client.generation_calls[1]["prompt"]
+    (question,) = _round_questions(engine, row.id)
+    with Session(engine) as fresh:
+        evaluation = fresh.scalars(
+            select(QuestionEvaluationRow).where(QuestionEvaluationRow.question_id == question.id)
+        ).one()
+    assert evaluation.custom_results[0]["passed"] is True
+    assert evaluation.custom_results[0]["rule_text"] == "No global variables"
+
+
+def test_section_only_generation_keeps_its_spec_and_prompt() -> None:
+    spec = QuestionSpec(
+        curriculum_version_id=1,
+        question_type=QuestionType.MULTIPLE_CHOICE,
+        difficulty=Difficulty.EASY,
+        source_section_ids=[3],
+    )
+    assert spec.stored() == {
+        "curriculum_version_id": 1,
+        "question_type": "multiple_choice",
+        "difficulty": "easy",
+        "source_section_ids": [3],
+        "seed": None,
+    }
+    _, plain = build_prompt(spec, section_text="text", citation="c", taxonomy="t")
+    assert "--- target ---" not in plain
+    _, aimed = build_prompt(
+        spec, section_text="text", citation="c", taxonomy="t", target_block="--- target ---\nX"
+    )
+    assert aimed.replace("\n\n--- target ---\nX", "") == plain
+    assert "One taught step, applied directly." in plain
+    assert "Two or three taught ideas combined" in plain
+    assert "Several taught ideas composed" in plain
+
+
+# ------------------------------------------------------------------ planning
+
+
+def test_only_cells_below_target_get_targets(session: Session, env: SimpleNamespace) -> None:
+    setup = _setup(
+        session,
+        env,
+        [
+            (env.while_loops.id, "easy", 2),
+            (env.while_loops.id, "medium", 1),
+            (env.slicing.id, "easy", 1),
+        ],
+    )
+    # while/easy: one approved + one pending = full. slicing/easy: a reject does not count.
+    _question(session, env, env.while_loops, "easy", QuestionStatus.APPROVED)
+    _question(session, env, env.while_loops, "easy", QuestionStatus.VALIDATION_PASSED)
+    _question(session, env, env.slicing, "easy", QuestionStatus.REJECTED)
+
+    targets = plan_targets(session, setup, size=10, rng=random.Random(0))
+
+    cells = sorted((t["subtopic_id"], t["difficulty"]) for t in targets)
+    assert cells == sorted([(env.while_loops.id, "medium"), (env.slicing.id, "easy")])
+
+
+def test_targets_spread_across_cells_before_repeating_one(
+    session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(
+        session,
+        env,
+        [(env.while_loops.id, "easy", 3), (env.slicing.id, "hard", 3)],
+    )
+
+    two = plan_targets(session, setup, size=2, rng=random.Random(0))
+    everything = plan_targets(session, setup, size=10, rng=random.Random(0))
+
+    assert {(t["subtopic_id"], t["difficulty"]) for t in two} == {
+        (env.while_loops.id, "easy"),
+        (env.slicing.id, "hard"),
+    }
+    assert len(everything) == 6
+
+
+def test_a_subtopic_without_approved_styles_gets_no_targets(
+    session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(
+        session,
+        env,
+        [(env.while_loops.id, "easy", 1), (env.slicing.id, "easy", 1)],
+        styles={env.while_loops.id: [STYLE_A.id], env.slicing.id: ["py.not_in_library"]},
+    )
+    targets = plan_targets(session, setup, size=10)
+    assert [t["subtopic_id"] for t in targets] == [env.while_loops.id]
+
+
+def test_style_weights_halve_per_reject_and_exclude_at_two() -> None:
+    assert style_weights(["a", "b", "c"], {"b": 1, "c": 2}) == {"a": 1.0, "b": 0.5, "c": 0.0}
+
+
+def test_when_every_style_is_excluded_the_least_rejected_is_used() -> None:
+    assert style_weights(["a", "b"], {"a": 3, "b": 2}) == {"a": 0.0, "b": 1.0}
+
+
+def test_a_style_rejected_twice_in_a_cell_is_not_drawn_there(
+    session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 6), (env.while_loops.id, "hard", 6)])
+    for _ in range(2):
+        _question(
+            session, env, env.while_loops, "easy", QuestionStatus.REJECTED, style_id=STYLE_A.id
+        )
+
+    drawn: dict[str, set[str]] = {"easy": set(), "hard": set()}
+    for seed in range(10):
+        for target in plan_targets(session, setup, size=12, rng=random.Random(seed)):
+            drawn[target["difficulty"]].add(target["style_id"])
+
+    assert drawn["easy"] == {STYLE_B.id}
+    # The rejects belong to the easy cell only.
+    assert drawn["hard"] == {STYLE_A.id, STYLE_B.id}
+
+
+def test_next_round_refuses_while_a_round_is_running(
+    session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 2)])
+    first = start_round(session, setup.id, size=1)
+    session.commit()
+    assert (first.number, first.status, first.requested) == (1, RoundStatus.QUEUED, 1)
+
+    with pytest.raises(DomainRuleError):
+        next_round(session, setup.id)
+    with pytest.raises(DomainRuleError):
+        start_round(session, setup.id)
+
+    first.status = RoundStatus.DONE
+    session.commit()
+    second = next_round(session, setup.id, size=5)
+    assert (second.number, second.requested) == (2, 2)
+
+
+def test_a_full_setup_gets_an_empty_done_round(session: Session, env: SimpleNamespace) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 1)])
+    _question(session, env, env.while_loops, "easy", QuestionStatus.APPROVED)
+
+    row = next_round(session, setup.id)
+
+    assert (row.status, row.requested, row.targets) == (RoundStatus.DONE, 0, [])
+
+
+# ------------------------------------------------------------------ run_round
+
+
+def test_run_round_reports_progress_and_examples(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 4)])
+    _question(
+        session,
+        env,
+        env.while_loops,
+        "medium",
+        QuestionStatus.APPROVED,
+        prompt="Accepted: what does a while loop do?",
+    )
+    row = start_round(session, setup.id, size=2, rng=random.Random(1))
+    session.commit()
+    assert row.status is RoundStatus.QUEUED
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    _run(engine, row.id, client)
+
+    done = _round(engine, row.id)
+    assert (done.status, done.requested, done.produced, done.dropped) == (
+        RoundStatus.DONE,
+        2,
+        2,
+        0,
+    )
+    assert done.started_at is not None and done.finished_at is not None
+    assert "Accepted: what does a while loop do?" in client.generation_calls[0]["prompt"]
+    questions = _round_questions(engine, row.id)
+    assert len(questions) == 2
+    assert {q.spec["source_section_ids"][0] for q in questions} == {env.sections[0].id}
+
+    # A second run of the same round is a no-op.
+    _run(engine, row.id, client)
+    assert len(_round_questions(engine, row.id)) == 2
+
+
+def test_without_an_embedder_a_target_is_grounded_in_its_evidence(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    session.add(
+        SubtopicEvidenceRow(
+            subtopic_id=env.while_loops.id,
+            book_id=env.book.id,
+            section_id=env.sections[1].id,
+            candidate_label="while",
+        )
+    )
+    session.commit()
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
+    row = _queue(session, setup, [_target(env)])
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    run_round(
+        row.id,
+        client=client,  # type: ignore[arg-type]
+        embedder=None,
+        session_factory=lambda: Session(engine, expire_on_commit=False),
+    )
+
+    (question,) = _round_questions(engine, row.id)
+    assert question.spec["source_section_ids"] == [env.sections[1].id]
+
+
+def test_a_round_that_cannot_reach_a_model_ends_failed_with_a_reason(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
+    row = _queue(session, setup, [_target(env)])
+
+    # No client and LLM_PROVIDER=none: building the live client is a configuration error.
+    run_round(
+        row.id,
+        embedder=KeywordEmbedder(),  # type: ignore[arg-type]
+        session_factory=lambda: Session(engine, expire_on_commit=False),
+    )
+
+    failed = _round(engine, row.id)
+    assert failed.status is RoundStatus.FAILED
+    assert failed.error
+    assert failed.finished_at is not None
+
+
+# ------------------------------------------------------------------ routes
+
+
+@pytest.fixture
+def http(configured_app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    holder = SimpleNamespace(client=None)
+    configured_app.dependency_overrides[get_generation_client] = lambda: holder.client
+    monkeypatch.setattr(rounds_module, "default_embedder", KeywordEmbedder)
+    with TestClient(configured_app) as test_client:
+        holder.http = test_client
+        yield holder
+
+
+def test_post_rounds_queues_and_runs_the_next_round(
+    http: SimpleNamespace, session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
+    http.client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    response = http.http.post("/api/rounds", json={"setup_id": setup.id})
+
+    assert response.status_code == 202, response.text
+    round_id = response.json()["round_id"]
+    polled = http.http.get(f"/api/rounds/{round_id}")
+    assert polled.status_code == 200
+    body = polled.json()
+    assert (body["status"], body["requested"], body["produced"], body["dropped"]) == (
+        "done",
+        1,
+        1,
+        0,
+    )
+
+    full = http.http.post("/api/rounds", json={"setup_id": setup.id})
+    assert full.status_code == 422
+    assert full.json()["error"]["message"] == "Every cell has reached its target."
+    session.expire_all()
+    assert len(session.scalars(select(GenerationRoundRow)).all()) == 1
+
+
+def test_round_routes_404_on_unknown_ids(http: SimpleNamespace) -> None:
+    assert http.http.post("/api/rounds", json={"setup_id": 999}).status_code == 404
+    assert http.http.get("/api/rounds/999").status_code == 404
+
+
+def test_unavailable_required_judge_cannot_publish_round_question(session, engine, env):
+    class UnavailableDifficulty(MetricJudgeClient):
+        def complete_structured(self, *, response_model, **kwargs):
+            if response_model is DifficultyVerdict:
+                raise LLMRequestError("Difficulty judge unavailable")
+            return super().complete_structured(response_model=response_model, **kwargs)
+
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    client = UnavailableDifficulty(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        difficulty=Difficulty.MEDIUM,
+        topic_id=env.while_loops.topic_id,
+        subtopic_ids=[env.while_loops.id],
+    )
+    _run(engine, row.id, client)
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    assert _round_questions(engine, row.id) == []
+    assert _round(engine, row.id).dropped == 1
+
+
+def test_real_library_and_custom_rule_run_through_refill_pipeline(
+    session, engine, env, monkeypatch
+):
+    import app.styles
+    from app.styles.library import get_library
+
+    monkeypatch.setattr(rounds_module, "get_library", get_library)
+    monkeypatch.setattr(app.styles, "get_library", get_library)
+    style = next(
+        s
+        for s in get_library("intro_python")
+        if s.question_type == QuestionType.MULTIPLE_CHOICE
+        and Difficulty.MEDIUM in s.difficulty_range
+    )
+    setup = _setup(
+        session, env, [(env.while_loops.id, "medium", 1)], styles={env.while_loops.id: [style.id]}
+    )
+    _question(session, env, env.while_loops, "medium", QuestionStatus.APPROVED)
+    rule = CustomJudgeRow(
+        curriculum_version_id=env.version.id,
+        rule_text="No global declarations",
+        kind=CustomJudgeKind.PATTERN,
+        pattern="ast:Global",
+    )
+    session.add(rule)
+    session.commit()
+    assert plan_targets(session, setup, size=10) == []
+    row = rounds_module.refill_round(
+        session, setup.id, {(env.while_loops.id, Difficulty.MEDIUM): 1}
+    )
+    session.commit()
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        difficulty=Difficulty.MEDIUM,
+        topic_id=env.while_loops.topic_id,
+        subtopic_ids=[env.while_loops.id],
+    )
+    _run(engine, row.id, client)
+    (question,) = _round_questions(engine, row.id)
+    assert question.style_id == style.id
+    assert question.trust_provenance == "pending"
+    assert question.status == QuestionStatus.VALIDATION_PASSED
+    with Session(engine) as fresh:
+        evaluation = fresh.scalars(
+            select(QuestionEvaluationRow).where(QuestionEvaluationRow.question_id == question.id)
+        ).one()
+        assert evaluation.custom_results[0]["passed"] is True
+
+
+def test_round_execution_claim_is_idempotent(session, engine, env, monkeypatch):
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    calls = []
+    monkeypatch.setattr(
+        rounds_module, "_generate_round", lambda db, round_row, **kwargs: calls.append(round_row.id)
+    )
+    _run(engine, row.id, None)
+    _run(engine, row.id, None)
+    assert calls == [row.id]
+    assert _round(engine, row.id).status == RoundStatus.DONE

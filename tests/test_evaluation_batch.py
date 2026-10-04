@@ -853,3 +853,13 @@ def test_an_error_still_becomes_current_when_there_is_nothing_better(
     assert row is not None
     assert row.pedagogical_eval is not None
     assert row.pedagogical_eval["status"] == PedagogicalEvalStatus.ERROR.value
+
+
+@pytest.fixture(autouse=True)
+def four_metric_panel(monkeypatch, settings):
+    from app.config import get_settings
+
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "issues,subtopic,difficulty,generatability")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()

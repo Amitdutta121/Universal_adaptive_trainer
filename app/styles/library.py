@@ -14,13 +14,19 @@ import logging
 import re
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.coverage.schema import MIN_QUESTIONS_PER_CELL
 from app.domain.enums import CurriculumStatus, Difficulty
 from app.errors import DomainRuleError, FeatureNotAvailableError
 from app.llm import StructuredLLMClient, get_structured_client
-from app.persistence.models import CurriculumVersionRow, SubtopicRow
+from app.persistence.models import (
+    BookSectionRow,
+    CurriculumVersionRow,
+    SubtopicEvidenceRow,
+    SubtopicRow,
+)
 from app.persistence.repositories import CurriculumRepository
 from app.styles.python import PYTHON_STYLES
 from app.styles.python import SUBJECT as PYTHON_SUBJECT
@@ -69,7 +75,13 @@ class _SubtopicDraft(BaseModel):
     reason: str = Field(default="", description="One sentence for the professor.")
     easy: int | None = Field(default=None, description="Target approved easy questions, 1-6.")
     medium: int | None = Field(default=None, description="Target approved medium questions, 1-6.")
-    hard: int | None = Field(default=None, description="Target approved hard questions, 1-6.")
+    hard: int | None = Field(
+        default=None,
+        description=(
+            "Target approved hard questions. 0 when the lesson cannot support a hard "
+            "question, otherwise 1-6."
+        ),
+    )
 
 
 class _SetupDraft(BaseModel):
@@ -83,16 +95,23 @@ SYSTEM = (
     "sentence the professor reads explaining why, and say how many approved questions each "
     f"difficulty of that subtopic should reach ({MIN_CELL_TARGET} to {MAX_CELL_TARGET}; "
     f"{DEFAULT_CELL_TARGET} is the usual amount, more for central subtopics, fewer for minor "
-    "ones). Between them the chosen styles should cover easy, medium and hard. Styles checked "
-    "by running hidden tests cannot read or write files: do not choose them for file "
+    "ones). When a subtopic has lesson text, set hard to 0 if that text teaches only one "
+    "idea and cannot support a hard question, and set hard from 1 to 6 when the text contains "
+    "several ideas that can be composed. When no lesson text is attached, choose a hard target "
+    "from 1 to 6 as usual. Do not choose a style for a difficulty whose target is 0. Between "
+    "them the chosen styles should cover every difficulty whose target is above 0. Styles "
+    "checked by running hidden tests cannot read or write files: do not choose them for file "
     "input/output subtopics."
 )
 
 
-def _clamp(value: int | None) -> int:
-    if value is None:
+def _target_value(draft: _SubtopicDraft | None, difficulty: Difficulty) -> int:
+    """Easy and medium stay at least 1. A hard 0 stays 0. A missing number is the default."""
+    raw = getattr(draft, difficulty.value) if draft else None
+    if raw is None:
         return DEFAULT_CELL_TARGET
-    return max(MIN_CELL_TARGET, min(MAX_CELL_TARGET, value))
+    floor = 0 if difficulty is Difficulty.HARD else MIN_CELL_TARGET
+    return max(floor, min(MAX_CELL_TARGET, raw))
 
 
 _WORD = re.compile(r"[a-z]+")
@@ -142,27 +161,51 @@ def _validated(
     if not chosen:
         chosen.append(ranked[0].id)
         reason = _FALLBACK_REASON
-    # Every cell needs a style that can be written at its difficulty, or it can never fill.
-    for difficulty in Difficulty:
-        if not any(difficulty in library[style_id].difficulty_range for style_id in chosen):
-            fit = next((s for s in ranked if difficulty in s.difficulty_range), None)
-            if fit is not None:
-                chosen.append(fit.id)
-
     targets = [
         CellTarget(
             subtopic_id=subtopic.id,
             difficulty=difficulty,
-            target=_clamp(getattr(draft, difficulty.value) if draft else None),
+            target=_target_value(draft, difficulty),
         )
         for difficulty in Difficulty
     ]
+    # A cell with a target needs a style that can be written at its difficulty.
+    # A hard target of 0 does not get a hard style added back.
+    for cell in targets:
+        if cell.target == 0:
+            continue
+        if not any(cell.difficulty in library[style_id].difficulty_range for style_id in chosen):
+            fit = next((s for s in ranked if cell.difficulty in s.difficulty_range), None)
+            if fit is not None:
+                chosen.append(fit.id)
     return SubtopicStyleSuggestion(
         subtopic_id=subtopic.id, style_ids=chosen, reason=reason
     ), targets
 
 
-def _prompt(version: CurriculumVersionRow, styles: list[QuestionStyle]) -> str:
+def _lesson_excerpts(session: Session, subtopic_ids: list[int]) -> dict[int, str]:
+    """The first evidence section's text for each subtopic, when one is linked."""
+    if not subtopic_ids:
+        return {}
+    rows = session.execute(
+        select(SubtopicEvidenceRow.subtopic_id, BookSectionRow.text)
+        .join(BookSectionRow, BookSectionRow.id == SubtopicEvidenceRow.section_id)
+        .where(SubtopicEvidenceRow.subtopic_id.in_(subtopic_ids))
+        .order_by(SubtopicEvidenceRow.id)
+    ).all()
+    excerpts: dict[int, str] = {}
+    for subtopic_id, text in rows:
+        if subtopic_id in excerpts:
+            continue
+        cleaned = (text or "").strip()
+        if cleaned:
+            excerpts[subtopic_id] = cleaned[:2000]
+    return excerpts
+
+
+def _prompt(
+    version: CurriculumVersionRow, styles: list[QuestionStyle], lessons: dict[int, str]
+) -> str:
     library = [
         {
             "id": style.id,
@@ -179,7 +222,12 @@ def _prompt(version: CurriculumVersionRow, styles: list[QuestionStyle]) -> str:
         {
             "topic": topic.name,
             "subtopics": [
-                {"id": subtopic.id, "name": subtopic.name, "description": subtopic.description}
+                {
+                    "id": subtopic.id,
+                    "name": subtopic.name,
+                    "description": subtopic.description,
+                    "lesson": lessons.get(subtopic.id, ""),
+                }
                 for subtopic in topic.subtopics
             ],
         }
@@ -204,9 +252,11 @@ def suggest_setup(
     is validated against :func:`get_library` (narrowed to the course's question types); unknown
     ids are dropped, not passed through. Every visible subtopic of the version appears in
     ``subtopics`` with at least one style -- picked by fit when the model gave none -- and
-    styles covering every difficulty. Every subtopic x difficulty cell gets one
-    :class:`CellTarget` bounded to ``MIN_CELL_TARGET..MAX_CELL_TARGET`` (default
-    ``MIN_QUESTIONS_PER_CELL``). Persists nothing.
+    styles covering every difficulty whose target is above 0. A hard target of 0 is kept,
+    and no hard style is added back for it. Easy and medium stay at least 1. Every
+    subtopic x difficulty cell gets one :class:`CellTarget` (default
+    ``MIN_QUESTIONS_PER_CELL``). When a subtopic has linked lesson text, that text is in
+    the prompt. Persists nothing.
 
     Raises:
         NotFoundError: the curriculum version does not exist.
@@ -237,8 +287,11 @@ def suggest_setup(
         )
 
     llm = client or get_structured_client()
+    lessons = _lesson_excerpts(session, [subtopic.id for subtopic in subtopics])
     draft = llm.complete_structured(
-        system=SYSTEM, prompt=_prompt(version, styles), response_model=_SetupDraft
+        system=SYSTEM,
+        prompt=_prompt(version, styles, lessons),
+        response_model=_SetupDraft,
     )
     by_subtopic: dict[int, _SubtopicDraft] = {}
     for entry in draft.subtopics:

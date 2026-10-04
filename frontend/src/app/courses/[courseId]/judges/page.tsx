@@ -1,9 +1,11 @@
 /**
- * The judges route: the four advisory reviewers, and the prompt each one runs.
+ * The judges route: the difficulty judge, the topic-alignment judge, and this
+ * taxonomy's custom rules.
  *
- * Backed by `GET/PUT/DELETE /api/judge-prompts` and `POST /api/judge-prompts/
- * {metric}/refresh` (ADR-038, ADR-039). Editing or re-learning a prompt
- * re-names the panel, so the screen shows the rubric version it answers under.
+ * The two built-in judges are backed by `GET/PUT/DELETE /api/judge-prompts`
+ * (ADR-038). Editing a prompt re-names the panel, so the screen shows the
+ * rubric version it answers under. Custom rules are `GET/POST/PATCH
+ * /api/custom-judges` for the approved taxonomy.
  */
 
 import { PageHeader } from "@/components/page-header";
@@ -14,7 +16,7 @@ export default function JudgesPage() {
     <div className="space-y-6 pb-16">
       <PageHeader
         title="Judges"
-        summary="The four advisory reviewers, and the prompt each one follows. Edit a prompt to repair a judge, or re-learn it from the questions it got wrong."
+        summary="The difficulty judge, the topic-alignment judge, and this taxonomy's custom rules. Edit a prompt to change what a built-in judge checks, or revert it to the text it shipped with."
       />
       <JudgesScreen />
     </div>

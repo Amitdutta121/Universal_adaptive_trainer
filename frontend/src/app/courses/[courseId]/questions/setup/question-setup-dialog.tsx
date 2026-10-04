@@ -17,7 +17,7 @@
 
 import { Check, LoaderCircle, Plus, TriangleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { QueryError } from "@/components/query-state";
 import { DifficultyBadge } from "@/components/question-setup/badges";
@@ -51,14 +51,15 @@ import { useSaveSetup, useSetupSuggestion, useStyles } from "@/lib/api/queries";
 import type { CurriculumVersionDetail, QuestionSetup, SetupSuggestion } from "@/lib/api/types";
 import { useCoursePath } from "@/lib/use-course";
 import { cn } from "@/lib/utils";
+import { CustomRules } from "./custom-rules";
 import {
   addStyle,
   approveAllUndecided,
   approvedStyleIds,
   decide,
+  FIRST_ROUND_SIZE,
   initialChoices,
   removeStyle,
-  FIRST_ROUND_SIZE,
   rowTotal,
   type SetupChoices,
   type SetupSubtopic,
@@ -78,24 +79,18 @@ type Step = "styles" | "targets";
 export function QuestionSetupDialog({
   curriculum,
   currentSetup,
+  suggestionSession,
   onOpenChange,
 }: {
   curriculum: CurriculumVersionDetail;
   currentSetup: QuestionSetup | null;
+  /** Changes each time the dialog opens, so that opening asks for a new suggestion. */
+  suggestionSession: number;
   onOpenChange(open: boolean): void;
 }) {
   const curriculumVersionId = curriculum.version.id;
-  const suggest = useSetupSuggestion();
+  const suggest = useSetupSuggestion(curriculumVersionId, suggestionSession);
   const styles = useStyles();
-
-  // Ask once per mount; the ref keeps React's dev double-effect from paying for two LLM calls.
-  const asked = useRef(false);
-  const { mutate } = suggest;
-  useEffect(() => {
-    if (asked.current) return;
-    asked.current = true;
-    mutate(curriculumVersionId);
-  }, [mutate, curriculumVersionId]);
 
   const failed = suggest.error ?? styles.error;
   const ready = suggest.data && styles.data;
@@ -121,7 +116,7 @@ export function QuestionSetupDialog({
               </Button>
               <Button
                 onClick={() => {
-                  if (suggest.error) suggest.mutate(curriculumVersionId);
+                  if (suggest.error) void suggest.refetch();
                   if (styles.error) void styles.refetch();
                 }}
               >
@@ -207,6 +202,7 @@ function SetupSteps({
         ) : (
           <TargetsStep topics={topics} choices={choices} suggestion={suggestion} />
         )}
+        <CustomRules curriculumVersionId={curriculum.version.id} />
         {save.error ? (
           <div className="mt-4">
             <QueryError error={save.error} />
@@ -216,11 +212,14 @@ function SetupSteps({
 
       <div className="flex flex-col gap-3 border-t px-6 py-3 sm:flex-row sm:items-center">
         <p className="text-muted-foreground text-xs tabular-nums">
-          Step {step === "styles" ? 2 : 3} of 3 · {subtopicCount - missing.length} of {subtopicCount}{" "}
-          subtopics have a style
+          Step {step === "styles" ? 2 : 3} of 3 · {subtopicCount - missing.length} of{" "}
+          {subtopicCount} subtopics have a style
         </p>
         {missing.length > 0 ? (
-          <p role="alert" className="flex items-start gap-1.5 text-[var(--warn-solid)] text-sm sm:mr-auto">
+          <p
+            role="alert"
+            className="flex items-start gap-1.5 text-[var(--warn-solid)] text-sm sm:mr-auto"
+          >
             <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
             <span>
               {missingMessage(missing)} Use or add at least one style for each before approving.
@@ -260,7 +259,9 @@ function missingMessage(missing: readonly SetupSubtopic[]): string {
   const names = missing.slice(0, 3).map((subtopic) => subtopic.name);
   const more = missing.length - names.length;
   const list = more > 0 ? `${names.join(", ")} and ${more} more` : names.join(", ");
-  return missing.length === 1 ? `${list} has no style.` : `${missing.length} subtopics have no style: ${list}.`;
+  return missing.length === 1
+    ? `${list} has no style.`
+    : `${missing.length} subtopics have no style: ${list}.`;
 }
 
 function StylesStep({
@@ -298,7 +299,11 @@ function StylesStep({
       </div>
 
       {topics.map((topic) => (
-        <section key={topic.id} aria-labelledby={`setup-topic-${topic.id}`} className="flex flex-col gap-3">
+        <section
+          key={topic.id}
+          aria-labelledby={`setup-topic-${topic.id}`}
+          className="flex flex-col gap-3"
+        >
           <h3 id={`setup-topic-${topic.id}`} className="font-semibold text-sm">
             {topic.name}
           </h3>
@@ -334,16 +339,15 @@ function SubtopicStyles({
   const suggested = subtopic.suggestion?.style_ids ?? [];
   const added = (choices.added[subtopic.id] ?? []).filter((id) => !suggested.includes(id));
   const approvedCount = approvedStyleIds(choices, subtopic).length;
-  const addable = library.filter((style) => !suggested.includes(style.id) && !added.includes(style.id));
+  const addable = library.filter(
+    (style) => !suggested.includes(style.id) && !added.includes(style.id),
+  );
   const verdicts = choices.verdicts[subtopic.id] ?? {};
 
   return (
     <article
       aria-label={subtopic.name}
-      className={cn(
-        "rounded-lg border",
-        approvedCount === 0 && "border-[var(--warn-solid)]/50",
-      )}
+      className={cn("rounded-lg border", approvedCount === 0 && "border-[var(--warn-solid)]/50")}
     >
       <header className="flex flex-col gap-1 border-b px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -383,7 +387,9 @@ function SubtopicStyles({
                       size="sm"
                       variant={verdict === "skipped" ? "secondary" : "outline"}
                       aria-pressed={verdict === "skipped"}
-                      onClick={() => onChoices((current) => decide(current, subtopic.id, styleId, "skipped"))}
+                      onClick={() =>
+                        onChoices((current) => decide(current, subtopic.id, styleId, "skipped"))
+                      }
                     >
                       <X data-icon="inline-start" />
                       Skip
@@ -392,7 +398,9 @@ function SubtopicStyles({
                       size="sm"
                       variant={verdict === "approved" ? "default" : "outline"}
                       aria-pressed={verdict === "approved"}
-                      onClick={() => onChoices((current) => decide(current, subtopic.id, styleId, "approved"))}
+                      onClick={() =>
+                        onChoices((current) => decide(current, subtopic.id, styleId, "approved"))
+                      }
                     >
                       <Check data-icon="inline-start" />
                       Use
@@ -416,7 +424,9 @@ function SubtopicStyles({
                       size="sm"
                       variant="ghost"
                       aria-label={`Remove ${style.name}`}
-                      onClick={() => onChoices((current) => removeStyle(current, subtopic.id, styleId))}
+                      onClick={() =>
+                        onChoices((current) => removeStyle(current, subtopic.id, styleId))
+                      }
                     >
                       Remove
                     </Button>
@@ -461,7 +471,8 @@ function SubtopicStyles({
 function UnknownStyle({ styleId }: { styleId: string }) {
   return (
     <li className="px-3 py-2.5 text-muted-foreground text-xs">
-      Suggested style <span className="font-mono">{styleId}</span> is not in the library and is left out.
+      Suggested style <span className="font-mono">{styleId}</span> is not in the library and is left
+      out.
     </li>
   );
 }
@@ -535,7 +546,9 @@ function TargetsStep({
                         {row?.[difficulty] ?? <span className="text-muted-foreground">–</span>}
                       </TableCell>
                     ))}
-                    <TableCell className="text-right font-medium tabular-nums">{rowTotal(row)}</TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">
+                      {rowTotal(row)}
+                    </TableCell>
                   </TableRow>
                 );
               })}

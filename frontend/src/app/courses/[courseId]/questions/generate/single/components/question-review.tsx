@@ -12,7 +12,10 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { ReviewActionBar } from "@/app/courses/[courseId]/review/components/review-action-bar";
-import { JudgeRail, ValidationSummary } from "@/app/courses/[courseId]/review/components/review-feedback";
+import {
+  JudgeRail,
+  ValidationSummary,
+} from "@/app/courses/[courseId]/review/components/review-feedback";
 import {
   ReviewQuestionContent,
   ReviewQuestionSurface,
@@ -45,20 +48,13 @@ export function QuestionReview({
   if (isPending) return <TableSkeleton rows={3} />;
   if (isError || !detail) return <QueryError error={error} />;
 
-  const canReject = form.reasons.length > 0;
-  const canSubmit =
-    form.effectiveDecision === "reject"
-      ? canReject
-      : form.effectiveDecision === "edit"
-        ? form.changedFields.length > 0
-        : true;
+  const canSubmit = form.effectiveDecision !== "edit" || form.changedFields.length > 0;
 
   async function onSubmit() {
     if (!canSubmit || submitReview.isPending) return;
     const body: Schemas["ReviewRequest"] = {
       decision: form.effectiveDecision,
-      ...(form.reasons.length > 0 ? { reasons: form.reasons } : {}),
-      ...(form.comment.trim() ? { comment: form.comment } : {}),
+      ...(form.comment.trim() ? { comment: form.comment.trim() } : {}),
       ...(form.effectiveDecision === "edit"
         ? {
             prompt: form.promptEdit,
@@ -152,17 +148,13 @@ export function QuestionReview({
         </div>
       ) : (
         <ReviewActionBar
-          detail={detail}
           decision={form.decision}
           effectiveDecision={form.effectiveDecision}
-          reasons={form.reasons}
           changedFields={form.changedFields}
           comment={form.comment}
           isSubmitting={submitReview.isPending}
           canSubmit={canSubmit}
-          canReject={canReject}
           onDecisionChange={form.setDecision}
-          onReasonsChange={form.setReasons}
           onCommentChange={form.setComment}
           onSubmit={() => void onSubmit()}
           onSkip={onGenerateAnother}

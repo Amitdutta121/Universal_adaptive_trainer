@@ -109,11 +109,13 @@ function JudgeRow({
   passed,
   verdict,
   rationale,
+  agreement,
 }: {
   label: string;
   passed: boolean | null | undefined;
   verdict?: string | null;
   rationale?: string | null;
+  agreement?: string | null;
 }) {
   return (
     <div className="review-judge-row" data-status={statusTone(passed)} data-testid="judge-row">
@@ -126,6 +128,7 @@ function JudgeRow({
         </div>
         {verdict ? <p className="mt-1 text-[var(--review-muted)] text-xs">{verdict}</p> : null}
         {rationale ? <ExpandableText text={rationale} /> : null}
+        {agreement ? <p className="mt-2 text-[var(--review-muted)] text-xs">{agreement}</p> : null}
       </div>
     </div>
   );
@@ -170,13 +173,25 @@ export function JudgeRail({
   const proposedSubtopics = (subtopic?.proposed_subtopic_ids ?? []).map(
     (id) => subtopicNames?.get(id) ?? `#${id}`,
   );
+  function agreement(name: string) {
+    const metric = detail.judge_trust?.metrics[name];
+    if (!metric) return null;
+    const record = `${metric.agreements}/${metric.observations} professor agreements`;
+    return metric.audit_revoked
+      ? `${record} · Trust removed after a spot check`
+      : `${record} · ${metric.trusted ? "Trusted" : "Learning"}`;
+  }
 
   return (
     <Card className="review-panel border">
       <CardHeader>
         <div className="review-eyebrow">Panel</div>
         <CardTitle>Judges</CardTitle>
-        <CardDescription>Advisory only; your verdict below is what counts.</CardDescription>
+        <CardDescription>
+          {detail.question.trust_provenance === "audit"
+            ? "Spot check: one in ten questions from trusted judges comes back for your review."
+            : "Confirm or correct the judges, then give your verdict."}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <JudgeRow label="Answer check" passed={answer.passed} verdict={answer.verdict} />
@@ -189,6 +204,7 @@ export function JudgeRail({
               : null
           }
           rationale={difficulty?.rationale ?? difficulty?.error_detail}
+          agreement={agreement("difficulty")}
         />
         <JudgeRow
           label="Topic"
@@ -197,6 +213,7 @@ export function JudgeRail({
             proposedSubtopics.length > 0 ? `Judge says ${proposedSubtopics.join(", ")}` : null
           }
           rationale={subtopic?.rationale ?? subtopic?.error_detail}
+          agreement={agreement("subtopic")}
         />
         {customResults.map((result) => (
           <JudgeRow
@@ -205,6 +222,7 @@ export function JudgeRail({
             passed={result.passed}
             verdict={result.kind === "pattern" ? "Custom rule - pattern" : "Custom rule"}
             rationale={result.reason}
+            agreement={agreement(`custom:${result.judge_id}`)}
           />
         ))}
         {!difficulty && !subtopic && evaluation?.skip_reason ? (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Difficulty, QuestionDetail, RejectionReason, ReviewDecision } from "./review-types";
+import type { Difficulty, QuestionDetail, ReviewDecision } from "./review-types";
 
 function judgeMetric(detail: QuestionDetail, metric: "difficulty" | "subtopic") {
   return detail.pedagogical_eval?.metrics?.find((item) => item.metric === metric) ?? null;
@@ -20,7 +20,6 @@ export function presetSubtopicIds(detail: QuestionDetail): number[] {
 
 export function useReviewForm(detail: QuestionDetail | null) {
   const [decision, setDecision] = useState<ReviewDecision>("approve");
-  const [reasons, setReasons] = useState<RejectionReason[]>([]);
   const [comment, setComment] = useState("");
   const [promptEdit, setPromptEdit] = useState("");
   const [referenceEdit, setReferenceEdit] = useState("");
@@ -29,17 +28,20 @@ export function useReviewForm(detail: QuestionDetail | null) {
   // backend compares them to the judges' answers to decide who was right.
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [subtopicIds, setSubtopicIds] = useState<number[]>([]);
+  const [difficultyConfirmed, setDifficultyConfirmed] = useState(false);
+  const [subtopicsConfirmed, setSubtopicsConfirmed] = useState(false);
 
   useEffect(() => {
     if (!detail) return;
     setDecision("approve");
-    setReasons([]);
     setComment("");
     setPromptEdit(detail.question.prompt);
     setReferenceEdit(detail.reference_solution ?? "");
     setTestsEdit(detail.tests ?? "");
     setDifficulty(presetDifficulty(detail));
     setSubtopicIds(presetSubtopicIds(detail));
+    setDifficultyConfirmed(false);
+    setSubtopicsConfirmed(false);
   }, [detail]);
 
   const changedFields = useMemo(() => {
@@ -57,8 +59,6 @@ export function useReviewForm(detail: QuestionDetail | null) {
   return {
     decision,
     setDecision,
-    reasons,
-    setReasons,
     comment,
     setComment,
     promptEdit,
@@ -68,9 +68,19 @@ export function useReviewForm(detail: QuestionDetail | null) {
     testsEdit,
     setTestsEdit,
     difficulty,
-    setDifficulty,
+    setDifficulty: (value: Difficulty) => {
+      setDifficulty(value);
+      setDifficultyConfirmed(true);
+    },
     subtopicIds,
-    setSubtopicIds,
+    setSubtopicIds: (value: number[]) => {
+      setSubtopicIds(value);
+      setSubtopicsConfirmed(true);
+    },
+    difficultyConfirmed,
+    subtopicsConfirmed,
+    confirmDifficulty: () => setDifficultyConfirmed(true),
+    confirmSubtopics: () => setSubtopicsConfirmed(true),
     changedFields,
     effectiveDecision,
     isInlineEditing: decision === "edit" || effectiveDecision === "edit",

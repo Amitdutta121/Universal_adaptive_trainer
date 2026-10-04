@@ -16,8 +16,10 @@ from app.domain.enums import Difficulty, EvaluationTrigger, QuestionType
 from app.domain.questions import Question
 from app.errors import InvalidQuestionSpecError
 from app.evaluation import PedagogicalJudge, new_run_id, record_evaluation, skipped_evaluation
+from app.evaluation.custom import CustomRule
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
+from app.generation.review import RoundReview
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
@@ -48,6 +50,7 @@ class GenerationService:
             retrieval=self._retrieval,
             validator=self._validator,
         )
+        self._client = client
         self._judge = PedagogicalJudge(session, client=client)
         self._questions = QuestionRepository(session)
 
@@ -247,6 +250,96 @@ class GenerationService:
             rows.append(row)
         return rows
 
+    def generate_round_question(
+        self,
+        spec: QuestionSpec,
+        *,
+        version: CurriculumVersionRow,
+        round_id: int,
+        rules: Sequence[CustomRule] = (),
+        examples: list[str] | None = None,
+        run_id: str | None = None,
+    ) -> QuestionRow | None:
+        """Generate one round question, judged inside the retry loop; ``None`` when dropped.
+
+        docs/QUESTION_SETUP_PLAN.md step 4: generate -> answer check -> difficulty judge ->
+        topic judge -> custom rules. Any failure is fed back as a correction; after
+        ``MAX_GENERATION_ATTEMPTS`` a question that still fails is **not stored**. A stored
+        question carries ``style_id``, ``round_id`` and ``target_subtopic_id``, keeps the
+        judge evaluation that passed it (no second judge run), and lands in the review queue.
+
+        Flushes; the caller commits.
+
+        A hard cell does this in two steps. First it generates a medium question and
+        keeps it only when the answer check passes. Then it asks for a harder question
+        made from that one, and the difficulty judge runs on the harder question.
+        """
+        if not spec.is_round_spec:
+            raise InvalidQuestionSpecError(
+                "Round generation needs a target subtopic.",
+                detail="Use generate_for_sections for section-only specs.",
+            )
+        review = RoundReview(self._judge, rules, spec=spec, client=self._client)
+        question = self._question_for_round(
+            spec, version=version, review=review, examples=examples
+        )
+        if not question.generation_attempts or not question.generation_attempts[-1].usable:
+            return None
+        evaluation = review.last_evaluation
+        if evaluation is None:
+            return None
+
+        row = self._row_from_question(question)
+        row.style_id = spec.style_id
+        row.round_id = round_id
+        row.target_subtopic_id = spec.target_subtopic_id
+        row = self._questions.add(row)
+        report = question.validation_report or self._validator.validate(question)
+        row.validation_report = report
+        row.status = report.resulting_status()
+        evaluation = evaluation.model_copy(update={"question_id": row.id})
+        stored = record_evaluation(
+            self._session,
+            row.id,
+            evaluation,
+            run_id=run_id or new_run_id(),
+            trigger=EvaluationTrigger.GENERATION,
+        )
+        stored.custom_results = [result.model_dump(mode="json") for result in review.last_custom]
+        self._session.flush()
+        from app.evaluation.trust import route_generated_question
+
+        route_generated_question(self._session, row, review.last_custom)
+        return row
+
+    def _question_for_round(
+        self,
+        spec: QuestionSpec,
+        *,
+        version: CurriculumVersionRow,
+        review: RoundReview,
+        examples: list[str] | None,
+    ) -> Question:
+        """One round question. A hard cell is a valid medium question, then a harder one."""
+        if spec.difficulty is not Difficulty.HARD:
+            return self._generator.generate_one(
+                spec, version=version, review=review, examples=examples
+            )
+        seed = self._generator.generate_one(
+            spec.model_copy(update={"difficulty": Difficulty.MEDIUM}),
+            version=version,
+            examples=None,
+        )
+        if not seed.generation_attempts or not seed.generation_attempts[-1].usable:
+            return seed
+        return self._generator.generate_one(
+            spec,
+            version=version,
+            review=review,
+            examples=examples,
+            follow_up=_harden_follow_up(seed),
+        )
+
     def _resolve_section_ids(
         self, source_section_ids: list[int] | None, book_id: int | None
     ) -> list[int]:
@@ -292,3 +385,22 @@ class GenerationService:
             created_at=question.created_at,
             updated_at=question.updated_at,
         )
+
+
+def _harden_follow_up(seed: Question) -> str:
+    """Tell the model to make a passing question harder without breaking the answer check."""
+    content = seed.content if isinstance(seed.content, dict) else {}
+    code = content.get("code")
+    lines = [
+        "This question already passes the answer check. Make a harder question from it.",
+        "Keep the same subtopic and the same question type.",
+        "The harder question must still pass the answer check.",
+        "",
+        f"Prompt:\n{seed.prompt}",
+    ]
+    if isinstance(code, str) and code.strip():
+        lines.append(f"Code:\n{code}")
+    solution = seed.reference_solution
+    if isinstance(solution, str) and solution.strip() and solution != code:
+        lines.append(f"Reference solution:\n{solution}")
+    return "\n".join(lines)

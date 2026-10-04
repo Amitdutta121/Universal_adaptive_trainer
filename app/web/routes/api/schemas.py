@@ -71,6 +71,7 @@ from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
 from app.evaluation.custom import CustomJudgeResult
+from app.evaluation.trust import TrustReport
 from app.generation import ChunkQuestionRequest, PlannedQuestion
 from app.ingestion import VocabularyTerm
 from app.persistence.models import (
@@ -951,6 +952,7 @@ class QuestionSummary(BaseModel):
     style_id: str | None = None
     round_id: int | None = None
     target_subtopic_id: int | None = None
+    trust_provenance: str | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -991,6 +993,7 @@ class QuestionSummary(BaseModel):
             style_id=row.style_id,
             round_id=row.round_id,
             target_subtopic_id=row.target_subtopic_id,
+            trust_provenance=row.trust_provenance,
         )
 
 
@@ -1034,6 +1037,7 @@ class QuestionDetail(BaseModel):
     #: until the detail builder fills it (Phase 1, agent C) and for questions judged before
     #: custom judges existed.
     custom_results: list[CustomJudgeResult] = Field(default_factory=list)
+    judge_trust: TrustReport | None = None
     personalization: PersonalizationEvidence | None
     original_prompt: str | None
     original_reference_solution: str | None
@@ -1362,7 +1366,7 @@ class ReviewOut(BaseModel):
     outcome: ReviewOutcomeOut | None = None
     #: The professor's corrections, when the review carried any.
     corrected_difficulty: Difficulty | None = None
-    corrected_subtopic_ids: list[int] = Field(default_factory=list)
+    corrected_subtopic_ids: list[int] | None = None
 
     @classmethod
     def from_row(cls, row: ProfessorReviewRow) -> ReviewOut:
@@ -1385,7 +1389,9 @@ class ReviewOut(BaseModel):
             ),
             created_at=row.created_at,
             corrected_difficulty=row.corrected_difficulty,
-            corrected_subtopic_ids=list(row.corrected_subtopic_ids or []),
+            corrected_subtopic_ids=(
+                list(row.corrected_subtopic_ids) if row.corrected_subtopic_ids is not None else None
+            ),
         )
 
 
@@ -2551,6 +2557,8 @@ class GenerationRoundOut(BaseModel):
     requested: int
     produced: int
     dropped: int
+    skipped: int = 0
+    skip_reason: str | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -2566,6 +2574,8 @@ class GenerationRoundOut(BaseModel):
             requested=row.requested,
             produced=row.produced,
             dropped=row.dropped,
+            skipped=row.skipped,
+            skip_reason=row.skip_reason,
             error=row.error,
             created_at=row.created_at,
             started_at=row.started_at,

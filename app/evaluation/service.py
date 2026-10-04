@@ -1,4 +1,8 @@
-"""Four advisory judges per question, each with its own bounded retries."""
+"""Advisory metric judges per question, each with its own bounded retries.
+
+Which judges run is ``settings.judge_metrics_enabled`` (docs/QUESTION_SETUP_PLAN.md); the
+others are absent from the stored evaluation, not failed.
+"""
 
 from __future__ import annotations
 
@@ -142,8 +146,14 @@ def result_from_verdict(metric: JudgeMetricId, verdict: object, question: Questi
     raise TypeError(msg)
 
 
+def enabled_metrics() -> list[JudgeMetricId]:
+    """The metric judges new evaluations run, in ``JudgeMetricId`` order."""
+    enabled = set(get_settings().judge_metrics_enabled)
+    return [metric for metric in JudgeMetricId if metric.value in enabled]
+
+
 class PedagogicalJudge:
-    """Run all four metric judges over one question."""
+    """Run the enabled metric judges over one question."""
 
     def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
         self._session = session
@@ -172,26 +182,76 @@ class PedagogicalJudge:
         """
         model = self._client.description
         prompts, rubric_version = self._panel(question)
+        # Read per call, not at construction: the panel is configuration, and a judge
+        # built before a settings change must not keep running the old one.
+        panel = enabled_metrics()
         try:
             context = build_judge_context(self._session, question)
         except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
             detail = humanize_judge_error_detail(_error_detail(exc))
             return evaluation_from_metrics(
-                [failed_metric(metric, detail=detail) for metric in JudgeMetricId],
+                [failed_metric(metric, detail=detail) for metric in panel],
                 question_id=question.id,
                 judge_model=model,
                 rubric_version=rubric_version,
+                expected=panel,
             )
 
         metrics = [
-            self._run_metric(metric, context, question, prompts[metric]) for metric in JudgeMetricId
+            self._run_metric(metric, context, question, prompts[metric]) for metric in panel
         ]
         return evaluation_from_metrics(
             metrics,
             question_id=question.id,
             judge_model=model,
             rubric_version=rubric_version,
+            expected=panel,
         )
+
+    def section_supports(
+        self,
+        *,
+        curriculum_version_id: int,
+        difficulty: str,
+        question_type: str,
+        section_text: str,
+        citation: str,
+    ) -> tuple[bool | None, str]:
+        """Whether this lesson can support a question of this difficulty and type.
+
+        The generatability judge sees the section, the difficulty, and the type,
+        not a question. ``None`` means it could not answer. The caller generates
+        anyway, so a judge outage does not skip the cell.
+        """
+        profile = profile_for_version(self._session, curriculum_version_id)
+        if profile.storage_key not in self._panels:
+            self._panels[profile.storage_key] = (
+                resolve_system_prompts(self._session, profile=profile),
+                effective_rubric_version(self._session, profile=profile),
+            )
+        prompts, _rubric = self._panels[profile.storage_key]
+        context = JudgeContext(
+            question_artifact={},
+            source_sections=[{"citation": citation, "text": section_text}],
+            taxonomy=[],
+            claimed_taxonomy={},
+            requested_difficulty=difficulty,
+            requested_question_type=question_type,
+        )
+        prompt = build_user_prompt(JudgeMetricId.GENERATABILITY, context)
+        system = prompts[JudgeMetricId.GENERATABILITY]
+        last = "The generatability judge could not answer."
+        for _ in range(JUDGE_MAX_ATTEMPTS):
+            try:
+                verdict = self._client.complete_structured(
+                    system=system,
+                    prompt=prompt,
+                    response_model=GeneratabilityVerdict,
+                )
+                return bool(verdict.should_have_generated), verdict.rationale
+            except (LLMRequestError, MalformedModelOutputError) as exc:
+                last = humanize_judge_error_detail(str(exc.detail or exc))
+        return None, last
 
     def _run_metric(
         self, metric: JudgeMetricId, context: JudgeContext, question: Question, system: str

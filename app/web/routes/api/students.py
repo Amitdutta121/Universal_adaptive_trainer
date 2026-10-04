@@ -27,13 +27,20 @@ import logging
 import secrets
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi.responses import JSONResponse
 
 from app.adaptive import AdaptiveTrainingEngine
 from app.auth.backend import current_active_user
 from app.coverage import get_prod_question_set, get_taxonomy_question_set
 from app.domain.mastery import difficulty_for_mastery, mastery_band
-from app.errors import ActiveSessionExistsError, DomainRuleError, NotFoundError
+from app.errors import (
+    ActiveSessionExistsError,
+    DomainRuleError,
+    NoQuestionAvailableError,
+    NotFoundError,
+)
+from app.generation.refill import plan_refill, schedule_refill
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionSetRepository,
@@ -525,7 +532,11 @@ def get_training_session(session: DbSession, training_session_id: int) -> Traini
 
 
 @router.get("/training-sessions/{training_session_id}/next", response_model=ServedQuestionOut)
-def next_question(session: DbSession, training_session_id: int) -> ServedQuestionOut:
+def next_question(
+    session: DbSession,
+    training_session_id: int,
+    background_tasks: BackgroundTasks,
+) -> ServedQuestionOut | JSONResponse:
     """Serve the next question.
 
     Not idempotent in the HTTP sense -- it writes an attempt row and lowers the
@@ -534,7 +545,24 @@ def next_question(session: DbSession, training_session_id: int) -> ServedQuestio
     A GET is still the honest verb, because what a client wants here is the
     session's current question.
     """
-    served = AdaptiveTrainingEngine(session).serve_next(training_session_id)
+    try:
+        served = AdaptiveTrainingEngine(session).serve_next(training_session_id)
+    except NoQuestionAvailableError as exc:
+        if plan_refill(session, training_session_id) is not None:
+            background_tasks.add_task(schedule_refill, training_session_id)
+        session.commit()
+        # Raising would discard the injected BackgroundTasks. Return the same
+        # error contract explicitly so depletion still schedules replenishment.
+        error = {"code": exc.code, "message": exc.message}
+        if exc.detail is not None:
+            error["detail"] = exc.detail
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": error},
+            background=background_tasks,
+        )
+    if plan_refill(session, training_session_id) is not None:
+        background_tasks.add_task(schedule_refill, training_session_id)
     session.commit()
     subtopic_name = None
     if served.attempt.subtopic_id is not None:
@@ -576,7 +604,9 @@ def review_attempt(session: DbSession, attempt_id: int) -> QuestionDetail:
         )
     from app.web.routes.api.questions import get_question
 
-    return get_question(session, attempt.question_id)
+    # Attempt ownership pins the reviewed question; the student page carries no
+    # instructor course filter. Use the explicit scope added by the course API.
+    return get_question(session, course=None, question_id=attempt.question_id)
 
 
 @router.post("/training-sessions/{training_session_id}/end", response_model=TrainingSessionOut)

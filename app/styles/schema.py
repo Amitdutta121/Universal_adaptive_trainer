@@ -11,12 +11,12 @@ suggester can all import them.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import Difficulty, QuestionType
 
-#: The bounds on a suggested cell target. The suggester may not ask for fewer than one approved
-#: question per cell, nor more than six.
+#: Easy and medium stay at least one. Hard may be 0 when the lesson cannot support it.
+#: No cell asks for more than six.
 MIN_CELL_TARGET = 1
 MAX_CELL_TARGET = 6
 
@@ -93,11 +93,22 @@ class SubtopicStyleSuggestion(BaseModel):
 
 
 class CellTarget(BaseModel):
-    """How many approved questions one subtopic x difficulty cell should reach."""
+    """How many approved questions one subtopic x difficulty cell should reach.
+
+    Hard may be 0 when the lesson teaches one idea. Easy and medium stay at least one.
+    """
 
     subtopic_id: int
     difficulty: Difficulty
-    target: int = Field(ge=MIN_CELL_TARGET, le=MAX_CELL_TARGET)
+    target: int = Field(ge=0, le=MAX_CELL_TARGET)
+
+    @model_validator(mode="after")
+    def easy_and_medium_need_at_least_one(self) -> CellTarget:
+        if self.difficulty is not Difficulty.HARD and self.target < MIN_CELL_TARGET:
+            raise ValueError(
+                f"A {self.difficulty.value} cell needs at least {MIN_CELL_TARGET} question."
+            )
+        return self
 
 
 class SetupSuggestion(BaseModel):

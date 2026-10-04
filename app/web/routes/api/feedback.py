@@ -15,8 +15,10 @@ the one allowed to reach across them (ADR-027).
 from __future__ import annotations
 
 import logging
+from collections import Counter
 
 from fastapi import APIRouter, status
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.domain.enums import (
@@ -30,10 +32,15 @@ from app.errors import AdaptiveTrainerError
 from app.evaluation.judge_learning import refresh_judge_prompt
 from app.feedback import ReviewOutcome, route_review_outcome, submit_review
 from app.generation.prompts import base_type_instruction
-from app.persistence.repositories import JudgePromptRepository, ProfessorReviewRepository
+from app.persistence.models import CurriculumVersionRow, ProfessorReviewRow, QuestionRow
+from app.persistence.repositories import (
+    JudgePromptRepository,
+    ProfessorReviewRepository,
+    QuestionRepository,
+)
 from app.personalization import refresh_type_instruction
 from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_version
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     ReasonCount,
     ReviewListResponse,
@@ -51,8 +58,17 @@ router = APIRouter(tags=["feedback"])
 @router.post(
     "/questions/{question_id}/review", response_model=ReviewOut, status_code=status.HTTP_201_CREATED
 )
-def create_review(session: DbSession, question_id: int, payload: ReviewRequest) -> ReviewOut:
+def create_review(
+    session: DbSession, course: CourseScope, question_id: int, payload: ReviewRequest
+) -> ReviewOut:
     """Record a professor verdict, then act on the cell it lands in (ADR-037)."""
+    question = QuestionRepository(session).get(question_id)
+    version = (
+        session.get(CurriculumVersionRow, question.curriculum_version_id)
+        if question.curriculum_version_id is not None
+        else None
+    )
+    ensure_in_course(version.course_id if version is not None else None, course, "Question")
     edit_fields: dict[str, str | None] = {}
     if payload.decision is ReviewDecision.EDIT:
         edit_fields = {
@@ -68,6 +84,8 @@ def create_review(session: DbSession, question_id: int, payload: ReviewRequest) 
             reasons=payload.reasons,
             comment=payload.comment or None,
             professor_id=payload.professor_id,
+            corrected_difficulty=payload.corrected_difficulty,
+            corrected_subtopic_ids=payload.corrected_subtopic_ids,
             **edit_fields,
         )
         outcome = route_review_outcome(session, review)
@@ -209,8 +227,13 @@ def _relearn_for(
 
 
 @router.get("/reviews", response_model=ReviewListResponse)
-def list_reviews(session: DbSession, limit: int = 50) -> ReviewListResponse:
+def list_reviews(session: DbSession, course: CourseScope, limit: int = 50) -> ReviewListResponse:
     """The professor's review history, newest first."""
+    if course is not None:
+        rows = _scoped_reviews(session, course)
+        return ReviewListResponse(
+            reviews=[ReviewOut.from_row(row) for row in rows[: max(0, limit)]], total=len(rows)
+        )
     repo = ProfessorReviewRepository(session)
     return ReviewListResponse(
         reviews=[ReviewOut.from_row(row) for row in repo.list_recent(limit=limit)],
@@ -219,12 +242,20 @@ def list_reviews(session: DbSession, limit: int = 50) -> ReviewListResponse:
 
 
 @router.get("/reviews/stats", response_model=ReviewStatsResponse)
-def review_stats(session: DbSession) -> ReviewStatsResponse:
+def review_stats(session: DbSession, course: CourseScope) -> ReviewStatsResponse:
     """Decision totals and the rejection-reason distribution."""
     repo = ProfessorReviewRepository(session)
-    by_decision = repo.count_by_decision()
+    if course is None:
+        by_decision = repo.count_by_decision()
+        reason_counts = repo.reason_counts()
+        reviewed = repo.count()
+    else:
+        rows = _scoped_reviews(session, course)
+        by_decision = Counter(row.decision.value for row in rows)
+        reason_counts = Counter(reason.value for row in rows for reason in row.reasons)
+        reviewed = len(rows)
     return ReviewStatsResponse(
-        reviewed=repo.count(),
+        reviewed=reviewed,
         approved=by_decision.get(ReviewDecision.APPROVE.value, 0),
         rejected=by_decision.get(ReviewDecision.REJECT.value, 0),
         edited=by_decision.get(ReviewDecision.EDIT.value, 0),
@@ -235,8 +266,20 @@ def review_stats(session: DbSession) -> ReviewStatsResponse:
                 count=count,
             )
             # Most frequent first; ties broken by code so the order is stable.
-            for code, count in sorted(
-                repo.reason_counts().items(), key=lambda item: (-item[1], item[0])
-            )
+            for code, count in sorted(reason_counts.items(), key=lambda item: (-item[1], item[0]))
         ],
+    )
+
+
+def _scoped_reviews(session: DbSession, course: int) -> list[ProfessorReviewRow]:
+    return list(
+        session.scalars(
+            select(ProfessorReviewRow)
+            .join(QuestionRow, ProfessorReviewRow.question_id == QuestionRow.id)
+            .join(
+                CurriculumVersionRow, QuestionRow.curriculum_version_id == CurriculumVersionRow.id
+            )
+            .where(CurriculumVersionRow.course_id == course)
+            .order_by(ProfessorReviewRow.created_at.desc(), ProfessorReviewRow.id.desc())
+        )
     )

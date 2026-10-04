@@ -75,7 +75,7 @@ def test_a_0004_database_is_upgraded_keeping_its_rows(engine: Engine) -> None:
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
         row = connection.execute(text("SELECT prompt, style_id, round_id FROM questions")).one()
-    assert version == "0005_question_setup"
+    assert version == "0006_judge_trust"
     assert tuple(row) == ("Old question", None, None)
 
 
@@ -173,7 +173,7 @@ def test_a_style_needs_two_examples_and_a_difficulty() -> None:
 
 
 # The setup routes (agent A) are implemented: tests/test_setup_routes.py.
-STUB_ROUTES = [
+IMPLEMENTED_ROUTES = [
     ("POST", "/api/rounds", {"setup_id": 1}),
     ("GET", "/api/rounds/1", None),
     ("GET", "/api/custom-judges?curriculum_version_id=1", None),
@@ -182,13 +182,12 @@ STUB_ROUTES = [
 ]
 
 
-@pytest.mark.parametrize(("method", "path", "body"), STUB_ROUTES)
-def test_stub_routes_are_registered_and_answer_501(
+@pytest.mark.parametrize(("method", "path", "body"), IMPLEMENTED_ROUTES)
+def test_setup_routes_are_registered_and_validate_missing_resources(
     client: TestClient, method: str, path: str, body: dict | None
 ) -> None:
     response = client.request(method, path, json=body)
-    assert response.status_code == 501, response.text
-    assert response.json()["error"]["code"] == "feature_not_available"
+    assert response.status_code == 404, response.text
 
 
 def test_review_request_rejects_an_empty_subtopic_correction(client: TestClient) -> None:
