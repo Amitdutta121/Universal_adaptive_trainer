@@ -83,6 +83,7 @@ export const qk = {
   judgePrompts: {
     all: ["judge-prompts"] as const,
     list: () => ["judge-prompts", "list"] as const,
+    stats: () => ["judge-prompts", "stats"] as const,
   },
   coverage: {
     all: ["coverage"] as const,
@@ -1015,6 +1016,17 @@ export const judgePromptsQuery = () =>
   });
 
 export const useJudgePrompts = () => useQuery(judgePromptsQuery());
+
+/** Agreement per judge and trust per style under the current panel (step 13). */
+export const judgeStatsQuery = () =>
+  queryOptions({
+    queryKey: qk.judgePrompts.stats(),
+    queryFn: () => unwrap(api.GET("/api/judge-prompts/stats")),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+export const useJudgeStats = () => useQuery(judgeStatsQuery());
 
 type JudgeMetricId = Schemas["JudgeMetricId"];
 

@@ -223,6 +223,12 @@ def agreements_for(
     return _of_subject(session, rows, profile, limit)
 
 
+def held_out_for(session: Session, *, profile: SubjectProfile = PYTHON_PROFILE) -> int:
+    """How many reserved pairs of this subject a rewrite could be scored on."""
+    rows = ReviewOutcomeRepository(session).list_held_out(limit=_SUBJECT_SCAN)
+    return len(_of_subject(session, rows, profile, _SUBJECT_SCAN))
+
+
 def score_prompt(
     session: Session,
     metric: JudgeMetricId,

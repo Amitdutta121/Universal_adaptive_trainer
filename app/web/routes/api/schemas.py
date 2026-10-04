@@ -1531,6 +1531,52 @@ class JudgePromptListResponse(BaseModel):
     shipped_rubric_version: str
 
 
+class MetricTrustOut(BaseModel):
+    observations: int
+    agreements: int
+    agreement_rate: float
+    trusted: bool
+    audit_revoked: bool
+
+
+class StyleTrustOut(BaseModel):
+    """One (taxonomy, style) scope: whether its questions skip review, and why not."""
+
+    curriculum_version_id: int
+    style_id: str
+    style_name: str | None
+    trusted: bool
+    #: ``difficulty``, ``subtopic``, ``acceptance`` and ``custom:<id>`` windows.
+    metrics: dict[str, MetricTrustOut]
+
+
+class JudgeStatsOut(BaseModel):
+    """Step 13: how often the professor agreed with one judge, pooled over styles' windows."""
+
+    metric: JudgeMetricId
+    observations: int
+    agreements: int
+    agreement_rate: float | None
+    #: Disagreements a rewrite could learn from now (held-out third excluded).
+    learnable_disagreements: int
+    disagreements_needed: int
+
+
+class JudgeStatsResponse(BaseModel):
+    rubric_version: str
+    judges: list[JudgeStatsOut]
+    styles: list[StyleTrustOut]
+    held_out_pairs: int
+    held_out_needed: int
+    learning_enabled: bool
+    #: True while any style of this subject is trusted; automatic rewrites wait.
+    learning_paused: bool
+    trusted_style_count: int
+    min_observations: int
+    min_agreement: float
+    min_acceptance: float
+
+
 class JudgePromptRequest(BaseModel):
     """A professor's replacement text for one judge."""
 
