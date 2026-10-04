@@ -17,10 +17,11 @@ import logging
 from fastapi import APIRouter
 
 from app.domain.enums import JudgeMetricId
-from app.errors import NotFoundError
+from app.errors import DomainRuleError, NotFoundError
 from app.evaluation.judge_learning import disagreements_for, refresh_judge_prompt
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
 from app.evaluation.prompts import rubric_version_for, system_prompt_for
+from app.evaluation.trust_scope import trusted_scopes
 from app.persistence.models import JudgePromptRow
 from app.persistence.repositories import JudgePromptRepository
 from app.subjects import SubjectProfile
@@ -161,6 +162,15 @@ def refresh(
     the disagreements this judge is named in, minus the held-out third, so the
     reserved questions stay available to score the result.
     """
+    trusted = trusted_scopes(session, profile)
+    if trusted:
+        raise DomainRuleError(
+            "Judge learning is paused while questions skip review.",
+            detail=(
+                f"{len(trusted)} style(s) are trusted under the current judges. A rewrite would "
+                "send them all back to review; edit the prompt by hand if that is intended."
+            ),
+        )
     before = effective_rubric_version(session, profile=profile)
     try:
         row = refresh_judge_prompt(session, metric, profile=profile)

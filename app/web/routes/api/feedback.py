@@ -30,6 +30,7 @@ from app.domain.enums import (
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.errors import AdaptiveTrainerError
 from app.evaluation.judge_learning import refresh_judge_prompt
+from app.evaluation.trust_scope import trusted_scopes
 from app.feedback import ReviewOutcome, route_review_outcome, submit_review
 from app.generation.prompts import base_type_instruction
 from app.persistence.models import CurriculumVersionRow, ProfessorReviewRow, QuestionRow
@@ -146,8 +147,20 @@ def _relearn_judges(
     A hand-written prompt is left alone. The professor typed it deliberately, and
     a learned rewrite renders onto the *shipped* text, so relearning would
     silently discard what they wrote.
+
+    Paused while any style of this subject is trusted under the current panel
+    (docs/TRUST_AND_JUDGE_STATS_PLAN.md).
     """
     if not outcome.attributed_metrics:
+        return
+    trusted = trusted_scopes(session, profile)
+    if trusted:
+        # A rewrite renames the panel and every trusted style would fall back to review.
+        logger.info(
+            "Judge learning paused: %s style(s) trusted under the current panel.", len(trusted)
+        )
+        outcome.row.judges_refreshed = []
+        reported.judges_refreshed = []
         return
 
     repository = JudgePromptRepository(session)
