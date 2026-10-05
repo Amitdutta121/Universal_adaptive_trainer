@@ -32,6 +32,7 @@ desktop.ini
 /CLAUDE.md
 /frontend/CLAUDE.md
 /frontend/AGENTS.md
+/AGENTS.md
 
 # Source textbooks (PDFs). Out of scope per ADR-012..016: the app imports
 # structured book JSON, never a PDF. Kept locally, never committed.
