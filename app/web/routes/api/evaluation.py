@@ -58,6 +58,9 @@ def submit_batch_run(
     evaluated when this returns, and results appear only after a poll.
     """
     request = payload or SubmitBatchRunRequest()
+    # Named questions of another course are a 404, not silently dropped (ADR-060).
+    for question_id in request.question_ids or []:
+        question_in_course(session, question_id, course)
     try:
         result = submit_bank_rerun(session, question_ids=request.question_ids, course_id=course)
     except Exception:

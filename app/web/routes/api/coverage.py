@@ -35,6 +35,7 @@ from app.errors import LLMRequestError, MalformedModelOutputError
 from app.evaluation import new_run_id
 from app.generation import ChunkQuestionRequest, GenerationService
 from app.llm import StructuredLLMClient
+from app.persistence.models import CurriculumVersionRow
 from app.persistence.repositories import CurriculumRepository, QuestionSetRepository
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
 from app.retrieval.embedder import Embedder
@@ -358,6 +359,16 @@ def sync_taxonomy_set(
 
 
 def _sync_prod(session: DbSession, course: int | None) -> QuestionSetOut:
-    """Freeze the approved bank now and repoint the stable prod classroom link."""
+    """Freeze the approved bank now and repoint the stable prod classroom link.
+
+    There is one ``prod`` alias per installation, so a course may only repoint it while it
+    is unset or already serves this course: otherwise one professor could swap another's
+    students onto their own bank (ADR-060).
+    """
+    current = QuestionSetRepository(session).get_alias("prod")
+    if current is not None and current.set_version is not None:
+        version_id = current.set_version.curriculum_version_id
+        version = session.get(CurriculumVersionRow, version_id) if version_id else None
+        ensure_in_course(version.course_id if version else None, course, "The prod classroom")
     row = sync_prod_question_set(session, course_id=course)
     return QuestionSetOut.from_row(row, is_prod=True)

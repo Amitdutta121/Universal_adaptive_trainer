@@ -140,8 +140,9 @@ class CourseRow(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, default=None)
-    #: Who created it. Nullable because there is no per-owner scoping yet
-    #: (roadmap F2); recorded now so that feature needs no backfill guesswork.
+    #: The account that owns it, and so the only one that can reach it (ADR-058, ADR-060).
+    #: ``NULL`` (a deleted owner, or a row from before 0009) means no account reaches it:
+    #: every check compares with ``=``, which a ``NULL`` never satisfies.
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("user.id", ondelete="SET NULL"), default=None, index=True
     )

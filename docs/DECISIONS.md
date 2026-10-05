@@ -2401,3 +2401,42 @@ without a course (tests only) still reads the bare preset key.
 Also under ADR-058: ids carried in query strings and bodies (coverage `set_version_id` and gap
 targets, generation version/book/section ids, review subtopic corrections) are checked against
 the request's course, and every cross-course 404 reads exactly like a missing row.
+
+## ADR-060 — An account is the isolation boundary for public signup
+
+**Status:** accepted. Extends ADR-058 (per-course access) and ADR-059 (per-professor judges)
+to the public signup coming in M3; amends ADR-041's "the student flow needs no credential".
+
+**Context.** Once anyone can register, every account must be treated as untrusted. ADR-058
+already scoped professor routes to owned courses, but an audit for M2 found four remaining
+hops: `GET /api/counts` counted reviews, learned instructions and students across every
+course; `POST /api/question-sets/prod/sync` let any course repoint the one installation-wide
+`prod` alias, taking over another professor's prod join link; `?curriculum_version_id=` on the
+question list and review queue, and `question_ids` on a judge re-run, were filtered out
+silently instead of refused; and every public run/attempt route (`/training-sessions/{id}/…`,
+`/attempts/{id}/…`, starting a run) took a bare sequential id, so an edited URL reached another
+learner's run, answer keys and email -- and through it another professor's course.
+
+**Decision.** The account is the boundary: what a new account can see or change is exactly
+what it created. A course is reached only by its owner (`courses.owner_id`, stamped from the
+session on create; a posted owner is ignored); every row is reached through its course; an
+id of another account's row -- in a path, query, body or `X-Course-Id` -- is the same 404 as a
+missing one, never a 403. A superuser gets nothing extra: no route reads `is_superuser`.
+Ownerless rows (`courses.owner_id` NULL, books/taxonomies with `course_id` NULL) are reached
+by no account. They are left as they are rather than tightened to `NOT NULL`: owner deletion
+is `ON DELETE SET NULL`, unit tests and scripts build course-less rows, and handing orphans to
+some account would be a guess on a public instance; every check compares with `=`, which
+NULL never satisfies, and the isolation test seeds such rows to keep it that way. The public
+student flow stays login-free but not open: run and attempt routes, and starting a run,
+require the learner's `resume_token` in `X-Student-Token` and answer 404 unless the run is
+that learner's. The prod alias may only be repointed while unset or already serving the
+requesting course.
+
+**Consequences.** `tests/test_account_isolation.py` enumerates `app.routes`: every route is
+either probed (A's ids everywhere -> 404, empty lists for a new account, A's data unchanged
+after the sweep, for a plain account and a superuser) or named in an allowlist with a reason,
+so a new route fails the test until it is classified. The Studio's client sends
+`X-Student-Token` from the stored learner identity, which the join screen now saves before
+starting a run. Still open: classroom links are sequential ids
+(`/students/join?set=` / `?taxonomy=`), so a guessed link joins that class; closing it needs
+an unguessable join code, which changes every shared link.

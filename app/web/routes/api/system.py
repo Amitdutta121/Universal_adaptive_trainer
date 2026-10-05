@@ -19,9 +19,10 @@ from app.persistence.repositories import (
     ProfessorReviewRepository,
     QuestionRepository,
     StudentRepository,
+    TrainingSessionRepository,
     TypeInstructionRepository,
 )
-from app.web.routes.api.deps import CourseScope, DbSession
+from app.web.routes.api.deps import CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import ConfigResponse, CountsResponse, HealthResponse
 
 logger = logging.getLogger(__name__)
@@ -73,13 +74,24 @@ def config() -> ConfigResponse:
 
 
 @router.get("/counts", response_model=CountsResponse)
-def counts(session: DbSession, course: CourseScope) -> CountsResponse:
-    """One count per section. Books, taxonomies and questions are the course's own."""
+def counts(session: DbSession, course: CourseScope, profile: CourseProfile) -> CountsResponse:
+    """One count per section, every one of them the course's own (ADR-060).
+
+    Learned instructions are the professor's (ADR-059), and a student counts once they have
+    run a session in the course.
+    """
+    students = (
+        len(TrainingSessionRepository(session).student_ids_for_course(course))
+        if course is not None
+        else StudentRepository(session).count()
+    )
     return CountsResponse(
         books=BookRepository(session).count(course_id=course),
         curriculum_versions=CurriculumRepository(session).count(course_id=course),
         questions=QuestionRepository(session).count(course_id=course),
-        reviews=ProfessorReviewRepository(session).count(),
-        learned_instructions=len(TypeInstructionRepository(session).list_all()),
-        students=StudentRepository(session).count(),
+        reviews=ProfessorReviewRepository(session).count(course_id=course),
+        learned_instructions=len(
+            TypeInstructionRepository(session).list_all(subject=profile.personal_key)
+        ),
+        students=students,
     )

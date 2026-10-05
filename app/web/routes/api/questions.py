@@ -101,6 +101,11 @@ def list_questions(
     describe the whole bank, so a filtered listing still says how much it is
     showing of what.
     """
+    # Another course's taxonomy or section is a 404, not an empty page (ADR-060).
+    if curriculum_version_id is not None and course is not None:
+        version_in_course(session, curriculum_version_id, course)
+    if section_id is not None:
+        sections_in_course(session, [section_id], course)
     repo = QuestionRepository(session)
     rows = repo.list_recent(
         limit=limit,
@@ -373,6 +378,8 @@ def review_queue(
     and ``total`` counts only reviewable ones, so a completed pass reads as
     ``remaining == 0`` rather than stalling on questions the queue excludes.
     """
+    if curriculum_version_id is not None and course is not None:
+        version_in_course(session, curriculum_version_id, course)
     repo = QuestionRepository(session)
     scoreable = [
         row

@@ -24,7 +24,12 @@ from app.adaptive.service import AdaptiveTrainingEngine
 from app.domain.enums import Difficulty, QuestionStatus, QuestionType, RoundStatus
 from app.errors import NoQuestionAvailableError
 from app.generation import live
-from app.persistence.models import LiveQuestionJobRow, QuestionRow, QuestionSetupRow
+from app.persistence.models import (
+    LiveQuestionJobRow,
+    QuestionRow,
+    QuestionSetupRow,
+    StudentRow,
+)
 from app.persistence.repositories import (
     QuestionSetRepository,
     StudentRepository,
@@ -193,11 +198,16 @@ def test_without_a_model_the_bank_behaves_as_before(session, monkeypatch):
         live.next_for_session(session, bank.run.id)
 
 
+def _learner(session, bank):
+    """The learner whose token the student page would send (ADR-060)."""
+    return session.get(StudentRow, bank.run.student_id)
+
+
 def test_the_route_reports_generating_and_schedules_the_job(session, monkeypatch):
     bank, _ = _live(session, monkeypatch, questions=0)
     tasks = BackgroundTasks()
 
-    response = students.next_question(session, bank.run.id, tasks)
+    response = students.next_question(session, _learner(session, bank), bank.run.id, tasks)
 
     assert response.status_code == 409
     assert b'"question_generating"' in response.body
@@ -209,7 +219,9 @@ def test_the_route_serves_a_ready_live_question(session, monkeypatch):
     job = live.next_for_session(session, bank.run.id)
     _finish(session, job)
 
-    served = students.next_question(session, bank.run.id, BackgroundTasks())
+    served = students.next_question(
+        session, _learner(session, bank), bank.run.id, BackgroundTasks()
+    )
 
     assert served.live is True and served.question_id == job.question_id
 
