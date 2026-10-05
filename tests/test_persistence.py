@@ -145,6 +145,19 @@ class TestMigrations:
                 text("SELECT course_id, label FROM curriculum_versions")
             ).all() == [(course_id, "Old taxonomy")]
 
+    def test_an_empty_version_table_counts_as_unversioned(self, engine: Engine) -> None:
+        # Seen on a real dev database: tables built by create_all and an alembic_version
+        # table with no row. Plain ``alembic upgrade`` would re-create the baseline tables.
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), BASELINE_REVISION)
+            connection.execute(text("DELETE FROM alembic_version"))
+
+        init_db(engine)
+
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+            assert "courses" in inspect(connection).get_table_names()
+
 
 def test_book_repository_roundtrip(session: Session) -> None:
     repo = BookRepository(session)

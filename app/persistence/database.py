@@ -15,6 +15,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Connection, Engine, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -98,7 +99,8 @@ def init_db(engine: Engine | None = None) -> None:
     """Bring the database to the current schema, then check it matches the models.
 
     ``alembic upgrade head`` is the only thing that builds tables. A database from
-    before migrations existed (tables, no ``alembic_version``) is first stamped at
+    before migrations existed (tables, but no revision recorded -- no ``alembic_version``
+    table, or an empty one) is first stamped at
     :data:`BASELINE_REVISION`, whose schema it already has. Safe to repeat: an
     up-to-date database upgrades as a no-op.
 
@@ -111,7 +113,8 @@ def init_db(engine: Engine | None = None) -> None:
     with target.begin() as connection:
         tables = set(inspect(connection).get_table_names())
         config = _alembic_config(connection)
-        if tables - {"alembic_version"} and "alembic_version" not in tables:
+        unversioned = MigrationContext.configure(connection).get_current_revision() is None
+        if tables - {"alembic_version"} and unversioned:
             command.stamp(config, BASELINE_REVISION)
         command.upgrade(config, "head")
     verify_schema(target)
