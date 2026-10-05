@@ -11,22 +11,24 @@
 import { ArrowLeft, BookOpen, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { CourseLink } from "@/components/course-link";
+import { NotFoundInCourse } from "@/components/not-found-in-course";
 import { PageHeader } from "@/components/page-header";
 import { QueryError, TableSkeleton } from "@/components/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api/client";
 import { useBook } from "@/lib/api/queries";
 import { pluralise } from "@/lib/display";
+import { useCoursePath } from "@/lib/use-course";
 import { authorLabel, BOOK_STATUS_LABEL, BOOK_STATUS_VARIANT, defects } from "../book-display";
 import { BookDeleteDialog } from "../components/book-delete-dialog";
 import { BookEditDialog } from "../components/book-edit-dialog";
 import { BookProvenance } from "./components/book-provenance";
 import { BookStructure } from "./components/book-structure";
 import { WarningList } from "./components/warning-list";
-import { CourseLink } from "@/components/course-link";
-import { useCoursePath } from "@/lib/use-course";
 
 export function BookDetailScreen({ bookId }: { bookId: number }) {
   const router = useRouter();
@@ -44,6 +46,8 @@ export function BookDetailScreen({ bookId }: { bookId: number }) {
     );
   }
 
+  // Another course's row answers the same 404 as a missing one (ADR-058).
+  if (isError && readApiError(error)?.status === 404) return <NotFoundInCourse />;
   if (isError) {
     return (
       <>

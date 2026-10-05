@@ -17,12 +17,12 @@ import logging
 from fastapi import APIRouter, status
 
 from app.evaluation import poll_and_ingest, submit_bank_rerun
+from app.persistence.models import JudgeBatchRunRow
 from app.persistence.repositories import (
     JudgeBatchRunRepository,
     QuestionEvaluationRepository,
-    QuestionRepository,
 )
-from app.web.routes.api.deps import CourseScope, DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course, question_in_course
 from app.web.routes.api.schemas import (
     BatchRunListResponse,
     EvaluationHistoryEntry,
@@ -36,6 +36,12 @@ from app.web.routes.api.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["evaluation"])
+
+
+def _run_in_course(session: DbSession, run_id: str, course: int | None) -> JudgeBatchRunRow:
+    run = JudgeBatchRunRepository(session).get(run_id)
+    ensure_in_course(run.course_id, course, f"Batch run {run_id}")
+    return run
 
 
 @router.post(
@@ -61,27 +67,30 @@ def submit_batch_run(
 
 
 @router.get("/evaluation/batch-runs", response_model=BatchRunListResponse)
-def list_batch_runs(session: DbSession, limit: int = 20) -> BatchRunListResponse:
-    """Recent re-runs, newest first."""
-    runs = JudgeBatchRunRepository(session).list_recent(limit=limit)
+def list_batch_runs(
+    session: DbSession, course: CourseScope, limit: int = 20
+) -> BatchRunListResponse:
+    """The course's recent re-runs, newest first."""
+    runs = JudgeBatchRunRepository(session).list_recent(limit=limit, course_id=course)
     return BatchRunListResponse(
         runs=[JudgeBatchRunOut.from_row(row) for row in runs], total=len(runs)
     )
 
 
 @router.get("/evaluation/batch-runs/{run_id}", response_model=JudgeBatchRunOut)
-def get_batch_run(session: DbSession, run_id: str) -> JudgeBatchRunOut:
+def get_batch_run(session: DbSession, course: CourseScope, run_id: str) -> JudgeBatchRunOut:
     """One re-run's stored status, without contacting the provider."""
-    return JudgeBatchRunOut.from_row(JudgeBatchRunRepository(session).get(run_id))
+    return JudgeBatchRunOut.from_row(_run_in_course(session, run_id, course))
 
 
 @router.post("/evaluation/batch-runs/{run_id}/poll", response_model=PollBatchRunResponse)
-def poll_batch_run(session: DbSession, run_id: str) -> PollBatchRunResponse:
+def poll_batch_run(session: DbSession, course: CourseScope, run_id: str) -> PollBatchRunResponse:
     """Ask the provider about a run and record whatever has finished.
 
     Idempotent. Polling a run whose results are already recorded reports them as
     ``already_recorded`` and writes nothing.
     """
+    _run_in_course(session, run_id, course)
     try:
         result = poll_and_ingest(session, run_id)
     except Exception:
@@ -94,7 +103,9 @@ def poll_batch_run(session: DbSession, run_id: str) -> PollBatchRunResponse:
     "/questions/{question_id}/evaluations",
     response_model=EvaluationHistoryResponse,
 )
-def question_evaluations(session: DbSession, question_id: int) -> EvaluationHistoryResponse:
+def question_evaluations(
+    session: DbSession, course: CourseScope, question_id: int
+) -> EvaluationHistoryResponse:
     """Every evaluation this question has received, newest first.
 
     The newest row is flagged ``is_current`` because it is what
@@ -103,7 +114,7 @@ def question_evaluations(session: DbSession, question_id: int) -> EvaluationHist
     """
     # Raises NotFoundError for an unknown question, so history and detail agree
     # about which questions exist.
-    QuestionRepository(session).get(question_id)
+    question_in_course(session, question_id, course)
     rows = QuestionEvaluationRepository(session).list_for_question(question_id)
     return EvaluationHistoryResponse(
         question_id=question_id,

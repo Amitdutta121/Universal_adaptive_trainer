@@ -18,6 +18,7 @@ from app.generation import rounds
 from app.persistence.models import CourseRow, GenerationRoundRow, QuestionSetupRow
 from app.persistence.repositories import GenerationRoundRepository
 from app.web.routes.api.setup import get_setup_client
+from tests.conftest import TEST_PROFESSOR_ID
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ def test_styles_lists_the_course_subject_library(http: TestClient, session: Sess
     assert len(body["styles"]) == 10
     assert len(body["styles"][0]["examples"]) == 2
 
-    course = CourseRow(name="Mechanics", subject="physics")
+    course = CourseRow(name="Mechanics", subject="physics", owner_id=TEST_PROFESSOR_ID)
     session.add(course)
     session.commit()
     scoped = http.get("/api/styles", headers={"X-Course-Id": str(course.id)}).json()
@@ -212,8 +213,10 @@ def test_save_rolls_back_when_the_round_cannot_start(
 def test_setup_routes_stay_inside_the_course(
     http: TestClient, session: Session, started: dict[str, list[Any]]
 ) -> None:
-    version, subtopics = make_taxonomy(session, course=CourseRow(name="A", subject="intro_python"))
-    other = CourseRow(name="B", subject="intro_python")
+    version, subtopics = make_taxonomy(
+        session, course=CourseRow(name="A", subject="intro_python", owner_id=TEST_PROFESSOR_ID)
+    )
+    other = CourseRow(name="B", subject="intro_python", owner_id=TEST_PROFESSOR_ID)
     session.add(other)
     session.commit()
     headers = {"X-Course-Id": str(other.id)}

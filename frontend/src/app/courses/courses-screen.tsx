@@ -148,7 +148,9 @@ function CourseCard({
   const { course } = progress;
   const next = progress.setup.find((step) => !step.done);
   const setupDone = next === undefined;
-  const owner = progress.owned_by_you ? "You (owner)" : (progress.owner_email ?? null);
+  // The list holds only courses you own (ADR-058), so an owner is named only for a
+  // course someone else shares with you, which co-instructors will bring.
+  const owner = progress.owned_by_you ? null : (progress.owner_email ?? null);
 
   const stats: Array<[string, string]> = [
     ["Books", String(course.book_count)],

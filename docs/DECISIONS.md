@@ -2329,3 +2329,54 @@ from one course's professor would rewrite another subject's generator.
 
 **Consequences.** Physics questions are generated and judged with Physics prompts; Python courses
 are unchanged. Existing edits and learned instructions belong to `intro_python` (migration 0004).
+
+## ADR-058 — A professor reaches only the courses they own
+
+**Status:** accepted. Supersedes the "unscoped means every course" rule in
+`app/web/routes/api/deps.py` and the "courses are not access control yet" note on
+`ensure_in_course`.
+
+**Context.** Any logged-in professor could open any course, and a request without
+`X-Course-Id` read every course's rows. Several by-id routes (topic and subtopic edits,
+question evaluations and regenerate, batch runs, calibration, retrieval, and the professor's
+student routes) checked no course at all.
+
+**Decision.** `CourseScope` requires the header and loads the course through
+`CourseRepository.get_owned`: a course someone else owns is the same 404 as an unknown one,
+so a guessed id reveals nothing. A missing header is a 422. Every route that fetches a row by
+id checks that row against the scope (`ensure_in_course`, `question_in_course`), and the
+cohort-wide reads (calibration, agreement trend, batch-run list, retrieval, roster, class
+summary) filter to the course. A student belongs to a course through a session on a set built
+from one of its taxonomies. `/courses`, `/courses/overview` and `/courses/{id}` list and open
+only the professor's own courses. Ownership is `courses.owner_id`; membership for
+co-instructors and TAs comes with task-104. Migration `0009_course_access` gives every
+ownerless course to the first user by email (the `0002_courses` rule) and adds
+`judge_batch_runs.course_id`.
+
+**Consequences.** The Studio already sends the header from every `/courses/{id}/…` page; a
+`CourseGate` in the professor chrome shows "Course not found" when the course 404s. The test
+suite overrides `_course_scope` so its older header-less calls stay unscoped, while a request
+naming a course still gets the real ownership check; `tests/test_course_access.py` runs without
+the override. Judge prompts and learned instructions stay keyed by subject (ADR-056), so two
+professors teaching the same subject still share them; that is a separate follow-up.
+
+## ADR-059 — Judge edits and learned rules belong to the professor
+
+**Status:** accepted. Amends ADR-056's "a preset is shared by every course using it".
+
+**Context.** With per-course access (ADR-058), two professors teaching the same preset subject
+still shared one row per judge metric and per question type: one professor's judge edit or
+learned rule rewrote the other's judges and generator.
+
+**Decision.** `SubjectProfile.personal_key` (`<preset>@<owner hex>`; `custom:<course id>` for a
+custom subject) keys judge-prompt overrides, learned type instructions, judge panels, trust
+scope and judge learning. `storage_key` still names the subject for the shared style library.
+A preset pools across one professor's own courses only. Migration `0010_personal_judges` copies
+each shared row to every professor owning a course of that subject.
+
+**Consequences.** The Judges page of one professor never shows or changes another's. A request
+without a course (tests only) still reads the bare preset key.
+
+Also under ADR-058: ids carried in query strings and bodies (coverage `set_version_id` and gap
+targets, generation version/book/section ids, review subtopic corrections) are checked against
+the request's course, and every cross-course 404 reads exactly like a missing row.

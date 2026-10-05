@@ -8,17 +8,14 @@ books and taxonomies, and what removing one should do to them is undecided.
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, status
 
 from app.assessment import catalog
-from app.auth.backend import current_active_user
 from app.courses.overview import SETUP_STEPS, build_overview
 from app.errors import DomainRuleError
-from app.persistence.models import CourseRow, UserRow
+from app.persistence.models import CourseRow
 from app.persistence.repositories import CourseRepository
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CurrentUser, DbSession
 from app.web.routes.api.schemas import (
     ActivityEventOut,
     AssessmentCatalogResponse,
@@ -38,24 +35,25 @@ from app.web.routes.api.schemas import (
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
-CurrentUser = Annotated[UserRow, Depends(current_active_user)]
-
 
 @router.get("", response_model=CourseListResponse)
-def list_courses(session: DbSession) -> CourseListResponse:
-    """Every course, newest first, with what has been built in each."""
+def list_courses(session: DbSession, user: CurrentUser) -> CourseListResponse:
+    """The professor's own courses, newest first, with what has been built in each."""
     repo = CourseRepository(session)
     counts = repo.content_counts()
     return CourseListResponse(
-        courses=[CourseOut.from_row(row, counts.get(row.id, (0, 0, 0))) for row in repo.list_all()]
+        courses=[
+            CourseOut.from_row(row, counts.get(row.id, (0, 0, 0)))
+            for row in repo.list_all(owner_id=user.id)
+        ]
     )
 
 
 # Declared before "/{course_id}" so the literal path is not parsed as an id.
 @router.get("/overview", response_model=CoursesOverviewResponse)
 def courses_overview(session: DbSession, user: CurrentUser) -> CoursesOverviewResponse:
-    """The course list's dashboard: each course's progress, and recent activity."""
-    overview = build_overview(session)
+    """The course list's dashboard: each of the professor's courses, and recent activity."""
+    overview = build_overview(session, owner_id=user.id)
     return CoursesOverviewResponse(
         courses=[
             CourseProgressOut(
@@ -168,16 +166,19 @@ def create_course(session: DbSession, user: CurrentUser, body: CourseCreate) -> 
 
 
 @router.get("/{course_id}", response_model=CourseOut)
-def get_course(session: DbSession, course_id: int) -> CourseOut:
+def get_course(session: DbSession, user: CurrentUser, course_id: int) -> CourseOut:
     repo = CourseRepository(session)
-    return CourseOut.from_row(repo.get(course_id), repo.content_counts().get(course_id, (0, 0, 0)))
+    course = repo.get_owned(course_id, user.id)
+    return CourseOut.from_row(course, repo.content_counts().get(course_id, (0, 0, 0)))
 
 
 @router.patch("/{course_id}", response_model=CourseOut)
-def update_course(session: DbSession, course_id: int, body: CourseUpdate) -> CourseOut:
+def update_course(
+    session: DbSession, user: CurrentUser, course_id: int, body: CourseUpdate
+) -> CourseOut:
     """Rename a course or change its description."""
     repo = CourseRepository(session)
-    course = repo.get(course_id)
+    course = repo.get_owned(course_id, user.id)
     if body.name is not None and body.name.strip():
         course.name = body.name.strip()
     if body.description is not None:

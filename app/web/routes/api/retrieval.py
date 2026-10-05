@@ -11,12 +11,15 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.errors import DomainRuleError
+from app.persistence.models import BookRow
+from app.persistence.repositories import CurriculumRepository
 from app.retrieval import SectionEmbeddingStore, SectionRetriever, get_embedder
 from app.retrieval.embedder import Embedder
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import RetrievedSectionOut
 
 router = APIRouter(tags=["retrieval"])
@@ -33,6 +36,7 @@ EmbedderDep = Annotated[Embedder, Depends(get_query_embedder)]
 @router.get("/retrieval/sections", response_model=list[RetrievedSectionOut])
 def retrieve_sections(
     session: DbSession,
+    course: CourseScope,
     embedder: EmbedderDep,
     query: Annotated[str | None, Query(description="Free-text query.")] = None,
     subtopic_id: Annotated[
@@ -41,17 +45,26 @@ def retrieve_sections(
     ] = None,
     top_k: Annotated[int, Query(ge=1, le=25)] = 5,
 ) -> list[RetrievedSectionOut]:
-    """Rank sections for a query or a subtopic. Exactly one of the two is required."""
+    """Rank the course's sections for a query or a subtopic. Exactly one is required."""
     if (query is None) == (subtopic_id is None):
         raise DomainRuleError(
             "Provide exactly one of 'query' or 'subtopic_id'.",
             detail="Pass free text as 'query', or a curriculum subtopic id as 'subtopic_id'.",
         )
 
+    book_ids = (
+        list(session.scalars(select(BookRow.id).where(BookRow.course_id == course)))
+        if course is not None
+        else None
+    )
     retriever = SectionRetriever(session, SectionEmbeddingStore(session, embedder))
     if subtopic_id is not None:
-        results = retriever.for_subtopic(subtopic_id, top_k=top_k)
+        subtopic = CurriculumRepository(session).get_subtopic(subtopic_id)
+        ensure_in_course(
+            subtopic.topic.curriculum_version.course_id, course, f"Subtopic {subtopic_id}"
+        )
+        results = retriever.for_subtopic(subtopic_id, top_k=top_k, book_ids=book_ids)
     else:
         assert query is not None
-        results = retriever.search(query, top_k=top_k)
+        results = retriever.search(query, top_k=top_k, book_ids=book_ids)
     return [RetrievedSectionOut.from_result(result) for result in results]

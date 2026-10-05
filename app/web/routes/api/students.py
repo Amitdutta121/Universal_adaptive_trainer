@@ -45,7 +45,7 @@ from app.errors import (
 )
 from app.generation.live import next_for_session, run_live_job
 from app.generation.refill import plan_refill, schedule_refill
-from app.persistence.models import LiveQuestionJobRow
+from app.persistence.models import LiveQuestionJobRow, StudentRow
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionSetRepository,
@@ -54,7 +54,7 @@ from app.persistence.repositories import (
     StudentStateRepository,
     TrainingSessionRepository,
 )
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     AnsweredOut,
     AnswerRequest,
@@ -93,6 +93,35 @@ ROSTER_PAGE_SIZE = 20
 
 #: Cap on cohort weakness cells returned, matching the client heatmap.
 WEAKNESS_CELLS = 48
+
+
+def _student_ids_in(
+    session: DbSession, course: int | None, curriculum_version_id: int | None
+) -> set[int] | None:
+    """The students the roster may show: the course's, narrowed to one taxonomy's when given.
+
+    ``None`` means no restriction, which only an unscoped (test-suite) request gets.
+    """
+    sessions = TrainingSessionRepository(session)
+    allowed: set[int] | None = None
+    if course is not None:
+        allowed = sessions.student_ids_for_course(course)
+    if curriculum_version_id is not None:
+        version = CurriculumRepository(session).get_version(curriculum_version_id)
+        ensure_in_course(version.course_id, course, f"Curriculum version {curriculum_version_id}")
+        in_version = sessions.student_ids_for_curriculum_version(curriculum_version_id)
+        allowed = in_version if allowed is None else allowed & in_version
+    return allowed
+
+
+def _student_in_course(session: DbSession, student_id: int, course: int | None) -> StudentRow:
+    """The student, or a 404 when they have never run a session in the request's course."""
+    row = StudentRepository(session).get(student_id)
+    if course is not None and student_id not in TrainingSessionRepository(
+        session
+    ).student_ids_for_course(course):
+        raise NotFoundError(f"Student {student_id} does not exist.")
+    return row
 
 
 def _aware(value: datetime) -> datetime:
@@ -175,6 +204,7 @@ def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
 )
 def list_students(
     session: DbSession,
+    course: CourseScope,
     search: str = "",
     score: str = "all",
     answered: str = "all",
@@ -200,11 +230,7 @@ def list_students(
     attempts = StudentAttemptRepository(session)
     stats = attempts.stats_by_student()
     now = datetime.now(UTC)
-    allowed_ids = (
-        TrainingSessionRepository(session).student_ids_for_curriculum_version(curriculum_version_id)
-        if curriculum_version_id is not None
-        else None
-    )
+    allowed_ids = _student_ids_in(session, course, curriculum_version_id)
 
     matched = []
     for row in students.search(search):
@@ -250,7 +276,9 @@ def list_students(
     response_model=ClassSummaryOut,
     dependencies=[Depends(current_active_user)],
 )
-def class_summary(session: DbSession, curriculum_version_id: int | None = None) -> ClassSummaryOut:
+def class_summary(
+    session: DbSession, course: CourseScope, curriculum_version_id: int | None = None
+) -> ClassSummaryOut:
     """Cohort-wide figures for the roster's aggregate cards.
 
     Independent of which roster page is open: the class trend graph and the
@@ -266,10 +294,11 @@ def class_summary(session: DbSession, curriculum_version_id: int | None = None) 
     state = StudentStateRepository(session)
     curriculum = CurriculumRepository(session)
 
-    roster = students.search("")
+    allowed_ids = _student_ids_in(session, course, curriculum_version_id)
+    roster = [row for row in students.search("") if allowed_ids is None or row.id in allowed_ids]
     stats = attempts.stats_by_student()
-    scored = attempts.scored_attempts_all(curriculum_version_id)
-    weakness_rows = state.list_weakness_all(curriculum_version_id)
+    scored = attempts.scored_attempts_all(curriculum_version_id, course_id=course)
+    weakness_rows = state.list_weakness_all(curriculum_version_id, course_id=course)
 
     names = {row.id: row.display_name for row in roster}
     answered_by_student = {student_id: stat.answered_count for student_id, stat in stats.items()}
@@ -384,8 +413,8 @@ def resume_student(session: DbSession, payload: ResumeStudentRequest) -> Student
     response_model=StudentOut,
     dependencies=[Depends(current_active_user)],
 )
-def get_student(session: DbSession, student_id: int) -> StudentOut:
-    row = StudentRepository(session).get(student_id)
+def get_student(session: DbSession, course: CourseScope, student_id: int) -> StudentOut:
+    row = _student_in_course(session, student_id, course)
     return StudentOut.from_row(
         row, answered_count=StudentAttemptRepository(session).count_answered(student_id)
     )
@@ -396,8 +425,11 @@ def get_student(session: DbSession, student_id: int) -> StudentOut:
     response_model=StudentProgressOut,
     dependencies=[Depends(current_active_user)],
 )
-def student_progress(session: DbSession, student_id: int) -> StudentProgressOut:
+def student_progress(
+    session: DbSession, course: CourseScope, student_id: int
+) -> StudentProgressOut:
     """Measured mastery, weakness and history for one learner (instructor view)."""
+    _student_in_course(session, student_id, course)
     return _progress(session, student_id)
 
 
@@ -520,8 +552,10 @@ def start_training_session(
     response_model=TrainingSessionListResponse,
     dependencies=[Depends(current_active_user)],
 )
-def list_training_sessions(session: DbSession, student_id: int) -> TrainingSessionListResponse:
-    student = StudentRepository(session).get(student_id)
+def list_training_sessions(
+    session: DbSession, course: CourseScope, student_id: int
+) -> TrainingSessionListResponse:
+    student = _student_in_course(session, student_id, course)
     rows = TrainingSessionRepository(session).list_for_student(student_id)
     return TrainingSessionListResponse(
         sessions=[

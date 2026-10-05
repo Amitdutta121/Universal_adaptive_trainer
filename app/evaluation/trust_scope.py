@@ -46,7 +46,7 @@ def style_trust_under_current_panel(
     keys = storage_keys_by_version(session, {row.curriculum_version_id for row in rows})
     newest: dict[tuple[int, str], QuestionRow] = {}
     for row in rows:
-        if key_of_version(keys, row.curriculum_version_id) != profile.storage_key:
+        if key_of_version(keys, row.curriculum_version_id) != profile.personal_key:
             continue
         if (row.pedagogical_eval or {}).get("rubric_version") != rubric:
             continue

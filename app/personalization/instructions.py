@@ -127,10 +127,10 @@ def reviews_for_type(
 ) -> list[ProfessorReviewRow]:
     """Reviews of this subject's questions of this type, newest first, capped at the limit.
 
-    A question's subject is its course's storage key (``SubjectProfile.storage_key``: the preset,
-    or ``custom:<course id>``), reached through the curriculum version it was generated against.
-    Filtering here is what keeps a Physics professor's reviews out of the rules a Python course
-    learns, and the other way round.
+    A question's subject is its course's personal key (``SubjectProfile.personal_key``: the
+    preset and the course's owner, or ``custom:<course id>``), reached through the curriculum
+    version it was generated against. Filtering here is what keeps a Physics course's reviews
+    out of the rules a Python course learns, and one professor's out of another's (ADR-059).
     """
     reviews = ProfessorReviewRepository(session).list_with_questions(limit=500)
     of_type = [

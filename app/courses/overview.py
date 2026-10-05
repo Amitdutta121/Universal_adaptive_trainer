@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy import Select, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.coverage import build_coverage_report
 from app.domain.enums import CurriculumStatus, QuestionStatus, ReviewDecision
@@ -92,8 +92,9 @@ class CoursesOverview:
     activity: list[ActivityEvent]
 
 
-def build_overview(session: Session) -> CoursesOverview:
-    courses = CourseRepository(session).list_all()
+def build_overview(session: Session, *, owner_id: uuid.UUID | None = None) -> CoursesOverview:
+    """Progress and recent activity for every course, or only ``owner_id``'s."""
+    courses = CourseRepository(session).list_all(owner_id=owner_id)
     owners = _owner_emails(session, {c.owner_id for c in courses if c.owner_id is not None})
     return CoursesOverview(
         courses=[_progress(session, course, owners.get(course.owner_id)) for course in courses],
@@ -230,8 +231,9 @@ def _plural(count: int, one: str, many: str | None = None) -> str:
 
 
 def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEvent]:
-    """The newest things that happened, across every course, newest first."""
+    """The newest things that happened in ``course_names``' courses, newest first."""
     events: list[ActivityEvent] = []
+    course_ids = list(course_names)
 
     def add(kind: str, text: str, at: datetime | None, course_id: int | None) -> None:
         if at is not None:
@@ -245,12 +247,21 @@ def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEv
         ).all()
     )
     for book in session.scalars(
-        select(BookRow).order_by(BookRow.created_at.desc()).limit(ACTIVITY_LIMIT)
+        select(BookRow)
+        .where(BookRow.course_id.in_(course_ids))
+        .order_by(BookRow.created_at.desc())
+        .limit(ACTIVITY_LIMIT)
     ):
         sections = _plural(section_counts.get(book.id, 0), "section")
         add("book", f"Imported {book.title} ({sections})", book.created_at, book.course_id)
 
-    for version in CurriculumRepository(session).list_versions(limit=ACTIVITY_LIMIT):
+    for version in session.scalars(
+        select(CurriculumVersionRow)
+        .options(selectinload(CurriculumVersionRow.topics))
+        .where(CurriculumVersionRow.course_id.in_(course_ids))
+        .order_by(CurriculumVersionRow.created_at.desc(), CurriculumVersionRow.id.desc())
+        .limit(ACTIVITY_LIMIT)
+    ):
         topics = version.topics
         subtopics = sum(len(topic.subtopics) for topic in topics)
         add(
@@ -267,6 +278,7 @@ def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEv
             CurriculumVersionRow,
             CurriculumVersionRow.id == QuestionSetVersionRow.curriculum_version_id,
         )
+        .where(CurriculumVersionRow.course_id.in_(course_ids))
         .order_by(QuestionSetVersionRow.created_at.desc())
         .limit(ACTIVITY_LIMIT)
     ):
@@ -290,6 +302,7 @@ def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEv
         .outerjoin(
             CurriculumVersionRow, CurriculumVersionRow.id == QuestionRow.curriculum_version_id
         )
+        .where(CurriculumVersionRow.course_id.in_(course_ids))
         .order_by(ProfessorReviewRow.created_at.desc())
         .limit(500)
     ):
@@ -315,6 +328,7 @@ def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEv
             CurriculumVersionRow,
             CurriculumVersionRow.id == QuestionSetVersionRow.curriculum_version_id,
         )
+        .where(CurriculumVersionRow.course_id.in_(course_ids))
         .group_by(TrainingSessionRow.student_id, CurriculumVersionRow.course_id)
     )
     joins: dict[tuple[int | None, str], list[datetime]] = defaultdict(list)

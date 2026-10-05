@@ -104,9 +104,11 @@ class AgreementTrend(BaseModel):
         return rated[-1].agreement > rated[0].agreement
 
 
-def build_agreement_trend(session: Session, *, limit: int = 1000) -> AgreementTrend:
-    """Group every frozen outcome by its judge panel, oldest panel first."""
-    rows = ReviewOutcomeRepository(session).list_recent(limit=limit)
+def build_agreement_trend(
+    session: Session, *, limit: int = 1000, course_id: int | None = None
+) -> AgreementTrend:
+    """Group every frozen outcome (of one course) by its judge panel, oldest panel first."""
+    rows = ReviewOutcomeRepository(session).list_recent(limit=limit, course_id=course_id)
     grouped: dict[str | None, list[ReviewOutcomeRow]] = {}
     for row in rows:
         grouped.setdefault(row.rubric_version, []).append(row)

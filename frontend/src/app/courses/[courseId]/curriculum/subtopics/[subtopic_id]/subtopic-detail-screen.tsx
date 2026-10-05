@@ -18,11 +18,14 @@
 
 import { ArrowLeft, Pencil } from "lucide-react";
 import { useState } from "react";
+import { CourseLink } from "@/components/course-link";
+import { NotFoundInCourse } from "@/components/not-found-in-course";
 import { PageHeader } from "@/components/page-header";
 import { QueryError, TableSkeleton } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api/client";
 import { useCurriculumSubtopic } from "@/lib/api/queries";
 import { pluralise } from "@/lib/display";
 import { ItemRenameDialog, type RenameTarget } from "../../components/item-rename-dialog";
@@ -31,7 +34,6 @@ import {
   CURRICULUM_ITEM_STATUS_LABEL,
   stableIdMeaning,
 } from "../../curriculum-display";
-import { CourseLink } from "@/components/course-link";
 
 export function SubtopicDetailScreen({ subtopicId }: { subtopicId: number }) {
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
@@ -46,6 +48,8 @@ export function SubtopicDetailScreen({ subtopicId }: { subtopicId: number }) {
     );
   }
 
+  // Another course's row answers the same 404 as a missing one (ADR-058).
+  if (isError && readApiError(error)?.status === 404) return <NotFoundInCourse />;
   if (isError) {
     return (
       <>

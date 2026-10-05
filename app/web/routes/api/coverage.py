@@ -44,6 +44,7 @@ from app.web.routes.api.deps import (
     DbSession,
     ensure_in_course,
     ensure_question_types_allowed,
+    subtopics_in_course,
 )
 from app.web.routes.api.questions import approved_curriculum_id
 from app.web.routes.api.retrieval import EmbedderDep
@@ -108,6 +109,8 @@ def coverage(
     Without ``set_version_id`` this is the live bank -- what to generate next.
     With one it is that frozen set -- what a training run would actually serve.
     """
+    if set_version_id is not None:
+        _set_in_course(session, set_version_id, course)
     return CoverageReportResponse.from_report(
         build_coverage_report(session, set_version_id=set_version_id, course_id=course),
         active_run_topic_ids=active_generation_topic_ids(),
@@ -131,8 +134,22 @@ def start_generation_run(
     failure on one target is reported beside the questions the run did produce
     (ADR-032). The new questions land in the review queue with no extra step.
     """
+    subtopics_in_course(session, [target.subtopic_id for target in payload.targets], course)
     return run_generation_for_gaps(
         session, payload.targets, embedder=embedder, client=client, course_id=course
+    )
+
+
+def _set_in_course(session: Session, set_version_id: int, course: int | None) -> None:
+    """404 when a frozen question set belongs to another course than the request's."""
+    qset = QuestionSetRepository(session).get(set_version_id)
+    version = (
+        CurriculumRepository(session).get_version(qset.curriculum_version_id)
+        if qset.curriculum_version_id is not None
+        else None
+    )
+    ensure_in_course(
+        version.course_id if version else None, course, f"Question set {set_version_id}"
     )
 
 

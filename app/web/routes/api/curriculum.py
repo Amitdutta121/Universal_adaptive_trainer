@@ -33,6 +33,7 @@ from app.curriculum import (
 from app.curriculum.drafting import DraftBrief, draft_taxonomy
 from app.errors import NotFoundError
 from app.llm.client import StructuredLLMClient
+from app.persistence.models import SubtopicRow
 from app.persistence.repositories import BookRepository, CurriculumRepository
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
@@ -236,8 +237,12 @@ def activate_version(
 
 
 @router.patch("/topics/{topic_id}", response_model=TopicOut)
-def update_topic(session: DbSession, topic_id: int, update: CurriculumItemLabelUpdate) -> TopicOut:
+def update_topic(
+    session: DbSession, course: CourseScope, topic_id: int, update: CurriculumItemLabelUpdate
+) -> TopicOut:
     """Edit a topic's display name. Its stable id is untouched (ADR-021)."""
+    topic = CurriculumRepository(session).get_topic(topic_id)
+    ensure_in_course(topic.curriculum_version.course_id, course, f"Topic {topic_id}")
     topic = CurriculumLibraryService(session).update_topic(
         topic_id, name=update.name, description=update.description
     )
@@ -247,13 +252,14 @@ def update_topic(session: DbSession, topic_id: int, update: CurriculumItemLabelU
 
 @router.patch("/subtopics/{subtopic_id}", response_model=SubtopicSummary)
 def update_subtopic(
-    session: DbSession, subtopic_id: int, update: CurriculumItemLabelUpdate
+    session: DbSession, course: CourseScope, subtopic_id: int, update: CurriculumItemLabelUpdate
 ) -> SubtopicSummary:
     """Edit a subtopic's display name.
 
     The stable id is not recomputed, so any weakness a student has been measured
     for on this skill stays attached to it (ADR-021).
     """
+    _subtopic_in_course(session, subtopic_id, course)
     subtopic = CurriculumLibraryService(session).update_subtopic(
         subtopic_id, name=update.name, description=update.description
     )
@@ -291,10 +297,16 @@ def _version_in_course(session: DbSession, version_id: int, course: int | None) 
     ensure_in_course(version.course_id, course, f"Curriculum version {version_id}")
 
 
-@router.get("/subtopics/{subtopic_id}", response_model=SubtopicDetail)
-def get_subtopic(session: DbSession, subtopic_id: int) -> SubtopicDetail:
-    """One subtopic: its approved definition and any legacy textbook evidence."""
+def _subtopic_in_course(session: DbSession, subtopic_id: int, course: int | None) -> SubtopicRow:
     subtopic = CurriculumRepository(session).get_subtopic(subtopic_id)
+    ensure_in_course(subtopic.topic.curriculum_version.course_id, course, f"Subtopic {subtopic_id}")
+    return subtopic
+
+
+@router.get("/subtopics/{subtopic_id}", response_model=SubtopicDetail)
+def get_subtopic(session: DbSession, course: CourseScope, subtopic_id: int) -> SubtopicDetail:
+    """One subtopic: its approved definition and any legacy textbook evidence."""
+    subtopic = _subtopic_in_course(session, subtopic_id, course)
     evidence = [SubtopicEvidenceOut.from_row(row) for row in subtopic.evidence]
     return SubtopicDetail(
         subtopic=SubtopicSummary.from_row(subtopic),

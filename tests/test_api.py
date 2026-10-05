@@ -354,12 +354,16 @@ def test_batch_generation_uses_the_active_curriculum_version(
 
 
 def test_regenerate_threads_feedback_and_returns_both_ids(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.persistence.models import QuestionRow
     from app.web.routes.api import questions as api_questions
 
     _import_taxonomy(client)
+    # The route checks the source question is in the request's course before generating.
+    source = QuestionRow(prompt="the original question", original_prompt="the original question")
+    session.add(source)
+    session.commit()
     seen: dict[str, object] = {}
 
     class FakeGenerationService:
@@ -379,15 +383,15 @@ def test_regenerate_threads_feedback_and_returns_both_ids(
     monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
 
     response = client.post(
-        "/api/questions/77/regenerate",
+        f"/api/questions/{source.id}/regenerate",
         json={"feedback": "Make the distractors subtler."},
     )
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["regenerated_from_question_id"] == 77
+    assert body["regenerated_from_question_id"] == source.id
     assert body["question_id"] == body["question"]["id"]
-    assert seen == {"question_id": 77, "feedback": "Make the distractors subtler."}
+    assert seen == {"question_id": source.id, "feedback": "Make the distractors subtler."}
 
 
 def test_regenerate_surfaces_an_unknown_question_as_a_json_404(

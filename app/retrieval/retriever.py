@@ -80,10 +80,13 @@ class SectionRetriever:
             if section_id in rows
         ]
 
-    def for_subtopic(self, subtopic_id: int, *, top_k: int = 5) -> list[RetrievedSection]:
+    def for_subtopic(
+        self, subtopic_id: int, *, top_k: int = 5, book_ids: list[int] | None = None
+    ) -> list[RetrievedSection]:
+        """Sections for a subtopic, from its taxonomy's source books, else from ``book_ids``."""
         subtopic = CurriculumRepository(self._session).get_subtopic(subtopic_id)
         version = self._session.get(CurriculumVersionRow, subtopic.topic.curriculum_version_id)
-        scoped = list(version.source_book_ids) if version and version.source_book_ids else None
+        scoped = list(version.source_book_ids) if version and version.source_book_ids else book_ids
         return self.search(subtopic_query_text(subtopic), book_ids=scoped, top_k=top_k)
 
     # -- internals --------------------------------------------------------

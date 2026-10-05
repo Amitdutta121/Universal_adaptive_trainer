@@ -756,6 +756,10 @@ class JudgeBatchRunRow(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    #: The course whose questions it re-judges; ``None`` for a run submitted without one.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), default=None, index=True
+    )
     provider_batch_ids: Mapped[list[str]] = mapped_column(
         "provider_batch_ids_json", JsonList, default=list, nullable=True
     )

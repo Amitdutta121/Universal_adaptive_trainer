@@ -24,11 +24,12 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
+from tests.conftest import TEST_PROFESSOR_ID
 
 
 @pytest.fixture
 def taxonomy(session):
-    course = CourseRow(name="Trust course")
+    course = CourseRow(name="Trust course", owner_id=TEST_PROFESSOR_ID)
     session.add(course)
     session.flush()
     version = CurriculumVersionRow(label="v1", course_id=course.id)
@@ -479,7 +480,7 @@ def test_sqlite_0005_upgrade_preserves_rows_and_adds_only_trust_schema(engine):
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0008_live_questions"
+            == "0010_personal_judges"
         )
         assert connection.execute(text("SELECT prompt,trust_provenance FROM questions")).one() == (
             "Old",

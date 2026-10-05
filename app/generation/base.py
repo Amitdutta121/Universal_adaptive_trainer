@@ -87,7 +87,9 @@ class BaseQuestionGenerator:
         refresh must not later appear to have used the newer instruction.
         """
         row = (
-            TypeInstructionRepository(self._session).get(question_type, subject=profile.storage_key)
+            TypeInstructionRepository(self._session).get(
+                question_type, subject=profile.personal_key
+            )
             if self._session is not None
             else None
         )
@@ -267,7 +269,7 @@ class BaseQuestionGenerator:
         topic, subtopic = found
         style = (
             next(
-                (row for row in get_library(profile.storage_key) if row.id == spec.style_id),
+                (row for row in get_library(profile.personal_key) if row.id == spec.style_id),
                 None,
             )
             if spec.style_id

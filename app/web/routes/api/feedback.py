@@ -37,11 +37,15 @@ from app.persistence.models import CurriculumVersionRow, ProfessorReviewRow, Que
 from app.persistence.repositories import (
     JudgePromptRepository,
     ProfessorReviewRepository,
-    QuestionRepository,
 )
 from app.personalization import refresh_type_instruction
 from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_version
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.deps import (
+    CourseScope,
+    DbSession,
+    question_in_course,
+    subtopics_in_course,
+)
 from app.web.routes.api.schemas import (
     ReasonCount,
     ReviewListResponse,
@@ -63,13 +67,8 @@ def create_review(
     session: DbSession, course: CourseScope, question_id: int, payload: ReviewRequest
 ) -> ReviewOut:
     """Record a professor verdict, then act on the cell it lands in (ADR-037)."""
-    question = QuestionRepository(session).get(question_id)
-    version = (
-        session.get(CurriculumVersionRow, question.curriculum_version_id)
-        if question.curriculum_version_id is not None
-        else None
-    )
-    ensure_in_course(version.course_id if version is not None else None, course, "Question")
+    question_in_course(session, question_id, course)
+    subtopics_in_course(session, payload.corrected_subtopic_ids or [], course)
     edit_fields: dict[str, str | None] = {}
     if payload.decision is ReviewDecision.EDIT:
         edit_fields = {
@@ -167,7 +166,7 @@ def _relearn_judges(
     refreshed: list[JudgeMetricId] = []
     errors: list[str] = []
     for metric in outcome.attributed_metrics:
-        existing = repository.get(metric, subject=profile.storage_key)
+        existing = repository.get(metric, subject=profile.personal_key)
         if existing is not None and not existing.learned:
             logger.info("Judge %s is hand-written; leaving it alone.", metric.value)
             continue
@@ -217,7 +216,7 @@ def _relearn_for(
             session,
             question_type,
             base_instruction=base_type_instruction(question_type),
-            subject=profile.storage_key,
+            subject=profile.personal_key,
         )
     except (AdaptiveTrainerError, OSError) as exc:
         session.rollback()

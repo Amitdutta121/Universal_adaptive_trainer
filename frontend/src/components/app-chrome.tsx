@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
+import { CourseGate } from "@/components/course-gate";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 function ProfessorChrome({
@@ -31,7 +32,7 @@ function ProfessorChrome({
               isWideRoute ? "h-[100dvh] overflow-hidden" : "max-w-7xl"
             }`}
           >
-            {children}
+            <CourseGate>{children}</CourseGate>
           </div>
         </SidebarInset>
       </SidebarProvider>

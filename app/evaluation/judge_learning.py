@@ -186,7 +186,7 @@ def _of_subject(
         row
         for row in rows
         if row.question is not None
-        and key_of_version(keys, row.question.curriculum_version_id) == profile.storage_key
+        and key_of_version(keys, row.question.curriculum_version_id) == profile.personal_key
     ]
     return kept[:limit]
 
@@ -309,7 +309,7 @@ def refresh_judge_prompt(
         return None
 
     repository = JudgePromptRepository(session)
-    existing = repository.get(metric, subject=profile.storage_key)
+    existing = repository.get(metric, subject=profile.personal_key)
     current = [
         LearnedJudgeRule.model_validate(rule) for rule in (existing.rules if existing else [])
     ]
@@ -342,7 +342,7 @@ def refresh_judge_prompt(
 
     row = repository.save(
         metric,
-        subject=profile.storage_key,
+        subject=profile.personal_key,
         system_prompt=candidate,
         note=f"Learned from {len(rows)} disagreement(s). {verdict.detail}",
         rules=[rule.model_dump() for rule in learned.rules],

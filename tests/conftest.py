@@ -15,9 +15,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Annotated
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
@@ -26,6 +27,7 @@ from app.auth.backend import current_active_user
 from app.config import Settings, get_settings
 from app.persistence import async_database, database
 from app.persistence.models import UserRow
+from app.web.routes.api import deps
 
 TEST_ENV: dict[str, str] = {
     "ENVIRONMENT": "test",
@@ -75,13 +77,34 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
 #: logic without each needing to log in. ``tests/test_auth.py`` builds its own
 #: app *without* this override to test the real login/protect/logout flow.
 _TEST_USER = UserRow(
-    id=uuid.uuid4(),
+    # Fixed rather than random: a test module importing ``TEST_PROFESSOR_ID`` loads a
+    # second copy of this module, and both copies must name the same professor.
+    id=uuid.UUID("00000000-0000-4000-8000-000000000001"),
     email="test-professor@example.com",
     hashed_password="not-a-real-hash",
     is_active=True,
     is_superuser=False,
     is_verified=True,
 )
+
+#: Owner to give a course a test builds directly, so requests naming it pass the
+#: ownership check (ADR-058). Courses created through the API get it already.
+TEST_PROFESSOR_ID = _TEST_USER.id
+
+
+def _unscoped_course_scope(
+    session: deps.DbSession,
+    user: Annotated[UserRow, Depends(current_active_user)],
+    x_course_id: Annotated[int | None, Header(alias=deps.COURSE_HEADER)] = None,
+) -> int | None:
+    """The real course check, except that a request without the header stays unscoped.
+
+    Most tests predate courses and call the API without ``X-Course-Id``; the app now
+    refuses that (ADR-058). A request that names a course still gets the real
+    ownership check, and ``tests/test_course_access.py`` drops this override to test
+    the refusal itself.
+    """
+    return None if x_course_id is None else deps.owned_course(session, user, x_course_id)
 
 
 @pytest.fixture
@@ -91,6 +114,7 @@ def configured_app(settings: Settings) -> FastAPI:
 
     app = create_app(settings)
     app.dependency_overrides[current_active_user] = lambda: _TEST_USER
+    app.dependency_overrides[deps._course_scope] = _unscoped_course_scope
     return app
 
 

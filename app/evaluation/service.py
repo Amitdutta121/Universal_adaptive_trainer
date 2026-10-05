@@ -167,12 +167,12 @@ class PedagogicalJudge:
     def _panel(self, question: Question) -> tuple[dict[JudgeMetricId, str], str]:
         """The prompts and rubric version for the subject of this question's course."""
         profile = profile_for_version(self._session, question.curriculum_version_id)
-        if profile.storage_key not in self._panels:
-            self._panels[profile.storage_key] = (
+        if profile.personal_key not in self._panels:
+            self._panels[profile.personal_key] = (
                 resolve_system_prompts(self._session, profile=profile),
                 effective_rubric_version(self._session, profile=profile),
             )
-        return self._panels[profile.storage_key]
+        return self._panels[profile.personal_key]
 
     def evaluate(self, question: Question) -> PedagogicalEvaluation:
         """Return one evaluation, with a failed judge recorded rather than raised.
@@ -224,12 +224,12 @@ class PedagogicalJudge:
         anyway, so a judge outage does not skip the cell.
         """
         profile = profile_for_version(self._session, curriculum_version_id)
-        if profile.storage_key not in self._panels:
-            self._panels[profile.storage_key] = (
+        if profile.personal_key not in self._panels:
+            self._panels[profile.personal_key] = (
                 resolve_system_prompts(self._session, profile=profile),
                 effective_rubric_version(self._session, profile=profile),
             )
-        prompts, _rubric = self._panels[profile.storage_key]
+        prompts, _rubric = self._panels[profile.personal_key]
         context = JudgeContext(
             question_artifact={},
             source_sections=[{"citation": citation, "text": section_text}],

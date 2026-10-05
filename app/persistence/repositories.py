@@ -7,12 +7,13 @@ here rather than in routes or services.
 
 from __future__ import annotations
 
+import uuid
 from collections import Counter
 from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import NamedTuple
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.assessment.catalog import LEGACY_SUBJECT
@@ -61,6 +62,11 @@ from app.persistence.models import (
 )
 
 
+def _version_ids_of(course_id: int) -> Select[tuple[int]]:
+    """The ids of the course's curriculum versions, as a subquery."""
+    return select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course_id)
+
+
 def questions_in_course(course_id: int) -> ColumnElement[bool]:
     """Questions whose curriculum version belongs to this course.
 
@@ -68,9 +74,7 @@ def questions_in_course(course_id: int) -> ColumnElement[bool]:
     curriculum version (``app/generation/spec.py``), and the version carries the
     course. A question with no version belongs to no course.
     """
-    return QuestionRow.curriculum_version_id.in_(
-        select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course_id)
-    )
+    return QuestionRow.curriculum_version_id.in_(_version_ids_of(course_id))
 
 
 class CourseRepository:
@@ -79,13 +83,26 @@ class CourseRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def list_all(self) -> list[CourseRow]:
+    def list_all(self, *, owner_id: uuid.UUID | None = None) -> list[CourseRow]:
+        """Every course, newest first; only ``owner_id``'s when given."""
         stmt = select(CourseRow).order_by(CourseRow.created_at.desc(), CourseRow.id.desc())
+        if owner_id is not None:
+            stmt = stmt.where(CourseRow.owner_id == owner_id)
         return list(self._session.scalars(stmt))
 
     def get(self, course_id: int) -> CourseRow:
         row = self._session.get(CourseRow, course_id)
         if row is None:
+            raise NotFoundError(f"Course {course_id} does not exist.")
+        return row
+
+    def get_owned(self, course_id: int, owner_id: uuid.UUID) -> CourseRow:
+        """The course, or the same not-found as a missing one when someone else owns it.
+
+        Not-found rather than forbidden, so a guessed id does not reveal that the course exists.
+        """
+        row = self._session.get(CourseRow, course_id)
+        if row is None or row.owner_id != owner_id:
             raise NotFoundError(f"Course {course_id} does not exist.")
         return row
 
@@ -773,7 +790,7 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.id.not_in(exclude_ids))
         return list(self._session.scalars(stmt))
 
-    def list_reviewed_with_evaluation(self) -> list[QuestionRow]:
+    def list_reviewed_with_evaluation(self, *, course_id: int | None = None) -> list[QuestionRow]:
         """Questions carrying both a stored judge evaluation and a review.
 
         The reviews are eager-loaded in one further query, because calibration
@@ -788,6 +805,8 @@ class QuestionRepository:
             .options(selectinload(QuestionRow.reviews))
             .order_by(QuestionRow.id)
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         return list(self._session.scalars(stmt))
 
     def count_reviewed(
@@ -1003,12 +1022,16 @@ class JudgeBatchRunRepository:
         stmt = select(JudgeBatchRunRow).where(JudgeBatchRunRow.run_id == run_id)
         return self._session.scalars(stmt).first()
 
-    def list_recent(self, limit: int = 20) -> list[JudgeBatchRunRow]:
+    def list_recent(
+        self, limit: int = 20, *, course_id: int | None = None
+    ) -> list[JudgeBatchRunRow]:
         stmt = (
             select(JudgeBatchRunRow)
             .order_by(JudgeBatchRunRow.created_at.desc(), JudgeBatchRunRow.id.desc())
             .limit(limit)
         )
+        if course_id is not None:
+            stmt = stmt.where(JudgeBatchRunRow.course_id == course_id)
         return list(self._session.scalars(stmt))
 
 
@@ -1075,12 +1098,20 @@ class ReviewOutcomeRepository:
         stmt = select(ReviewOutcomeRow).where(ReviewOutcomeRow.review_id == review_id)
         return self._session.scalars(stmt).first()
 
-    def list_recent(self, limit: int = 50) -> list[ReviewOutcomeRow]:
+    def list_recent(
+        self, limit: int = 50, *, course_id: int | None = None
+    ) -> list[ReviewOutcomeRow]:
         stmt = (
             select(ReviewOutcomeRow)
             .order_by(ReviewOutcomeRow.created_at.desc(), ReviewOutcomeRow.id.desc())
             .limit(limit)
         )
+        if course_id is not None:
+            stmt = stmt.where(
+                ReviewOutcomeRow.question_id.in_(
+                    select(QuestionRow.id).where(questions_in_course(course_id))
+                )
+            )
         return list(self._session.scalars(stmt))
 
     def list_in_cells(
@@ -1668,21 +1699,24 @@ class StudentStateRepository:
         return list(self._session.scalars(stmt))
 
     def list_weakness_all(
-        self, curriculum_version_id: int | None = None
+        self, curriculum_version_id: int | None = None, *, course_id: int | None = None
     ) -> list[StudentSubtopicWeaknessRow]:
         """Every learner's subtopic weakness, for the cohort weakness heatmap.
 
         ``curriculum_version_id`` narrows to subtopics owned by that taxonomy
         (via the subtopic's topic), so switching the roster's taxonomy filter
         re-scopes the heatmap instead of mixing subtopics from every version.
+        ``course_id`` narrows the same way to every taxonomy of that course.
         """
         stmt = select(StudentSubtopicWeaknessRow).order_by(StudentSubtopicWeaknessRow.subtopic_id)
+        if curriculum_version_id is not None or course_id is not None:
+            stmt = stmt.join(
+                SubtopicRow, SubtopicRow.id == StudentSubtopicWeaknessRow.subtopic_id
+            ).join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
         if curriculum_version_id is not None:
-            stmt = (
-                stmt.join(SubtopicRow, SubtopicRow.id == StudentSubtopicWeaknessRow.subtopic_id)
-                .join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
-                .where(TopicRow.curriculum_version_id == curriculum_version_id)
-            )
+            stmt = stmt.where(TopicRow.curriculum_version_id == curriculum_version_id)
+        if course_id is not None:
+            stmt = stmt.where(TopicRow.curriculum_version_id.in_(_version_ids_of(course_id)))
         return list(self._session.scalars(stmt))
 
     def count_students_measured_on(
@@ -1807,6 +1841,23 @@ class TrainingSessionRepository:
         row.ended_at = datetime.now(UTC)
         self._session.flush()
         return row
+
+    def student_ids_for_course(self, course_id: int) -> set[int]:
+        """Every student who has run a session on a set built from one of the course's taxonomies.
+
+        The course-wide form of :meth:`student_ids_for_curriculum_version`: this is what makes a
+        student part of a course, since a student is never tagged with one directly.
+        """
+        stmt = (
+            select(TrainingSessionRow.student_id)
+            .join(
+                QuestionSetVersionRow,
+                QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+            )
+            .where(QuestionSetVersionRow.curriculum_version_id.in_(_version_ids_of(course_id)))
+            .distinct()
+        )
+        return set(self._session.scalars(stmt))
 
     def student_ids_for_curriculum_version(self, curriculum_version_id: int) -> set[int]:
         """Every student who has run a session against this taxonomy.
@@ -2019,7 +2070,7 @@ class StudentAttemptRepository:
         return series
 
     def scored_attempts_all(
-        self, curriculum_version_id: int | None = None
+        self, curriculum_version_id: int | None = None, *, course_id: int | None = None
     ) -> list[ClassTrendAttempt]:
         """Every scored attempt across the cohort, oldest first: the class trend.
 
@@ -2030,6 +2081,7 @@ class StudentAttemptRepository:
         whose frozen set was built off that taxonomy (mirrors
         :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`),
         so the trend line reflects only the selected taxonomy's questions.
+        ``course_id`` narrows the same way to every taxonomy of that course.
         """
         ordering = func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
         stmt = (
@@ -2043,14 +2095,18 @@ class StudentAttemptRepository:
             .where(StudentAttemptRow.score.is_not(None))
             .order_by(ordering, StudentAttemptRow.ordinal)
         )
+        if curriculum_version_id is not None or course_id is not None:
+            stmt = stmt.join(
+                TrainingSessionRow, TrainingSessionRow.id == StudentAttemptRow.session_id
+            ).join(
+                QuestionSetVersionRow,
+                QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+            )
         if curriculum_version_id is not None:
-            stmt = (
-                stmt.join(TrainingSessionRow, TrainingSessionRow.id == StudentAttemptRow.session_id)
-                .join(
-                    QuestionSetVersionRow,
-                    QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
-                )
-                .where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+            stmt = stmt.where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+        if course_id is not None:
+            stmt = stmt.where(
+                QuestionSetVersionRow.curriculum_version_id.in_(_version_ids_of(course_id))
             )
         return [
             ClassTrendAttempt(

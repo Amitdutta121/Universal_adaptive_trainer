@@ -24,10 +24,11 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
+from tests.conftest import TEST_PROFESSOR_ID
 
 
 def taxonomy(session, name):
-    course = CourseRow(name=name)
+    course = CourseRow(name=name, owner_id=TEST_PROFESSOR_ID)
     session.add(course)
     session.flush()
     version = CurriculumVersionRow(label=name, course_id=course.id)

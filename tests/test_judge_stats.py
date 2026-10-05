@@ -3,6 +3,7 @@
 from app.config import get_settings
 from app.persistence.models import CourseRow
 from tests import test_trust_freeze
+from tests.conftest import TEST_PROFESSOR_ID
 
 taxonomy = test_trust_freeze.taxonomy
 seed_current_panel = test_trust_freeze.seed_current_panel
@@ -43,7 +44,7 @@ def test_stats_report_a_trusted_style_and_the_pause(client, session, taxonomy):
 def test_stats_are_scoped_to_the_course(client, session, taxonomy):
     seed_current_panel(session, taxonomy)
     session.commit()
-    other = CourseRow(name="Other course")
+    other = CourseRow(name="Other course", owner_id=TEST_PROFESSOR_ID)
     session.add(other)
     session.commit()
     body = client.get("/api/judge-prompts/stats", headers={"X-Course-Id": str(other.id)}).json()

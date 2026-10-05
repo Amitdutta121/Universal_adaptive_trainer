@@ -75,7 +75,7 @@ def list_judge_prompts(session: DbSession, profile: CourseProfile) -> JudgePromp
     """All four judges of this course's subject: the text each runs and the text it shipped with."""
     stored = {
         row.metric: row
-        for row in JudgePromptRepository(session).list_all(subject=profile.storage_key)
+        for row in JudgePromptRepository(session).list_all(subject=profile.personal_key)
     }
     return JudgePromptListResponse(
         prompts=[
@@ -118,7 +118,7 @@ def judge_stats(
     subject_wide = (
         scoped if version_ids is None else style_trust_under_current_panel(session, profile)
     )
-    names = {style.id: style.name for style in get_library(profile.storage_key)}
+    names = {style.id: style.name for style in get_library(profile.personal_key)}
 
     judges = []
     for metric in SHOWN_JUDGES:
@@ -188,7 +188,7 @@ def save_judge_prompt(
     try:
         row = JudgePromptRepository(session).save(
             metric,
-            subject=profile.storage_key,
+            subject=profile.personal_key,
             system_prompt=text,
             note=(payload.note or "").strip() or None,
         )
@@ -219,7 +219,7 @@ def revert_judge_prompt(
     """Drop one override so the judge runs its shipped prompt again."""
     before = effective_rubric_version(session, profile=profile)
     repository = JudgePromptRepository(session)
-    if not repository.delete(metric, subject=profile.storage_key):
+    if not repository.delete(metric, subject=profile.personal_key):
         raise NotFoundError(
             f"The {metric.value} judge is already running its shipped prompt.",
             detail="There is no override to revert.",
@@ -271,7 +271,7 @@ def refresh(
         return JudgePromptRefreshResponse(
             prompt=_out(
                 metric,
-                JudgePromptRepository(session).get(metric, subject=profile.storage_key),
+                JudgePromptRepository(session).get(metric, subject=profile.personal_key),
                 profile,
                 available=available,
             ),

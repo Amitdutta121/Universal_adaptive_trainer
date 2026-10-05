@@ -10,6 +10,7 @@ had subjects, and reproduces the shipped prompts byte for byte
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -51,6 +52,8 @@ class SubjectProfile:
     question_types: tuple[str, ...] = ()
     #: The course this was read from (``None`` for :data:`PYTHON_PROFILE`).
     course_id: int | None = None
+    #: The professor who owns that course (``None`` without one).
+    owner_id: uuid.UUID | None = None
 
     @property
     def storage_key(self) -> str:
@@ -62,6 +65,18 @@ class SubjectProfile:
         if self.subject_id == "custom" and self.course_id is not None:
             return f"custom:{self.course_id}"
         return self.subject_id
+
+    @property
+    def personal_key(self) -> str:
+        """The key one professor's judge edits and learned rules are stored under (ADR-059).
+
+        :attr:`storage_key` names the subject (its style library is shared by everyone);
+        what a professor teaches the judges and generator stays theirs: a preset pools
+        across that professor's own courses only. Without an owner it is the storage key.
+        """
+        if self.owner_id is None or self.subject_id == "custom":
+            return self.storage_key
+        return f"{self.subject_id}@{self.owner_id.hex}"
 
     @property
     def code_language(self) -> str | None:
@@ -85,6 +100,7 @@ def _profile(
     question_types: tuple[str, ...],
     course_name: str | None = None,
     course_id: int | None = None,
+    owner_id: uuid.UUID | None = None,
 ) -> SubjectProfile:
     if subject_id in _WORDING:
         phrase, name = _WORDING[subject_id]
@@ -98,6 +114,7 @@ def _profile(
         has_code_types=any(type_id in CODE_TYPES for type_id in question_types),
         question_types=question_types,
         course_id=course_id,
+        owner_id=owner_id,
     )
 
 
@@ -120,4 +137,10 @@ def profile_for(course: CourseLike) -> SubjectProfile:
     if subject_id not in SUBJECTS_BY_ID:
         subject_id = "custom"
     types = tuple(course_question_types(subject_id, course.question_types))
-    return _profile(subject_id, types, course.name, getattr(course, "id", None))
+    return _profile(
+        subject_id,
+        types,
+        course.name,
+        getattr(course, "id", None),
+        getattr(course, "owner_id", None),
+    )

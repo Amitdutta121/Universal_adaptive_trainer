@@ -74,6 +74,9 @@ def test_review_relearning_runs_when_nothing_is_trusted(session, taxonomy, monke
 def test_the_refresh_endpoint_refuses_while_a_style_is_trusted(client, session, taxonomy):
     seed_current_panel(session, taxonomy)
     session.commit()
-    response = client.post("/api/judge-prompts/difficulty/refresh")
+    response = client.post(
+        "/api/judge-prompts/difficulty/refresh",
+        headers={"X-Course-Id": str(taxonomy.course_id)},
+    )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "domain_rule_violation"

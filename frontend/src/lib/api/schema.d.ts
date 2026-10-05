@@ -122,7 +122,7 @@ export interface paths {
         };
         /**
          * List Courses
-         * @description Every course, newest first, with what has been built in each.
+         * @description The professor's own courses, newest first, with what has been built in each.
          */
         get: operations["list_courses_api_courses_get"];
         put?: never;
@@ -149,7 +149,7 @@ export interface paths {
         };
         /**
          * Courses Overview
-         * @description The course list's dashboard: each course's progress, and recent activity.
+         * @description The course list's dashboard: each of the professor's courses, and recent activity.
          */
         get: operations["courses_overview_api_courses_overview_get"];
         put?: never;
@@ -1019,7 +1019,7 @@ export interface paths {
         };
         /**
          * Calibration Results
-         * @description Judge/professor agreement over every reviewed, judged question.
+         * @description Judge/professor agreement over the course's reviewed, judged questions.
          */
         get: operations["calibration_results_api_calibration_results_get"];
         put?: never;
@@ -1244,7 +1244,7 @@ export interface paths {
         };
         /**
          * Retrieve Sections
-         * @description Rank sections for a query or a subtopic. Exactly one of the two is required.
+         * @description Rank the course's sections for a query or a subtopic. Exactly one is required.
          */
         get: operations["retrieve_sections_api_retrieval_sections_get"];
         put?: never;
@@ -1810,7 +1810,7 @@ export interface paths {
         };
         /**
          * List Batch Runs
-         * @description Recent re-runs, newest first.
+         * @description The course's recent re-runs, newest first.
          */
         get: operations["list_batch_runs_api_evaluation_batch_runs_get"];
         put?: never;
@@ -6375,7 +6375,9 @@ export interface operations {
     update_topic_api_curriculum_topics__topic_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 topic_id: number;
             };
@@ -6410,7 +6412,9 @@ export interface operations {
     get_subtopic_api_curriculum_subtopics__subtopic_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 subtopic_id: number;
             };
@@ -6441,7 +6445,9 @@ export interface operations {
     update_subtopic_api_curriculum_subtopics__subtopic_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 subtopic_id: number;
             };
@@ -6548,7 +6554,9 @@ export interface operations {
     regenerate_question_api_questions__question_id__regenerate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };
@@ -6655,7 +6663,9 @@ export interface operations {
                 section_ids?: number[] | null;
                 all_sections?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7149,7 +7159,9 @@ export interface operations {
     calibration_results_api_calibration_results_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7164,12 +7176,23 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationResultsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     calibration_pairs_api_calibration_pairs_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7184,6 +7207,15 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationPairsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     calibration_quadrant_api_calibration_quadrant_get: {
@@ -7191,7 +7223,9 @@ export interface operations {
             query?: {
                 rubric_version?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7220,7 +7254,9 @@ export interface operations {
     agreement_trend_api_calibration_trend_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7233,6 +7269,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgreementTrendResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7475,7 +7520,9 @@ export interface operations {
                 subtopic_id?: number | null;
                 top_k?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7903,7 +7950,9 @@ export interface operations {
                 page?: number;
                 page_size?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -7967,7 +8016,9 @@ export interface operations {
             query?: {
                 curriculum_version_id?: number | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8029,7 +8080,9 @@ export interface operations {
     get_student_api_students__student_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 student_id: number;
             };
@@ -8060,7 +8113,9 @@ export interface operations {
     student_progress_api_students__student_id__progress_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 student_id: number;
             };
@@ -8124,7 +8179,9 @@ export interface operations {
             query: {
                 student_id: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8409,7 +8466,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8473,7 +8532,9 @@ export interface operations {
     get_batch_run_api_evaluation_batch_runs__run_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 run_id: string;
             };
@@ -8504,7 +8565,9 @@ export interface operations {
     poll_batch_run_api_evaluation_batch_runs__run_id__poll_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 run_id: string;
             };
@@ -8535,7 +8598,9 @@ export interface operations {
     question_evaluations_api_questions__question_id__evaluations_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };

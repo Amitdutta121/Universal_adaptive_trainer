@@ -156,7 +156,7 @@ def _difficulty_disagreement(
 
 
 def build_calibration_pairs(
-    session: Session, *, rubric_version: str | None = None
+    session: Session, *, rubric_version: str | None = None, course_id: int | None = None
 ) -> list[CalibrationPair]:
     """Every reviewed question the judge actually rendered a verdict on.
 
@@ -165,7 +165,7 @@ def build_calibration_pairs(
     and the honest alternative -- naming every version present in the report --
     is what :attr:`CalibrationReport.rubric_versions` does.
     """
-    rows = QuestionRepository(session).list_reviewed_with_evaluation()
+    rows = QuestionRepository(session).list_reviewed_with_evaluation(course_id=course_id)
     pairs = [_pair_for_question(row) for row in rows]
     found = [pair for pair in pairs if pair is not None]
     if rubric_version is None:
@@ -314,6 +314,8 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, _RATE_PLACES)
 
 
-def build_calibration_report(session: Session) -> CalibrationReport:
-    """The judge reliability report over all reviewed, evaluated questions."""
-    return metrics_from_pairs(build_calibration_pairs(session))
+def build_calibration_report(
+    session: Session, *, course_id: int | None = None
+) -> CalibrationReport:
+    """The judge reliability report over the reviewed, evaluated questions (of one course)."""
+    return metrics_from_pairs(build_calibration_pairs(session, course_id=course_id))

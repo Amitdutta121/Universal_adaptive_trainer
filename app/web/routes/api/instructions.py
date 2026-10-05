@@ -46,7 +46,7 @@ def _out(
         learned=row is not None,
         review_count=row.review_count if row else 0,
         available_reviews=len(
-            reviews_for_type(session, question_type, subject=profile.storage_key)
+            reviews_for_type(session, question_type, subject=profile.personal_key)
         ),
         updated_at=row.updated_at or row.created_at if row else None,
     )
@@ -62,7 +62,7 @@ def list_instructions(session: DbSession, profile: CourseProfile) -> TypeInstruc
     """
     stored = {
         row.question_type: row
-        for row in TypeInstructionRepository(session).list_all(subject=profile.storage_key)
+        for row in TypeInstructionRepository(session).list_all(subject=profile.personal_key)
     }
     return TypeInstructionListResponse(
         instructions=[
@@ -78,7 +78,7 @@ def delete_instruction(
 ) -> TypeInstructionOut:
     """Delete one learned row so this type falls back to its shipped instruction."""
     repository = TypeInstructionRepository(session)
-    if not repository.delete(question_type, subject=profile.storage_key):
+    if not repository.delete(question_type, subject=profile.personal_key):
         raise NotFoundError(
             f"The {question_type.value} type is already using its shipped instruction.",
             detail="There is no learned instruction row to delete.",
@@ -106,7 +106,7 @@ def delete_rule(
             question_type,
             rule_index=rule_index,
             base_instruction=base_type_instruction(question_type),
-            subject=profile.storage_key,
+            subject=profile.personal_key,
         )
     except Exception:
         session.rollback()
@@ -132,7 +132,7 @@ def refresh(
             session,
             question_type,
             base_instruction=base_type_instruction(question_type),
-            subject=profile.storage_key,
+            subject=profile.personal_key,
         )
     except Exception:
         session.rollback()

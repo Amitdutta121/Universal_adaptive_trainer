@@ -25,7 +25,7 @@ router = APIRouter(prefix="/custom-judges", tags=["custom-judges"])
 
 def _check_version(session: DbSession, version_id: int, course: int | None) -> None:
     version = CurriculumRepository(session).get_with_tree(version_id)
-    ensure_in_course(version.course_id, course, "Curriculum version")
+    ensure_in_course(version.course_id, course, f"Curriculum version {version_id}")
 
 
 def _validated(fields: dict) -> dict:

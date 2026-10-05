@@ -28,6 +28,7 @@ from app.ingestion import BookImportService
 from app.persistence.models import CourseRow
 from app.persistence.repositories import JudgePromptRepository, TypeInstructionRepository
 from app.subjects import PYTHON_PROFILE, profile_for, profile_for_course_id
+from tests.conftest import TEST_PROFESSOR_ID
 
 TAXONOMY = (
     b'{"schema_version":"1","label":"Mechanics","topics":['
@@ -54,7 +55,12 @@ class Recorder(MetricJudgeClient):
 def _course(session: Session, subject: str | None, types: list[str] | None) -> int | None:
     if subject is None:
         return None
-    course = CourseRow(name=f"{subject} course", subject=subject, question_types=types)
+    course = CourseRow(
+        name=f"{subject} course",
+        subject=subject,
+        question_types=types,
+        owner_id=TEST_PROFESSOR_ID,
+    )
     session.add(course)
     session.flush()
     return course.id
@@ -110,15 +116,17 @@ def test_a_course_less_taxonomy_still_gets_the_golden_python_prompt(session, set
 
 
 def test_a_learned_instruction_reaches_only_its_own_subject(session, settings) -> None:
+    physics_course = _course(session, "physics", None)
     TypeInstructionRepository(session).upsert(
         QuestionType.MULTIPLE_CHOICE,
-        subject="physics",
+        # The course's owner's own Physics rules (ADR-059).
+        subject=profile_for_course_id(session, physics_course).personal_key,
         instruction="PHYSICS-ONLY RULE",
         rules=[],
         review_count=1,
     )
     session.commit()
-    physics_client, _ = _generate(session, settings, _course(session, "physics", None))
+    physics_client, _ = _generate(session, settings, physics_course)
     python_client, _ = _generate(session, settings, None)
 
     assert "PHYSICS-ONLY RULE" in physics_client.generation_calls[0]["prompt"]

@@ -315,6 +315,7 @@ def submit_bank_rerun(
     run = JudgeBatchRunRepository(session).add(
         JudgeBatchRunRow(
             run_id=run_id,
+            course_id=course_id,
             provider_batch_ids=batch_ids,
             status=JudgeBatchStatus.SUBMITTED,
             model=settings.judge_batch_route,

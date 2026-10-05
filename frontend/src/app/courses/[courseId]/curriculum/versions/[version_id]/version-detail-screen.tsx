@@ -14,13 +14,17 @@
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { CourseLink } from "@/components/course-link";
+import { NotFoundInCourse } from "@/components/not-found-in-course";
 import { PageHeader } from "@/components/page-header";
 import { QueryError, TableSkeleton } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api/client";
 import { useCurriculumVersion, useCurriculumVersions } from "@/lib/api/queries";
 import { formatTimestamp, pluralise } from "@/lib/display";
+import { useCoursePath } from "@/lib/use-course";
 import { ItemRenameDialog, type RenameTarget } from "../../components/item-rename-dialog";
 import { VersionDeleteDialog } from "../../components/version-delete-dialog";
 import { VersionEditDialog } from "../../components/version-edit-dialog";
@@ -34,8 +38,6 @@ import {
 import { CurriculumTree } from "./components/curriculum-tree";
 import { ProposalWarningList } from "./components/proposal-warning-list";
 import { VersionProvenance } from "./components/version-provenance";
-import { CourseLink } from "@/components/course-link";
-import { useCoursePath } from "@/lib/use-course";
 
 export function VersionDetailScreen({ versionId }: { versionId: number }) {
   const router = useRouter();
@@ -57,6 +59,8 @@ export function VersionDetailScreen({ versionId }: { versionId: number }) {
     );
   }
 
+  // Another course's row answers the same 404 as a missing one (ADR-058).
+  if (isError && readApiError(error)?.status === 404) return <NotFoundInCourse />;
   if (isError) {
     return (
       <>

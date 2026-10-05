@@ -32,7 +32,7 @@ from app.evaluation import (
 from app.evaluation.trust import judge_trust
 from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
 from app.ingestion import SourceRetrieval
-from app.persistence.models import CurriculumVersionRow, QuestionRow
+from app.persistence.models import QuestionRow
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
@@ -42,8 +42,12 @@ from app.persistence.repositories import (
 from app.web.routes.api.deps import (
     CourseScope,
     DbSession,
+    book_in_course,
     ensure_in_course,
     ensure_question_types_allowed,
+    question_in_course,
+    sections_in_course,
+    version_in_course,
 )
 from app.web.routes.api.schemas import (
     BatchPlanResponse,
@@ -139,6 +143,11 @@ def generate_questions(
             detail="Provide section_ids, or set all_sections_of_book with a book_id.",
         )
     ensure_question_types_allowed(session, course, [payload.question_type.value])
+    if payload.curriculum_version_id is not None:
+        version_in_course(session, payload.curriculum_version_id, course)
+    if payload.book_id is not None:
+        book_in_course(session, payload.book_id, course)
+    sections_in_course(session, payload.section_ids or [], course)
     # Resolved before the service is built so that a missing curriculum reports
     # the fixable problem rather than an LLM-configuration error raised first.
     curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
@@ -169,7 +178,7 @@ def generate_questions(
     status_code=status.HTTP_201_CREATED,
 )
 def regenerate_question(
-    session: DbSession, question_id: int, payload: RegenerateQuestionRequest
+    session: DbSession, course: CourseScope, question_id: int, payload: RegenerateQuestionRequest
 ) -> RegenerateQuestionResponse:
     """Generate a new question from an existing one, with instructor feedback.
 
@@ -178,6 +187,7 @@ def regenerate_question(
     generation prompt. It writes no review and triggers no instruction relearn --
     that is the review endpoint's job, not this one.
     """
+    question_in_course(session, question_id, course)
     try:
         new_row = GenerationService(session).regenerate_from_question(
             question_id,
@@ -241,6 +251,9 @@ def generate_batch(
     ensure_question_types_allowed(
         session, course, [qt.value for chunk in chunks for qt in chunk.question_types]
     )
+    if payload.curriculum_version_id is not None:
+        version_in_course(session, payload.curriculum_version_id, course)
+    sections_in_course(session, [chunk.section_id for chunk in chunks], course)
     # Compiled before the service is built so an unusable sheet reports the
     # fixable problem rather than an LLM-configuration error raised first.
     planned = compile_chunk_requests(chunks)
@@ -280,6 +293,7 @@ def approved_curriculum_id(session: Session, course: int | None = None) -> int:
 @router.get("/generation-plan", response_model=GenerationPlanResponse)
 def generation_plan(
     session: DbSession,
+    course: CourseScope,
     book_id: int,
     section_ids: Annotated[list[int] | None, Query()] = None,
     all_sections: bool = False,
@@ -291,6 +305,7 @@ def generation_plan(
     the template because the page is only one client of it (ADR-027).
     """
     book = BookRepository(session).get(book_id)
+    ensure_in_course(book.course_id, course, f"Book {book_id}")
     chapters = SourceRetrieval(session).chapters_in_book(book_id)
     already_generated = QuestionRepository(session).count_by_source_section()
     chosen = set(section_ids or [])
@@ -407,13 +422,7 @@ def _is_scoreable(question: QuestionRow) -> bool:
 @router.get("/{question_id}", response_model=QuestionDetail)
 def get_question(session: DbSession, course: CourseScope, question_id: int) -> QuestionDetail:
     """One question with its validation report, judge evaluation and provenance."""
-    question = QuestionRepository(session).get(question_id)
-    version = (
-        session.get(CurriculumVersionRow, question.curriculum_version_id)
-        if question.curriculum_version_id is not None
-        else None
-    )
-    ensure_in_course(version.course_id if version is not None else None, course, "Question")
+    question = question_in_course(session, question_id, course)
     history = QuestionEvaluationRepository(session).list_for_question(question.id)
     current = next((row for row in history if row.evaluation == question.pedagogical_eval), None)
     report = question.validation_report

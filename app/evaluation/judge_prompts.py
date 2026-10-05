@@ -42,7 +42,7 @@ def resolve_system_prompts(
     shipped = system_prompts_for(profile)
     overrides = {
         row.metric: row.system_prompt
-        for row in JudgePromptRepository(session).list_all(subject=profile.storage_key)
+        for row in JudgePromptRepository(session).list_all(subject=profile.personal_key)
     }
     return {metric: overrides.get(metric, shipped[metric]) for metric in JudgeMetricId}
 
@@ -82,4 +82,4 @@ def is_edited(
     session: Session, metric: JudgeMetricId, *, profile: SubjectProfile = PYTHON_PROFILE
 ) -> bool:
     """Whether this judge is running professor-edited text for this subject."""
-    return JudgePromptRepository(session).get(metric, subject=profile.storage_key) is not None
+    return JudgePromptRepository(session).get(metric, subject=profile.personal_key) is not None

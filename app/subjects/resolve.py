@@ -28,7 +28,7 @@ def profile_for_version(session: Session, curriculum_version_id: int | None) -> 
 
 
 def storage_keys_by_version(session: Session, version_ids: set[int]) -> dict[int, str]:
-    """``{curriculum_version_id: storage key}`` (see :attr:`SubjectProfile.storage_key`).
+    """``{curriculum_version_id: personal key}`` (see :attr:`SubjectProfile.personal_key`).
 
     A version with no course, or a missing one, is absent and so counts as Intro Python.
     """
@@ -43,7 +43,7 @@ def storage_keys_by_version(session: Session, version_ids: set[int]) -> dict[int
             continue
         if version.course_id not in profiles:
             profiles[version.course_id] = profile_for_course_id(session, version.course_id)
-        keys[version.id] = profiles[version.course_id].storage_key
+        keys[version.id] = profiles[version.course_id].personal_key
     return keys
 
 
