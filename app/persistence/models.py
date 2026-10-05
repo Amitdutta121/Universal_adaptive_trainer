@@ -282,10 +282,8 @@ class SectionEmbeddingRow(Base):
 
     A *derived* index, not source data: it can be rebuilt from
     ``book_sections.text`` at any time by ``scripts/embed_sections.py``. It lives
-    in its own table -- never a column on ``book_sections`` -- so an existing
-    database needs no migration: ``create_all`` adds a missing table, while
-    ``verify_schema`` (ADR-008) only trips on missing *columns* of tables that
-    already exist.
+    in its own table -- never a column on ``book_sections`` -- so dropping and
+    rebuilding it never touches source data.
 
     ``content_hash`` is the SHA-256 of the section text the vector was built
     from, so a re-run re-embeds only the sections whose text changed. ``model``

@@ -1,10 +1,10 @@
 ---
 id: TASK-93
 title: 'Structured logging, error tracking, metrics'
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:31'
-updated_date: '2026-10-05 17:45'
+updated_date: '2026-10-05 17:49'
 labels:
   - infra
   - backend
@@ -12,7 +12,7 @@ labels:
 milestone: m-5
 dependencies: []
 priority: medium
-ordinal: 26000
+ordinal: 56000
 ---
 
 ## Description

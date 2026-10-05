@@ -1,10 +1,10 @@
 ---
 id: TASK-104
 title: Co-instructors and TA roles per course
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:35'
-updated_date: '2026-10-05 17:45'
+updated_date: '2026-10-05 17:48'
 labels:
   - e2e-gap
   - backend
@@ -13,7 +13,7 @@ milestone: m-1
 dependencies:
   - TASK-74
 priority: medium
-ordinal: 37000
+ordinal: 6000
 ---
 
 ## Description

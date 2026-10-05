@@ -1,17 +1,17 @@
 ---
 id: TASK-76
 title: Server-side route protection in Next (middleware)
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:30'
-updated_date: '2026-10-05 17:44'
+updated_date: '2026-10-05 17:49'
 labels:
   - security
   - frontend
 milestone: m-6
 dependencies: []
 priority: medium
-ordinal: 9000
+ordinal: 30000
 ---
 
 ## Description

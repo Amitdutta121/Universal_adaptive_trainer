@@ -1,9 +1,9 @@
 """Engine, session and schema bootstrap.
 
-SQLite via SQLAlchemy 2.0. A fresh database is built with ``create_all``; a
-change to an existing table ships as an Alembic migration under
-``migrations/versions`` and is applied on start by :func:`init_db`
-(see ``docs/DECISIONS.md`` ADR-051, superseding ADR-008).
+SQLite via SQLAlchemy 2.0. The schema comes only from the Alembic migrations
+under ``migrations/versions``, applied on start by :func:`init_db`; every model
+change, including a new table, ships as a migration (``docs/DECISIONS.md``
+ADR-057, amending ADR-051).
 """
 
 from __future__ import annotations
@@ -97,17 +97,13 @@ def _alembic_config(connection: Connection) -> AlembicConfig:
 def init_db(engine: Engine | None = None) -> None:
     """Bring the database to the current schema, then check it matches the models.
 
-    Three cases, all safe to repeat:
-
-    - **Empty database:** ``create_all`` builds every table, then it is stamped at
-      head -- Alembic's documented way to start a fresh database, and fast enough
-      for the test suite to do per test.
-    - **Database from before migrations existed** (tables, no ``alembic_version``):
-      stamped at :data:`BASELINE_REVISION`, then upgraded.
-    - **Migrated database:** upgraded to head; a no-op when already there.
+    ``alembic upgrade head`` is the only thing that builds tables. A database from
+    before migrations existed (tables, no ``alembic_version``) is first stamped at
+    :data:`BASELINE_REVISION`, whose schema it already has. Safe to repeat: an
+    up-to-date database upgrades as a no-op.
 
     Import of :mod:`app.persistence.models` is what registers the tables on
-    :class:`Base`, so it happens here explicitly.
+    :class:`Base` for :func:`verify_schema`, so it happens here explicitly.
     """
     from app.persistence import models  # noqa: F401  (registers mappers)
 
@@ -115,28 +111,19 @@ def init_db(engine: Engine | None = None) -> None:
     with target.begin() as connection:
         tables = set(inspect(connection).get_table_names())
         config = _alembic_config(connection)
-        if not tables - {"alembic_version"}:
-            Base.metadata.create_all(bind=connection)
-            command.stamp(config, "head")
-        else:
-            if "alembic_version" not in tables:
-                command.stamp(config, BASELINE_REVISION)
-            command.upgrade(config, "head")
-            # Tables added to the models without a migration still get created, as
-            # before Alembic; only changes to existing tables need a migration.
-            Base.metadata.create_all(bind=connection)
+        if tables - {"alembic_version"} and "alembic_version" not in tables:
+            command.stamp(config, BASELINE_REVISION)
+        command.upgrade(config, "head")
     verify_schema(target)
     logger.info("Database schema ready (%d tables)", len(Base.metadata.tables))
 
 
 def verify_schema(engine: Engine | None = None) -> None:
-    """Fail loudly when an existing table is missing columns the models declare.
+    """Fail loudly when the database lacks a table or column the models declare.
 
-    ``create_all`` adds missing *tables* but never alters existing ones, so a
-    database file created before a model gained a column would otherwise survive
-    startup and fail later with a bare "no such column". This runs after
-    :func:`init_db` has applied every migration, so remaining drift means a model
-    gained a column without one (ADR-051); the honest response is to name it.
+    This runs after :func:`init_db` has applied every migration, so remaining
+    drift means a model gained a column without one (ADR-057); the honest response
+    is to name it rather than fail later with a bare "no such column".
 
     Raises:
         SchemaOutOfDateError: if any mapped column is absent from the database.
@@ -150,6 +137,7 @@ def verify_schema(engine: Engine | None = None) -> None:
     drift: list[str] = []
     for table_name, table in Base.metadata.tables.items():
         if table_name not in existing_tables:
+            drift.append(f"{table_name} (table)")
             continue
         actual = {column["name"] for column in inspector.get_columns(table_name)}
         missing = [column.name for column in table.columns if column.name not in actual]
@@ -163,8 +151,8 @@ def verify_schema(engine: Engine | None = None) -> None:
     raise SchemaOutOfDateError(
         "The database file is older than the current data model.",
         detail=(
-            f"Missing column(s): {', '.join(sorted(drift))} in {location}. A model gained "
-            "a column without a migration: add one under app/persistence/migrations/versions."
+            f"Missing: {', '.join(sorted(drift))} in {location}. A model changed without "
+            "a migration: add one under app/persistence/migrations/versions."
         ),
     )
 

@@ -1,10 +1,10 @@
 ---
 id: TASK-105
 title: Professor settings page and account deletion
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:35'
-updated_date: '2026-10-05 17:45'
+updated_date: '2026-10-05 17:47'
 labels:
   - e2e-gap
   - frontend
@@ -12,7 +12,7 @@ labels:
 milestone: m-1
 dependencies: []
 priority: low
-ordinal: 38000
+ordinal: 3000
 ---
 
 ## Description

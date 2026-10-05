@@ -79,14 +79,29 @@ class TestSchemaDriftGuard:
         assert "books.checksum_sha256" in (exc_info.value.detail or "")
         assert "add one under app/persistence/migrations" in (exc_info.value.detail or "")
 
+    def test_a_missing_table_is_reported(self, engine: Engine) -> None:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE review_outcomes"))
+
+        with pytest.raises(SchemaOutOfDateError) as exc_info:
+            verify_schema(engine)
+
+        assert "review_outcomes (table)" in (exc_info.value.detail or "")
+
 
 class TestMigrations:
     """ADR-051: a database is upgraded in place, never recreated."""
 
-    def test_a_fresh_database_is_stamped_at_head(self, engine: Engine) -> None:
+    def test_a_fresh_database_is_upgraded_to_head(self, engine: Engine) -> None:
         with engine.connect() as connection:
             version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
         assert version == "0010_personal_judges"
+
+    def test_the_migrations_build_exactly_the_models(self, engine: Engine) -> None:
+        # ADR-057: Alembic is the only schema source, so a model change without a
+        # migration fails here (``alembic check``), not on Postgres later.
+        with engine.begin() as connection:
+            command.check(_alembic_config(connection))
 
     def test_a_pre_migration_database_is_upgraded_keeping_its_rows(self, engine: Engine) -> None:
         # Rebuild the shape a pre-Alembic database had -- no courses table, no

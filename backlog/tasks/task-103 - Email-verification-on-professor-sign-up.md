@@ -1,10 +1,10 @@
 ---
 id: TASK-103
 title: Email verification on professor sign-up
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:35'
-updated_date: '2026-10-05 17:45'
+updated_date: '2026-10-05 17:47'
 labels:
   - e2e-gap
   - backend
@@ -13,7 +13,7 @@ milestone: m-1
 dependencies:
   - TASK-75
 priority: medium
-ordinal: 36000
+ordinal: 2000
 ---
 
 ## Description

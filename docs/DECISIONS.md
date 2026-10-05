@@ -2330,6 +2330,27 @@ from one course's professor would rewrite another subject's generator.
 **Consequences.** Physics questions are generated and judged with Physics prompts; Python courses
 are unchanged. Existing edits and learned instructions belong to `intro_python` (migration 0004).
 
+## ADR-057 — Alembic migrations are the only schema source
+
+**Status:** accepted. Amends ADR-051's "an empty database is built with `create_all`" and "a new
+table needs no migration".
+
+**Context.** `init_db` built an empty database with `create_all` and ran `create_all` again after
+every upgrade, so a table could exist that no migration creates, and `0001_baseline` was empty. A
+move to Postgres would replay only the migrations and silently miss those tables.
+
+**Decision.** `init_db` only runs `alembic upgrade head` (after stamping a pre-Alembic database at
+`0001_baseline`). `0001_baseline` now creates the schema as of the last pre-migration commit
+(`d5c0fa4`, rendered by autogenerate with the app's TypeDecorators written as plain column types),
+so base → head builds the whole schema. Every model change, a new table included, ships as a
+migration; `tests/test_persistence.py` runs `alembic check` on a freshly migrated database, and
+`verify_schema` now also names a missing table. A repo-root `alembic.ini` lets
+`alembic check` / `alembic revision --autogenerate` run against `DATABASE_URL`.
+
+**Consequences.** Tests build each database through the full migration chain instead of one
+`create_all`. Databases first built by `create_all` keep their small differences (unused legacy
+tables, unnamed foreign keys); they upgrade fine but `alembic check` against them is not clean.
+
 ## ADR-058 — A professor reaches only the courses they own
 
 **Status:** accepted. Supersedes the "unscoped means every course" rule in

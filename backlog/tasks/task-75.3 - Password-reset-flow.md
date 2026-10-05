@@ -1,10 +1,10 @@
 ---
 id: TASK-75.3
 title: Password reset flow
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:40'
-updated_date: '2026-10-05 17:44'
+updated_date: '2026-10-05 17:48'
 labels:
   - backend
   - frontend
@@ -12,7 +12,7 @@ milestone: m-1
 dependencies:
   - TASK-102
 parent_task_id: TASK-75
-ordinal: 80000
+ordinal: 4000
 ---
 
 ## Description

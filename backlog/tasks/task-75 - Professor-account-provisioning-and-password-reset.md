@@ -1,10 +1,10 @@
 ---
 id: TASK-75
 title: Professor account provisioning and password reset
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:30'
-updated_date: '2026-10-05 17:44'
+updated_date: '2026-10-05 17:47'
 labels:
   - security
   - backend
@@ -12,7 +12,7 @@ labels:
 milestone: m-1
 dependencies: []
 priority: high
-ordinal: 8000
+ordinal: 1000
 ---
 
 ## Description

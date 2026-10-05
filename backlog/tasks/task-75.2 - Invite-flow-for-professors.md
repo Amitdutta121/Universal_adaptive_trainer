@@ -1,10 +1,10 @@
 ---
 id: TASK-75.2
 title: Invite flow for professors
-status: Later
+status: To Do
 assignee: []
 created_date: '2026-10-05 17:40'
-updated_date: '2026-10-05 17:44'
+updated_date: '2026-10-05 17:48'
 labels:
   - backend
   - frontend
@@ -13,7 +13,7 @@ dependencies:
   - TASK-75.1
   - TASK-102
 parent_task_id: TASK-75
-ordinal: 79000
+ordinal: 5000
 ---
 
 ## Description
