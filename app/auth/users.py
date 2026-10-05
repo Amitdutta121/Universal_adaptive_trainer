@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends
-from fastapi_users import BaseUserManager, UUIDIDMixin
+from fastapi_users import BaseUserManager, InvalidPasswordException, UUIDIDMixin, schemas
 from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,9 @@ from app.persistence.async_database import get_async_session
 from app.persistence.models import UserRow
 
 logger = logging.getLogger(__name__)
+
+#: Shortest password any account may have, however it is created.
+MIN_PASSWORD_LENGTH = 12
 
 
 async def get_user_db(
@@ -29,8 +32,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[UserRow, uuid.UUID]):
     """Password hashing and lifecycle hooks for the one identity kind here.
 
     No registration route is mounted (``app/web/routes/api/auth.py``), so
-    ``on_after_register`` only ever fires for the seeded developer account
-    (:func:`app.auth.seed.seed_dev_user`).
+    ``on_after_register`` only fires for the seeded developer account
+    (:func:`app.auth.seed.seed_dev_user`) and accounts made with
+    ``python -m app.auth.create_user``.
     """
 
     @property
@@ -40,6 +44,14 @@ class UserManager(UUIDIDMixin, BaseUserManager[UserRow, uuid.UUID]):
     @property
     def verification_token_secret(self) -> str:
         return get_settings().auth_secret_key.get_secret_value()
+
+    async def validate_password(
+        self, password: str, user: schemas.BaseUserCreate | UserRow
+    ) -> None:
+        if len(password) < MIN_PASSWORD_LENGTH:
+            raise InvalidPasswordException(
+                reason=f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+            )
 
     async def on_after_register(self, user: UserRow, request: object = None) -> None:
         logger.info("Professor account registered: %s", user.email)

@@ -37,9 +37,20 @@ def test_an_unknown_executor_is_rejected() -> None:
         Settings(_env_file=None, executor="docker")
 
 
+#: Production refuses the default auth secret (app/config.py), which is not under test here.
+PRODUCTION_SECRET = "x" * 32
+
+
 def test_local_is_refused_in_production() -> None:
     with pytest.raises(ConfigurationError, match="EXECUTOR=local"):
-        configure_executor(Settings(_env_file=None, environment="production", executor="local"))
+        configure_executor(
+            Settings(
+                _env_file=None,
+                environment="production",
+                auth_secret_key=PRODUCTION_SECRET,
+                executor="local",
+            )
+        )
 
 
 def test_piston_is_allowed_in_production() -> None:
@@ -47,6 +58,7 @@ def test_piston_is_allowed_in_production() -> None:
         Settings(
             _env_file=None,
             environment="production",
+            auth_secret_key=PRODUCTION_SECRET,
             executor="piston",
             piston_url="http://sandbox:2000",
         )

@@ -80,6 +80,8 @@ def test_log_level_is_upper_cased() -> None:
 
 def test_environment_variables_are_read(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
+    # Production refuses the default secret (tests/test_create_user.py).
+    monkeypatch.setenv("AUTH_SECRET_KEY", "x" * 32)
     monkeypatch.setenv("PORT", "9123")
     monkeypatch.setenv("LLM_MODEL", "some-model")
     settings = Settings()
