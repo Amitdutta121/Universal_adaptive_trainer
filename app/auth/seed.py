@@ -1,10 +1,10 @@
 """The one seeded developer account.
 
-There is no public registration route (``app/web/routes/api/auth.py``), so
-this is the only way a professor identity comes to exist outside a
-production deployment, which must set its own credentials and never runs
-this. See ``docs/DECISIONS.md`` for why: a hardcoded credential must not ship
-live by accident.
+A ready, verified login for development, so a fresh checkout needs neither the
+registration flow (``POST /api/auth/register``, ADR-061) nor an email link. A
+production deployment never runs this: its accounts come from registration or
+``python -m app.auth.create_user``. See ``docs/DECISIONS.md`` for why: a
+hardcoded credential must not ship live by accident.
 """
 
 from __future__ import annotations

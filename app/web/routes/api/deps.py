@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.assessment.catalog import TYPES_BY_ID, course_question_types
-from app.auth.backend import current_active_user
+from app.auth.backend import current_active_user, current_verified_user
 from app.errors import DomainRuleError, NotFoundError
 from app.persistence.database import get_session
 from app.persistence.models import (
@@ -34,6 +34,10 @@ COURSE_HEADER = "X-Course-Id"
 
 #: The logged-in professor.
 CurrentUser = Annotated[UserRow, Depends(current_active_user)]
+
+#: ``dependencies=`` of every route that spends LLM or embedder credit: the account must have
+#: verified its email (ADR-061). ``tests/test_registration.py`` lists these routes.
+SPENDS_LLM_CREDIT = [Depends(current_verified_user)]
 
 
 def owned_course(session: Session, user: UserRow, course_id: int) -> int:

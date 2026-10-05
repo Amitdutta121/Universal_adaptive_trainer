@@ -36,6 +36,13 @@ class ConfigurationError(AdaptiveTrainerError):
     code = "configuration_error"
 
 
+class EmailNotVerifiedError(AdaptiveTrainerError):
+    """The account has not confirmed its email, and the route spends LLM credit (ADR-061)."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "email_not_verified"
+
+
 class NotFoundError(AdaptiveTrainerError):
     """A requested entity does not exist."""
 
@@ -238,6 +245,34 @@ class UnoverridableConflictError(ResourceInUseError):
     code = "conflict_not_overridable"
 
 
+#: What the Studio shows for each error code fastapi-users raises from the auth routes
+#: (``fastapi_users.router.common.ErrorCode``), which otherwise reach the client as bare codes.
+_AUTH_ERROR_MESSAGES = {
+    "LOGIN_BAD_CREDENTIALS": "Incorrect email or password.",
+    "REGISTER_USER_ALREADY_EXISTS": "An account with this email already exists.",
+    "VERIFY_USER_BAD_TOKEN": "This verification link is invalid or has expired.",
+    "VERIFY_USER_ALREADY_VERIFIED": "This email address is already verified.",
+    "RESET_PASSWORD_BAD_TOKEN": "This password reset link is invalid or has expired.",
+}
+
+
+def _http_error_text(exc: StarletteHTTPException) -> tuple[str, str]:
+    """The envelope's ``code`` and ``message`` for an ``HTTPException``.
+
+    fastapi-users raises ``detail="SOME_CODE"`` or ``detail={"code": ..., "reason": ...}``
+    (a rejected password); both become a lower-case code and a sentence a person can read.
+    """
+    detail = exc.detail
+    if isinstance(detail, dict) and isinstance(detail.get("code"), str):
+        code = detail["code"]
+        reason = detail.get("reason")
+        return code.lower(), str(reason) if reason else _AUTH_ERROR_MESSAGES.get(code, code)
+    if isinstance(detail, str) and detail in _AUTH_ERROR_MESSAGES:
+        return detail.lower(), _AUTH_ERROR_MESSAGES[detail]
+    message = str(detail) if detail else "Request could not be completed."
+    return f"http_{exc.status_code}", message
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Attach the application's exception handlers to ``app``."""
 
@@ -261,17 +296,12 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def _handle_http_error(request: Request, exc: StarletteHTTPException) -> Response:
-        message = str(exc.detail) if exc.detail else "Request could not be completed."
+        code, message = _http_error_text(exc)
         if exc.status_code >= 500:
             logger.error("HTTP %s on %s %s", exc.status_code, request.method, request.url.path)
         else:
             logger.info("HTTP %s on %s %s", exc.status_code, request.method, request.url.path)
-        return _respond(
-            status_code=exc.status_code,
-            code=f"http_{exc.status_code}",
-            message=message,
-            detail=None,
-        )
+        return _respond(status_code=exc.status_code, code=code, message=message, detail=None)
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(request: Request, exc: RequestValidationError) -> Response:

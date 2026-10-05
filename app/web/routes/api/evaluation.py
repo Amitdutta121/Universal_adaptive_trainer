@@ -22,7 +22,13 @@ from app.persistence.repositories import (
     JudgeBatchRunRepository,
     QuestionEvaluationRepository,
 )
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course, question_in_course
+from app.web.routes.api.deps import (
+    SPENDS_LLM_CREDIT,
+    CourseScope,
+    DbSession,
+    ensure_in_course,
+    question_in_course,
+)
 from app.web.routes.api.schemas import (
     BatchRunListResponse,
     EvaluationHistoryEntry,
@@ -48,6 +54,7 @@ def _run_in_course(session: DbSession, run_id: str, course: int | None) -> Judge
     "/evaluation/batch-runs",
     response_model=SubmitBatchRunResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=SPENDS_LLM_CREDIT,
 )
 def submit_batch_run(
     session: DbSession, course: CourseScope, payload: SubmitBatchRunRequest | None = None
@@ -86,7 +93,11 @@ def get_batch_run(session: DbSession, course: CourseScope, run_id: str) -> Judge
     return JudgeBatchRunOut.from_row(_run_in_course(session, run_id, course))
 
 
-@router.post("/evaluation/batch-runs/{run_id}/poll", response_model=PollBatchRunResponse)
+@router.post(
+    "/evaluation/batch-runs/{run_id}/poll",
+    response_model=PollBatchRunResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def poll_batch_run(session: DbSession, course: CourseScope, run_id: str) -> PollBatchRunResponse:
     """Ask the provider about a run and record whatever has finished.
 

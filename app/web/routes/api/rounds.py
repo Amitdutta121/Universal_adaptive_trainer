@@ -14,7 +14,7 @@ from app.generation.rounds import next_round, run_round
 from app.persistence.models import CurriculumVersionRow
 from app.persistence.repositories import GenerationRoundRepository, QuestionSetupRepository
 from app.web.routes.api.coverage import GenerationClientDep
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import GenerationRoundOut, StartRoundRequest, StartRoundResponse
 
 router = APIRouter(prefix="/rounds", tags=["question-setup"])
@@ -26,7 +26,12 @@ def _ensure_setup_in_course(session: DbSession, setup_id: int, course: int | Non
     ensure_in_course(version.course_id if version else None, course, f"Question setup {setup_id}")
 
 
-@router.post("", response_model=StartRoundResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "",
+    response_model=StartRoundResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def start_next_round(
     session: DbSession,
     course: CourseScope,

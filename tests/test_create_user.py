@@ -77,7 +77,13 @@ def test_production_refuses_a_weak_auth_secret(secret: str) -> None:
 
 
 def test_production_accepts_a_real_auth_secret_and_dev_keeps_the_default() -> None:
-    Settings(environment=Environment.PRODUCTION, auth_secret_key="x" * 32)  # type: ignore[arg-type]
+    Settings(
+        environment=Environment.PRODUCTION,
+        auth_secret_key="x" * 32,  # type: ignore[arg-type]
+        # Also required in production (ADR-061), not under test here.
+        public_app_url="https://trainer.example.edu",
+        email_backend="console",
+    )
     assert Settings(environment=Environment.DEVELOPMENT).auth_secret_key.get_secret_value() == (
         DEV_AUTH_SECRET_KEY
     )

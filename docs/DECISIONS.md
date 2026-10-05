@@ -2440,3 +2440,49 @@ so a new route fails the test until it is classified. The Studio's client sends
 starting a run. Still open: classroom links are sequential ids
 (`/students/join?set=` / `?taxonomy=`), so a guessed link joins that class; closing it needs
 an unguessable join code, which changes every shared link.
+
+## ADR-061 — Public professor registration, with a verified email before LLM spend
+
+**Status:** accepted. Completes the public signup that ADR-060 prepared (M3); supersedes the
+"no registration route; the developer account is seeded" notes in `app/auth/` and
+`app/web/routes/api/auth.py`.
+
+**Context.** Accounts came only from the development seed and `python -m app.auth.create_user`.
+A stranger needs to create an account, prove they own the address, and recover a forgotten
+password, and the repo could not send email at all. Once anyone can sign up, the expensive
+thing an account can do is spend the installation's LLM and embedder credit.
+
+**Decision.** fastapi-users' own routers are mounted under `/api/auth`: `register`,
+`request-verify-token`, `verify`, `forgot-password` and `reset-password`; nothing is
+hand-rolled. Register runs `create(safe=True)` and its schema is only email and password, so a
+posted `is_superuser`, `is_verified` or `is_active` has no effect. The 12-character rule stays
+in `UserManager.validate_password`. Registering emails a verification link at once
+(`on_after_register` → `request_verify`); accounts made by the CLI or the seed are created
+verified and get none. Links are `PUBLIC_APP_URL/verify?token=` and
+`/reset-password?token=`, signed with `AUTH_SECRET_KEY` and valid for one hour.
+
+An unverified account can log in and use the whole Studio except the 14 routes that call the
+LLM or the embedder (generation, regeneration, batch generation, coverage gap runs, section
+retrieval, AI taxonomy drafts, setup suggestion, saving a setup and starting a round, judge
+batch re-runs and polls, instruction and judge relearning, and the review that triggers
+relearning). They take `current_verified_user`, which is `current_user(active=True,
+verified=True)` with a readable 403 (`email_not_verified`) instead of fastapi-users' bare one.
+`tests/test_registration.py` lists them and fails if the app's set drifts. Live questions and
+refills in the student flow have no logged-in user; they only run for a classroom with a
+question setup, and a setup can only be saved by a verified account.
+
+Email goes through an `EmailSender` (`app/auth/email.py`): `console` logs the message and link
+(default in development and test), `smtp` uses `smtplib` with STARTTLS off the request thread
+(default in production). Production refuses to start without `PUBLIC_APP_URL`, and with the
+`smtp` backend without `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM`. A failed send
+is logged, never raised. fastapi-users' error codes are turned into sentences by the shared
+HTTP error handler, so the forms show the server's own reason inline.
+
+**Consequences.** Forgot-password and request-verify-token answer 202 whether or not the
+address has an account. Register does not: an existing email is a 400
+(`register_user_already_exists`), which tells a caller that the address has an account. This
+is accepted, as most signup forms do the same; closing it would mean answering every register
+with "check your email". Forgot-password still takes measurably longer for a real account (one
+password hash), which fastapi-users does too. A password reset deletes every session of the
+account. Not here (M4): rate limits, a CAPTCHA, and a per-account LLM quota, so a
+verified account can still spend without limit.

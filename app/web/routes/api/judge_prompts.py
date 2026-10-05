@@ -28,7 +28,7 @@ from app.persistence.models import CurriculumVersionRow, JudgePromptRow
 from app.persistence.repositories import JudgePromptRepository
 from app.styles import get_library
 from app.subjects import SubjectProfile
-from app.web.routes.api.deps import CourseProfile, CourseScope, DbSession
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import (
     JudgePromptListResponse,
     JudgePromptOut,
@@ -240,7 +240,11 @@ def current_prompts(session: DbSession, profile: SubjectProfile) -> dict[JudgeMe
     return resolve_system_prompts(session, profile=profile)
 
 
-@router.post("/{metric}/refresh", response_model=JudgePromptRefreshResponse)
+@router.post(
+    "/{metric}/refresh",
+    response_model=JudgePromptRefreshResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def refresh(
     session: DbSession, metric: JudgeMetricId, profile: CourseProfile
 ) -> JudgePromptRefreshResponse:

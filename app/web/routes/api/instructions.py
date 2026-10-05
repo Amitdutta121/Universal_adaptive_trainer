@@ -20,7 +20,7 @@ from app.personalization import (
 )
 from app.question_types import implemented_types
 from app.subjects import SubjectProfile
-from app.web.routes.api.deps import CourseProfile, DbSession
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseProfile, DbSession
 from app.web.routes.api.schemas import (
     TypeInstructionListResponse,
     TypeInstructionOut,
@@ -122,7 +122,11 @@ def delete_rule(
     return _out(session, profile, question_type, row=row)
 
 
-@router.post("/{question_type}/refresh", response_model=TypeInstructionRefreshResponse)
+@router.post(
+    "/{question_type}/refresh",
+    response_model=TypeInstructionRefreshResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def refresh(
     session: DbSession, question_type: QuestionType, profile: CourseProfile
 ) -> TypeInstructionRefreshResponse:

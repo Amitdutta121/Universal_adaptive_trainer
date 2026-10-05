@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
 import { CourseGate } from "@/components/course-gate";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { VerifyEmailBanner } from "@/components/verify-email-banner";
 
 function ProfessorChrome({
   children,
@@ -32,6 +33,7 @@ function ProfessorChrome({
               isWideRoute ? "h-[100dvh] overflow-hidden" : "max-w-7xl"
             }`}
           >
+            <VerifyEmailBanner />
             <CourseGate>{children}</CourseGate>
           </div>
         </SidebarInset>
@@ -62,12 +64,21 @@ function StudentChrome({ children }: { children: React.ReactNode }) {
   );
 }
 
+const SIGNED_OUT_ROUTES = new Set([
+  "/login",
+  "/register",
+  "/verify",
+  "/forgot-password",
+  "/reset-password",
+]);
+
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isStudentRoute = pathname.startsWith("/students/join");
-  // The login page renders full-page (see login-screen.tsx) and must never sit
-  // behind AuthGate itself, or a logged-out visitor could never reach it.
-  const isLoginRoute = pathname === "/login";
+  // The login page and the other signed-out account screens (sign up, verify email,
+  // forgot/reset password) render full-page (`AuthCard`) and must never sit behind
+  // AuthGate itself, or a logged-out visitor could never reach them.
+  const isSignedOutRoute = SIGNED_OUT_ROUTES.has(pathname);
   // A multi-column workspace, not a document — capping it to reading width
   // wastes a wide monitor instead of giving the PDF pane the room it needs.
   const isWideRoute = /^\/courses\/\d+\/questions\/generate\/single/.test(pathname);
@@ -82,7 +93,7 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   // before any account or backend exists, so it must be reachable logged out.
   const isLandingRoute = pathname === "/";
 
-  if (isLoginRoute || isExperimentRoute || isLandingRoute) return <>{children}</>;
+  if (isSignedOutRoute || isExperimentRoute || isLandingRoute) return <>{children}</>;
   if (isCoursePicker) return <AuthGate>{children}</AuthGate>;
   return isStudentRoute ? (
     <StudentChrome>{children}</StudentChrome>

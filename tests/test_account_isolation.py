@@ -83,6 +83,17 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", "/api/auth/login"): "public; checked by test_create_user.py and the first-login test",
     ("POST", "/api/auth/logout"): "ends the caller's own session only",
     ("GET", "/api/auth/me"): "returns the caller only; checked by the first-login test",
+    ("POST", "/api/auth/register"): (
+        "public; creates a new, unverified account and reads nothing (test_registration.py)"
+    ),
+    ("POST", "/api/auth/request-verify-token"): (
+        "public; emails a link to the address's owner, answers 202 either way"
+    ),
+    ("POST", "/api/auth/verify"): "public; keyed by a signed token, not an id",
+    ("POST", "/api/auth/forgot-password"): (
+        "public; emails a link to the address's owner, answers 202 either way"
+    ),
+    ("POST", "/api/auth/reset-password"): "public; keyed by a signed token, not an id",
     ("GET", "/api/courses/catalog"): "the shipped subject/question-type catalogue, same for all",
     ("GET", "/api/books/document-guide"): "static description of the book document format",
     ("GET", "/api/curriculum/document-guide"): "static description of the taxonomy format",
@@ -389,16 +400,28 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
     )
 
 
-@pytest.fixture(params=["professor", "superuser"])
+@pytest.fixture(params=["professor", "superuser", "registered"])
 def intruder(
     request: pytest.FixtureRequest,
     app: FastAPI,
     seed: Seed,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[tuple[TestClient, int]]:
-    """A fresh account (logged in) and the one course it creates for itself."""
+    """A fresh account (logged in) and the one course it creates for itself.
+
+    ``registered`` signs up through the public ``POST /api/auth/register`` (ADR-061) and stays
+    unverified, as a stranger's account is until they open the email link.
+    """
     email = f"new-{request.param}@example.edu"
-    _create_account(monkeypatch, email, *(["--superuser"] if request.param == "superuser" else []))
+    if request.param == "registered":
+        with TestClient(app) as anonymous:
+            registered = anonymous.post(
+                "/api/auth/register", json={"email": email, "password": PASSWORD}
+            )
+            assert registered.status_code == 201, registered.text
+    else:
+        superuser = ["--superuser"] if request.param == "superuser" else []
+        _create_account(monkeypatch, email, *superuser)
     with _login(app, email) as client:
         assert client.get("/api/courses").json()["courses"] == []
         course = client.post("/api/courses", json={"name": "My course"}).json()["id"]
@@ -439,6 +462,10 @@ def _router_deps(app: FastAPI, method: str, path: str) -> set[str]:
                 stack.extend(dependency.dependencies)
             return names
     raise AssertionError(f"{method} {path} is not mounted")
+
+
+def _needs_verified_email(app: FastAPI, method: str, path: str) -> bool:
+    return "current_verified_user" in _router_deps(app, method, path)
 
 
 def _fill(value: Any, ids: dict[str, Any]) -> Any:
@@ -532,10 +559,17 @@ def test_a_new_account_gets_404_for_every_id_of_another_account(
     app: FastAPI, seed: Seed, intruder: tuple[TestClient, int]
 ) -> None:
     client, own_course = intruder
+    # An unverified account is stopped before the ownership check on routes that spend LLM
+    # credit (ADR-061); a 403 there reveals nothing either.
+    unverified = not client.get("/api/auth/me").json()["is_verified"]
     failures = []
     for what, method, url, headers, body, query in _probes(app, seed, own_course):
         response = client.request(method, url, headers=headers, json=body, params=query)
-        if response.status_code != 404:
+        method_path = what.split(" with ")[0].split("?")[0]
+        if unverified and _needs_verified_email(app, *method_path.split(" ", 1)):
+            if response.status_code != 403:
+                failures.append(f"{what}: {response.status_code} for an unverified account")
+        elif response.status_code != 404:
             failures.append(f"{what}: {response.status_code} {response.text[:200]}")
         _assert_private(response, what)
     assert failures == [], "\n".join(failures)

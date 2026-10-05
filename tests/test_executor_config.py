@@ -39,6 +39,8 @@ def test_an_unknown_executor_is_rejected() -> None:
 
 #: Production refuses the default auth secret (app/config.py), which is not under test here.
 PRODUCTION_SECRET = "x" * 32
+#: Production also needs its email settings (ADR-061), equally not under test here.
+PRODUCTION_EMAIL = {"public_app_url": "https://trainer.example.edu", "email_backend": "console"}
 
 
 def test_local_is_refused_in_production() -> None:
@@ -48,6 +50,7 @@ def test_local_is_refused_in_production() -> None:
                 _env_file=None,
                 environment="production",
                 auth_secret_key=PRODUCTION_SECRET,
+                **PRODUCTION_EMAIL,
                 executor="local",
             )
         )
@@ -59,6 +62,7 @@ def test_piston_is_allowed_in_production() -> None:
             _env_file=None,
             environment="production",
             auth_secret_key=PRODUCTION_SECRET,
+            **PRODUCTION_EMAIL,
             executor="piston",
             piston_url="http://sandbox:2000",
         )

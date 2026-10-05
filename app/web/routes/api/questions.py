@@ -40,6 +40,7 @@ from app.persistence.repositories import (
     QuestionRepository,
 )
 from app.web.routes.api.deps import (
+    SPENDS_LLM_CREDIT,
     CourseScope,
     DbSession,
     book_in_course,
@@ -127,7 +128,10 @@ def list_questions(
 
 
 @router.post(
-    "/generate", response_model=GenerateQuestionsResponse, status_code=status.HTTP_201_CREATED
+    "/generate",
+    response_model=GenerateQuestionsResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=SPENDS_LLM_CREDIT,
 )
 def generate_questions(
     session: DbSession, course: CourseScope, payload: GenerateQuestionsRequest
@@ -181,6 +185,7 @@ def generate_questions(
     "/{question_id}/regenerate",
     response_model=RegenerateQuestionResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=SPENDS_LLM_CREDIT,
 )
 def regenerate_question(
     session: DbSession, course: CourseScope, question_id: int, payload: RegenerateQuestionRequest
@@ -237,7 +242,10 @@ def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
 
 
 @router.post(
-    "/generate-batch", response_model=GenerateBatchResponse, status_code=status.HTTP_201_CREATED
+    "/generate-batch",
+    response_model=GenerateBatchResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=SPENDS_LLM_CREDIT,
 )
 def generate_batch(
     session: DbSession, course: CourseScope, payload: GenerateBatchRequest

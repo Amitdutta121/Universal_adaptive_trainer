@@ -82,6 +82,9 @@ def test_environment_variables_are_read(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ENVIRONMENT", "production")
     # Production refuses the default secret (tests/test_create_user.py).
     monkeypatch.setenv("AUTH_SECRET_KEY", "x" * 32)
+    # And email links need a public address (tests/test_registration.py).
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://trainer.example.edu")
+    monkeypatch.setenv("EMAIL_BACKEND", "console")
     monkeypatch.setenv("PORT", "9123")
     monkeypatch.setenv("LLM_MODEL", "some-model")
     settings = Settings()

@@ -48,7 +48,10 @@ export interface paths {
         };
         /**
          * Counts
-         * @description One count per section. Books, taxonomies and questions are the course's own.
+         * @description One count per section, every one of them the course's own (ADR-060).
+         *
+         *     Learned instructions are the professor's (ADR-059), and a student counts once they have
+         *     run a session in the course.
          */
         get: operations["counts_api_counts_get"];
         put?: never;
@@ -93,6 +96,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register:Register */
+        post: operations["register_register_api_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/request-verify-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify:Request-Token */
+        post: operations["verify_request_token_api_auth_request_verify_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify:Verify */
+        post: operations["verify_verify_api_auth_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/forgot-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset:Forgot Password */
+        post: operations["reset_forgot_password_api_auth_forgot_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset:Reset Password */
+        post: operations["reset_reset_password_api_auth_reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -102,7 +190,9 @@ export interface paths {
         };
         /**
          * Read Current User
-         * @description The frontend's session check: 401 with no cookie, the professor's identity otherwise.
+         * @description The frontend's session check: 401 with no cookie, the professor's account otherwise.
+         *
+         *     ``is_verified`` drives the Studio's "verify your email" banner.
          */
         get: operations["read_current_user_api_auth_me_get"];
         put?: never;
@@ -1648,6 +1738,8 @@ export interface paths {
          *     corrupt the mastery estimate (ADR-041) -- and an accidental double-join (a
          *     second tab, a re-followed link) is a routine event, not an edge case. The
          *     client recovers by resuming the session the error names.
+         *
+         *     Only the learner holding the token may start a run, and only for themselves (ADR-060).
          */
         post: operations["start_training_session_api_training_sessions_post"];
         delete?: never;
@@ -2085,6 +2177,34 @@ export interface components {
         Body_import_taxonomy_api_curriculum_versions_post: {
             /** File */
             file: string;
+        };
+        /** Body_reset_forgot_password_api_auth_forgot_password_post */
+        Body_reset_forgot_password_api_auth_forgot_password_post: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** Body_reset_reset_password_api_auth_reset_password_post */
+        Body_reset_reset_password_api_auth_reset_password_post: {
+            /** Token */
+            token: string;
+            /** Password */
+            password: string;
+        };
+        /** Body_verify_request_token_api_auth_request_verify_token_post */
+        Body_verify_request_token_api_auth_request_verify_token_post: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** Body_verify_verify_api_auth_verify_post */
+        Body_verify_verify_api_auth_verify_post: {
+            /** Token */
+            token: string;
         };
         /**
          * BookDeletion
@@ -2741,6 +2861,22 @@ export interface components {
          */
         CurrentSetupResponse: {
             setup: components["schemas"]["QuestionSetupOut"] | null;
+        };
+        /**
+         * CurrentUserOut
+         * @description ``/me``. A plain ``str`` email, unlike :class:`UserRead`: the seeded developer account's
+         *     ``dev@local.test`` is not a deliverable address and must still be readable.
+         */
+        CurrentUserOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Is Verified */
+            is_verified: boolean;
         };
         /**
          * CurriculumItemLabelUpdate
@@ -5374,6 +5510,54 @@ export interface components {
             /** Enabled */
             enabled?: boolean | null;
         };
+        /**
+         * UserCreate
+         * @description What a registration posts: an email and a password, nothing else.
+         *
+         *     Narrower than ``BaseUserCreate``, so the public schema does not even list
+         *     ``is_superuser``/``is_verified``/``is_active``. A body that sends them anyway has them
+         *     ignored here, and ``create(safe=True)`` would drop them regardless.
+         */
+        UserCreate: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * UserRead
+         * @description The account as the API shows it.
+         */
+        UserRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /**
+             * Is Superuser
+             * @default false
+             */
+            is_superuser: boolean;
+            /**
+             * Is Verified
+             * @default false
+             */
+            is_verified: boolean;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -5570,6 +5754,198 @@ export interface operations {
             };
         };
     };
+    register_register_api_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_request_token_api_auth_request_verify_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_verify_request_token_api_auth_request_verify_token_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_verify_api_auth_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_verify_verify_api_auth_verify_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_forgot_password_api_auth_forgot_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_reset_forgot_password_api_auth_forgot_password_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_reset_password_api_auth_reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_reset_reset_password_api_auth_reset_password_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     read_current_user_api_auth_me_get: {
         parameters: {
             query?: never;
@@ -5585,9 +5961,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["CurrentUserOut"];
                 };
             };
         };
@@ -8146,7 +8520,9 @@ export interface operations {
     training_session_progress_api_training_sessions__training_session_id__progress_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -8210,7 +8586,9 @@ export interface operations {
     start_training_session_api_training_sessions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8243,7 +8621,9 @@ export interface operations {
     get_training_session_api_training_sessions__training_session_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -8274,7 +8654,9 @@ export interface operations {
     next_question_api_training_sessions__training_session_id__next_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -8305,7 +8687,9 @@ export interface operations {
     request_live_question_api_training_sessions__training_session_id__live_question_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -8336,7 +8720,9 @@ export interface operations {
     answer_attempt_api_attempts__attempt_id__answer_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 attempt_id: number;
             };
@@ -8371,7 +8757,9 @@ export interface operations {
     get_attempt_api_attempts__attempt_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 attempt_id: number;
             };
@@ -8402,7 +8790,9 @@ export interface operations {
     review_attempt_api_attempts__attempt_id__review_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 attempt_id: number;
             };
@@ -8433,7 +8823,9 @@ export interface operations {
     end_training_session_api_training_sessions__training_session_id__end_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };

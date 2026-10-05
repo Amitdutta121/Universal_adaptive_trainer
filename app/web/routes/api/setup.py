@@ -24,7 +24,13 @@ from app.persistence.repositories import (
 )
 from app.styles import get_library, suggest_setup
 from app.subjects import profile_for_version
-from app.web.routes.api.deps import CourseProfile, CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.deps import (
+    SPENDS_LLM_CREDIT,
+    CourseProfile,
+    CourseScope,
+    DbSession,
+    ensure_in_course,
+)
 from app.web.routes.api.schemas import (
     CurrentSetupResponse,
     QuestionSetupOut,
@@ -54,7 +60,11 @@ def list_styles(profile: CourseProfile, subject: str | None = None) -> StyleList
     return StyleListResponse(subject=key, styles=get_library(key))
 
 
-@router.post("/setup/suggest", response_model=SetupSuggestionResponse)
+@router.post(
+    "/setup/suggest",
+    response_model=SetupSuggestionResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def suggest(
     session: DbSession, course: CourseScope, body: SuggestSetupRequest, client: SetupClientDep
 ) -> SetupSuggestionResponse:
@@ -114,7 +124,12 @@ def _validate(session: Session, version: CurriculumVersionRow, body: SaveSetupRe
         raise DomainRuleError("The setup lists the same subtopic and difficulty twice.")
 
 
-@router.post("/setup", response_model=SaveSetupResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/setup",
+    response_model=SaveSetupResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def save_setup(
     session: DbSession, course: CourseScope, body: SaveSetupRequest, background: BackgroundTasks
 ) -> SaveSetupResponse:

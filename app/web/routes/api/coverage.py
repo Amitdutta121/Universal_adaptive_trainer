@@ -41,6 +41,7 @@ from app.retrieval import SectionEmbeddingStore, SectionRetriever
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.dedup import flag_possible_duplicates
 from app.web.routes.api.deps import (
+    SPENDS_LLM_CREDIT,
     CourseScope,
     DbSession,
     ensure_in_course,
@@ -118,7 +119,11 @@ def coverage(
     )
 
 
-@router.post("/coverage/generation-runs", response_model=GenerationRunResponse)
+@router.post(
+    "/coverage/generation-runs",
+    response_model=GenerationRunResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def start_generation_run(
     session: DbSession,
     course: CourseScope,
