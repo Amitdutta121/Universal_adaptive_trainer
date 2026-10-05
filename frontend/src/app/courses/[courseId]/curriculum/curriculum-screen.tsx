@@ -49,7 +49,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { curriculumVersionQuery, useCurriculumVersions } from "@/lib/api/queries";
+import { curriculumVersionQuery, useCurriculumVersions, useJudgeStats } from "@/lib/api/queries";
 import type { CurriculumVersionSummary } from "@/lib/api/types";
 import { formatTimestamp, pluralise } from "@/lib/display";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
@@ -60,8 +60,8 @@ import {
 } from "./builder/taxonomy-builder";
 import { draftFromVersion, emptyDraft } from "./builder/taxonomy-draft";
 import { clearDraft, loadDrafts, type SavedDraft } from "./builder/taxonomy-draft-storage";
-import { DraftWithAiDialog, type TaxonomyDraft } from "./components/draft-with-ai-dialog";
 import { CurriculumVersionsTable } from "./components/curriculum-versions-table";
+import { DraftWithAiDialog, type TaxonomyDraft } from "./components/draft-with-ai-dialog";
 import { TaxonomyImportDialog } from "./components/taxonomy-import-dialog";
 import { VersionDeleteDialog } from "./components/version-delete-dialog";
 import { VersionEditDialog } from "./components/version-edit-dialog";
@@ -120,6 +120,7 @@ export function CurriculumScreen() {
   const [deleting, setDeleting] = useState<CurriculumVersionSummary | null>(null);
 
   const versions = useCurriculumVersions();
+  const judgeStats = useJudgeStats();
 
   const approvedVersionId = versions.data?.approved_version_id;
 
@@ -324,6 +325,7 @@ export function CurriculumScreen() {
           {visible.length > 0 ? (
             <CurriculumVersionsTable
               versions={visible}
+              styles={judgeStats.data?.styles}
               approvedVersionId={approvedVersionId}
               openingId={openingId}
               onOpen={open}

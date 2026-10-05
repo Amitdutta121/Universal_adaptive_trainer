@@ -16,7 +16,42 @@ import type {
   CurriculumItemStatus,
   CurriculumStatus,
   CurriculumVersionSummary,
+  StyleTrust,
 } from "@/lib/api/types";
+
+export type VersionJudgeAlignments = {
+  difficulty: string;
+  subtopic: string;
+};
+
+function judgeAlignment(observations: number, agreements: number, rate: number | null): string {
+  if (!observations || rate == null) return "–";
+  return `${Math.round(rate * 100)}% (${agreements}/${observations})`;
+}
+
+function poolMetric(styles: readonly StyleTrust[], metric: "difficulty" | "subtopic"): string {
+  let observations = 0;
+  let agreements = 0;
+  for (const style of styles) {
+    const window = style.metrics[metric];
+    if (!window) continue;
+    observations += window.observations;
+    agreements += window.agreements;
+  }
+  return judgeAlignment(observations, agreements, observations ? agreements / observations : null);
+}
+
+/** Difficulty and topic agreement for one taxonomy, pooled the way the Judges page is. */
+export function alignmentsForVersion(
+  styles: readonly StyleTrust[] | undefined,
+  versionId: number,
+): VersionJudgeAlignments {
+  const ofVersion = (styles ?? []).filter((style) => style.curriculum_version_id === versionId);
+  return {
+    difficulty: poolMetric(ofVersion, "difficulty"),
+    subtopic: poolMetric(ofVersion, "subtopic"),
+  };
+}
 
 /** What `generated_by` reads for a version a professor uploaded. */
 export const TAXONOMY_UPLOAD_GENERATOR = "taxonomy-upload";
