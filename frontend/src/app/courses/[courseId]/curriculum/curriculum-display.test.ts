@@ -10,8 +10,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { CurriculumItemStatus, CurriculumStatus } from "@/lib/api/types";
+import type { CurriculumItemStatus, CurriculumStatus, StyleTrust } from "@/lib/api/types";
 import {
+  alignmentsForVersion,
   CONFIDENCE_VARIANT,
   CURRICULUM_ITEM_STATUS_LABEL,
   CURRICULUM_ITEM_STATUS_VARIANT,
@@ -29,7 +30,13 @@ import {
 } from "./curriculum-display";
 
 const STATUSES: CurriculumStatus[] = ["approved", "superseded", "proposed", "under_review"];
-const ITEM_STATUSES: CurriculumItemStatus[] = ["accepted", "edited", "proposed", "rejected", "deleted"];
+const ITEM_STATUSES: CurriculumItemStatus[] = [
+  "accepted",
+  "edited",
+  "proposed",
+  "rejected",
+  "deleted",
+];
 
 describe("status maps", () => {
   it("covers every version status the backend can send", () => {
@@ -142,5 +149,52 @@ describe("versionStanding", () => {
     // A taxonomy that is not selected is still usable: its classroom link works either way.
     expect(STANDING_MEANING.replaced).toMatch(/classroom link works/);
     expect(`${STANDING_MEANING.live} ${STANDING_MEANING.replaced}`).not.toMatch(/active/i);
+  });
+});
+
+const window = (observations: number, agreements: number): StyleTrust["metrics"][string] => ({
+  observations,
+  agreements,
+  agreement_rate: observations ? agreements / observations : 0,
+  trusted: false,
+  audit_revoked: false,
+});
+
+const style = (
+  versionId: number,
+  difficulty: [number, number],
+  topic: [number, number],
+): StyleTrust =>
+  ({
+    curriculum_version_id: versionId,
+    style_id: `s-${versionId}-${difficulty[0]}`,
+    style_name: "Style",
+    trusted: false,
+    metrics: {
+      difficulty: window(difficulty[0], difficulty[1]),
+      subtopic: window(topic[0], topic[1]),
+    },
+  }) as StyleTrust;
+
+describe("alignmentsForVersion", () => {
+  it("pools a taxonomy's styles the way the Judges page pools the course", () => {
+    const styles = [
+      style(2, [10, 9], [10, 10]),
+      style(2, [10, 7], [6, 3]),
+      style(1, [20, 20], [20, 20]),
+    ];
+
+    expect(alignmentsForVersion(styles, 2)).toEqual({
+      difficulty: "80% (16/20)",
+      subtopic: "81% (13/16)",
+    });
+  });
+
+  it("leaves a taxonomy with no reviews blank", () => {
+    expect(alignmentsForVersion([style(1, [8, 8], [8, 8])], 2)).toEqual({
+      difficulty: "–",
+      subtopic: "–",
+    });
+    expect(alignmentsForVersion(undefined, 2).difficulty).toBe("–");
   });
 });

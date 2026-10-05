@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { CurriculumVersionSummary } from "@/lib/api/types";
+import type { CurriculumVersionSummary, StyleTrust } from "@/lib/api/types";
 import { CurriculumVersionsTable } from "./curriculum-versions-table";
 
 // Links inside a course are built from the URL's course id (`lib/course.ts`).
@@ -24,6 +24,31 @@ const version = (id: number, label: string): CurriculumVersionSummary =>
     subtopic_count: 6,
   }) as CurriculumVersionSummary;
 
+const styles: StyleTrust[] = [
+  {
+    curriculum_version_id: 2,
+    style_id: "py.concept_check",
+    style_name: "Concept check",
+    trusted: false,
+    metrics: {
+      difficulty: {
+        observations: 10,
+        agreements: 9,
+        agreement_rate: 0.9,
+        trusted: false,
+        audit_revoked: false,
+      },
+      subtopic: {
+        observations: 10,
+        agreements: 8,
+        agreement_rate: 0.8,
+        trusted: false,
+        audit_revoked: false,
+      },
+    },
+  },
+];
+
 function setup(openingId: number | null = null) {
   const handlers = {
     onOpen: vi.fn(),
@@ -34,6 +59,7 @@ function setup(openingId: number | null = null) {
     <TooltipProvider>
       <CurriculumVersionsTable
         versions={[version(2, "Newer"), version(1, "Older")]}
+        styles={styles}
         approvedVersionId={2}
         openingId={openingId}
         {...handlers}
@@ -55,6 +81,7 @@ describe("CurriculumVersionsTable", () => {
       "Status",
       "Topics",
       "Subtopics",
+      "Judges",
       "Source",
       "Created",
       "Last selected",
@@ -65,7 +92,10 @@ describe("CurriculumVersionsTable", () => {
     expect(within(newer).getByText("selected")).toBeInTheDocument();
     expect(within(newer).getByText("3")).toBeInTheDocument();
     expect(within(newer).getByText("6")).toBeInTheDocument();
+    expect(within(newer).getByText("90% (9/10)")).toBeInTheDocument();
+    expect(within(newer).getByText("80% (8/10)")).toBeInTheDocument();
     expect(within(older).getByText("saved")).toBeInTheDocument();
+    expect(within(older).getAllByText("–")).toHaveLength(2);
   });
 
   it("opens a row on click and on Enter or Space", async () => {

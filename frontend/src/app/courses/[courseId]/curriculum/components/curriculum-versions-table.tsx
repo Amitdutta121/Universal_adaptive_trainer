@@ -12,6 +12,7 @@
  */
 
 import { ExternalLink, Eye, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { CourseLink } from "@/components/course-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,20 +30,32 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { CurriculumVersionSummary } from "@/lib/api/types";
+import type { CurriculumVersionSummary, StyleTrust } from "@/lib/api/types";
 import { formatTimestamp } from "@/lib/display";
 import { cn } from "@/lib/utils";
 import {
+  alignmentsForVersion,
   generatedByLabel,
   STANDING_LABEL,
   STANDING_MEANING,
   STANDING_VARIANT,
   versionStanding,
 } from "../curriculum-display";
-import { CourseLink } from "@/components/course-link";
+
+function JudgeFigure({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="review-eyebrow">{label}</div>
+      <div className="mt-0.5 font-semibold text-sm tabular-nums leading-none tracking-tight">
+        {value}
+      </div>
+    </div>
+  );
+}
 
 export function CurriculumVersionsTable({
   versions,
+  styles,
   approvedVersionId,
   openingId,
   onOpen,
@@ -50,6 +63,8 @@ export function CurriculumVersionsTable({
   onDelete,
 }: {
   versions: readonly CurriculumVersionSummary[];
+  /** Style windows from `GET /api/judge-prompts/stats`, used to fill Judges. */
+  styles?: readonly StyleTrust[];
   /** Which row is chosen in the header's taxonomy selector. */
   approvedVersionId: number | null | undefined;
   /** A row whose tree is still being fetched for the builder. */
@@ -67,6 +82,7 @@ export function CurriculumVersionsTable({
           <TableHead>Status</TableHead>
           <TableHead className="text-right">Topics</TableHead>
           <TableHead className="text-right">Subtopics</TableHead>
+          <TableHead>Judges</TableHead>
           <TableHead>Source</TableHead>
           <TableHead>Created</TableHead>
           <TableHead>Last selected</TableHead>
@@ -76,6 +92,7 @@ export function CurriculumVersionsTable({
       <TableBody>
         {versions.map((version) => {
           const standing = versionStanding(version, approvedVersionId);
+          const judges = alignmentsForVersion(styles, version.id);
           return (
             <TableRow
               key={version.id}
@@ -102,6 +119,16 @@ export function CurriculumVersionsTable({
               </TableCell>
               <TableCell className="text-right tabular-nums">{version.topic_count}</TableCell>
               <TableCell className="text-right tabular-nums">{version.subtopic_count}</TableCell>
+              <TableCell>
+                <div className="flex items-start">
+                  <div className="pr-5">
+                    <JudgeFigure label="Difficulty" value={judges.difficulty} />
+                  </div>
+                  <div className="border-border border-l pl-5">
+                    <JudgeFigure label="Topic" value={judges.subtopic} />
+                  </div>
+                </div>
+              </TableCell>
               <TableCell className="text-muted-foreground text-sm">
                 {generatedByLabel(version)}
               </TableCell>

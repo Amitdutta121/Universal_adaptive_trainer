@@ -43,6 +43,35 @@ vi.mock("@/lib/api/queries", () => ({
   curriculumVersionQuery: (id: number) => ({ queryKey: ["version", id] }),
   // The builder modal still reads it.
   useApprovedCurriculum: () => ({ data: undefined, isPending: false, error: null }),
+  useJudgeStats: () => ({
+    data: {
+      styles: [
+        {
+          curriculum_version_id: 2,
+          style_id: "py.concept_check",
+          style_name: "Concept check",
+          trusted: false,
+          metrics: {
+            difficulty: {
+              observations: 10,
+              agreements: 9,
+              agreement_rate: 0.9,
+              trusted: false,
+              audit_revoked: false,
+            },
+            subtopic: {
+              observations: 10,
+              agreements: 8,
+              agreement_rate: 0.8,
+              trusted: false,
+              audit_revoked: false,
+            },
+          },
+        },
+      ],
+    },
+    isPending: false,
+  }),
   useCurriculumVersions: () => ({
     data: {
       versions: [summary(2, "Newer"), summary(1, "Older")],
