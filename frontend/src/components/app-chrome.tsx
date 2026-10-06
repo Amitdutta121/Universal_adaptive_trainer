@@ -1,11 +1,11 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
+import { LogoGlyph } from "@/components/brand-logo";
 import { CourseGate } from "@/components/course-gate";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
@@ -50,7 +50,7 @@ function StudentChrome({ children }: { children: React.ReactNode }) {
         <header className="student-shell__header">
           <Link href={"/students/join" as Route} className="student-shell__brand">
             <span className="student-shell__brand-mark">
-              <Sparkles className="size-4" />
+              <LogoGlyph className="size-5" />
             </span>
             <span>
               <span className="student-shell__eyebrow">Adaptive Trainer</span>

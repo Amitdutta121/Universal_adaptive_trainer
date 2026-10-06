@@ -2,21 +2,13 @@
 
 /** The persistent professor navigation, driven entirely by `lib/navigation.ts`. */
 
-import {
-  ArrowLeft,
-  ChevronRight,
-  ChevronsUpDown,
-  LogOut,
-  Moon,
-  Sparkles,
-  Sun,
-  SunMoon,
-} from "lucide-react";
+import { ArrowLeft, ChevronRight, ChevronsUpDown, LogOut, Moon, Sun, SunMoon } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, useEffect, useState } from "react";
+import { LogoGlyph } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -277,7 +269,7 @@ export function AppSidebar() {
           className="app-sidebar-brand group-data-[collapsible=icon]:justify-center"
         >
           <span className="app-sidebar-brand-mark">
-            <Sparkles className="size-4" />
+            <LogoGlyph className="size-5" />
           </span>
           <span className="app-sidebar-brand-copy group-data-[collapsible=icon]:hidden">
             <span className="app-sidebar-brand-title">Adaptive Trainer</span>

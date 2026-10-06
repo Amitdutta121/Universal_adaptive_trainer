@@ -3,7 +3,7 @@
  * email, forgot and reset password. These routes render outside `AuthGate` (`app-chrome.tsx`).
  */
 
-import { Sparkles } from "lucide-react";
+import { LogoGlyph } from "@/components/brand-logo";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function AuthCard({ subtitle, children }: { subtitle: string; children: React.ReactNode }) {
@@ -11,8 +11,8 @@ export function AuthCard({ subtitle, children }: { subtitle: string; children: R
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-sm border-border/70">
         <CardHeader className="items-center gap-2 text-center">
-          <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <Sparkles className="size-5" />
+          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <LogoGlyph className="size-6" />
           </span>
           <CardTitle className="text-xl">Adaptive Trainer</CardTitle>
           <p className="text-muted-foreground text-sm">{subtitle}</p>
