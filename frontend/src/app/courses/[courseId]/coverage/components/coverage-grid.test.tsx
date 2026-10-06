@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { CoverageReport, GenerationRunResponse } from "@/lib/api/types";
+import type { CoverageReport, GenerationRunResponse, Job } from "@/lib/api/types";
 
 // Links inside a course are built from the URL's course id (`lib/course.ts`).
 vi.mock("next/navigation", async (importOriginal) => ({
@@ -14,13 +14,40 @@ const mutate = vi.fn();
 const useGenerateCoverageRun = vi.fn(() => ({
   mutate,
   isPending: false,
-  data: undefined as GenerationRunResponse | undefined,
+  isSuccess: false,
+  data: undefined as { job_id: string } | undefined,
   error: null as unknown,
 }));
+// The run is a background job; the button follows it through the Jobs list.
+const useJob = vi.fn((_jobId: string | undefined): Job | undefined => undefined);
 
 vi.mock("@/lib/api/queries", () => ({
   useGenerateCoverageRun: () => useGenerateCoverageRun(),
+  useJob: (jobId: string | undefined) => useJob(jobId),
 }));
+
+/** A coverage-fill job of the Jobs list, as `GET /api/jobs` reports it. */
+function coverageJob(overrides: Partial<Job>): Job {
+  return {
+    id: "job-1",
+    kind: "coverage_fill",
+    title: "Fill 2 coverage gaps",
+    status: "running",
+    done: 1,
+    total: 2,
+    counts: {},
+    error: null,
+    link: null,
+    result: null,
+    can_cancel: false,
+    cancel_requested: false,
+    retry_label: null,
+    created_at: "2026-10-06T12:00:00",
+    started_at: "2026-10-06T12:00:01",
+    finished_at: null,
+    ...overrides,
+  };
+}
 
 import { CoverageGrid } from "./coverage-grid";
 
@@ -30,9 +57,12 @@ beforeEach(() => {
   useGenerateCoverageRun.mockReturnValue({
     mutate,
     isPending: false,
+    isSuccess: false,
     data: undefined,
     error: null,
   });
+  useJob.mockReset();
+  useJob.mockReturnValue(undefined);
 });
 
 beforeAll(() => {
@@ -217,6 +247,7 @@ describe("CoverageGrid Generate button", () => {
     useGenerateCoverageRun.mockReturnValue({
       mutate,
       isPending: true,
+      isSuccess: false,
       data: undefined,
       error: null,
     });
@@ -261,7 +292,14 @@ describe("CoverageGrid Generate button", () => {
       failed: [],
       possible_duplicates: 1,
     };
-    useGenerateCoverageRun.mockReturnValue({ mutate, isPending: false, data: run, error: null });
+    useGenerateCoverageRun.mockReturnValue({
+      mutate,
+      isPending: false,
+      isSuccess: true,
+      data: { job_id: "job-1" },
+      error: null,
+    });
+    useJob.mockReturnValue(coverageJob({ status: "done", done: 2, result: run }));
 
     render(
       <TooltipProvider>
@@ -306,10 +344,56 @@ describe("CoverageGrid Generate button", () => {
     expect(screen.getByText("Generating…")).toBeInTheDocument();
   });
 
+  it("keeps showing Generating while its queued job is still running", () => {
+    useGenerateCoverageRun.mockReturnValue({
+      mutate,
+      isPending: false,
+      isSuccess: true,
+      data: { job_id: "job-1" },
+      error: null,
+    });
+    useJob.mockReturnValue(coverageJob({ status: "running" }));
+
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={oneTopicReport} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Generate questions for Basics" })).toBeDisabled();
+    expect(screen.getByText("Generating…")).toBeInTheDocument();
+    expect(useJob).toHaveBeenCalledWith("job-1");
+  });
+
+  it("says why its job failed", () => {
+    useGenerateCoverageRun.mockReturnValue({
+      mutate,
+      isPending: false,
+      isSuccess: true,
+      data: { job_id: "job-1" },
+      error: null,
+    });
+    useJob.mockReturnValue(
+      coverageJob({ status: "failed", error: "Interrupted by a server restart." }),
+    );
+
+    render(
+      <TooltipProvider>
+        <CoverageGrid report={oneTopicReport} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("Interrupted by a server restart.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Generate questions for Basics" }),
+    ).not.toBeDisabled();
+  });
+
   it("shows a readable error instead of a silent no-op", () => {
     useGenerateCoverageRun.mockReturnValue({
       mutate,
       isPending: false,
+      isSuccess: false,
       data: undefined,
       error: {
         status: 502,

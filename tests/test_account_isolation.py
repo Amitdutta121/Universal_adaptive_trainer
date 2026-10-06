@@ -182,6 +182,8 @@ PATH_IDS = {
     "round_id": "round",
     "judge_id": "custom_judge",
     "set_version_id": "qset",
+    # ``round-<id>``: A's question round, as the Jobs panel addresses it.
+    "job_id": "job",
 }
 
 #: Lists a brand-new account legitimately sees filled: shipped content, not anyone's data.
@@ -223,6 +225,7 @@ class Seed:
     setup: int
     round: int
     custom_judge: int
+    job: str
 
 
 # ---------------------------------------------------------------- accounts and seed
@@ -397,6 +400,7 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
         setup=setup.id,
         round=generation_round.id,
         custom_judge=judge.id,
+        job=f"round-{generation_round.id}",
     )
 
 

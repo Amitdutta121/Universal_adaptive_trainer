@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.domain.enums import CurriculumStatus
 from app.errors import DomainRuleError
 from app.generation import rounds
+from app.jobs.queue import JobQueueDep
 from app.llm import StructuredLLMClient
 from app.persistence.models import CurriculumVersionRow, QuestionSetupRow
 from app.persistence.repositories import (
@@ -131,7 +132,7 @@ def _validate(session: Session, version: CurriculumVersionRow, body: SaveSetupRe
     dependencies=SPENDS_LLM_CREDIT,
 )
 def save_setup(
-    session: DbSession, course: CourseScope, body: SaveSetupRequest, background: BackgroundTasks
+    session: DbSession, course: CourseScope, body: SaveSetupRequest, queue: JobQueueDep
 ) -> SaveSetupResponse:
     """Save the approved setup and start round 1 in the background."""
     version = CurriculumRepository(session).get_with_tree(body.curriculum_version_id)
@@ -152,5 +153,5 @@ def save_setup(
     first = rounds.start_round(session, setup.id, size=body.round_size)
     session.commit()
     # Read off the module per request, so tests can replace the pipeline.
-    background.add_task(rounds.run_round, first.id)
+    queue.submit(rounds.run_round, first.id)
     return SaveSetupResponse(setup_id=setup.id, round_id=first.id)

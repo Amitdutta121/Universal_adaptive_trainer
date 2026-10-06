@@ -271,10 +271,7 @@ def submit_bank_rerun(
     # One run records one rubric version, so it judges one course's subject: the requesting
     # course's questions (all of them without a course, as before courses existed).
     profile = profile_for_course_id(session, course_id)
-    candidates = QuestionRepository(session).list_judgeable()
-    if course_id is not None:
-        in_course = _version_ids_of_course(session, course_id)
-        candidates = [row for row in candidates if row.curriculum_version_id in in_course]
+    candidates = judgeable_questions(session, course_id)
     if question_ids is not None:
         wanted = set(question_ids)
         candidates = [row for row in candidates if row.id in wanted]
@@ -333,6 +330,15 @@ def submit_bank_rerun(
         len(batch_ids),
     )
     return SubmissionResult(run=run, submitted=submitted, skipped=skipped, backfilled=backfilled)
+
+
+def judgeable_questions(session: Session, course_id: int | None) -> list[QuestionRow]:
+    """The questions a re-run of this course would submit (all of them without a course)."""
+    candidates = QuestionRepository(session).list_judgeable()
+    if course_id is not None:
+        in_course = _version_ids_of_course(session, course_id)
+        candidates = [row for row in candidates if row.curriculum_version_id in in_course]
+    return candidates
 
 
 def _version_ids_of_course(session: Session, course_id: int) -> set[int]:

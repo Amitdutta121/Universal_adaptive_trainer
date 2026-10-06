@@ -48,6 +48,7 @@ from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
+from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
 from app.llm import StructuredLLMClient
 from app.persistence.models import (
     CurriculumVersionRow,
@@ -497,6 +498,8 @@ def _generate_round(
     provider_errors: list[str] = []
 
     for target in targets:
+        # Asked to stop from the Jobs panel: the targets already done are committed.
+        raise_if_cancelled(session, row)
         subtopic_id = int(target["subtopic_id"])
         difficulty = Difficulty(target["difficulty"])
         style = library.get(str(target.get("style_id")))
@@ -627,6 +630,13 @@ def run_round(
         )
         rounds.update(round_id, status=RoundStatus.DONE, finished_at=datetime.now(UTC))
         session.commit()
+    except JobCancelled:
+        session.rollback()
+        GenerationRoundRepository(session).update(
+            round_id, status=RoundStatus.FAILED, error=CANCELLED, finished_at=datetime.now(UTC)
+        )
+        session.commit()
+        logger.info("round %s cancelled", round_id)
     except Exception as exc:
         logger.exception("round %s failed", round_id)
         session.rollback()
