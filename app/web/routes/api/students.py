@@ -19,6 +19,12 @@ that powers the join lobby (``/students/join?set=...``), so those stay public.
 Only the professor-facing reads -- listing students, one student's detail and
 progress, and listing a student's sessions -- carry
 ``Depends(current_active_user)``.
+
+Public is not open, though (ADR-060): every call about one run or attempt, and starting a
+run, must carry the learner's ``resume_token`` in ``X-Student-Token``. Run and attempt ids
+are sequential, so without it an edited URL would reach another learner's run -- and
+through it another professor's course. A run that is not the token holder's is the same
+404 as one that does not exist.
 """
 
 from __future__ import annotations
@@ -26,8 +32,9 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
 
 from app.adaptive import AdaptiveTrainingEngine
@@ -45,7 +52,12 @@ from app.errors import (
 )
 from app.generation.live import next_for_session, run_live_job
 from app.generation.refill import plan_refill, schedule_refill
-from app.persistence.models import LiveQuestionJobRow, StudentRow
+from app.persistence.models import (
+    LiveQuestionJobRow,
+    StudentAttemptRow,
+    StudentRow,
+    TrainingSessionRow,
+)
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionSetRepository,
@@ -93,6 +105,39 @@ ROSTER_PAGE_SIZE = 20
 
 #: Cap on cohort weakness cells returned, matching the client heatmap.
 WEAKNESS_CELLS = 48
+
+#: The header a student's browser sends its ``resume_token`` in (ADR-060).
+STUDENT_HEADER = "X-Student-Token"
+
+
+def _learner(
+    session: DbSession,
+    x_student_token: Annotated[str | None, Header(alias=STUDENT_HEADER)] = None,
+) -> StudentRow | None:
+    """The learner whose token the request carries, or ``None`` for a missing/unknown one."""
+    return StudentRepository(session).get_by_resume_token(x_student_token or "")
+
+
+#: The learner making a public student-flow request; ``None`` when the token is no one's.
+Learner = Annotated[StudentRow | None, Depends(_learner)]
+
+
+def _own_run(session: DbSession, learner: StudentRow | None, run_id: int) -> TrainingSessionRow:
+    """The run, or the same 404 as a missing one unless it is the token holder's."""
+    run = TrainingSessionRepository(session).get(run_id)
+    if learner is None or run.student_id != learner.id:
+        raise NotFoundError(f"Training session {run_id} was not found.")
+    return run
+
+
+def _own_attempt(
+    session: DbSession, learner: StudentRow | None, attempt_id: int
+) -> StudentAttemptRow:
+    """The attempt, or the same 404 as a missing one unless it is the token holder's."""
+    attempt = StudentAttemptRepository(session).get(attempt_id)
+    if learner is None or attempt.student_id != learner.id:
+        raise NotFoundError(f"Attempt {attempt_id} was not found.")
+    return attempt
 
 
 def _student_ids_in(
@@ -434,14 +479,16 @@ def student_progress(
 
 
 @router.get("/training-sessions/{training_session_id}/progress", response_model=StudentProgressOut)
-def training_session_progress(session: DbSession, training_session_id: int) -> StudentProgressOut:
+def training_session_progress(
+    session: DbSession, learner: Learner, training_session_id: int
+) -> StudentProgressOut:
     """The learner's own progress, for the student page.
 
     Keyed by the run, like every other student-page call (``/next``, ``/answer``): the student
     has no instructor login, so ``/students/{id}/progress`` answered 401 and the page's progress
     sidebar never loaded.
     """
-    run = TrainingSessionRepository(session).get(training_session_id)
+    run = _own_run(session, learner, training_session_id)
     return _progress(session, run.student_id)
 
 
@@ -505,7 +552,7 @@ def _progress(session: DbSession, student_id: int) -> StudentProgressOut:
     "/training-sessions", response_model=TrainingSessionOut, status_code=status.HTTP_201_CREATED
 )
 def start_training_session(
-    session: DbSession, payload: StartTrainingSessionRequest
+    session: DbSession, learner: Learner, payload: StartTrainingSessionRequest
 ) -> TrainingSessionOut:
     """Begin a run for one student against one frozen question set (ADR-036).
 
@@ -518,8 +565,12 @@ def start_training_session(
     corrupt the mastery estimate (ADR-041) -- and an accidental double-join (a
     second tab, a re-followed link) is a routine event, not an edge case. The
     client recovers by resuming the session the error names.
+
+    Only the learner holding the token may start a run, and only for themselves (ADR-060).
     """
-    student = StudentRepository(session).get(payload.student_id)
+    if learner is None or learner.id != payload.student_id:
+        raise NotFoundError(f"Student {payload.student_id} was not found.")
+    student = learner
     frozen = QuestionSetRepository(session).get(payload.set_version_id)
     open_run = TrainingSessionRepository(session).open_session_for(student.id)
     if open_run is not None:
@@ -566,13 +617,17 @@ def list_training_sessions(
 
 
 @router.get("/training-sessions/{training_session_id}", response_model=TrainingSessionOut)
-def get_training_session(session: DbSession, training_session_id: int) -> TrainingSessionOut:
+def get_training_session(
+    session: DbSession, learner: Learner, training_session_id: int
+) -> TrainingSessionOut:
+    _own_run(session, learner, training_session_id)
     return _session_out(session, training_session_id)
 
 
 @router.get("/training-sessions/{training_session_id}/next", response_model=ServedQuestionOut)
 def next_question(
     session: DbSession,
+    learner: Learner,
     training_session_id: int,
     background_tasks: BackgroundTasks,
 ) -> ServedQuestionOut | JSONResponse:
@@ -588,6 +643,7 @@ def next_question(
     (:mod:`app.generation.live`) and this answers ``question_generating`` until it is ready;
     the client keeps polling.
     """
+    _own_run(session, learner, training_session_id)
     return _next_or_generate(session, training_session_id, background_tasks, force=False)
 
 
@@ -596,10 +652,12 @@ def next_question(
 )
 def request_live_question(
     session: DbSession,
+    learner: Learner,
     training_session_id: int,
     background_tasks: BackgroundTasks,
 ) -> ServedQuestionOut | JSONResponse:
     """``/next``, but generate even right after a failed attempt: the student asked to retry."""
+    _own_run(session, learner, training_session_id)
     return _next_or_generate(session, training_session_id, background_tasks, force=True)
 
 
@@ -656,8 +714,11 @@ def _next_or_generate(
 
 
 @router.post("/attempts/{attempt_id}/answer", response_model=AnsweredOut)
-def answer_attempt(session: DbSession, attempt_id: int, payload: AnswerRequest) -> AnsweredOut:
+def answer_attempt(
+    session: DbSession, learner: Learner, attempt_id: int, payload: AnswerRequest
+) -> AnsweredOut:
     """Score a submitted answer and fold it into the student's state."""
+    _own_attempt(session, learner, attempt_id)
     try:
         result = AdaptiveTrainingEngine(session).submit_answer(attempt_id, payload.answer)
     except Exception:
@@ -668,19 +729,19 @@ def answer_attempt(session: DbSession, attempt_id: int, payload: AnswerRequest) 
 
 
 @router.get("/attempts/{attempt_id}", response_model=AttemptOut)
-def get_attempt(session: DbSession, attempt_id: int) -> AttemptOut:
-    return AttemptOut.from_row(StudentAttemptRepository(session).get(attempt_id))
+def get_attempt(session: DbSession, learner: Learner, attempt_id: int) -> AttemptOut:
+    return AttemptOut.from_row(_own_attempt(session, learner, attempt_id))
 
 
 @router.get("/attempts/{attempt_id}/review", response_model=QuestionDetail)
-def review_attempt(session: DbSession, attempt_id: int) -> QuestionDetail:
+def review_attempt(session: DbSession, learner: Learner, attempt_id: int) -> QuestionDetail:
     """The answered question with its answer key, for the student's result card.
 
     Only once *this* attempt has been answered: before that the key would answer the question
     being asked. The student page used the instructor-only ``/questions/{id}`` and never got past
     "Loading the correct answer".
     """
-    attempt = StudentAttemptRepository(session).get(attempt_id)
+    attempt = _own_attempt(session, learner, attempt_id)
     if attempt.score is None:
         raise DomainRuleError(
             "Answer the question first.",
@@ -694,9 +755,11 @@ def review_attempt(session: DbSession, attempt_id: int) -> QuestionDetail:
 
 
 @router.post("/training-sessions/{training_session_id}/end", response_model=TrainingSessionOut)
-def end_training_session(session: DbSession, training_session_id: int) -> TrainingSessionOut:
+def end_training_session(
+    session: DbSession, learner: Learner, training_session_id: int
+) -> TrainingSessionOut:
     repository = TrainingSessionRepository(session)
-    repository.end(repository.get(training_session_id))
+    repository.end(_own_run(session, learner, training_session_id))
     session.commit()
     return _session_out(session, training_session_id)
 

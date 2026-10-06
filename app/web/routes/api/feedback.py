@@ -41,6 +41,7 @@ from app.persistence.repositories import (
 from app.personalization import refresh_type_instruction
 from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_version
 from app.web.routes.api.deps import (
+    SPENDS_LLM_CREDIT,
     CourseScope,
     DbSession,
     question_in_course,
@@ -61,7 +62,10 @@ router = APIRouter(tags=["feedback"])
 
 
 @router.post(
-    "/questions/{question_id}/review", response_model=ReviewOut, status_code=status.HTTP_201_CREATED
+    "/questions/{question_id}/review",
+    response_model=ReviewOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=SPENDS_LLM_CREDIT,
 )
 def create_review(
     session: DbSession, course: CourseScope, question_id: int, payload: ReviewRequest

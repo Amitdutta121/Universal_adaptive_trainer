@@ -44,6 +44,9 @@ TEST_ENV: dict[str, str] = {
     "JUDGE_BATCH_API_KEY": "",
     "JUDGE_BATCH_MODEL": "",
     "CORS_ALLOW_ORIGINS": "http://localhost:5173",
+    # A developer's SMTP settings must never make the suite send real email.
+    "EMAIL_BACKEND": "console",
+    "PUBLIC_APP_URL": "",
     # Judge repair policy is pinned permissive here so that the tests which
     # exercise the learning *mechanism* are not also asserting the *policy*
     # (ADR-042). The threshold and the acceptance gate have their own tests,

@@ -22,6 +22,7 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.persistence.repositories import QuestionSetRepository
+from app.web.routes.api.students import STUDENT_HEADER
 
 
 def _bank(session: Session, *, question_type: QuestionType = QuestionType.TRUE_FALSE) -> int:
@@ -83,15 +84,15 @@ def _enrol_payload(name: str) -> dict[str, str]:
 
 
 def _enrol(client: TestClient, name: str = "Ada") -> int:
-    response = client.post("/api/students", json=_enrol_payload(name))
-    assert response.status_code == 201, response.text
-    return response.json()["id"]
+    return _enrol_with_token(client, name)[0]
 
 
 def _enrol_with_token(client: TestClient, name: str = "Ada") -> tuple[int, str]:
+    """Enrol, and from now on send this learner's token like their browser does (ADR-060)."""
     response = client.post("/api/students", json=_enrol_payload(name))
     assert response.status_code == 201, response.text
     body = response.json()
+    client.headers[STUDENT_HEADER] = body["resume_token"]
     return body["id"], body["resume_token"]
 
 
@@ -523,6 +524,7 @@ class TestStudentPageWithoutInstructorLogin:
         from app.main import create_app
 
         with TestClient(create_app(settings)) as public:
+            public.headers[STUDENT_HEADER] = client.headers[STUDENT_HEADER]
             served = public.get(f"/api/training-sessions/{run_id}/next").json()
             attempt_id = served["attempt_id"]
             # Before answering, the key stays hidden.

@@ -128,16 +128,17 @@ export function JoinClassroomScreen() {
         display_name: trimmedName,
         email: trimmedEmail,
       });
-      const session = await startTrainingSession.mutateAsync({
-        student_id: learner.id,
-        set_version_id: resolvedSetVersionId,
-      });
-      // Only store the identity once both calls actually succeeded.
+      // Stored before the run starts: starting it sends the token (ADR-060), and a learner
+      // whose start fails can still resume instead of hitting the unique-name rule.
       saveLearnerIdentity({
         studentId: learner.id,
         resumeToken: learner.resume_token,
         displayName: trimmedName,
         email: trimmedEmail,
+      });
+      const session = await startTrainingSession.mutateAsync({
+        student_id: learner.id,
+        set_version_id: resolvedSetVersionId,
       });
       router.push(`/students/join/session/${session.id}` as Route);
     } catch {

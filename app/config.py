@@ -11,12 +11,19 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr, computed_field, field_validator
+from pydantic import Field, SecretStr, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+#: The ``AUTH_SECRET_KEY`` default. Safe on one developer's machine only, so a
+#: production run refuses to start with it (``Settings._require_real_auth_secret``).
+DEV_AUTH_SECRET_KEY = "dev-only-insecure-secret-change-me"
+#: Shortest ``AUTH_SECRET_KEY`` a production run accepts -- 32 characters is
+#: what ``secrets.token_urlsafe(24)`` produces.
+MIN_PRODUCTION_SECRET_LENGTH = 32
 
 
 class Environment(StrEnum):
@@ -148,14 +155,30 @@ class Settings(BaseSettings):
     max_book_upload_mb: int = Field(default=100, gt=0)
 
     # -- Auth (app/auth/) -----------------------------------------------------
-    #: Signs password-reset/verification tokens. Neither flow is exposed by any
-    #: route yet, but fastapi-users requires the secret to exist regardless.
-    #: Generate a real value for anything beyond a single developer's machine.
-    auth_secret_key: SecretStr = SecretStr("dev-only-insecure-secret-change-me")
+    #: Signs the email-verification and password-reset links (ADR-061).
+    #: Generate a real value for anything beyond a single developer's machine;
+    #: ENVIRONMENT=production refuses to start without one.
+    auth_secret_key: SecretStr = SecretStr(DEV_AUTH_SECRET_KEY)
     #: The one seeded professor account (app/auth/seed.py). Only created when
     #: ENVIRONMENT=development -- a production run never seeds a credential.
     dev_user_email: str = "dev@local.test"
     dev_user_password: SecretStr = SecretStr("devpassword123")
+
+    # -- Account email (app/auth/email.py, ADR-061) ---------------------------
+    #: Where the Studio is served; verification and reset links point here. Required in
+    #: production, where a localhost link in a real inbox would be useless.
+    public_app_url: str | None = None
+    #: ``console`` logs each email (with its link) instead of sending it; ``smtp`` sends it.
+    #: Unset means ``console`` in development and test and ``smtp`` in production, so a
+    #: deployment never writes password-reset links into its logs by default.
+    email_backend: Literal["console", "smtp"] | None = None
+    smtp_host: str | None = None
+    #: 587 is the submission port; the connection is upgraded with STARTTLS before login.
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+    #: The From address, e.g. ``Adaptive Trainer <no-reply@example.edu>``.
+    smtp_from: str | None = None
 
     # -- Browser clients ----------------------------------------------------
     # Origins allowed to call /api from a browser. Defaults cover the Vite and
@@ -175,7 +198,17 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "llm_api_key", "llm_base_url", "judge_batch_api_key", "judge_batch_model", mode="before"
+        "llm_api_key",
+        "llm_base_url",
+        "judge_batch_api_key",
+        "judge_batch_model",
+        "public_app_url",
+        "email_backend",
+        "smtp_host",
+        "smtp_user",
+        "smtp_password",
+        "smtp_from",
+        mode="before",
     )
     @classmethod
     def _blank_is_none(cls, value: object) -> object:
@@ -206,6 +239,55 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _require_real_auth_secret(self) -> Self:
+        """Fail at startup rather than sign tokens with a public, known secret."""
+        if self.environment is not Environment.PRODUCTION:
+            return self
+        secret = self.auth_secret_key.get_secret_value()
+        if secret == DEV_AUTH_SECRET_KEY or len(secret) < MIN_PRODUCTION_SECRET_LENGTH:
+            raise ValueError(
+                "ENVIRONMENT=production needs AUTH_SECRET_KEY set to a random value of at "
+                f"least {MIN_PRODUCTION_SECRET_LENGTH} characters, e.g. "
+                '`python -c "import secrets; print(secrets.token_urlsafe(32))"`.'
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_production_email(self) -> Self:
+        """Fail at startup rather than send links nobody can open, or no email at all."""
+        if self.environment is not Environment.PRODUCTION:
+            return self
+        if self.public_app_url is None:
+            raise ValueError(
+                "ENVIRONMENT=production needs PUBLIC_APP_URL, the address the Studio is served "
+                "at (e.g. https://trainer.example.edu); email links are built from it."
+            )
+        if self.effective_email_backend == "smtp":
+            missing = [
+                name.upper()
+                for name in ("smtp_host", "smtp_user", "smtp_password", "smtp_from")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"ENVIRONMENT=production sends email over SMTP and needs {', '.join(missing)}"
+                    " (or EMAIL_BACKEND=console to only log each email)."
+                )
+        return self
+
+    @property
+    def effective_email_backend(self) -> Literal["console", "smtp"]:
+        """The configured email backend, defaulting by environment."""
+        if self.email_backend is not None:
+            return self.email_backend
+        return "smtp" if self.environment is Environment.PRODUCTION else "console"
+
+    @property
+    def app_url(self) -> str:
+        """Base URL for links in emails, without a trailing slash."""
+        return (self.public_app_url or "http://localhost:3000").rstrip("/")
 
     @computed_field  # type: ignore[prop-decorator]
     @property

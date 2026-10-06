@@ -23,6 +23,7 @@ from app.generation.principles import COMMON_SYSTEM
 from app.generation.schemas import CodingDraft, MultipleChoiceDraft
 from app.question_types.equation_response import EquationResponseDraft
 from app.question_types.numeric_response import NumericResponseDraft
+from app.web.routes.api.students import STUDENT_HEADER
 
 PHYSICS_TAXONOMY = {
     "schema_version": "1",
@@ -193,6 +194,8 @@ def _enrol(client: TestClient, name: str) -> int:
         "/api/students", json={"display_name": name, "email": f"{slug}@example.edu"}
     )
     assert response.status_code == 201, response.text
+    # The student page sends the learner's token on every run call (ADR-060).
+    client.headers[STUDENT_HEADER] = response.json()["resume_token"]
     return response.json()["id"]
 
 

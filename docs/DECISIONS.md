@@ -2401,3 +2401,88 @@ without a course (tests only) still reads the bare preset key.
 Also under ADR-058: ids carried in query strings and bodies (coverage `set_version_id` and gap
 targets, generation version/book/section ids, review subtopic corrections) are checked against
 the request's course, and every cross-course 404 reads exactly like a missing row.
+
+## ADR-060 — An account is the isolation boundary for public signup
+
+**Status:** accepted. Extends ADR-058 (per-course access) and ADR-059 (per-professor judges)
+to the public signup coming in M3; amends ADR-041's "the student flow needs no credential".
+
+**Context.** Once anyone can register, every account must be treated as untrusted. ADR-058
+already scoped professor routes to owned courses, but an audit for M2 found four remaining
+hops: `GET /api/counts` counted reviews, learned instructions and students across every
+course; `POST /api/question-sets/prod/sync` let any course repoint the one installation-wide
+`prod` alias, taking over another professor's prod join link; `?curriculum_version_id=` on the
+question list and review queue, and `question_ids` on a judge re-run, were filtered out
+silently instead of refused; and every public run/attempt route (`/training-sessions/{id}/…`,
+`/attempts/{id}/…`, starting a run) took a bare sequential id, so an edited URL reached another
+learner's run, answer keys and email -- and through it another professor's course.
+
+**Decision.** The account is the boundary: what a new account can see or change is exactly
+what it created. A course is reached only by its owner (`courses.owner_id`, stamped from the
+session on create; a posted owner is ignored); every row is reached through its course; an
+id of another account's row -- in a path, query, body or `X-Course-Id` -- is the same 404 as a
+missing one, never a 403. A superuser gets nothing extra: no route reads `is_superuser`.
+Ownerless rows (`courses.owner_id` NULL, books/taxonomies with `course_id` NULL) are reached
+by no account. They are left as they are rather than tightened to `NOT NULL`: owner deletion
+is `ON DELETE SET NULL`, unit tests and scripts build course-less rows, and handing orphans to
+some account would be a guess on a public instance; every check compares with `=`, which
+NULL never satisfies, and the isolation test seeds such rows to keep it that way. The public
+student flow stays login-free but not open: run and attempt routes, and starting a run,
+require the learner's `resume_token` in `X-Student-Token` and answer 404 unless the run is
+that learner's. The prod alias may only be repointed while unset or already serving the
+requesting course.
+
+**Consequences.** `tests/test_account_isolation.py` enumerates `app.routes`: every route is
+either probed (A's ids everywhere -> 404, empty lists for a new account, A's data unchanged
+after the sweep, for a plain account and a superuser) or named in an allowlist with a reason,
+so a new route fails the test until it is classified. The Studio's client sends
+`X-Student-Token` from the stored learner identity, which the join screen now saves before
+starting a run. Still open: classroom links are sequential ids
+(`/students/join?set=` / `?taxonomy=`), so a guessed link joins that class; closing it needs
+an unguessable join code, which changes every shared link.
+
+## ADR-061 — Public professor registration, with a verified email before LLM spend
+
+**Status:** accepted. Completes the public signup that ADR-060 prepared (M3); supersedes the
+"no registration route; the developer account is seeded" notes in `app/auth/` and
+`app/web/routes/api/auth.py`.
+
+**Context.** Accounts came only from the development seed and `python -m app.auth.create_user`.
+A stranger needs to create an account, prove they own the address, and recover a forgotten
+password, and the repo could not send email at all. Once anyone can sign up, the expensive
+thing an account can do is spend the installation's LLM and embedder credit.
+
+**Decision.** fastapi-users' own routers are mounted under `/api/auth`: `register`,
+`request-verify-token`, `verify`, `forgot-password` and `reset-password`; nothing is
+hand-rolled. Register runs `create(safe=True)` and its schema is only email and password, so a
+posted `is_superuser`, `is_verified` or `is_active` has no effect. The 12-character rule stays
+in `UserManager.validate_password`. Registering emails a verification link at once
+(`on_after_register` → `request_verify`); accounts made by the CLI or the seed are created
+verified and get none. Links are `PUBLIC_APP_URL/verify?token=` and
+`/reset-password?token=`, signed with `AUTH_SECRET_KEY` and valid for one hour.
+
+An unverified account can log in and use the whole Studio except the 14 routes that call the
+LLM or the embedder (generation, regeneration, batch generation, coverage gap runs, section
+retrieval, AI taxonomy drafts, setup suggestion, saving a setup and starting a round, judge
+batch re-runs and polls, instruction and judge relearning, and the review that triggers
+relearning). They take `current_verified_user`, which is `current_user(active=True,
+verified=True)` with a readable 403 (`email_not_verified`) instead of fastapi-users' bare one.
+`tests/test_registration.py` lists them and fails if the app's set drifts. Live questions and
+refills in the student flow have no logged-in user; they only run for a classroom with a
+question setup, and a setup can only be saved by a verified account.
+
+Email goes through an `EmailSender` (`app/auth/email.py`): `console` logs the message and link
+(default in development and test), `smtp` uses `smtplib` with STARTTLS off the request thread
+(default in production). Production refuses to start without `PUBLIC_APP_URL`, and with the
+`smtp` backend without `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM`. A failed send
+is logged, never raised. fastapi-users' error codes are turned into sentences by the shared
+HTTP error handler, so the forms show the server's own reason inline.
+
+**Consequences.** Forgot-password and request-verify-token answer 202 whether or not the
+address has an account. Register does not: an existing email is a 400
+(`register_user_already_exists`), which tells a caller that the address has an account. This
+is accepted, as most signup forms do the same; closing it would mean answering every register
+with "check your email". Forgot-password still takes measurably longer for a real account (one
+password hash), which fastapi-users does too. A password reset deletes every session of the
+account. Not here (M4): rate limits, a CAPTCHA, and a per-account LLM quota, so a
+verified account can still spend without limit.

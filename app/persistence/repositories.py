@@ -1041,8 +1041,13 @@ class ProfessorReviewRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(ProfessorReviewRow)) or 0
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(ProfessorReviewRow)
+        if course_id is not None:
+            stmt = stmt.join(QuestionRow, ProfessorReviewRow.question_id == QuestionRow.id).where(
+                questions_in_course(course_id)
+            )
+        return self._session.scalar(stmt) or 0
 
     def list_recent(self, limit: int = 50) -> list[ProfessorReviewRow]:
         stmt = (

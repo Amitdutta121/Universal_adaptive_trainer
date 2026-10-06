@@ -11,6 +11,7 @@
  */
 
 import createClient, { type Middleware } from "openapi-fetch";
+import { loadLearnerIdentity } from "@/app/students/join/learner-identity";
 import { API_BASE_URL } from "@/lib/env";
 import type { paths } from "./schema";
 
@@ -74,6 +75,30 @@ const courseHeader: Middleware = {
   },
 };
 
+/** The header carrying the learner's `resume_token` (`app/web/routes/api/students.py`). */
+export const STUDENT_HEADER = "X-Student-Token";
+
+/** Starting a run, and every call about one run or attempt, which the backend ties to the learner. */
+const STUDENT_FLOW = /\/api\/(training-sessions|attempts)(\/|$)/;
+
+/**
+ * A student-flow request carries the learner's token (ADR-060).
+ *
+ * Run and attempt ids are sequential, so the backend answers 404 unless the run belongs to
+ * the learner holding the token. Read from the browser's stored identity rather than passed
+ * by each caller, like the course header above.
+ */
+const studentToken: Middleware = {
+  async onRequest({ request }) {
+    if (request.headers.has(STUDENT_HEADER) || !STUDENT_FLOW.test(new URL(request.url).pathname)) {
+      return request;
+    }
+    const identity = loadLearnerIdentity();
+    if (identity) request.headers.set(STUDENT_HEADER, identity.resumeToken);
+    return request;
+  },
+};
+
 /**
  * Build a client against an explicit origin.
  *
@@ -83,7 +108,7 @@ const courseHeader: Middleware = {
  */
 export function createApiClient(baseUrl: string) {
   const client = createClient<paths>({ baseUrl });
-  client.use(acceptJson, courseHeader);
+  client.use(acceptJson, courseHeader, studentToken);
   return client;
 }
 

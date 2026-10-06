@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { VerifyEmailBanner } from "@/components/verify-email-banner";
 import { useCoursesOverview, useUpdateCourse } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 import { coursePath } from "@/lib/course";
@@ -371,6 +372,8 @@ export function CoursesScreen() {
           New course
         </Button>
       </header>
+
+      <VerifyEmailBanner />
 
       {overview.isError ? <QueryError error={overview.error} /> : null}
 

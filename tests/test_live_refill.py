@@ -12,9 +12,14 @@ from app.adaptive.inventory import StudentBank
 from app.adaptive.service import AdaptiveTrainingEngine
 from app.domain.enums import Difficulty, QuestionStatus, RoundStatus
 from app.generation import refill, rounds
-from app.persistence.models import GenerationRoundRow, QuestionSetupRow
+from app.persistence.models import GenerationRoundRow, QuestionSetupRow, StudentRow
 from app.persistence.repositories import QuestionSetRepository
 from app.web.routes.api import students
+
+
+def _learner(session: Session, bank: StudentBank) -> StudentRow | None:
+    """The learner whose token the student page would send (ADR-060)."""
+    return session.get(StudentRow, bank.run.student_id)
 
 
 def _live(session, monkeypatch, *, questions=1):
@@ -125,7 +130,7 @@ def test_background_owns_session_and_new_approval_is_live(session, engine, monke
 def test_route_schedules_without_running_generator(session, monkeypatch):
     bank, _ = _live(session, monkeypatch)
     tasks = BackgroundTasks()
-    served = students.next_question(session, bank.run.id, tasks)
+    served = students.next_question(session, _learner(session, bank), bank.run.id, tasks)
     assert served is not None
     assert len(tasks.tasks) == 1
     assert tasks.tasks[0].func is refill.schedule_refill
@@ -134,7 +139,7 @@ def test_route_schedules_without_running_generator(session, monkeypatch):
 def test_depleted_response_keeps_background_refill(session, monkeypatch):
     bank, _ = _live(session, monkeypatch, questions=0)
     tasks = BackgroundTasks()
-    response = students.next_question(session, bank.run.id, tasks)
+    response = students.next_question(session, _learner(session, bank), bank.run.id, tasks)
     assert response.status_code == 409
     assert response.background is tasks
     assert len(tasks.tasks) == 1
@@ -168,7 +173,7 @@ def test_pending_audits_reserve_refill_capacity_until_rejected(session, monkeypa
     assert StudentBank(session).questions(bank.set_id) == []
     for _ in range(2):
         tasks = BackgroundTasks()
-        response = students.next_question(session, bank.run.id, tasks)
+        response = students.next_question(session, _learner(session, bank), bank.run.id, tasks)
         assert response.status_code == 409
         assert not tasks.tasks
     assert list(session.scalars(select(GenerationRoundRow))) == []

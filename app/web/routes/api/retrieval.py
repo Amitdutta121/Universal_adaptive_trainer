@@ -19,7 +19,7 @@ from app.persistence.models import BookRow
 from app.persistence.repositories import CurriculumRepository
 from app.retrieval import SectionEmbeddingStore, SectionRetriever, get_embedder
 from app.retrieval.embedder import Embedder
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import RetrievedSectionOut
 
 router = APIRouter(tags=["retrieval"])
@@ -33,7 +33,11 @@ def get_query_embedder() -> Embedder:
 EmbedderDep = Annotated[Embedder, Depends(get_query_embedder)]
 
 
-@router.get("/retrieval/sections", response_model=list[RetrievedSectionOut])
+@router.get(
+    "/retrieval/sections",
+    response_model=list[RetrievedSectionOut],
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def retrieve_sections(
     session: DbSession,
     course: CourseScope,

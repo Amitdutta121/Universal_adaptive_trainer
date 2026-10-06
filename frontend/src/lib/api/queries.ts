@@ -212,6 +212,61 @@ export function useLogout() {
   });
 }
 
+/**
+ * Public signup (ADR-061), then the same cookie login as the login screen, so a new
+ * professor lands in the Studio without typing the password twice.
+ */
+export function useRegister() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
+      await unwrap(api.POST("/api/auth/register", { body: { email, password } }));
+      try {
+        await login(email, password);
+      } catch {
+        // The account exists now; "incorrect password" or a retry ("already exists") would
+        // both mislead, so say what actually happened.
+        throw new ApiError(
+          401,
+          "registered_login_failed",
+          "Your account was created, but signing in failed.",
+          "Sign in with the email and password you just chose.",
+        );
+      }
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.auth.me() }),
+  });
+}
+
+/** Redeems the emailed verification link; `/me` then reports the account as verified. */
+export function useVerifyEmail() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => unwrap(api.POST("/api/auth/verify", { body: { token } })),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.auth.me() }),
+  });
+}
+
+/** Emails a fresh verification link. Answers 202 whether or not one was sent. */
+export const useRequestVerifyEmail = () =>
+  useMutation({
+    mutationFn: (email: string) =>
+      unwrap(api.POST("/api/auth/request-verify-token", { body: { email } })),
+  });
+
+/** Emails a password reset link. Answers 202 whether or not the address has an account. */
+export const useForgotPassword = () =>
+  useMutation({
+    mutationFn: (email: string) =>
+      unwrap(api.POST("/api/auth/forgot-password", { body: { email } })),
+  });
+
+export const useResetPassword = () =>
+  useMutation({
+    mutationFn: ({ token, password }: { token: string; password: string }) =>
+      unwrap(api.POST("/api/auth/reset-password", { body: { token, password } })),
+  });
+
 // --- Courses ----------------------------------------------------------------
 
 export const useCourses = () =>

@@ -1,4 +1,4 @@
-"""The cookie transport, the database session strategy, and ``current_active_user``.
+"""The cookie transport, the database session strategy, and the current-user dependencies.
 
 The strategy is database-backed (an :class:`~app.persistence.models.AccessTokenRow`
 per login) rather than JWT: logout deletes the row, so a copied cookie value
@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.users import get_user_manager
 from app.config import get_settings
+from app.errors import EmailNotVerifiedError
 from app.persistence.async_database import get_async_session
 from app.persistence.models import AccessTokenRow, UserRow
 
@@ -60,3 +61,23 @@ auth_backend = AuthenticationBackend(
 fastapi_users = FastAPIUsers[UserRow, uuid.UUID](get_user_manager, [auth_backend])
 
 current_active_user = fastapi_users.current_user(active=True)
+
+
+async def current_verified_user(
+    user: Annotated[UserRow, Depends(current_active_user)],
+) -> UserRow:
+    """``current_user(active=True, verified=True)``, with a 403 the Studio can show.
+
+    Guards every route that spends money on the LLM or the embedder (ADR-061). An account that
+    has not confirmed its email can log in and use the rest of the Studio. fastapi-users' own
+    ``verified=True`` answers a bare 403 with no reason; this one says what to do.
+    """
+    if not user.is_verified:
+        raise EmailNotVerifiedError(
+            "Verify your email address to use AI features.",
+            detail=(
+                f"We sent a verification link to {user.email}. Open it, or ask for a new one "
+                "from the banner at the top of the Studio."
+            ),
+        )
+    return user

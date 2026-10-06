@@ -35,7 +35,7 @@ from app.errors import NotFoundError
 from app.llm.client import StructuredLLMClient
 from app.persistence.models import SubtopicRow
 from app.persistence.repositories import BookRepository, CurriculumRepository
-from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookSummary,
     CurriculumItemLabelUpdate,
@@ -111,7 +111,11 @@ def get_draft_client() -> StructuredLLMClient | None:
     return None
 
 
-@router.post("/drafts", response_model=TaxonomyDraftResponse)
+@router.post(
+    "/drafts",
+    response_model=TaxonomyDraftResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
 def draft_with_ai(
     payload: TaxonomyDraftRequest,
     client: Annotated[StructuredLLMClient | None, Depends(get_draft_client)],
