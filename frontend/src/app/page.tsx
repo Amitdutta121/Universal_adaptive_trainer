@@ -105,6 +105,9 @@ export default function LandingPage() {
             <Link href="/login" className="text-muted-foreground hover:text-foreground">
               Sign in
             </Link>
+            <Link href="/register" className="font-medium hover:underline">
+              Create an account
+            </Link>
           </nav>
         </div>
       </header>
