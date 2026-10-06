@@ -6,8 +6,10 @@
  *
  *   1. Suggest — on open the AI suggests library styles per subtopic and a target per
  *      subtopic x difficulty cell.
- *   2. Styles  — per topic and subtopic the professor uses or skips each suggested style and
- *      can add others from the library. Every subtopic needs at least one approved style.
+ *   2. Styles  — one subtopic at a time, picked from a rail that shows every subtopic's state.
+ *      The whole library is shown, grouped by what the student does, in the same order for
+ *      every subtopic; the AI's picks start selected and the professor deselects or adds.
+ *      Every subtopic needs at least one selected style.
  *   3. Targets — the AI's counts, read-only, and the total. Approve saves the setup; the backend
  *      starts round 1 in the background and the professor lands on the review queue.
  *
@@ -15,14 +17,22 @@
  * for a fresh suggestion and starts from clean choices.
  */
 
-import { Check, LoaderCircle, Plus, TriangleAlert, X } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  LoaderCircle,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { QueryError } from "@/components/query-state";
 import { DifficultyBadge } from "@/components/question-setup/badges";
-import { StyleRow, type StyleRowStyle } from "@/components/question-setup/style-row";
-import { DIFFICULTIES } from "@/components/question-setup/types";
+import { ExampleQuestionView } from "@/components/question-setup/example-question";
+import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty } from "@/components/question-setup/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,13 +41,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -48,18 +51,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSaveSetup, useSetupSuggestion, useStyles } from "@/lib/api/queries";
+import type { StyleRowStyle } from "@/components/question-setup/style-row";
 import type { CurriculumVersionDetail, QuestionSetup, SetupSuggestion } from "@/lib/api/types";
 import { useCoursePath } from "@/lib/use-course";
 import { cn } from "@/lib/utils";
 import { CustomRules } from "./custom-rules";
 import {
-  addStyle,
-  approveAllUndecided,
   approvedStyleIds,
-  decide,
   FIRST_ROUND_SIZE,
   initialChoices,
-  removeStyle,
   rowTotal,
   type SetupChoices,
   type SetupSubtopic,
@@ -68,8 +68,11 @@ import {
   setupTopics,
   subtopicsWithoutStyle,
   targetsBySubtopic,
-  undecidedCount,
+  toggleStyle,
+  uncoveredDifficulties,
+  withKnownStyles,
 } from "./setup-state";
+import { groupStyles } from "./style-groups";
 
 /** A library style as the API client returns it. */
 type QuestionStyle = StyleRowStyle & { id: string };
@@ -102,8 +105,7 @@ export function QuestionSetupDialog({
           <DialogTitle>{currentSetup ? "Edit question setup" : "Set up questions"}</DialogTitle>
           <DialogDescription>
             For each subtopic of {curriculum.version.label}, choose the kinds of questions the AI
-            writes. It suggests styles from the library and how many questions each difficulty
-            needs; you approve or skip.
+            writes. Its suggestions start selected; click any style to change that.
           </DialogDescription>
         </DialogHeader>
 
@@ -165,13 +167,18 @@ function SetupSteps({
   const router = useRouter();
   const toCourse = useCoursePath();
   const save = useSaveSetup();
-  const topics = useMemo(() => setupTopics(curriculum, suggestion), [curriculum, suggestion]);
+  const { topics, dropped } = useMemo(
+    () =>
+      withKnownStyles(
+        setupTopics(curriculum, suggestion),
+        new Set(library.map((style) => style.id)),
+      ),
+    [curriculum, suggestion, library],
+  );
   const [choices, setChoices] = useState<SetupChoices>(() => initialChoices(topics, currentSetup));
   const [step, setStep] = useState<Step>("styles");
-  const styleById = useMemo(() => new Map(library.map((style) => [style.id, style])), [library]);
 
   const missing = subtopicsWithoutStyle(choices, topics);
-  const undecided = undecidedCount(choices, topics);
   const subtopicCount = topics.reduce((sum, topic) => sum + topic.subtopics.length, 0);
 
   function approve() {
@@ -187,28 +194,36 @@ function SetupSteps({
     });
   }
 
+  const extras = (
+    <>
+      <CustomRules curriculumVersionId={curriculum.version.id} />
+      {save.error ? (
+        <div className="mt-4">
+          <QueryError error={save.error} />
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <>
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        {step === "styles" ? (
-          <StylesStep
-            topics={topics}
-            choices={choices}
-            onChoices={setChoices}
-            styleById={styleById}
-            library={library}
-            undecided={undecided}
-          />
-        ) : (
+      {step === "styles" ? (
+        <StylesStep
+          topics={topics}
+          choices={choices}
+          onChoices={setChoices}
+          library={library}
+          cellTargets={suggestion.cell_targets}
+          droppedSuggestions={dropped}
+        >
+          {extras}
+        </StylesStep>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           <TargetsStep topics={topics} choices={choices} suggestion={suggestion} />
-        )}
-        <CustomRules curriculumVersionId={curriculum.version.id} />
-        {save.error ? (
-          <div className="mt-4">
-            <QueryError error={save.error} />
-          </div>
-        ) : null}
-      </div>
+          {extras}
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 border-t px-6 py-3 sm:flex-row sm:items-center">
         <p className="text-muted-foreground text-xs tabular-nums">
@@ -222,7 +237,7 @@ function SetupSteps({
           >
             <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
             <span>
-              {missingMessage(missing)} Use or add at least one style for each before approving.
+              {missingMessage(missing)} Select at least one style for each before approving.
             </span>
           </p>
         ) : (
@@ -264,216 +279,431 @@ function missingMessage(missing: readonly SetupSubtopic[]): string {
     : `${missing.length} subtopics have no style: ${list}.`;
 }
 
+type Health = "ok" | "gap" | "none";
+
+/**
+ * Step 2: one subtopic at a time. The rail lists every subtopic with its state; the main pane
+ * shows the whole library for the chosen subtopic, grouped by what the student does, in the
+ * same order and place for every subtopic. The AI's picks start selected.
+ */
 function StylesStep({
   topics,
   choices,
   onChoices,
-  styleById,
   library,
-  undecided,
+  cellTargets,
+  droppedSuggestions,
+  children,
 }: {
   topics: readonly SetupTopic[];
   choices: SetupChoices;
   onChoices(update: (choices: SetupChoices) => SetupChoices): void;
-  styleById: ReadonlyMap<string, QuestionStyle>;
   library: readonly QuestionStyle[];
-  undecided: number;
+  cellTargets: SetupSuggestion["cell_targets"];
+  droppedSuggestions: number;
+  children: ReactNode;
 }) {
+  const subtopics = useMemo(() => topics.flatMap((topic) => topic.subtopics), [topics]);
+  const groups = useMemo(() => groupStyles(library), [library]);
+  const styleById = useMemo(() => new Map(library.map((style) => [style.id, style])), [library]);
+  const targets = useMemo(() => targetsBySubtopic(cellTargets), [cellTargets]);
+  const [selectedId, setSelectedId] = useState(() => subtopics[0]?.id);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const index = Math.max(
+    0,
+    subtopics.findIndex((subtopic) => subtopic.id === selectedId),
+  );
+  const subtopic = subtopics[index];
+  const topic = topics.find((entry) => entry.subtopics.includes(subtopic));
+  const next = subtopics[index + 1];
+  const previous = subtopics[index - 1];
+
+  function select(id: number) {
+    setSelectedId(id);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }
+
+  function selectedStyles(entry: SetupSubtopic): QuestionStyle[] {
+    return approvedStyleIds(choices, entry)
+      .map((id) => styleById.get(id))
+      .filter((style): style is QuestionStyle => style !== undefined);
+  }
+
+  function health(entry: SetupSubtopic): Health {
+    if (approvedStyleIds(choices, entry).length === 0) return "none";
+    return uncoveredDifficulties(selectedStyles(entry), targets.get(entry.id)).length > 0
+      ? "gap"
+      : "ok";
+  }
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="mr-auto text-muted-foreground text-sm">
-          {undecided > 0
-            ? `${undecided} suggested ${undecided === 1 ? "style is" : "styles are"} waiting for a decision. Open Examples to see two questions written in a style.`
-            : "Every suggestion has a decision. You can still change any of them."}
-        </p>
-        {undecided > 0 ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onChoices((current) => approveAllUndecided(current, topics))}
+    <div className="flex min-h-0 flex-1">
+      <nav
+        aria-label="Subtopics"
+        className="hidden w-72 shrink-0 overflow-y-auto border-r bg-muted/30 p-2 md:block"
+      >
+        {topics.map((entry) => (
+          <div key={entry.id} className="pb-2">
+            <p className="px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs">{entry.name}</p>
+            <ul>
+              {entry.subtopics.map((item) => {
+                const count = approvedStyleIds(choices, item).length;
+                const current = item.id === subtopic?.id;
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      aria-current={current ? "true" : undefined}
+                      title={item.name}
+                      onClick={() => select(item.id)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted",
+                        current && "bg-background font-medium ring-1 ring-border",
+                      )}
+                    >
+                      <HealthIcon health={health(item)} />
+                      <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        {count}
+                        <span className="sr-only"> selected</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
+          <select
+            aria-label="Subtopic"
+            value={subtopic?.id}
+            onChange={(event) => select(Number(event.target.value))}
+            className="mb-4 h-9 w-full rounded-md border bg-background px-2 text-sm md:hidden"
           >
-            Use all remaining suggestions
-          </Button>
+            {subtopics.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          {droppedSuggestions > 0 ? (
+            <p className="mb-4 text-muted-foreground text-xs">
+              {droppedSuggestions} suggested {droppedSuggestions === 1 ? "style is" : "styles are"}{" "}
+              no longer in the library and {droppedSuggestions === 1 ? "was" : "were"} left out.
+            </p>
+          ) : null}
+          {subtopic && topic ? (
+            <SubtopicPicker
+              key={subtopic.id}
+              topicName={topic.name}
+              position={index + 1}
+              total={subtopics.length}
+              subtopic={subtopic}
+              selected={approvedStyleIds(choices, subtopic)}
+              selectedStyles={selectedStyles(subtopic)}
+              groups={groups}
+              targets={targets.get(subtopic.id)}
+              onToggle={(styleId) =>
+                onChoices((current) => toggleStyle(current, subtopic, styleId))
+              }
+            />
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              This taxonomy has no subtopics to set up.
+            </p>
+          )}
+          {children}
+        </div>
+        {subtopic ? (
+          <div className="flex items-center gap-2 border-t px-6 py-2.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!previous}
+              onClick={() => previous && select(previous.id)}
+            >
+              <ChevronLeft data-icon="inline-start" />
+              Previous
+            </Button>
+            <span className="ml-auto" />
+            {next ? (
+              <Button variant="outline" size="sm" onClick={() => select(next.id)}>
+                Next: {next.name}
+                <ChevronRight data-icon="inline-end" />
+              </Button>
+            ) : (
+              <span className="text-muted-foreground text-xs">
+                Last subtopic. Review the targets when you are ready.
+              </span>
+            )}
+          </div>
         ) : null}
       </div>
-
-      {topics.map((topic) => (
-        <section
-          key={topic.id}
-          aria-labelledby={`setup-topic-${topic.id}`}
-          className="flex flex-col gap-3"
-        >
-          <h3 id={`setup-topic-${topic.id}`} className="font-semibold text-sm">
-            {topic.name}
-          </h3>
-          {topic.subtopics.map((subtopic) => (
-            <SubtopicStyles
-              key={subtopic.id}
-              subtopic={subtopic}
-              choices={choices}
-              onChoices={onChoices}
-              styleById={styleById}
-              library={library}
-            />
-          ))}
-        </section>
-      ))}
     </div>
   );
 }
 
-function SubtopicStyles({
-  subtopic,
-  choices,
-  onChoices,
-  styleById,
-  library,
-}: {
-  subtopic: SetupSubtopic;
-  choices: SetupChoices;
-  onChoices(update: (choices: SetupChoices) => SetupChoices): void;
-  styleById: ReadonlyMap<string, QuestionStyle>;
-  library: readonly QuestionStyle[];
-}) {
-  const suggested = subtopic.suggestion?.style_ids ?? [];
-  const added = (choices.added[subtopic.id] ?? []).filter((id) => !suggested.includes(id));
-  const approvedCount = approvedStyleIds(choices, subtopic).length;
-  const addable = library.filter(
-    (style) => !suggested.includes(style.id) && !added.includes(style.id),
-  );
-  const verdicts = choices.verdicts[subtopic.id] ?? {};
-
+function HealthIcon({ health }: { health: Health }) {
+  if (health === "ok") {
+    return <Check className="size-3.5 shrink-0 text-[var(--accent-solid)]" aria-hidden />;
+  }
   return (
-    <article
-      aria-label={subtopic.name}
-      className={cn("rounded-lg border", approvedCount === 0 && "border-[var(--warn-solid)]/50")}
-    >
-      <header className="flex flex-col gap-1 border-b px-3 py-2.5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h4 className="font-medium text-sm">{subtopic.name}</h4>
-          <span
-            className={cn(
-              "text-xs tabular-nums",
-              approvedCount === 0 ? "text-[var(--warn-solid)]" : "text-muted-foreground",
-            )}
-          >
-            {approvedCount === 0
-              ? "No style yet"
-              : `${approvedCount} ${approvedCount === 1 ? "style" : "styles"} in use`}
-          </span>
-        </div>
-        <p className="text-muted-foreground text-xs">
-          {subtopic.suggestion?.reason
-            ? `Why these: ${subtopic.suggestion.reason}`
-            : "The AI made no suggestion for this subtopic. Add a style from the library."}
-        </p>
-      </header>
-
-      {suggested.length + added.length > 0 ? (
-        <ul className="divide-y">
-          {suggested.map((styleId) => {
-            const style = styleById.get(styleId);
-            const verdict = verdicts[styleId];
-            if (!style) return <UnknownStyle key={styleId} styleId={styleId} />;
-            return (
-              <StyleRow
-                key={styleId}
-                style={style}
-                muted={verdict === "skipped"}
-                controls={
-                  <div className="flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant={verdict === "skipped" ? "secondary" : "outline"}
-                      aria-pressed={verdict === "skipped"}
-                      onClick={() =>
-                        onChoices((current) => decide(current, subtopic.id, styleId, "skipped"))
-                      }
-                    >
-                      <X data-icon="inline-start" />
-                      Skip
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={verdict === "approved" ? "default" : "outline"}
-                      aria-pressed={verdict === "approved"}
-                      onClick={() =>
-                        onChoices((current) => decide(current, subtopic.id, styleId, "approved"))
-                      }
-                    >
-                      <Check data-icon="inline-start" />
-                      Use
-                    </Button>
-                  </div>
-                }
-              />
-            );
-          })}
-          {added.map((styleId) => {
-            const style = styleById.get(styleId);
-            if (!style) return <UnknownStyle key={styleId} styleId={styleId} />;
-            return (
-              <StyleRow
-                key={styleId}
-                style={style}
-                controls={
-                  <>
-                    <span className="text-muted-foreground text-xs">Added by you</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Remove ${style.name}`}
-                      onClick={() =>
-                        onChoices((current) => removeStyle(current, subtopic.id, styleId))
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </>
-                }
-              />
-            );
-          })}
-        </ul>
-      ) : null}
-
-      {addable.length > 0 ? (
-        <div className="border-t px-3 py-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="ghost">
-                <Plus data-icon="inline-start" />
-                Add a style from the library
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-80 w-80 overflow-y-auto">
-              <DropdownMenuLabel>Library styles</DropdownMenuLabel>
-              {addable.map((style) => (
-                <DropdownMenuItem
-                  key={style.id}
-                  onSelect={() => onChoices((current) => addStyle(current, subtopic.id, style.id))}
-                  className="flex flex-col items-start gap-0.5"
-                >
-                  <span className="text-sm">{style.name}</span>
-                  <span className="text-muted-foreground text-xs">{style.summary}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
-    </article>
+    <span className="flex shrink-0">
+      <TriangleAlert className="size-3.5 text-[var(--warn-solid)]" aria-hidden />
+      <span className="sr-only">
+        {health === "none" ? "No style selected." : "A difficulty has no style."}
+      </span>
+    </span>
   );
 }
 
-/** A style id the library does not know, e.g. after a library change. It cannot be approved. */
-function UnknownStyle({ styleId }: { styleId: string }) {
+function SubtopicPicker({
+  topicName,
+  position,
+  total,
+  subtopic,
+  selected,
+  selectedStyles,
+  groups,
+  targets,
+  onToggle,
+}: {
+  topicName: string;
+  position: number;
+  total: number;
+  subtopic: SetupSubtopic;
+  selected: readonly string[];
+  selectedStyles: readonly QuestionStyle[];
+  groups: readonly { title: string; description: string; styles: QuestionStyle[] }[];
+  targets: Record<Difficulty, number | null> | undefined;
+  onToggle(styleId: string): void;
+}) {
+  const [showReason, setShowReason] = useState(false);
+  const [openStyleId, setOpenStyleId] = useState<string | null>(null);
+  const suggested = new Set(subtopic.suggestion?.style_ids ?? []);
+  const reason = subtopic.suggestion?.reason;
+
   return (
-    <li className="px-3 py-2.5 text-muted-foreground text-xs">
-      Suggested style <span className="font-mono">{styleId}</span> is not in the library and is left
-      out.
+    <section aria-label={subtopic.name} className="flex flex-col gap-5">
+      <header className="flex flex-col gap-1">
+        <p className="text-muted-foreground text-xs">
+          {topicName} · subtopic {position} of {total}
+        </p>
+        <h3 className="font-heading font-semibold text-lg">{subtopic.name}</h3>
+        {reason ? (
+          <div>
+            <button
+              type="button"
+              aria-expanded={showReason}
+              onClick={() => setShowReason((open) => !open)}
+              className="text-muted-foreground text-xs underline decoration-dotted underline-offset-4 hover:text-foreground"
+            >
+              Why the AI suggested these
+            </button>
+            {showReason ? (
+              <p className="mt-1.5 max-w-prose rounded-md bg-muted px-2.5 py-1.5 text-sm">
+                {reason}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-xs">
+            The AI made no suggestion for this subtopic. Select at least one style.
+          </p>
+        )}
+      </header>
+
+      <DifficultyCoverage targets={targets} selectedStyles={selectedStyles} />
+
+      {groups.map((group) => {
+        const count = group.styles.filter((style) => selected.includes(style.id)).length;
+        const open = group.styles.find((style) => style.id === openStyleId);
+        return (
+          <section key={group.title} aria-label={group.title} className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <h4 className="font-medium text-sm">{group.title}</h4>
+              <span className="text-muted-foreground text-xs">{group.description}</span>
+              {count > 0 ? (
+                <span className="text-muted-foreground text-xs tabular-nums">{count} selected</span>
+              ) : null}
+            </div>
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {group.styles.map((style) => (
+                <StyleTile
+                  key={style.id}
+                  style={style}
+                  selected={selected.includes(style.id)}
+                  suggested={suggested.has(style.id)}
+                  examplesOpen={openStyleId === style.id}
+                  onToggle={() => onToggle(style.id)}
+                  onExamples={() => setOpenStyleId((id) => (id === style.id ? null : style.id))}
+                />
+              ))}
+            </ul>
+            {open ? <StyleExamples style={open} onClose={() => setOpenStyleId(null)} /> : null}
+          </section>
+        );
+      })}
+    </section>
+  );
+}
+
+/** Per difficulty: the AI's target and how many selected styles can be written at it. */
+function DifficultyCoverage({
+  targets,
+  selectedStyles,
+}: {
+  targets: Record<Difficulty, number | null> | undefined;
+  selectedStyles: readonly QuestionStyle[];
+}) {
+  return (
+    <ul aria-label="Questions planned per difficulty" className="grid gap-2 sm:grid-cols-3">
+      {DIFFICULTIES.map((difficulty) => {
+        const target = targets?.[difficulty] ?? 0;
+        const styles = selectedStyles.filter((style) =>
+          style.difficulty_range.includes(difficulty),
+        ).length;
+        const gap = target > 0 && styles === 0;
+        return (
+          <li
+            key={difficulty}
+            className={cn(
+              "flex min-h-14 flex-col justify-center gap-1 rounded-md border px-3 py-2",
+              target === 0 && "border-dashed",
+              target > 0 && !gap && "bg-muted/40",
+              gap && "border-[var(--warn-solid)]/50 bg-[var(--warn-wash)]",
+            )}
+          >
+            <span className="font-medium text-sm">{DIFFICULTY_LABEL[difficulty]}</span>
+            <span
+              className={cn(
+                "text-xs",
+                gap ? "font-medium text-[var(--warn-solid)]" : "text-muted-foreground",
+              )}
+            >
+              {target === 0
+                ? "No questions planned"
+                : `${target} ${target === 1 ? "question" : "questions"} planned · ${
+                    gap
+                      ? "no selected style writes these"
+                      : `${styles} selected ${styles === 1 ? "style writes" : "styles write"} these`
+                  }`}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function StyleTile({
+  style,
+  selected,
+  suggested,
+  examplesOpen,
+  onToggle,
+  onExamples,
+}: {
+  style: QuestionStyle;
+  selected: boolean;
+  suggested: boolean;
+  examplesOpen: boolean;
+  onToggle(): void;
+  onExamples(): void;
+}) {
+  return (
+    <li
+      className={cn(
+        "relative rounded-lg border bg-card transition-colors",
+        selected &&
+          "border-[var(--accent-solid)] bg-[var(--accent-wash)]/40 ring-1 ring-[var(--accent-solid)]",
+        examplesOpen && "outline-2 outline-[var(--accent-solid)] outline-offset-2",
+      )}
+    >
+      <button
+        type="button"
+        aria-pressed={selected}
+        title={style.summary}
+        onClick={onToggle}
+        className="flex w-full items-start gap-2.5 rounded-lg py-2.5 pr-10 pl-3 text-left"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border",
+            selected
+              ? "border-[var(--accent-solid)] bg-[var(--accent-solid)] text-primary-foreground"
+              : "border-input bg-background",
+          )}
+        >
+          {selected ? <Check className="size-3" /> : null}
+        </span>
+        <span className="flex min-w-0 flex-col gap-1">
+          <span className="font-medium text-sm leading-snug">{style.name}</span>
+          <span className="flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
+            {suggested ? (
+              <span className="rounded border border-[var(--accent-solid)]/50 px-1 font-medium text-[var(--accent-text)]">
+                Suggested
+              </span>
+            ) : null}
+            <span>
+              {style.difficulty_range.map((difficulty) => DIFFICULTY_LABEL[difficulty]).join(", ")}
+            </span>
+          </span>
+        </span>
+      </button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="absolute top-1.5 right-1.5 size-7"
+        aria-label={`Examples for ${style.name}`}
+        aria-expanded={examplesOpen}
+        title="Show two example questions"
+        onClick={onExamples}
+      >
+        <Eye />
+      </Button>
     </li>
+  );
+}
+
+function StyleExamples({ style, onClose }: { style: QuestionStyle; onClose(): void }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3.5">
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="font-medium text-sm">{style.name}</p>
+          <p className="text-muted-foreground text-xs">
+            {style.summary} Checked by: {style.checked_by}.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label="Close examples"
+          onClick={onClose}
+        >
+          <X />
+        </Button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {style.examples.map((example, index) => (
+          <ExampleQuestionView
+            key={example.prompt}
+            example={example}
+            label={`Example ${index + 1}`}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
