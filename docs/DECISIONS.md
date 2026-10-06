@@ -2486,3 +2486,46 @@ with "check your email". Forgot-password still takes measurably longer for a rea
 password hash), which fastapi-users does too. A password reset deletes every session of the
 account. Not here (M4): rate limits, a CAPTCHA, and a per-account LLM quota, so a
 verified account can still spend without limit.
+
+## ADR-062 — Long professor actions run as recorded background jobs, behind one queue interface
+
+**Status:** accepted. Amends ADR-030 (judge re-runs are now collected automatically).
+
+Bulk generation and coverage gap fills were one blocking request each, minutes long; question
+rounds already ran in the background (`generation_rounds` + `BackgroundTasks`) but nothing
+listed them, and a round left `running` by a restart blocked every later round of its
+taxonomy. Judge re-runs had an API and no button, and their results waited for someone to call
+the poll route.
+
+Now every long action is a job the Studio's header **Jobs** button lists
+(`GET /api/jobs`, `docs/JOBS_PLAN.md`):
+
+- Bulk generation and coverage fills answer `202 {job_id}`. Everything that can be refused is
+  checked before the 202; the work then runs from a `background_jobs` row (migration `0011`)
+  through the same claim-run-record lifecycle `run_round` uses, committing per question. The
+  row stores what the old blocking response returned, so the pages show the same results.
+  Coverage's process-local "topics in flight" set is replaced by that table.
+- Rounds and judge re-runs keep their own tables; `GET /api/jobs` maps all three onto one shape.
+- Every route that schedules work goes through `app.jobs.queue.JobQueue`. Today's only
+  implementation wraps FastAPI `BackgroundTasks` (in-process, not durable). Submitted functions
+  take ids, not live objects, so a durable queue (Huey's SQLite backend was the candidate) is a
+  new `JobQueue` plus one dependency override, not a rewrite.
+- On startup, jobs and rounds left queued or running are marked failed ("interrupted by a
+  server restart"); questions already made stay. This assumes one backend process.
+- A `JudgeCollector` thread (started when `JUDGE_BATCH_ENABLED`) polls every unfinished judge
+  run each minute, after submission and after a restart alike. One active run per course; the
+  Judges page's **Run judges** button confirms the question count first
+  (`GET /api/evaluation/rerun-preview`).
+
+- Cancelling records `cancel_requested_at` (migration `0012`); the job's loop checks it after
+  each committed question and stops, so nothing paid for is thrown away. A queued job ends at
+  once. Judge runs cannot be cancelled: OpenRouter's batch API offers no cancel, only deleting a
+  finished batch. Retrying starts a new job for what the old one left undone (bulk generation
+  resumes its fixed plan at `start_at`; a coverage fill takes the gaps it did not reach or that
+  failed; a round starts the next round; a judge run is submitted again); a background job is
+  retried once.
+
+**Consequences.** A restart loses in-flight generation (marked failed, made questions kept)
+rather than resuming it; that is the trade for no extra process. The UI polls (2 s while
+anything is active, 30 s otherwise) instead of a push channel. Cancelling takes effect after the
+question in flight, which can take a minute with judge calls.

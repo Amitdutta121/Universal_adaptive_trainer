@@ -10,6 +10,7 @@
 
 import { PageHeader } from "@/components/page-header";
 import { JudgesScreen } from "./judges-screen";
+import { RunJudgesButton } from "./run-judges-button";
 
 export default function JudgesPage() {
   return (
@@ -17,6 +18,7 @@ export default function JudgesPage() {
       <PageHeader
         title="Judges"
         summary="The difficulty judge, the topic-alignment judge, and this taxonomy's custom rules. Edit a prompt to change what a built-in judge checks, or revert it to the text it shipped with."
+        actions={<RunJudgesButton />}
       />
       <JudgesScreen />
     </div>

@@ -19,10 +19,11 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
-import { useApprovedCurriculum, useBatchPlan, useGenerateBatch } from "@/lib/api/queries";
+import { isActive } from "@/components/jobs/job-display";
+import { useApprovedCurriculum, useBatchPlan, useGenerateBatch, useJobs } from "@/lib/api/queries";
 import type { QuestionType } from "@/lib/api/types";
 import { ChunkPreview } from "./components/chunk-preview";
-import { RunResults } from "./components/run-results";
+import { RunJobStatus } from "./components/run-job-status";
 import { RunSummary } from "./components/run-summary";
 import { SheetToolbar } from "./components/sheet-toolbar";
 import { SpecSheet } from "./components/spec-sheet";
@@ -67,6 +68,16 @@ export function GenerateScreen() {
   const sheet = useSheetRows(filters);
   const specs = useChunkSpecs();
   const generate = useGenerateBatch();
+  // The run is a background job. Follow the one this page started; after a reload or a
+  // return to this page, follow the newest bulk run still in flight instead.
+  const [startedJobId, setStartedJobId] = useState<string | null>(null);
+  const jobs = useJobs();
+  const followedId =
+    startedJobId ??
+    jobs.data?.jobs.find((job) => job.kind === "bulk_generation" && isActive(job))?.id ??
+    null;
+  const runJob = jobs.data?.jobs.find((job) => job.id === followedId);
+  const isRunning = generate.isPending || (runJob ? isActive(runJob) : startedJobId !== null);
 
   // Priced against every chunk, not only the visible ones: narrowing a filter
   // must not quietly drop rows from the run that is about to be paid for.
@@ -86,10 +97,13 @@ export function GenerateScreen() {
 
   const runBatch = () => {
     if (requestChunks.length === 0) return;
-    generate.mutate({
-      curriculum_version_id: approvedCurriculum.data?.version.id ?? null,
-      chunks: requestChunks,
-    });
+    generate.mutate(
+      {
+        curriculum_version_id: approvedCurriculum.data?.version.id ?? null,
+        chunks: requestChunks,
+      },
+      { onSuccess: (started) => setStartedJobId(started.job_id) },
+    );
   };
 
   return (
@@ -106,7 +120,7 @@ export function GenerateScreen() {
 
       <section className="space-y-4">
         {generate.isError ? <QueryError error={generate.error} /> : null}
-        {generate.data ? <RunResults result={generate.data} /> : null}
+        {runJob ? <RunJobStatus job={runJob} onRetried={setStartedJobId} /> : null}
         {approvedCurriculum.isError ? <QueryError error={approvedCurriculum.error} /> : null}
 
         <div className="rounded-[1.4rem] border border-border/70 bg-[linear-gradient(135deg,rgba(243,248,246,0.96),rgba(255,255,255,0.88))] p-5 shadow-[0_16px_38px_-32px_rgba(19,26,28,0.55)] dark:bg-[linear-gradient(135deg,rgba(20,30,28,0.96),rgba(16,22,24,0.88))]">
@@ -215,7 +229,7 @@ export function GenerateScreen() {
           <RunSummary
             totals={plan.data?.totals ?? null}
             isPricing={plan.isFetching}
-            isRunning={generate.isPending}
+            isRunning={isRunning}
             canRun={Boolean(approvedCurriculum.data)}
             onRun={runBatch}
           />

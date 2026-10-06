@@ -22,17 +22,20 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.domain.books import BookSection
-from app.domain.enums import Difficulty, JudgeMetricId, QuestionStatus
-from app.errors import InvalidQuestionSpecError, NotFoundError
+from app.domain.enums import Difficulty, JobKind, JudgeMetricId, QuestionStatus
+from app.errors import DomainRuleError, InvalidQuestionSpecError, NotFoundError
 from app.evaluation import (
     PedagogicalEvalStatus,
     PedagogicalEvaluation,
     humanize_judge_error_detail,
+    new_run_id,
 )
 from app.evaluation.trust import judge_trust
 from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
 from app.ingestion import SourceRetrieval
-from app.persistence.models import QuestionRow
+from app.jobs.queue import JobQueue, JobQueueDep
+from app.jobs.runner import Progress, create_job, execute
+from app.persistence.models import BackgroundJobRow, QuestionRow
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
@@ -62,6 +65,7 @@ from app.web.routes.api.schemas import (
     GenerationPlanResponse,
     GenerationPlanSection,
     GenerationPlanTotals,
+    JobStartedResponse,
     PersonalizationEvidence,
     PlannedQuestionOut,
     QuestionDetail,
@@ -243,22 +247,23 @@ def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
 
 @router.post(
     "/generate-batch",
-    response_model=GenerateBatchResponse,
-    status_code=status.HTTP_201_CREATED,
+    response_model=JobStartedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     dependencies=SPENDS_LLM_CREDIT,
 )
 def generate_batch(
-    session: DbSession, course: CourseScope, payload: GenerateBatchRequest
-) -> GenerateBatchResponse:
-    """Generate the questions a per-chunk spec sheet asks for (ADR-044).
+    session: DbSession, course: CourseScope, payload: GenerateBatchRequest, queue: JobQueueDep
+) -> JobStartedResponse:
+    """Queue the questions a per-chunk spec sheet asks for (ADR-044) as a background job.
 
     One chunk may produce several questions, at several difficulties, in several
-    formats â€” which is what separates this from ``/generate``, where a run carries
+    formats — which is what separates this from ``/generate``, where a run carries
     one difficulty and one format for every section in it.
 
-    The run is synchronous: each question costs one generation call plus one judge
-    call per metric, made in sequence. A large sheet is therefore a long request,
-    and the console warns before submitting one.
+    Each question costs one generation call plus one judge call per metric, made in
+    sequence, so a sheet can take minutes. Everything that can be refused is checked
+    here, before the ``202``; the questions are then made by :func:`run_bulk_generation`,
+    which keeps going if the professor leaves the page. ``GET /api/jobs`` reports it.
     """
     chunks = [chunk.to_request() for chunk in payload.chunks]
     ensure_question_types_allowed(
@@ -267,27 +272,95 @@ def generate_batch(
     if payload.curriculum_version_id is not None:
         version_in_course(session, payload.curriculum_version_id, course)
     sections_in_course(session, [chunk.section_id for chunk in chunks], course)
-    # Compiled before the service is built so an unusable sheet reports the
-    # fixable problem rather than an LLM-configuration error raised first.
+    # Compiled before the job is queued so an unusable sheet reports the fixable
+    # problem now, not as a failed job later.
     planned = compile_chunk_requests(chunks)
     curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
 
-    try:
-        generated = GenerationService(session).generate_batch(
-            curriculum_version_id=curriculum_version_id,
-            chunks=chunks,
-            seed=payload.seed,
-        )
-    except Exception:
-        session.rollback()
-        raise
+    sheet = payload.model_copy(update={"curriculum_version_id": curriculum_version_id})
+    return queue_bulk_generation(session, course, sheet, queue, total=len(planned))
 
+
+def queue_bulk_generation(
+    session: Session,
+    course: int | None,
+    sheet: GenerateBatchRequest,
+    queue: JobQueue,
+    *,
+    total: int,
+    start_at: int = 0,
+    retry: bool = False,
+) -> JobStartedResponse:
+    """Add the job and hand it to the queue. ``start_at`` > 0 resumes a stopped run's plan."""
+    plural = "s" if total != 1 else ""
+    job = create_job(
+        session,
+        kind=JobKind.BULK_GENERATION,
+        title=f"Bulk generate · {total} question{plural}{' (retry)' if retry else ''}",
+        total=total,
+        request={"sheet": sheet.model_dump(mode="json"), "start_at": start_at},
+        course_id=course,
+        run_id=new_run_id(),
+    )
+    session.commit()
+    queue.submit(run_bulk_generation, job.id)
+    return JobStartedResponse(job_id=f"job-{job.id}")
+
+
+def retry_bulk_generation(
+    session: Session, course: int | None, job: BackgroundJobRow, queue: JobQueue
+) -> JobStartedResponse:
+    """Queue the questions a stopped bulk run had not reached, as a new job."""
+    remaining = job.total - job.done
+    if remaining <= 0:
+        raise DomainRuleError("Every question of this run was made.", detail="Nothing to retry.")
+    sheet = _sheet_of(job)
+    return queue_bulk_generation(
+        session,
+        course,
+        sheet,
+        queue,
+        total=remaining,
+        start_at=int(job.request.get("start_at", 0)) + job.done,
+        retry=True,
+    )
+
+
+def _sheet_of(job: BackgroundJobRow) -> GenerateBatchRequest:
+    """The spec sheet a bulk job was queued with.
+
+    Stored as ``{"sheet": ..., "start_at": n}``; a job queued before ``start_at`` existed
+    stored the sheet itself, and reads as a run from the start.
+    """
+    return GenerateBatchRequest.model_validate(job.request.get("sheet", job.request))
+
+
+def run_bulk_generation(job_id: int, *, session_factory=None) -> None:
+    """Background body of ``POST /generate-batch``: generate, then store the old response."""
+    execute(job_id, _bulk_generation, session_factory=session_factory)
+
+
+def _bulk_generation(session: Session, job: BackgroundJobRow, progress: Progress) -> dict:
+    sheet = _sheet_of(job)
+    start_at = int(job.request.get("start_at", 0))
+    chunks = [chunk.to_request() for chunk in sheet.chunks]
+    planned = compile_chunk_requests(chunks)[start_at:]
+    assert sheet.curriculum_version_id is not None
+    # Looked up on the module per run, so tests can replace the service.
+    generated = GenerationService(session).generate_batch(
+        curriculum_version_id=sheet.curriculum_version_id,
+        chunks=chunks,
+        seed=sheet.seed,
+        run_id=job.run_id,
+        on_question=progress,
+        start_at=start_at,
+    )
     return GenerateBatchResponse(
         created=len(generated),
         question_ids=[row.id for row in generated],
         questions=[QuestionSummary.from_row(row) for row in generated],
         planned=[PlannedQuestionOut.from_planned(question) for question in planned],
-    )
+    ).model_dump(mode="json")
 
 
 def approved_curriculum_id(session: Session, course: int | None = None) -> int:

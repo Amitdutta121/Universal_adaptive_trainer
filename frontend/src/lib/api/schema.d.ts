@@ -772,15 +772,16 @@ export interface paths {
         put?: never;
         /**
          * Generate Batch
-         * @description Generate the questions a per-chunk spec sheet asks for (ADR-044).
+         * @description Queue the questions a per-chunk spec sheet asks for (ADR-044) as a background job.
          *
          *     One chunk may produce several questions, at several difficulties, in several
-         *     formats â€” which is what separates this from ``/generate``, where a run carries
+         *     formats — which is what separates this from ``/generate``, where a run carries
          *     one difficulty and one format for every section in it.
          *
-         *     The run is synchronous: each question costs one generation call plus one judge
-         *     call per metric, made in sequence. A large sheet is therefore a long request,
-         *     and the console warns before submitting one.
+         *     Each question costs one generation call plus one judge call per metric, made in
+         *     sequence, so a sheet can take minutes. Everything that can be refused is checked
+         *     here, before the ``202``; the questions are then made by :func:`run_bulk_generation`,
+         *     which keeps going if the professor leaves the page. ``GET /api/jobs`` reports it.
          */
         post: operations["generate_batch_api_questions_generate_batch_post"];
         delete?: never;
@@ -1223,14 +1224,13 @@ export interface paths {
         put?: never;
         /**
          * Start Generation Run
-         * @description Generate one grounded question for each selected coverage gap.
+         * @description Queue one grounded question for each selected coverage gap, as a background job.
          *
-         *     For every target: retrieve the top book section that teaches its subtopic,
-         *     generate one multiple-choice question from that section at the requested
-         *     difficulty, and report what the generator claimed it wrote for. A target
-         *     with no confident section is skipped and the run continues; a provider
-         *     failure on one target is reported beside the questions the run did produce
-         *     (ADR-032). The new questions land in the review queue with no extra step.
+         *     For every target the job retrieves the top book section that teaches its subtopic,
+         *     generates one multiple-choice question from it at the requested difficulty, and
+         *     records what the generator claimed it wrote for (:func:`run_generation_for_gaps`).
+         *     Everything that can be refused is checked here, before the ``202``, including a
+         *     topic that already has a run in flight.
          */
         post: operations["start_generation_run_api_coverage_generation_runs_post"];
         delete?: never;
@@ -1491,6 +1491,71 @@ export interface paths {
          * @description Change a rule's text, kind, pattern, or enabled flag.
          */
         patch: operations["update_custom_judge_api_custom_judges__judge_id__patch"];
+        trace?: never;
+    };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description Recent and running jobs of the request's course, newest first.
+         */
+        get: operations["list_jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Job
+         * @description Stop a queued or running job. A queued one ends now; a running one after its question.
+         *
+         *     Judge runs cannot be stopped: the provider runs a submitted batch to the end.
+         */
+        post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Job
+         * @description Start a new job for what this one did not finish (see ``retry_label``).
+         *
+         *     Takes no embedder: building one makes a provider client, which a bulk or judge retry
+         *     never needs. A coverage retry's job builds the default one when it runs.
+         */
+        post: operations["retry_job_api_jobs__job_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/question-sets/prod": {
@@ -1887,6 +1952,26 @@ export interface paths {
         put?: never;
         /** End Training Session */
         post: operations["end_training_session_api_training_sessions__training_session_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/rerun-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rerun Preview
+         * @description What "Run judges" would do now: how many questions, or why it can't run.
+         */
+        get: operations["rerun_preview_api_evaluation_rerun_preview_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3619,6 +3704,81 @@ export interface components {
             /** Review Count */
             review_count: number;
         };
+        /** JobListResponse */
+        JobListResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["JobOut"][];
+        };
+        /**
+         * JobOut
+         * @description One entry of the Jobs panel, whichever table the job lives in.
+         *
+         *     ``id`` is ``job-<n>`` (bulk generation, coverage fill), ``round-<n>`` (question round) or
+         *     ``judge-<run id>`` (judge re-run). ``link`` is a course-relative page holding the job's
+         *     output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
+         *     ``result`` is what the old blocking response returned, for the two kinds that had one:
+         *     :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
+         *     coverage fill.
+         */
+        JobOut: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bulk_generation" | "coverage_fill" | "question_round" | "judge_run";
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Counts */
+            counts?: {
+                [key: string]: number;
+            };
+            /** Error */
+            error?: string | null;
+            /** Link */
+            link?: string | null;
+            /** Result */
+            result?: components["schemas"]["GenerateBatchResponse"] | components["schemas"]["GenerationRunResponse"] | null;
+            /**
+             * Can Cancel
+             * @default false
+             */
+            can_cancel: boolean;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested: boolean;
+            /** Retry Label */
+            retry_label?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+        };
+        /**
+         * JobStartedResponse
+         * @description ``202`` from a route that queued a background job; follow it in ``GET /api/jobs``.
+         */
+        JobStartedResponse: {
+            /** Job Id */
+            job_id: string;
+        };
         /**
          * JudgeBatchRunOut
          * @description One bulk re-run, as a professor needs to see it.
@@ -3751,6 +3911,20 @@ export interface components {
             rubric_version: string;
             /** Rubric Version Changed */
             rubric_version_changed: boolean;
+        };
+        /**
+         * JudgeRerunPreviewOut
+         * @description What "Run judges" would do for the course right now.
+         */
+        JudgeRerunPreviewOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Disabled Reason */
+            disabled_reason?: string | null;
+            /** Eligible */
+            eligible: number;
+            /** Active Run Id */
+            active_run_id?: string | null;
         };
         /**
          * JudgeStatsOut
@@ -7011,12 +7185,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GenerateBatchResponse"];
+                    "application/json": components["schemas"]["JobStartedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7705,12 +7879,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GenerationRunResponse"];
+                    "application/json": components["schemas"]["JobStartedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8218,6 +8392,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustomJudgeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_job_api_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_job_api_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStartedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8840,6 +9111,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrainingSessionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_preview_api_evaluation_rerun_preview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeRerunPreviewOut"];
                 };
             };
             /** @description Validation Error */

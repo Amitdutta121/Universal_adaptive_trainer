@@ -45,6 +45,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    JobKind,
     JudgeBatchStatus,
     JudgeMetricId,
     QuadrantCell,
@@ -1131,6 +1132,11 @@ class GenerationRoundRow(TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: When the professor asked it to stop (Jobs panel). ``run_round`` stops before its next
+    #: target and ends the round ``FAILED``; a set value makes that failure a cancellation.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     setup: Mapped[QuestionSetupRow] = relationship(back_populates="rounds")
 
@@ -1179,6 +1185,47 @@ class LiveQuestionJobRow(TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class BackgroundJobRow(TimestampMixin, Base):
+    """One long professor action run in the background: bulk generation or a coverage fill.
+
+    ``app.jobs`` creates the row ``QUEUED`` with the validated ``request``, and its runner moves
+    it through ``RUNNING`` to ``DONE`` (``result`` holds what the old blocking response
+    returned) or ``FAILED`` (``error``). ``done`` / ``total`` count questions as they commit,
+    so the Jobs panel can show progress. Question rounds and judge re-runs are jobs too, but
+    keep their own tables (``generation_rounds``, ``judge_batch_runs``).
+    """
+
+    __tablename__ = "background_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: The course it was started in; ``None`` for a request made without one.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="CASCADE"), default=None, index=True
+    )
+    kind: Mapped[JobKind] = mapped_column(StrEnumType(JobKind, 32))
+    title: Mapped[str] = mapped_column(String(300), default="")
+    status: Mapped[RoundStatus] = mapped_column(
+        StrEnumType(RoundStatus, 16), default=RoundStatus.QUEUED
+    )
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    done: Mapped[int] = mapped_column(Integer, default=0)
+    #: Groups the questions this job made, as ``questions?run_id=`` filters them.
+    run_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    request: Mapped[dict] = mapped_column("request_json", JsonObject, default=dict, nullable=True)
+    result: Mapped[dict | None] = mapped_column(
+        "result_json", JsonObject, default=None, nullable=True
+    )
+    #: Why the job failed, in the professor's terms. Never a credential.
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: When the professor asked it to stop. The runner stops before its next question and
+    #: ends the job ``FAILED``; a set value is what makes that failure a cancellation.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
 
 class CustomJudgeRow(TimestampMixin, Base):
