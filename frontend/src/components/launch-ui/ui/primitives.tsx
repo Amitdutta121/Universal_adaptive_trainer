@@ -31,7 +31,7 @@ export function Badge({ className, ...props }: React.ComponentProps<"span">) {
   );
 }
 
-const glowVariants = cva("absolute w-full", {
+const glowVariants = cva("pointer-events-none absolute w-full", {
   variants: {
     variant: {
       top: "top-0",
