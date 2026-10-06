@@ -2,8 +2,9 @@
  * Pure logic behind the question-setup modal: which styles the professor approved for each
  * subtopic, which subtopics still have none, the target totals, and the save payload.
  *
- * A suggested style is undecided until the professor uses or skips it; a style added from the
- * library is approved by adding it. Counts are the suggester's and are passed back unchanged.
+ * A new setup starts with every suggested style approved; the professor deselects what they
+ * don't want (a skip) and selects other library styles (an add). Counts are the suggester's and
+ * are passed back unchanged.
  */
 
 import { DIFFICULTIES, type Difficulty } from "@/components/question-setup/types";
@@ -69,9 +70,31 @@ export function setupTopics(
 }
 
 /**
- * The starting choices. Editing an existing setup starts from what was approved last time: a
- * previously approved style the AI suggests again is pre-approved, one it no longer suggests is
- * kept as an added style.
+ * Drops suggested style ids the library does not know (after a library change), so they are
+ * never preselected and saved. Returns how many were dropped.
+ */
+export function withKnownStyles(
+  topics: readonly SetupTopic[],
+  libraryIds: ReadonlySet<string>,
+): { topics: SetupTopic[]; dropped: number } {
+  let dropped = 0;
+  const known = topics.map((topic) => ({
+    ...topic,
+    subtopics: topic.subtopics.map((subtopic) => {
+      if (!subtopic.suggestion) return subtopic;
+      const styleIds = subtopic.suggestion.style_ids.filter((id) => libraryIds.has(id));
+      dropped += subtopic.suggestion.style_ids.length - styleIds.length;
+      return { ...subtopic, suggestion: { ...subtopic.suggestion, style_ids: styleIds } };
+    }),
+  }));
+  return { topics: known, dropped };
+}
+
+/**
+ * The starting choices. A new setup starts with every suggested style approved. Editing an
+ * existing setup starts from what was approved last time: a previously approved style the AI
+ * suggests again is approved, one it no longer suggests is kept as an added style, and a new
+ * suggestion starts unselected.
  */
 export function initialChoices(
   topics: readonly SetupTopic[],
@@ -79,7 +102,7 @@ export function initialChoices(
 ): SetupChoices {
   const verdicts: Record<number, Record<string, Verdict>> = {};
   const added: Record<number, string[]> = {};
-  if (!current) return { verdicts, added };
+  if (!current) return approveAllUndecided({ verdicts, added }, topics);
   const previous = new Map(
     current.approved_styles.map((entry) => [entry.subtopic_id, entry.style_ids]),
   );
@@ -132,6 +155,24 @@ export function removeStyle(
   };
 }
 
+/**
+ * Select or deselect one library style for a subtopic: a suggested style flips between approved
+ * and skipped, any other style is added or removed.
+ */
+export function toggleStyle(
+  choices: SetupChoices,
+  subtopic: SetupSubtopic,
+  styleId: string,
+): SetupChoices {
+  if (subtopic.suggestion?.style_ids.includes(styleId)) {
+    const approved = choices.verdicts[subtopic.id]?.[styleId] === "approved";
+    return decide(choices, subtopic.id, styleId, approved ? "skipped" : "approved");
+  }
+  return (choices.added[subtopic.id] ?? []).includes(styleId)
+    ? removeStyle(choices, subtopic.id, styleId)
+    : addStyle(choices, subtopic.id, styleId);
+}
+
 /** Approve every suggested style the professor has not decided yet; skips are kept. */
 export function approveAllUndecided(
   choices: SetupChoices,
@@ -156,18 +197,6 @@ export function approvedStyleIds(choices: SetupChoices, subtopic: SetupSubtopic)
   );
   const added = (choices.added[subtopic.id] ?? []).filter((styleId) => !used.includes(styleId));
   return [...used, ...added];
-}
-
-export function undecidedCount(choices: SetupChoices, topics: readonly SetupTopic[]): number {
-  let count = 0;
-  for (const topic of topics) {
-    for (const subtopic of topic.subtopics) {
-      for (const styleId of subtopic.suggestion?.style_ids ?? []) {
-        if (!choices.verdicts[subtopic.id]?.[styleId]) count += 1;
-      }
-    }
-  }
-  return count;
 }
 
 /** Subtopics with no approved style. Approve is blocked while any remain. */
@@ -210,6 +239,20 @@ export function targetsBySubtopic(
     bySubtopic.set(cell.subtopic_id, row);
   }
   return bySubtopic;
+}
+
+/**
+ * Difficulties the AI set a target for that none of the selected styles can be written at, so
+ * no question would be generated for that cell.
+ */
+export function uncoveredDifficulties(
+  selected: readonly { difficulty_range: readonly Difficulty[] }[],
+  row: Record<Difficulty, number | null> | undefined,
+): Difficulty[] {
+  const covered = new Set(selected.flatMap((style) => style.difficulty_range));
+  return DIFFICULTIES.filter(
+    (difficulty) => (row?.[difficulty] ?? 0) > 0 && !covered.has(difficulty),
+  );
 }
 
 export function rowTotal(row: Record<Difficulty, number | null> | undefined): number {

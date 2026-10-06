@@ -50,22 +50,29 @@ const example = (prompt: string) => ({
   options: [],
 });
 
-const style = (id: string, name: string): QuestionStyle => ({
+const style = (
+  id: string,
+  name: string,
+  question_type: QuestionStyle["question_type"],
+  difficulty_range: QuestionStyle["difficulty_range"],
+): QuestionStyle => ({
   id,
   subject: "intro_python",
   name,
   summary: `${name}: what the student does.`,
-  question_type: "output_prediction",
-  difficulty_range: ["easy", "medium"],
+  question_type,
+  difficulty_range,
   checked_by: "Runs the code and compares the output",
   applies_to: [],
   examples: [example(`${name} example one`), example(`${name} example two`)],
 });
 
+// Library order differs from group order on purpose: the modal regroups it.
 const LIBRARY = [
-  style("py.trace", "Predict what the code prints"),
-  style("py.fill", "Fill in the missing line"),
-  style("py.debug", "Find the bug"),
+  style("py.trace", "Predict what the code prints", "output_prediction", ["easy", "medium"]),
+  style("py.fill", "Fill in the missing line", "code_completion", ["medium", "hard"]),
+  style("py.debug", "Find the bug", "debugging", ["medium"]),
+  style("py.concept", "Check one concept", "multiple_choice", ["easy"]),
 ];
 
 const subtopic = (id: number, name: string, position: number) => ({
@@ -184,36 +191,90 @@ describe("QuestionSetupButton", () => {
 });
 
 describe("QuestionSetupDialog", () => {
-  it("asks for a suggestion on open and lists it per subtopic with the AI's reason", async () => {
+  /** The library's styles in one subtopic, in on-screen order (the Suggested mark aside). */
+  const styleToggles = (scope: HTMLElement) =>
+    within(scope)
+      .getAllByRole("button", { pressed: true })
+      .concat(within(scope).getAllByRole("button", { pressed: false }))
+      .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+      .map((button) => button.textContent?.replace("Suggested", ""));
+
+  it("asks for a suggestion on open and starts with the AI's picks selected", async () => {
     mockReady();
     const { user, dialog } = await openModal();
 
     expect(hooks.useSetupSuggestion).toHaveBeenCalledWith(3, 1);
 
-    const loops = within(dialog).getByRole("article", { name: "Loops" });
-    expect(within(loops).getByText("Predict what the code prints")).toBeInTheDocument();
-    expect(within(loops).getByText(/loops are learned by tracing iterations/i)).toBeInTheDocument();
-    expect(within(dialog).getByRole("article", { name: "Strings" })).toHaveTextContent(
-      "Fill in the missing line",
-    );
+    const loops = within(dialog).getByRole("region", { name: "Loops" });
+    expect(
+      within(loops).getByRole("button", { name: /^predict what the code prints/i }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(loops).getByRole("button", { name: /^predict what the code prints/i }),
+    ).toHaveTextContent(/suggested/i);
+    expect(
+      within(loops).getByRole("button", { name: /^fill in the missing line/i }),
+    ).toHaveAttribute("aria-pressed", "false");
 
-    // The two examples are behind a disclosure.
+    // The AI's reason and the two examples are one click away.
+    expect(within(loops).queryByText(/loops are learned by tracing iterations/i)).toBeNull();
+    await user.click(within(loops).getByRole("button", { name: /why the ai suggested these/i }));
+    expect(within(loops).getByText(/loops are learned by tracing iterations/i)).toBeInTheDocument();
+
     expect(within(loops).queryByText("Predict what the code prints example one")).toBeNull();
-    await user.click(within(loops).getByRole("button", { name: /examples/i }));
+    await user.click(
+      within(loops).getByRole("button", { name: /examples for predict what the code prints/i }),
+    );
     expect(within(loops).getByText("Predict what the code prints example one")).toBeInTheDocument();
     expect(within(loops).getByText("Predict what the code prints example two")).toBeInTheDocument();
   });
 
-  it("blocks Approve while a subtopic has no approved style", async () => {
+  it("groups the library by what the student does, the same way for every subtopic", async () => {
     mockReady();
     const { user, dialog } = await openModal();
 
-    const loops = within(dialog).getByRole("article", { name: "Loops" });
-    const strings = within(dialog).getByRole("article", { name: "Strings" });
-    await user.click(within(loops).getByRole("button", { name: /^use$/i }));
-    await user.click(within(strings).getByRole("button", { name: /skip/i }));
+    const loops = within(dialog).getByRole("region", { name: "Loops" });
+    expect(
+      within(loops)
+        .getAllByRole("region")
+        .map((group) => group.getAttribute("aria-label")),
+    ).toEqual(["Concept questions", "Code tracing", "Code completion", "Debugging"]);
+    const loopsOrder = styleToggles(loops);
 
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(/strings has no style/i);
+    const rail = within(dialog).getByRole("navigation", { name: /subtopics/i });
+    await user.click(within(rail).getByRole("button", { name: /strings/i }));
+
+    const strings = within(dialog).getByRole("region", { name: "Strings" });
+    expect(styleToggles(strings)).toEqual(loopsOrder);
+    expect(
+      within(strings).getByRole("button", { name: /^fill in the missing line/i }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(strings).getByRole("button", { name: /^predict what the code prints/i }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("flags a difficulty that no selected style can be written at", async () => {
+    mockReady();
+    const { user, dialog } = await openModal();
+
+    const loops = within(dialog).getByRole("region", { name: "Loops" });
+    const coverage = within(loops).getByRole("list", { name: /questions planned per difficulty/i });
+    const hard = within(coverage).getByText("Hard").closest("li") as HTMLElement;
+    expect(hard).toHaveTextContent(/1 question planned · no selected style writes these/i);
+
+    await user.click(within(loops).getByRole("button", { name: /^fill in the missing line/i }));
+    expect(hard).toHaveTextContent(/1 selected style writes these/i);
+  });
+
+  it("blocks Approve while a subtopic has no selected style", async () => {
+    mockReady();
+    const { user, dialog } = await openModal();
+
+    const loops = within(dialog).getByRole("region", { name: "Loops" });
+    await user.click(within(loops).getByRole("button", { name: /^predict what the code prints/i }));
+
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(/loops has no style/i);
 
     await user.click(within(dialog).getByRole("button", { name: /review targets/i }));
     expect(within(dialog).getByRole("button", { name: /approve/i })).toBeDisabled();
@@ -223,11 +284,11 @@ describe("QuestionSetupDialog", () => {
   it("posts the approved setup and goes to the review queue", async () => {
     mockReady();
     const { user, dialog } = await openModal();
-
-    await user.click(
-      within(dialog).getByRole("button", { name: /use all remaining suggestions/i }),
-    );
     expect(within(dialog).queryByRole("alert")).toBeNull();
+
+    // Add a library style the AI did not suggest.
+    const loops = within(dialog).getByRole("region", { name: "Loops" });
+    await user.click(within(loops).getByRole("button", { name: /^find the bug/i }));
 
     await user.click(within(dialog).getByRole("button", { name: /review targets/i }));
     expect(within(dialog).getByTestId("setup-total")).toHaveTextContent("12");
@@ -241,7 +302,7 @@ describe("QuestionSetupDialog", () => {
     expect(body).toEqual({
       curriculum_version_id: 3,
       approved_styles: [
-        { subtopic_id: 11, style_ids: ["py.trace"] },
+        { subtopic_id: 11, style_ids: ["py.trace", "py.debug"] },
         { subtopic_id: 12, style_ids: ["py.fill"] },
       ],
       cell_targets: SUGGESTION.cell_targets,
@@ -250,6 +311,27 @@ describe("QuestionSetupDialog", () => {
 
     options.onSuccess({ setup_id: 5, round_id: 9 });
     expect(push).toHaveBeenCalledWith("/courses/7/review");
+  });
+
+  it("never preselects a suggested style the library no longer has", async () => {
+    mockReady({
+      suggestion: {
+        ...SUGGESTION,
+        subtopics: [
+          { subtopic_id: 11, style_ids: ["py.trace", "py.retired"], reason: "Tracing." },
+          SUGGESTION.subtopics[1],
+        ],
+      },
+    });
+    const { user, dialog } = await openModal();
+
+    expect(
+      within(dialog).getByText(/1 suggested style is no longer in the library/i),
+    ).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: /review targets/i }));
+    await user.click(within(dialog).getByRole("button", { name: /approve/i }));
+    const [body] = saveMutate.mock.calls[0] as [SaveSetupRequest];
+    expect(body.approved_styles[0]).toEqual({ subtopic_id: 11, style_ids: ["py.trace"] });
   });
 
   it("shows a readable error when the suggestion fails", async () => {

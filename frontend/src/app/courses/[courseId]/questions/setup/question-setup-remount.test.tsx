@@ -103,7 +103,7 @@ describe("QuestionSetupDialog remount", () => {
 
     await user.click(await screen.findByRole("button", { name: /set up questions/i }));
 
-    expect(await screen.findByRole("article", { name: "Loops" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Loops" })).toBeInTheDocument();
     expect(suggestCalls.count).toBe(1);
   });
 });
