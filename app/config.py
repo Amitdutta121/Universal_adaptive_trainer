@@ -165,6 +165,10 @@ class Settings(BaseSettings):
     dev_user_password: SecretStr = SecretStr("devpassword123")
 
     # -- Account email (app/auth/email.py, ADR-061) ---------------------------
+    #: Off for now: a registered account is verified on creation and no verification link is
+    #: sent, and routes that spend LLM credit do not check verification. Set it true to make a
+    #: new account confirm its email first (ADR-061's original behaviour).
+    require_email_verification: bool = False
     #: Where the Studio is served; verification and reset links point here. Required in
     #: production, where a localhost link in a real inbox would be useless.
     public_app_url: str | None = None

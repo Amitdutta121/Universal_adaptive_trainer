@@ -37,8 +37,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[UserRow, uuid.UUID]):
 
     Accounts come from public registration (``POST /api/auth/register``, ADR-061), from
     ``python -m app.auth.create_user`` and, in development only, from the seeded developer
-    account (:func:`app.auth.seed.seed_dev_user`). The last two are created verified; a
-    registered account is sent a verification link straight away.
+    account (:func:`app.auth.seed.seed_dev_user`). The last two are created verified. A
+    registered account is verified on creation unless ``REQUIRE_EMAIL_VERIFICATION`` is on, in
+    which case it is sent a verification link straight away.
     """
 
     #: Both links work for an hour; the email text (``app/auth/email.py``) says so.
@@ -63,8 +64,13 @@ class UserManager(UUIDIDMixin, BaseUserManager[UserRow, uuid.UUID]):
 
     async def on_after_register(self, user: UserRow, request: Request | None = None) -> None:
         logger.info("Professor account registered: %s", user.email)
-        if user.is_active and not user.is_verified:
+        if not user.is_active or user.is_verified:
+            return
+        if get_settings().require_email_verification:
             await self.request_verify(user, request)
+        else:
+            await self.user_db.update(user, {"is_verified": True})
+            logger.info("Verified %s on creation (REQUIRE_EMAIL_VERIFICATION is off)", user.email)
 
     async def on_after_request_verify(
         self, user: UserRow, token: str, request: Request | None = None

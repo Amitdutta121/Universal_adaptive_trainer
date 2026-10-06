@@ -47,6 +47,9 @@ TEST_ENV: dict[str, str] = {
     # A developer's SMTP settings must never make the suite send real email.
     "EMAIL_BACKEND": "console",
     "PUBLIC_APP_URL": "",
+    # Verification is off by default for now; the suite keeps testing the full flow
+    # (test_registration.py tests the default separately).
+    "REQUIRE_EMAIL_VERIFICATION": "true",
     # Judge repair policy is pinned permissive here so that the tests which
     # exercise the learning *mechanism* are not also asserting the *policy*
     # (ADR-042). The threshold and the acceptance gate have their own tests,

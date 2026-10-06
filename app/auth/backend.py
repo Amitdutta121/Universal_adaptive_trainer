@@ -70,9 +70,10 @@ async def current_verified_user(
 
     Guards every route that spends money on the LLM or the embedder (ADR-061). An account that
     has not confirmed its email can log in and use the rest of the Studio. fastapi-users' own
-    ``verified=True`` answers a bare 403 with no reason; this one says what to do.
+    ``verified=True`` answers a bare 403 with no reason; this one says what to do. While
+    ``REQUIRE_EMAIL_VERIFICATION`` is off it lets every active account through.
     """
-    if not user.is_verified:
+    if get_settings().require_email_verification and not user.is_verified:
         raise EmailNotVerifiedError(
             "Verify your email address to use AI features.",
             detail=(
