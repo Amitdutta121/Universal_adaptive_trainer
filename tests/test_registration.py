@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.email import ConsoleEmailSender, SmtpEmailSender, get_email_sender
-from app.config import Environment, Settings
+from app.config import Environment, Settings, get_settings
 from app.persistence.models import UserRow
 from app.web.routes.api.coverage import get_generation_client
 from app.web.routes.api.curriculum import get_draft_client
@@ -333,7 +333,51 @@ def test_an_unverified_account_is_refused_llm_routes_until_it_verifies(
         assert response.status_code not in {401, 403}, (url, response.text)
 
 
-# ------------------------------------------------------------------ 5. production config
+# ------------------------------------------------------------------ 5. verification off
+
+
+@pytest.fixture
+def verification_off(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The shipped default: ``REQUIRE_EMAIL_VERIFICATION`` unset."""
+    monkeypatch.delenv("REQUIRE_EMAIL_VERIFICATION")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_verification_is_off_by_default() -> None:
+    assert Settings.model_fields["require_email_verification"].default is False
+
+
+def test_with_verification_off_a_new_account_is_verified_and_sent_no_link(
+    verification_off: None, browser: TestClient, email_log: pytest.LogCaptureFixture
+) -> None:
+    response = _register(browser)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["is_verified"] is True
+    assert "/verify?token=" not in email_log.text
+    assert _login(browser) == 204
+    assert browser.get("/api/auth/me").json()["is_verified"] is True
+
+
+def test_with_verification_off_an_unverified_account_may_use_llm_routes(
+    browser: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(browser)  # verification is on here, so the account stays unverified
+    assert _login(browser) == 204
+    course = browser.post("/api/courses", json={"name": "Physics 101"})
+    headers = {COURSE_HEADER: str(course.json()["id"])}
+
+    monkeypatch.setenv("REQUIRE_EMAIL_VERIFICATION", "false")
+    get_settings.cache_clear()
+    assert browser.get("/api/auth/me").json()["is_verified"] is False
+    for (method, _), url in LLM_ROUTES.items():
+        response = browser.request(method, url, headers=headers)
+        assert response.status_code not in {401, 403}, (url, response.text)
+
+
+# ------------------------------------------------------------------ 6. production config
 
 PRODUCTION = {"environment": Environment.PRODUCTION, "auth_secret_key": "x" * 32}
 SMTP = {
