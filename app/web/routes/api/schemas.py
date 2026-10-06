@@ -2729,3 +2729,58 @@ class UpdateCustomJudgeRequest(BaseModel):
     kind: CustomJudgeKind | None = None
     pattern: str | None = None
     enabled: bool | None = None
+
+
+class JobStartedResponse(BaseModel):
+    """``202`` from a route that queued a background job; follow it in ``GET /api/jobs``."""
+
+    job_id: str
+
+
+class JobOut(BaseModel):
+    """One entry of the Jobs panel, whichever table the job lives in.
+
+    ``id`` is ``job-<n>`` (bulk generation, coverage fill), ``round-<n>`` (question round) or
+    ``judge-<run id>`` (judge re-run). ``link`` is a course-relative page holding the job's
+    output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
+    ``result`` is what the old blocking response returned, for the two kinds that had one:
+    :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
+    coverage fill.
+    """
+
+    id: str
+    kind: Literal["bulk_generation", "coverage_fill", "question_round", "judge_run"]
+    title: str
+    status: Literal["queued", "running", "done", "failed", "cancelled"]
+    done: int
+    total: int
+    counts: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+    link: str | None = None
+    result: GenerateBatchResponse | GenerationRunResponse | None = None
+    #: Whether ``POST /jobs/{id}/cancel`` would stop it (queued or running, not yet asked).
+    can_cancel: bool = False
+    #: A stop was asked for; a running job ends after the question in flight.
+    cancel_requested: bool = False
+    #: What ``POST /jobs/{id}/retry`` would start, e.g. "Retry the remaining 14";
+    #: ``None`` when retrying would do nothing.
+    retry_label: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobOut]
+
+
+class JudgeRerunPreviewOut(BaseModel):
+    """What "Run judges" would do for the course right now."""
+
+    enabled: bool
+    #: Why a re-run cannot be started, in the professor's terms; ``None`` when it can.
+    disabled_reason: str | None = None
+    #: Questions a re-run would submit (passed deterministic validation, in this course).
+    eligible: int
+    #: A run of this course still being judged; a second one is refused until it ends.
+    active_run_id: str | None = None

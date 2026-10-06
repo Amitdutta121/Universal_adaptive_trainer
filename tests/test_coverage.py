@@ -634,11 +634,34 @@ def gen_env(session: Session, settings: Settings) -> SimpleNamespace:
     return env
 
 
+class _FinishedRun:
+    """A queued coverage run, read back from the Jobs list once it finished.
+
+    ``TestClient`` runs the job before the POST returns, so the job is already done (or
+    failed) here; ``json()`` is what the run stored, i.e. the old blocking response.
+    """
+
+    def __init__(self, posted: object, job: dict) -> None:
+        self.status_code = posted.status_code
+        self.text = posted.text
+        self.job = job
+
+    def json(self) -> dict:
+        return self.job["result"]
+
+
 def _run(app: FastAPI, gen_client: object, targets: list[dict]) -> object:
     app.dependency_overrides[get_query_embedder] = KeywordEmbedder
     app.dependency_overrides[get_generation_client] = lambda: gen_client
     with TestClient(app) as http:
-        return http.post("/api/coverage/generation-runs", json={"targets": targets})
+        posted = http.post("/api/coverage/generation-runs", json={"targets": targets})
+        if posted.status_code != 202:
+            return posted
+        job_id = posted.json()["job_id"]
+        (job,) = [job for job in http.get("/api/jobs").json()["jobs"] if job["id"] == job_id]
+    assert job["status"] == "done", job
+    assert job["done"] == job["total"] == len(targets)
+    return _FinishedRun(posted, job)
 
 
 def test_a_run_generates_a_grounded_question_into_the_review_queue(
@@ -652,7 +675,7 @@ def test_a_run_generates_a_grounded_question_into_the_review_queue(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["run_id"]
     assert body["skipped"] == [] and body["failed"] == []
@@ -682,7 +705,7 @@ def test_a_run_surfaces_an_aim_mismatch_without_filtering_it(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "easy"}],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     (produced,) = response.json()["generated"]
     assert produced["requested_subtopic_id"] == gen_env.while_loops.id
     assert produced["claimed_topic_id"] == gen_env.slicing.topic_id
@@ -703,7 +726,7 @@ def test_a_target_with_no_confident_section_is_skipped_and_the_run_continues(
         ],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["skipped"] == [
         {
@@ -730,7 +753,7 @@ def test_a_below_floor_section_is_skipped(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "hard"}],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["generated"] == []
     assert body["skipped"][0]["reason"] == "no confident section"
@@ -766,7 +789,7 @@ def test_a_provider_failure_on_one_target_keeps_the_others(
         ],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     (failed,) = body["failed"]
     assert failed["subtopic_id"] == gen_env.slicing.id
@@ -777,7 +800,7 @@ def test_a_provider_failure_on_one_target_keeps_the_others(
     with TestClient(configured_app) as http:
         listed = http.get("/api/questions", params={"status": "validation_passed"}).json()
     assert [q["id"] for q in listed["questions"]] == [body["generated"][0]["question_id"]]
-    assert active_generation_topic_ids() == []
+    assert active_generation_topic_ids(session, None) == []
 
 
 def test_asking_to_fill_no_gaps_at_all_is_rejected(configured_app: FastAPI) -> None:
@@ -796,10 +819,10 @@ def test_a_topic_stays_marked_active_until_its_run_finishes(
 
     class ProbeClient(MetricJudgeClient):
         def complete_structured(self, **kwargs):
-            assert active_generation_topic_ids() == [gen_env.while_loops.topic_id]
+            assert active_generation_topic_ids(session, None) == [gen_env.while_loops.topic_id]
             return super().complete_structured(**kwargs)
 
-    assert active_generation_topic_ids() == []
+    assert active_generation_topic_ids(session, None) == []
 
     response = _run(
         configured_app,
@@ -807,5 +830,5 @@ def test_a_topic_stays_marked_active_until_its_run_finishes(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
     )
 
-    assert response.status_code == 200, response.text
-    assert active_generation_topic_ids() == []
+    assert response.status_code == 202, response.text
+    assert active_generation_topic_ids(session, None) == []

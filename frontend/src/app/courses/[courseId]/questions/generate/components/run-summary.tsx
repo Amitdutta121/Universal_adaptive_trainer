@@ -12,7 +12,7 @@ import { AlertTriangle, Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { BatchPlanTotals } from "../spec-sheet-types";
 
-/** Above this, a synchronous run is long enough that the professor should be told. */
+/** Above this, a run is long enough that the professor should be told how it runs. */
 const LONG_RUN_QUESTIONS = 12;
 
 function Figure({
@@ -105,8 +105,8 @@ export function RunSummary({
 
       {isLongRun && !isRunning ? (
         <p className="text-muted-foreground text-xs">
-          This run is made in sequence — one generation call plus its judge calls per question — and
-          it holds one request open until it finishes. Keep the tab open.
+          This run is made in sequence — one generation call plus its judge calls per question — so
+          it takes a while. It runs in the background: you can leave this page and follow it in Jobs.
         </p>
       ) : null}
 
@@ -118,8 +118,8 @@ export function RunSummary({
 
       {isRunning ? (
         <p className="text-muted-foreground text-xs">
-          Generating in sequence. Questions are saved one at a time, so anything already produced is
-          kept even if the run is interrupted.
+          Generating in the background. Questions are saved one at a time, so anything already
+          produced is kept even if the run is interrupted.
         </p>
       ) : null}
     </div>

@@ -20,6 +20,7 @@ from app.web.routes.api import (
     evaluation,
     feedback,
     instructions,
+    jobs,
     judge_prompts,
     questions,
     retrieval,
@@ -51,6 +52,7 @@ _professor_only = [
     setup.router,
     rounds.router,
     custom_judges.router,
+    jobs.router,
 ]
 for professor_router in _professor_only:
     router.include_router(professor_router, dependencies=[Depends(current_active_user)])

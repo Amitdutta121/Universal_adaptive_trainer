@@ -4,7 +4,8 @@ import { Loader2 } from "lucide-react";
 import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useGenerateCoverageRun } from "@/lib/api/queries";
+import { isActive } from "@/components/jobs/job-display";
+import { useGenerateCoverageRun, useJob } from "@/lib/api/queries";
 import type {
   CoverageReport,
   CoverageTargetRef,
@@ -167,10 +168,10 @@ function TopicSubtopicCell({
 
 /** The topic card's Generate button, its pending state, and its inline result.
  *
- * `generatingElsewhere` covers the gap a local mutation can't: reload the page,
- * or navigate away and back, and this hook's `isPending` starts fresh at
- * `false` even though the server is still minutes into the run this topic's
- * last click started. Without it the button would look idle and invite a
+ * The run is a background job: the click queues it, and `useJob` follows it to
+ * its summary. `generatingElsewhere` covers what this component can't remember:
+ * reload the page, or navigate away and back, and the server still reports the
+ * topic's run in flight. Without it the button would look idle and invite a
  * second, overlapping run over the same gaps. */
 function TopicGenerateButton({
   topic,
@@ -181,7 +182,10 @@ function TopicGenerateButton({
 }) {
   const targets = topicGapTargets(topic);
   const run = useGenerateCoverageRun();
-  const generating = run.isPending || generatingElsewhere;
+  const job = useJob(run.data?.job_id);
+  const generating =
+    run.isPending || generatingElsewhere || (run.isSuccess && (job ? isActive(job) : true));
+  const summary = job?.status === "done" && job.result && "generated" in job.result ? job.result : null;
 
   return (
     <div className="mt-2 space-y-2">
@@ -206,11 +210,17 @@ function TopicGenerateButton({
         </Button>
       </div>
 
-      {run.data ? (
+      {job?.status === "failed" ? (
+        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive text-xs">
+          {job.error}
+        </p>
+      ) : null}
+
+      {summary ? (
         <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs">
-          <p>{runSummaryLine(run.data)}</p>
+          <p>{runSummaryLine(summary)}</p>
           <CourseLink
-            href={`/questions?run_id=${encodeURIComponent(run.data.run_id)}`}
+            href={`/questions?run_id=${encodeURIComponent(summary.run_id)}`}
             className="font-medium underline underline-offset-4"
           >
             Review these →

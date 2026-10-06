@@ -8,7 +8,7 @@ learned for its type.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from sqlalchemy.orm import Session
 
@@ -97,6 +97,8 @@ class GenerationService:
         chunks: Sequence[ChunkQuestionRequest],
         seed: str | None = None,
         run_id: str | None = None,
+        on_question: Callable[[], None] | None = None,
+        start_at: int = 0,
     ) -> list[QuestionRow]:
         """Generate the questions a per-chunk spec sheet asks for (ADR-044).
 
@@ -114,8 +116,13 @@ class GenerationService:
         one request -- the coverage "Generate" flow issues one per gap target so
         a provider failure isolates to that target -- keep every question under a
         single run id. Left ``None``, a fresh one is minted per call as before.
+
+        ``on_question`` is called after each question commits, so a background job can
+        count progress (``app.jobs``). ``start_at`` skips that many questions of the
+        compiled plan -- the plan's order is fixed, so a retry of a run that stopped part-way
+        generates exactly the questions it had not reached.
         """
-        planned = compile_chunk_requests(chunks)
+        planned = compile_chunk_requests(chunks)[start_at:]
         version = require_approved_version(self._session, curriculum_version_id)
         specs = [
             build_question_spec(
@@ -128,7 +135,7 @@ class GenerationService:
             )
             for question in planned
         ]
-        return self._generate_specs(specs, version=version, run_id=run_id)
+        return self._generate_specs(specs, version=version, run_id=run_id, on_question=on_question)
 
     def regenerate_from_question(
         self,
@@ -204,6 +211,7 @@ class GenerationService:
         version: CurriculumVersionRow,
         instructor_feedback: str | None = None,
         run_id: str | None = None,
+        on_question: Callable[[], None] | None = None,
     ) -> list[QuestionRow]:
         """Generate, validate, judge and persist one question per spec.
 
@@ -248,6 +256,8 @@ class GenerationService:
             # flight.
             self._session.commit()
             rows.append(row)
+            if on_question is not None:
+                on_question()
         return rows
 
     def generate_round_question(

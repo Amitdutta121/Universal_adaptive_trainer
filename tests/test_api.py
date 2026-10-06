@@ -349,7 +349,8 @@ def test_batch_generation_uses_the_active_curriculum_version(
         },
     )
 
-    assert response.status_code == 201, response.text
+    # Queued as a background job; TestClient runs it before returning.
+    assert response.status_code == 202, response.text
     assert seen["curriculum_version_id"] == old
 
 

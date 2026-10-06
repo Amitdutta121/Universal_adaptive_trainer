@@ -110,6 +110,11 @@ export const qk = {
     all: ["evaluation"] as const,
     batchRuns: () => ["evaluation", "batch-runs"] as const,
     batchRun: (id: string) => ["evaluation", "batch-runs", id] as const,
+    rerunPreview: () => ["evaluation", "rerun-preview"] as const,
+  },
+  jobs: {
+    all: ["jobs"] as const,
+    list: () => ["jobs", "list"] as const,
   },
   auth: {
     me: () => ["auth", "me"] as const,
@@ -498,12 +503,12 @@ export const useBatchPlan = (chunks: readonly ChunkGenerationSpec[]) =>
   });
 
 /**
- * Run a per-chunk spec sheet.
+ * Queue a per-chunk spec sheet as a background job.
  *
- * Synchronous on the server: every question costs one generation call plus one
- * judge call per metric, made in sequence. Each question commits on its own, so a
- * failure part-way through still leaves the questions already paid for — which is
- * why the caller shows what was created rather than treating the run as atomic.
+ * The server answers `202 { job_id }` at once and generates in the background —
+ * one generation call plus one judge call per metric per question, each question
+ * committed on its own. Follow the run with `useJob(job_id)`; the Jobs panel
+ * refreshes the question lists when it finishes.
  */
 export function useGenerateBatch() {
   const client = useQueryClient();
@@ -511,8 +516,7 @@ export function useGenerateBatch() {
     mutationFn: (body: Schemas["GenerateBatchRequest"]) =>
       unwrap(api.POST("/api/questions/generate-batch", { body })),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: qk.questions.all });
-      client.invalidateQueries({ queryKey: qk.system.counts() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
     },
   });
 }
@@ -582,9 +586,9 @@ export const useCoverage = (setVersionId?: number) =>
   });
 
 /**
- * Run the coverage "Generate" button: one grounded question per selected gap
- * cell. Synchronous, like `useGenerateBatch` -- the caller shows the run
- * summary (or the 502/422 it failed with) once the response comes back.
+ * Queue the coverage "Generate" button's run: one grounded question per selected
+ * gap cell, as a background job (`202 { job_id }`). The coverage report marks the
+ * topic as generating until the job ends; `useJob(job_id)` carries its summary.
  */
 export function useGenerateCoverageRun() {
   const client = useQueryClient();
@@ -593,8 +597,7 @@ export function useGenerateCoverageRun() {
       unwrap(api.POST("/api/coverage/generation-runs", { body })),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.coverage.all });
-      client.invalidateQueries({ queryKey: qk.questions.all });
-      client.invalidateQueries({ queryKey: qk.system.counts() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
     },
   });
 }
@@ -1376,6 +1379,87 @@ export function useBatchRun(runId: string, { enabled = true } = {}) {
       // A provider-side cancellation is recorded as `failed`, so these three are
       // the whole terminal set.
       return status === "completed" || status === "failed" || status === "expired" ? false : 5_000;
+    },
+  });
+}
+
+/** What "Run judges" would do now: how many questions, or why it cannot run. */
+export const useJudgeRerunPreview = () =>
+  useQuery({
+    queryKey: qk.evaluation.rerunPreview(),
+    queryFn: () => unwrap(api.GET("/api/evaluation/rerun-preview")),
+  });
+
+/** Submit the course's eligible questions for re-judging; results arrive in Jobs. */
+export function useRunJudges() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.POST("/api/evaluation/batch-runs", { body: {} })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.evaluation.all });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+// --- Jobs -------------------------------------------------------------------
+
+/** How often the Jobs list refreshes while something is queued or running, and otherwise. */
+export const JOBS_ACTIVE_POLL_MS = 2_000;
+export const JOBS_IDLE_POLL_MS = 30_000;
+
+/**
+ * Every recent and running job of the open course: bulk generation, coverage
+ * fills, question rounds and judge runs, newest first (`GET /api/jobs`).
+ *
+ * One query for the whole Studio — the header button, its popover, the run
+ * window and the screens that started a job all read it, so they never disagree.
+ */
+export const useJobs = ({ enabled = true }: { enabled?: boolean } = {}) =>
+  useQuery({
+    queryKey: qk.jobs.list(),
+    enabled,
+    queryFn: () => unwrap(api.GET("/api/jobs")),
+    refetchInterval: (query) =>
+      (query.state.data?.jobs ?? []).some(
+        (job) => job.status === "queued" || job.status === "running",
+      )
+        ? JOBS_ACTIVE_POLL_MS
+        : JOBS_IDLE_POLL_MS,
+  });
+
+/** One job of `useJobs`, by id (`job-12`, `round-5`, `judge-…`); `undefined` until listed. */
+export function useJob(jobId: string | null | undefined) {
+  const jobs = useJobs({ enabled: jobId != null });
+  return jobId == null ? undefined : jobs.data?.jobs.find((job) => job.id === jobId);
+}
+
+/**
+ * Stop a queued or running job (`POST /api/jobs/{id}/cancel`). A running one finishes the
+ * question in flight first; the returned job says `cancel_requested` until it does.
+ */
+export function useCancelJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      unwrap(api.POST("/api/jobs/{job_id}/cancel", { params: { path: { job_id: jobId } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+    },
+  });
+}
+
+/** Start a new job for what a stopped or partly failed one left undone (its `retry_label`). */
+export function useRetryJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      unwrap(api.POST("/api/jobs/{job_id}/retry", { params: { path: { job_id: jobId } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+      client.invalidateQueries({ queryKey: qk.evaluation.all });
     },
   });
 }
