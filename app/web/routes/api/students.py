@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
@@ -174,6 +174,39 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+#: Roster columns a client may sort by. Absent sort keeps the repository's name order.
+RosterSort = Literal["name", "email", "answered", "average", "last_active", "enrolled"]
+
+
+def _sort_roster(
+    rows: list[StudentRow],
+    stats: dict[int, Any],
+    sort: RosterSort,
+    order: Literal["asc", "desc"],
+) -> list[StudentRow]:
+    """Order matched learners by one column. Learners with no value for it
+    (never answered, so no average or last activity) sit last either way."""
+
+    def value(row: StudentRow) -> Any:
+        stat = stats.get(row.id)
+        if sort == "name":
+            return row.display_name.casefold()
+        if sort == "email":
+            return row.email.casefold()
+        if sort == "answered":
+            return stat.answered_count if stat else 0
+        if sort == "average":
+            return stat.average_score if stat else None
+        if sort == "last_active":
+            return _aware(stat.last_activity_at) if stat and stat.last_activity_at else None
+        return _aware(row.created_at)
+
+    present = [row for row in rows if value(row) is not None]
+    missing = [row for row in rows if value(row) is None]
+    present.sort(key=value, reverse=order == "desc")
+    return present + missing
+
+
 def _passes_score(average: float | None, band: str) -> bool:
     if band == "all":
         return True
@@ -257,6 +290,8 @@ def list_students(
     curriculum_version_id: int | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(ROSTER_PAGE_SIZE, ge=1, le=100),
+    sort: RosterSort | None = None,
+    order: Literal["asc", "desc"] = "asc",
 ) -> StudentListResponse:
     """One page of the roster, filtered server-side (ADR-041 keeps it read-only).
 
@@ -270,6 +305,9 @@ def list_students(
     set built from that taxonomy (see
     :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
     student is never tagged with a taxonomy directly, only a frozen set is.
+
+    ``sort``/``order`` order the whole matched set before it is paged, so a
+    sorted column is sorted across pages, not just within one.
     """
     students = StudentRepository(session)
     attempts = StudentAttemptRepository(session)
@@ -291,6 +329,9 @@ def list_students(
             and _passes_activity(last_activity, activity, now=now)
         ):
             matched.append(row)
+
+    if sort is not None:
+        matched = _sort_roster(matched, stats, sort, order)
 
     start = (page - 1) * page_size
     page_rows = matched[start : start + page_size]

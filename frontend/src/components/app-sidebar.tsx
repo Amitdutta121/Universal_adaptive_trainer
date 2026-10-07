@@ -47,7 +47,7 @@ type AppTheme = "light" | "dark" | "system";
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
   { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "review"] },
   { label: "Calibration", keys: ["judges", "coverage"] },
-  { label: "Adaptive Training", keys: ["classrooms", "roster"] },
+  { label: "Adaptive Training", keys: ["classrooms", "roster", "students"] },
 ];
 
 function sectionsFor(keys: readonly string[]): NavSection[] {

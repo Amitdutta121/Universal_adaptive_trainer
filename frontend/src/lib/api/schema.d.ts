@@ -1645,6 +1645,9 @@ export interface paths {
          *     set built from that taxonomy (see
          *     :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
          *     student is never tagged with a taxonomy directly, only a frozen set is.
+         *
+         *     ``sort``/``order`` order the whole matched set before it is paged, so a
+         *     sorted column is sorted across pages, not just within one.
          */
         get: operations["list_students_api_students_get"];
         put?: never;
@@ -8608,6 +8611,8 @@ export interface operations {
                 curriculum_version_id?: number | null;
                 page?: number;
                 page_size?: number;
+                sort?: ("name" | "email" | "answered" | "average" | "last_active" | "enrolled") | null;
+                order?: "asc" | "desc";
             };
             header?: {
                 "X-Course-Id"?: number | null;

@@ -191,6 +191,30 @@ class TestRosterPagination:
         assert [row["display_name"] for row in second["students"]] == ["Cy"]
         assert second["total"] == 3
 
+    def test_sort_orders_the_whole_set_before_paging(self, client: TestClient) -> None:
+        for name in ("Ada", "Bea", "Cy"):
+            _enrol(client, name)
+
+        params = {"sort": "name", "order": "desc", "page_size": 2}
+        first = client.get("/api/students", params={**params, "page": 1}).json()
+        second = client.get("/api/students", params={**params, "page": 2}).json()
+        assert [row["display_name"] for row in first["students"]] == ["Cy", "Bea"]
+        assert [row["display_name"] for row in second["students"]] == ["Ada"]
+
+    def test_learners_without_a_value_sort_last_either_way(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        _enrol(client, "Ada")
+        _answer_one(client, set_id, "Bea")
+
+        for order in ("asc", "desc"):
+            rows = client.get("/api/students", params={"sort": "average", "order": order}).json()
+            assert [row["display_name"] for row in rows["students"]] == ["Bea", "Ada"]
+
+    def test_an_unknown_sort_is_refused(self, client: TestClient) -> None:
+        assert client.get("/api/students", params={"sort": "resume_token"}).status_code == 422
+
     def test_search_matches_name_or_email(self, client: TestClient) -> None:
         _enrol(client, "Ada")
         _enrol(client, "Grace")

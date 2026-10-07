@@ -18,7 +18,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronDown, Layers, Search, Wand2, X } from "lucide-react";
+import { ArrowUpDown, Layers, Search, Wand2 } from "lucide-react";
 import {
   parseAsArrayOf,
   parseAsInteger,
@@ -31,6 +31,7 @@ import { QuestionReview } from "@/app/courses/[courseId]/questions/generate/sing
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
 import { StartCard } from "@/components/start-card";
+import { ActiveFilterChip, FilterLabel, FilterMultiSelect } from "@/components/table-filters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,7 +45,6 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -184,123 +184,6 @@ function DateCell({ value }: { value: string | null }) {
 function textOrDash(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
-}
-
-function FilterLabel({ children }: { children: string }) {
-  return (
-    <span className="font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
-      {children}
-    </span>
-  );
-}
-
-/**
- * One filter as a button that names the filter and what it keeps ("Status: Approved +1"),
- * opening a checklist so several values can be kept at once. The menu stays open while
- * ticking; no values ticked means the filter is off. `capitalize` is for enum labels;
- * names an instructor typed (topics) are shown as written.
- */
-function FilterMultiSelect<T extends string | number>({
-  label,
-  allLabel,
-  value,
-  options,
-  onChange,
-  capitalize = true,
-  disabled = false,
-}: {
-  label: string;
-  allLabel: string;
-  value: readonly T[];
-  options: readonly { value: T; label: string; count?: number }[];
-  onChange: (value: T[]) => void;
-  capitalize?: boolean;
-  disabled?: boolean;
-}) {
-  const chosen = options.filter((option) => value.includes(option.value));
-  const toggle = (option: T, on: boolean) =>
-    // Kept in the options' order so the URL and the button read the same every time.
-    onChange(
-      options
-        .map((each) => each.value)
-        .filter((each) => (each === option ? on : value.includes(each))),
-    );
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          className="h-9 min-w-40 max-w-72 justify-between font-normal"
-          disabled={disabled}
-        >
-          <span className="truncate">
-            <span className="text-muted-foreground">{label}:</span>{" "}
-            {chosen.length === 0 ? (
-              allLabel
-            ) : (
-              <span className={capitalize ? "capitalize" : undefined}>
-                {chosen[0].label}
-                {chosen.length > 1 ? (
-                  <span className="text-muted-foreground"> +{chosen.length - 1}</span>
-                ) : null}
-              </span>
-            )}
-          </span>
-          <ChevronDown className="size-4 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
-        {options.map((option) => (
-          <DropdownMenuCheckboxItem
-            key={option.value}
-            checked={value.includes(option.value)}
-            onCheckedChange={(on) => toggle(option.value, on)}
-            onSelect={(event) => event.preventDefault()}
-            className={capitalize ? "capitalize" : undefined}
-          >
-            {option.label}
-            {option.count !== undefined ? (
-              <span className="ml-auto pl-3 text-muted-foreground tabular-nums">
-                {option.count}
-              </span>
-            ) : null}
-          </DropdownMenuCheckboxItem>
-        ))}
-        {value.length > 0 ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => onChange([])}>
-              Clear {label.toLowerCase()}
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function ActiveFilterChip({
-  label,
-  value,
-  onClear,
-}: {
-  label: string;
-  value: string;
-  onClear: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClear}
-      className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-background/80 px-3 py-1.5 text-foreground text-sm shadow-[0_1px_0_rgba(255,255,255,0.45)_inset] transition-colors hover:bg-accent/70"
-    >
-      <span className="font-mono text-[0.66rem] text-muted-foreground uppercase tracking-[0.14em]">
-        {label}
-      </span>
-      <span>{value}</span>
-      <X className="size-3.5 text-muted-foreground" />
-    </button>
-  );
 }
 
 const columns: ColumnDef<QuestionSummary>[] = [

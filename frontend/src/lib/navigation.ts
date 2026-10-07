@@ -22,6 +22,7 @@ import {
   type LucideIcon,
   Network,
   Scale,
+  Table2,
   Users,
 } from "lucide-react";
 
@@ -107,6 +108,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     path: "/students/roster",
     summary: "Enrolled learners' progress: score trends, BKT topic mastery, and subtopic weakness.",
     icon: Users,
+  },
+  {
+    key: "students",
+    label: "Students",
+    path: "/students/list",
+    summary: "Every enrolled learner in one filterable table: score, answered count, and last activity.",
+    icon: Table2,
   },
 ] as const;
 

@@ -29,6 +29,7 @@ const COUNT_KEYS: Partial<Record<string, keyof Counts>> = {
   review: "reviews",
   instructions: "learned_instructions",
   roster: "students",
+  students: "students",
 };
 
 export default async function DashboardPage(props: PageProps<"/courses/[courseId]/dashboard">) {
