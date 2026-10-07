@@ -4,7 +4,7 @@ import { CircleCheck } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { AuthCard, authLinkClass } from "@/components/auth-card";
+import { AuthCard, authLinkClass, authButtonClass } from "@/components/auth-card";
 import { QueryError } from "@/components/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -54,11 +54,11 @@ export function VerifyScreen({ token }: { token: string }) {
       ) : error ? (
         <QueryError error={error} />
       ) : (
-        <p className="text-center text-muted-foreground text-sm">Verifying your email address…</p>
+        <p className="text-center text-base text-muted-foreground">Verifying your email address…</p>
       )}
 
       {done ? (
-        <Button asChild className="w-full">
+        <Button asChild className={authButtonClass}>
           <Link href={next.href as Route}>{next.label}</Link>
         </Button>
       ) : (
