@@ -5,7 +5,14 @@ import type { Route } from "next";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AuthCard, authLinkClass, MIN_PASSWORD_LENGTH } from "@/components/auth-card";
+import {
+  AuthCard,
+  authLinkClass,
+  MIN_PASSWORD_LENGTH,
+  authLabelClass,
+  authFieldClass,
+  authButtonClass,
+} from "@/components/auth-card";
 import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,10 +39,13 @@ export function RegisterScreen() {
 
   return (
     <AuthCard subtitle="Create an Instructor Studio account.">
-      <form className="space-y-4" onSubmit={(event) => void submit(event)}>
-        <div className="space-y-2">
-          <Label htmlFor="register-email">Email</Label>
+      <form className="space-y-5" onSubmit={(event) => void submit(event)}>
+        <div className="space-y-2.5">
+          <Label className={authLabelClass} htmlFor="register-email">
+            Email
+          </Label>
           <Input
+            className={authFieldClass}
             id="register-email"
             type="email"
             autoComplete="email"
@@ -45,9 +55,12 @@ export function RegisterScreen() {
             placeholder="you@university.edu"
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="register-password">Password</Label>
+        <div className="space-y-2.5">
+          <Label className={authLabelClass} htmlFor="register-password">
+            Password
+          </Label>
           <Input
+            className={authFieldClass}
             id="register-password"
             type="password"
             autoComplete="new-password"
@@ -56,7 +69,7 @@ export function RegisterScreen() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <p id="register-password-hint" className="text-muted-foreground text-xs">
+          <p id="register-password-hint" className="text-muted-foreground text-sm">
             At least {MIN_PASSWORD_LENGTH} characters.
           </p>
         </div>
@@ -65,7 +78,7 @@ export function RegisterScreen() {
 
         <Button
           type="submit"
-          className="w-full"
+          className={authButtonClass}
           disabled={!email.trim() || !password || register.isPending}
         >
           <UserPlus />
@@ -73,7 +86,7 @@ export function RegisterScreen() {
         </Button>
       </form>
 
-      <p className="text-center text-muted-foreground text-sm">
+      <p className="text-center text-base text-muted-foreground">
         Already have an account?{" "}
         <Link href={"/login" as Route} className={authLinkClass}>
           Sign in

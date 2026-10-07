@@ -4,7 +4,13 @@ import { Mail } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { useState } from "react";
-import { AuthCard, authLinkClass } from "@/components/auth-card";
+import {
+  AuthCard,
+  authLinkClass,
+  authLabelClass,
+  authFieldClass,
+  authButtonClass,
+} from "@/components/auth-card";
 import { QueryError } from "@/components/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -34,10 +40,13 @@ export function ForgotPasswordScreen() {
           </AlertDescription>
         </Alert>
       ) : (
-        <form className="space-y-4" onSubmit={submit}>
-          <div className="space-y-2">
-            <Label htmlFor="forgot-email">Email</Label>
+        <form className="space-y-5" onSubmit={submit}>
+          <div className="space-y-2.5">
+            <Label className={authLabelClass} htmlFor="forgot-email">
+              Email
+            </Label>
             <Input
+              className={authFieldClass}
               id="forgot-email"
               type="email"
               autoComplete="email"
@@ -49,7 +58,11 @@ export function ForgotPasswordScreen() {
 
           {forgot.isError ? <QueryError error={forgot.error} /> : null}
 
-          <Button type="submit" className="w-full" disabled={!email.trim() || forgot.isPending}>
+          <Button
+            type="submit"
+            className={authButtonClass}
+            disabled={!email.trim() || forgot.isPending}
+          >
             <Mail />
             Email me a reset link
           </Button>

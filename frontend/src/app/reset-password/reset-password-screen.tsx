@@ -4,7 +4,14 @@ import { CircleCheck, KeyRound } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { useState } from "react";
-import { AuthCard, authLinkClass, MIN_PASSWORD_LENGTH } from "@/components/auth-card";
+import {
+  AuthCard,
+  authLinkClass,
+  MIN_PASSWORD_LENGTH,
+  authLabelClass,
+  authFieldClass,
+  authButtonClass,
+} from "@/components/auth-card";
 import { QueryError } from "@/components/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -29,7 +36,7 @@ export function ResetPasswordScreen({ token }: { token: string }) {
           <AlertTitle>Your password has been changed.</AlertTitle>
           <AlertDescription>Sign in with the new password.</AlertDescription>
         </Alert>
-        <Button asChild className="w-full">
+        <Button asChild className={authButtonClass}>
           <Link href={"/login" as Route}>Sign in</Link>
         </Button>
       </AuthCard>
@@ -46,10 +53,13 @@ export function ResetPasswordScreen({ token }: { token: string }) {
           </AlertDescription>
         </Alert>
       ) : (
-        <form className="space-y-4" onSubmit={submit}>
-          <div className="space-y-2">
-            <Label htmlFor="reset-password">New password</Label>
+        <form className="space-y-5" onSubmit={submit}>
+          <div className="space-y-2.5">
+            <Label className={authLabelClass} htmlFor="reset-password">
+              New password
+            </Label>
             <Input
+              className={authFieldClass}
               id="reset-password"
               type="password"
               autoComplete="new-password"
@@ -58,14 +68,14 @@ export function ResetPasswordScreen({ token }: { token: string }) {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
-            <p id="reset-password-hint" className="text-muted-foreground text-xs">
+            <p id="reset-password-hint" className="text-muted-foreground text-sm">
               At least {MIN_PASSWORD_LENGTH} characters.
             </p>
           </div>
 
           {reset.isError ? <QueryError error={reset.error} /> : null}
 
-          <Button type="submit" className="w-full" disabled={!password || reset.isPending}>
+          <Button type="submit" className={authButtonClass} disabled={!password || reset.isPending}>
             <KeyRound />
             Change password
           </Button>
