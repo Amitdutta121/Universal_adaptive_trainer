@@ -1155,6 +1155,9 @@ export interface StudentRosterQuery {
   curriculumVersionId?: number | null;
   page?: number;
   pageSize?: number;
+  /** Column to order by across all pages; omitted keeps name order. */
+  sort?: "name" | "email" | "answered" | "average" | "last_active" | "enrolled" | null;
+  order?: "asc" | "desc";
 }
 
 export const useStudents = (params: StudentRosterQuery = {}) => {
@@ -1166,6 +1169,8 @@ export const useStudents = (params: StudentRosterQuery = {}) => {
     curriculum_version_id: params.curriculumVersionId ?? undefined,
     page: params.page ?? 1,
     page_size: params.pageSize ?? 20,
+    sort: params.sort ?? undefined,
+    order: params.order ?? "asc",
   };
   return useQuery({
     queryKey: qk.students.list(query),
