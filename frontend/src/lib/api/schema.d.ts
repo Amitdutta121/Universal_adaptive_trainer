@@ -674,8 +674,8 @@ export interface paths {
          * List Questions
          * @description The question bank, newest first, with counts by lifecycle status.
          *
-         *     ``status`` (repeatable: ``?status=a&status=b`` keeps either),
-         *     ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
+         *     ``status`` and ``topic_id`` (each repeatable: ``?status=a&status=b`` keeps
+         *     either), ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
          *     listing; without them nothing is hidden. The API does not filter by
          *     default even though the page does, because a caller reading the bank over
          *     JSON has no way to discover rows an unrequested default removed.
@@ -4328,6 +4328,8 @@ export interface components {
             status?: components["schemas"]["QuestionStatus"][] | null;
             /** Curriculum Version Id */
             curriculum_version_id?: number | null;
+            /** Topic Id */
+            topic_id?: number[] | null;
             /** Run Id */
             run_id?: string | null;
         };
@@ -7044,6 +7046,7 @@ export interface operations {
                 limit?: number;
                 status?: components["schemas"]["QuestionStatus"][] | null;
                 curriculum_version_id?: number | null;
+                topic_id?: number[] | null;
                 section_id?: number | null;
                 run_id?: string | null;
             };

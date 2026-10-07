@@ -704,6 +704,7 @@ class QuestionRepository:
         *,
         statuses: Collection[QuestionStatus] | None = None,
         curriculum_version_id: int | None = None,
+        topic_ids: Collection[int] | None = None,
         section_id: int | None = None,
         run_id: str | None = None,
         course_id: int | None = None,
@@ -714,7 +715,8 @@ class QuestionRepository:
         themselves what to show, and an empty collection means "nothing matches"
         rather than "no filter". ``curriculum_version_id`` narrows the same way,
         so a taxonomy filter applies to the whole bank rather than only to
-        whatever page ``limit`` happened to load.
+        whatever page ``limit`` happened to load. ``topic_ids`` keeps a question
+        whose topic is any of these, applied the same way.
 
         ``run_id`` narrows to questions carrying an evaluation from that
         generation run (coverage Generate m4's "Review these" link) -- a join
@@ -732,6 +734,8 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        if topic_ids is not None:
+            stmt = stmt.where(QuestionRow.topic_id.in_(list(topic_ids)))
         if course_id is not None:
             stmt = stmt.where(questions_in_course(course_id))
         if run_id is not None:

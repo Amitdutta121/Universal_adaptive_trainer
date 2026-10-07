@@ -92,13 +92,14 @@ def list_questions(
     limit: int = 50,
     status: Annotated[list[QuestionStatus] | None, Query()] = None,
     curriculum_version_id: int | None = None,
+    topic_id: Annotated[list[int] | None, Query()] = None,
     section_id: int | None = None,
     run_id: str | None = None,
 ) -> QuestionListResponse:
     """The question bank, newest first, with counts by lifecycle status.
 
-    ``status`` (repeatable: ``?status=a&status=b`` keeps either),
-    ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
+    ``status`` and ``topic_id`` (each repeatable: ``?status=a&status=b`` keeps
+    either), ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
     listing; without them nothing is hidden. The API does not filter by
     default even though the page does, because a caller reading the bank over
     JSON has no way to discover rows an unrequested default removed.
@@ -116,6 +117,7 @@ def list_questions(
         limit=limit,
         statuses=status or None,
         curriculum_version_id=curriculum_version_id,
+        topic_ids=topic_id or None,
         section_id=section_id,
         run_id=run_id,
         course_id=course,
@@ -127,6 +129,7 @@ def list_questions(
         total=repo.count(course_id=course),
         status=status or None,
         curriculum_version_id=curriculum_version_id,
+        topic_id=topic_id or None,
         run_id=run_id,
     )
 
