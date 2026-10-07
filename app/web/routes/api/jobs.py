@@ -1,6 +1,6 @@
 """The Jobs panel: every long-running professor action of the course, in one list.
 
-Three tables hold jobs: ``background_jobs`` (bulk generation, coverage fills),
+Three tables hold jobs: ``background_jobs`` (bulk generation, coverage fills, book imports),
 ``generation_rounds`` (question rounds of a setup) and ``judge_batch_runs`` (judge
 re-runs). They keep their own shapes; this route maps each onto :class:`JobOut` so the
 header button, popover and run-detail window read one list.
@@ -89,6 +89,11 @@ def cancel_job(session: DbSession, course: CourseScope, job_id: str) -> JobOut:
         row, _ = _round(session, key, course)
     if RoundStatus(row.status) not in _IN_FLIGHT:
         raise DomainRuleError("This job has already finished.", detail="There is nothing to stop.")
+    if _is_running_import(row):
+        raise DomainRuleError(
+            "A book import can't be stopped once it has started.",
+            detail="It is one step; delete the book afterwards if it is not wanted.",
+        )
     now = datetime.now(UTC)
     model = type(row)
     # A queued job has not started: end it now. The update only matches while it is still
@@ -258,14 +263,29 @@ def _status(row: BackgroundJobRow | GenerationRoundRow) -> str:
     return status.value
 
 
+def _is_running_import(row: BackgroundJobRow | GenerationRoundRow) -> bool:
+    return (
+        isinstance(row, BackgroundJobRow)
+        and JobKind(row.kind) is JobKind.BOOK_IMPORT
+        and RoundStatus(row.status) is RoundStatus.RUNNING
+    )
+
+
 def _can_cancel(row: BackgroundJobRow | GenerationRoundRow) -> bool:
-    return RoundStatus(row.status) in _IN_FLIGHT and row.cancel_requested_at is None
+    return (
+        RoundStatus(row.status) in _IN_FLIGHT
+        and row.cancel_requested_at is None
+        and not _is_running_import(row)
+    )
 
 
 def _retry_label(row: BackgroundJobRow) -> str | None:
     """What retrying this background job would do, or ``None`` when it would do nothing."""
     status = RoundStatus(row.status)
     if status in _IN_FLIGHT or (row.request or {}).get("retried_by"):
+        return None
+    if JobKind(row.kind) is JobKind.BOOK_IMPORT:
+        # A refused document is refused again; importing it anew is a new upload.
         return None
     if JobKind(row.kind) is JobKind.BULK_GENERATION:
         remaining = row.total - row.done
@@ -283,6 +303,14 @@ def _retry_label(row: BackgroundJobRow) -> str | None:
     return f"Retry the remaining {gaps} gap{plural}"
 
 
+def _link(row: BackgroundJobRow) -> str | None:
+    """The course page holding the job's output: its questions, or the imported book."""
+    if JobKind(row.kind) is JobKind.BOOK_IMPORT:
+        book = (row.result or {}).get("book")
+        return f"/books/{book['id']}" if book else None
+    return f"/questions?run_id={row.run_id}" if row.run_id else None
+
+
 def _from_background(row: BackgroundJobRow) -> JobOut:
     return JobOut(
         id=f"job-{row.id}",
@@ -292,7 +320,7 @@ def _from_background(row: BackgroundJobRow) -> JobOut:
         done=row.done,
         total=row.total,
         error=row.error,
-        link=f"/questions?run_id={row.run_id}" if row.run_id else None,
+        link=_link(row),
         result=row.result,
         can_cancel=_can_cancel(row),
         cancel_requested=row.cancel_requested_at is not None,

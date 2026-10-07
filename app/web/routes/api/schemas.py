@@ -2737,19 +2737,25 @@ class JobStartedResponse(BaseModel):
     job_id: str
 
 
+class BookImportResult(BaseModel):
+    """What a book import job produced: the book, as ``POST /books`` used to return it."""
+
+    book: BookSummary
+
+
 class JobOut(BaseModel):
     """One entry of the Jobs panel, whichever table the job lives in.
 
     ``id`` is ``job-<n>`` (bulk generation, coverage fill), ``round-<n>`` (question round) or
     ``judge-<run id>`` (judge re-run). ``link`` is a course-relative page holding the job's
     output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
-    ``result`` is what the old blocking response returned, for the two kinds that had one:
+    ``result`` is what the old blocking response returned, for the kinds that had one:
     :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
-    coverage fill.
+    coverage fill, :class:`BookImportResult` for a book import.
     """
 
     id: str
-    kind: Literal["bulk_generation", "coverage_fill", "question_round", "judge_run"]
+    kind: Literal["bulk_generation", "coverage_fill", "book_import", "question_round", "judge_run"]
     title: str
     status: Literal["queued", "running", "done", "failed", "cancelled"]
     done: int
@@ -2757,7 +2763,7 @@ class JobOut(BaseModel):
     counts: dict[str, int] = Field(default_factory=dict)
     error: str | None = None
     link: str | None = None
-    result: GenerateBatchResponse | GenerationRunResponse | None = None
+    result: GenerateBatchResponse | GenerationRunResponse | BookImportResult | None = None
     #: Whether ``POST /jobs/{id}/cancel`` would stop it (queued or running, not yet asked).
     can_cancel: bool = False
     #: A stop was asked for; a running job ends after the question in flight.

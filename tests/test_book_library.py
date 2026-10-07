@@ -13,6 +13,7 @@ from pathlib import Path
 
 import book_documents as docs
 import pytest
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -41,12 +42,9 @@ def _question_grounded_in(session: Session, section_id: int) -> QuestionRow:
 
 
 def _upload(client: TestClient, document: dict | None = None) -> dict:
-    response = client.post(
-        "/api/books",
-        files={"file": ("book.json", docs.to_bytes(document or docs.think_python()))},
+    return upload_book(
+        client, files={"file": ("book.json", docs.to_bytes(document or docs.think_python()))}
     )
-    assert response.status_code == 201, response.text
-    return response.json()
 
 
 class TestUpdateMetadata:

@@ -19,8 +19,9 @@ vi.mock("nuqs", () => {
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
+const { invalidateQueries } = vi.hoisted(() => ({ invalidateQueries: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries }),
 }));
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, actions }: { title: string; actions?: React.ReactNode }) => (
@@ -81,7 +82,8 @@ function makeDetail(): QuestionDetail {
   } as unknown as QuestionDetail;
 }
 
-let detail: QuestionDetail;
+let detail: QuestionDetail | null;
+let remaining: number;
 
 vi.mock("@/lib/api/queries", () => ({
   qk: { setup: { all: ["setup"] } },
@@ -100,7 +102,7 @@ vi.mock("@/lib/api/queries", () => ({
     },
   }),
   useReviewQueue: () => ({
-    data: { question: detail, reviewed: 0, total: 3, remaining: 3, mode: "all" },
+    data: { question: detail, reviewed: 3 - remaining, total: 3, remaining, mode: "all" },
     isPending: false,
     isError: false,
     error: null,
@@ -117,6 +119,8 @@ vi.mock("@/lib/api/queries", () => ({
 
 beforeEach(() => {
   detail = makeDetail();
+  remaining = 3;
+  invalidateQueries.mockReset();
   currentSetup = { setup: null };
   roundData = undefined;
   submitReview.mockReset().mockResolvedValue({ outcome: null });
@@ -255,5 +259,57 @@ describe("Generate next round", () => {
       "Generating round 2: produced 4, dropped 1 of 10",
     );
     expect(screen.getByRole("button", { name: /Generate next round/ })).toBeDisabled();
+  });
+});
+
+describe("Questions arriving during a round", () => {
+  const running = (produced: number) => ({
+    id: 3,
+    number: 1,
+    status: "running",
+    requested: 10,
+    produced,
+    dropped: 0,
+    error: null,
+  });
+
+  beforeEach(() => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+  });
+
+  it("says the next question is generating instead of that nothing is left", () => {
+    detail = null;
+    remaining = 0;
+    roundData = running(0);
+    render(<ReviewScreen />);
+
+    expect(screen.getByTestId("next-question-generating")).toHaveTextContent(
+      "Generating the next question",
+    );
+    expect(screen.queryByText("Nothing left to review")).not.toBeInTheDocument();
+  });
+
+  it("refetches the queue as each question lands, not only when the round ends", () => {
+    roundData = running(0);
+    const { rerender } = render(<ReviewScreen />);
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    roundData = running(1);
+    rerender(<ReviewScreen />);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["questions", "review-queue"] });
+
+    invalidateQueries.mockClear();
+    roundData = running(2);
+    rerender(<ReviewScreen />);
+    expect(invalidateQueries).toHaveBeenCalledTimes(1);
+  });
+
+  it("is back to the normal empty state once the round is done", () => {
+    detail = null;
+    remaining = 0;
+    roundData = { ...running(10), status: "done" };
+    render(<ReviewScreen />);
+
+    expect(screen.getByText("Nothing left to review")).toBeInTheDocument();
   });
 });

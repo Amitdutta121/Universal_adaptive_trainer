@@ -62,8 +62,7 @@ export function JobDetailDialog({
   const [filter, setFilter] = useState<JobFilter>("all");
   // "View all" lands on the first job still running, so the right side is not empty.
   // On a phone the list comes first instead (`md:` below shows both side by side).
-  const selectedId =
-    jobParam === "all" ? (jobs.find(isActive) ?? jobs[0])?.id ?? null : jobParam;
+  const selectedId = jobParam === "all" ? ((jobs.find(isActive) ?? jobs[0])?.id ?? null) : jobParam;
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
   const [showList, setShowList] = useState(jobParam === "all");
 
@@ -80,7 +79,7 @@ export function JobDetailDialog({
       <DialogContent className="grid h-[min(46rem,calc(100dvh-4rem))] max-w-[calc(100%-2rem)] grid-cols-1 gap-0 overflow-hidden p-0 sm:max-w-5xl md:grid-cols-[20rem_1fr]">
         <DialogTitle className="sr-only">Jobs</DialogTitle>
         <DialogDescription className="sr-only">
-          Generation runs, question rounds and judge runs of this course.
+          Generation runs, book imports, question rounds and judge runs of this course.
         </DialogDescription>
 
         <aside

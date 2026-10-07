@@ -309,7 +309,11 @@ export interface paths {
         put?: never;
         /**
          * Import Book
-         * @description Validate and import an uploaded book JSON document.
+         * @description Check an uploaded book document, store it, and import it as a background job.
+         *
+         *     The type, the size, a JSON document's structure and whether a PDF opens are
+         *     checked here, so the professor still sees those refusals in the import dialog.
+         *     Extracting a PDF's text is :func:`run_book_import`'s, after the ``202``.
          *
          *     Reading the spooled file synchronously is safe here: the route runs in a
          *     worker thread, so it does not block the event loop.
@@ -2345,6 +2349,13 @@ export interface components {
             /** Warning Severities */
             warning_severities: components["schemas"]["VocabularyTermOut"][];
         };
+        /**
+         * BookImportResult
+         * @description What a book import job produced: the book, as ``POST /books`` used to return it.
+         */
+        BookImportResult: {
+            book: components["schemas"]["BookSummary"];
+        };
         /** BookListResponse */
         BookListResponse: {
             /** Books */
@@ -3716,9 +3727,9 @@ export interface components {
          *     ``id`` is ``job-<n>`` (bulk generation, coverage fill), ``round-<n>`` (question round) or
          *     ``judge-<run id>`` (judge re-run). ``link`` is a course-relative page holding the job's
          *     output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
-         *     ``result`` is what the old blocking response returned, for the two kinds that had one:
+         *     ``result`` is what the old blocking response returned, for the kinds that had one:
          *     :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
-         *     coverage fill.
+         *     coverage fill, :class:`BookImportResult` for a book import.
          */
         JobOut: {
             /** Id */
@@ -3727,7 +3738,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bulk_generation" | "coverage_fill" | "question_round" | "judge_run";
+            kind: "bulk_generation" | "coverage_fill" | "book_import" | "question_round" | "judge_run";
             /** Title */
             title: string;
             /**
@@ -3748,7 +3759,7 @@ export interface components {
             /** Link */
             link?: string | null;
             /** Result */
-            result?: components["schemas"]["GenerateBatchResponse"] | components["schemas"]["GenerationRunResponse"] | null;
+            result?: components["schemas"]["GenerateBatchResponse"] | components["schemas"]["GenerationRunResponse"] | components["schemas"]["BookImportResult"] | null;
             /**
              * Can Cancel
              * @default false
@@ -6349,12 +6360,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookSummary"];
+                    "application/json": components["schemas"]["JobStartedResponse"];
                 };
             };
             /** @description Validation Error */

@@ -23,8 +23,10 @@ export function describeRoundError(error: unknown): string {
  *
  * The round being watched lives in the URL (`?round=`) so a reload keeps polling it. Without
  * one, a round of the current setup that is still queued or running is watched instead, so
- * landing here from the setup modal shows round 1's progress too. When the watched round
- * finishes, the review queue and the setup are refetched.
+ * landing here from the setup modal shows round 1's progress too. Each question a round
+ * produces is committed and reviewable at once, so the queue is refetched as every one lands:
+ * the professor reviews the first while the rest are generated. When the round finishes, the
+ * queue and the setup are refetched.
  */
 export function useNextRound(curriculumVersionId: number | null | undefined) {
   const client = useQueryClient();
@@ -46,6 +48,12 @@ export function useNextRound(curriculumVersionId: number | null | undefined) {
   useEffect(() => {
     if (roundParam == null && latestActive != null) void setRoundParam(latestActive);
   }, [roundParam, latestActive, setRoundParam]);
+
+  const produced = round?.produced ?? 0;
+  useEffect(() => {
+    if (produced === 0) return;
+    void client.invalidateQueries({ queryKey: ["questions", "review-queue"] });
+  }, [client, produced]);
 
   const refreshedFor = useRef<number | null>(null);
   useEffect(() => {
@@ -79,6 +87,7 @@ export function useNextRound(curriculumVersionId: number | null | undefined) {
     roundId,
     round,
     roundError: roundQuery.isError ? describeRoundError(roundQuery.error) : null,
+    isGenerating: isActive,
     isStarting: start.isPending,
     canStart: disabledReason === null && !start.isPending,
     disabledReason,

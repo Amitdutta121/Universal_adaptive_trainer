@@ -630,7 +630,9 @@ export const useBookDocumentGuide = () =>
   });
 
 /**
- * Import a book document.
+ * Import a book document: the quick checks answer here, the import itself is a
+ * background job (`202 {job_id}`) that the Jobs panel follows. The books list is
+ * refreshed when that job finishes (`useJobFinishedToasts`).
  *
  * `file` is typed as `string` by the generated types because OpenAPI describes an
  * upload as a binary string; a `File` is what the multipart body actually needs.
@@ -654,8 +656,7 @@ export function useImportBook() {
         }),
       ),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: qk.books.all });
-      client.invalidateQueries({ queryKey: qk.system.counts() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
     },
   });
 }
@@ -1568,6 +1569,9 @@ export function useRound(
             const status = query.state.data?.status;
             return status === "done" || status === "failed" ? false : ROUND_POLL_MS;
           },
+    // Each poll can bring a new question into the review queue; a professor who switches
+    // tabs while a round generates comes back to it already there.
+    refetchIntervalInBackground: true,
   });
 }
 

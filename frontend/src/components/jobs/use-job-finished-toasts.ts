@@ -36,6 +36,7 @@ export function useJobFinishedToasts(jobs: readonly Job[], onView: (jobId: strin
 
     for (const key of [
       qk.questions.all,
+      qk.books.all,
       qk.system.counts(),
       qk.coverage.all,
       qk.rounds.all,

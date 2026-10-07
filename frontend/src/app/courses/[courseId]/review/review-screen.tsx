@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { toast } from "sonner";
@@ -211,7 +211,20 @@ export function ReviewScreen() {
         </Card>
       ) : null}
       {data && !detail ? (
-        data.remaining === 0 ? (
+        nextRound.isGenerating ? (
+          <Card className="review-panel border" data-testid="next-question-generating">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Loader2 className="size-4 animate-spin" />
+                Generating the next question
+              </CardTitle>
+              <CardDescription>
+                It appears here as soon as it is generated and judged; the rest of the round keeps
+                generating while you review.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : data.remaining === 0 ? (
           <EmptyState
             title="Nothing left to review"
             hint="Every question in the bank has a verdict."

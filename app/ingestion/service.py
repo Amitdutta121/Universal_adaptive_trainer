@@ -29,9 +29,14 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.domain.enums import BookStatus, SourceFormat
-from app.ingestion.pdf import extract_book_document
+from app.ingestion.pdf import check_pdf_readable, extract_book_document
 from app.ingestion.schema import BookDocument, parse_book_document
-from app.ingestion.storage import checksum, store_upload, validate_upload
+from app.ingestion.storage import (
+    checksum,
+    resolve_stored_path,
+    store_upload,
+    validate_upload,
+)
 from app.persistence.models import BookChapterRow, BookRow, BookSectionRow
 from app.persistence.repositories import BookRepository, BookStructureRepository
 
@@ -76,13 +81,82 @@ class BookImportService:
         source_format = validate_upload(filename, data, self._settings)
         # Validate the structure before storing anything, so a bad document
         # leaves behind neither a file nor a row.
-        document = (
-            extract_book_document(data, source_filename=filename)
-            if source_format is SourceFormat.BOOK_PDF
-            else parse_book_document(data)
+        document = self._read_document(data, filename, source_format)
+        stored_name, _ = store_upload(data, filename, self._settings)
+        return self._create_book(
+            document,
+            data=data,
+            filename=filename,
+            stored_name=stored_name,
+            source_format=source_format,
+            title=title,
+            course_id=course_id,
         )
 
-        stored_name, stored_path = store_upload(data, filename, self._settings)
+    def check_upload(self, *, filename: str, data: bytes) -> SourceFormat:
+        """The checks quick enough to answer while the professor waits.
+
+        Type and size; a JSON document is validated in full (parsing it is cheap), a PDF
+        is only opened. What remains -- extracting a PDF's text, writing the rows -- is
+        :meth:`import_stored`, which a background job runs.
+
+        Raises:
+            UnsupportedFileError, FileTooLargeError, InvalidBookDocumentError: as
+                :meth:`import_upload`.
+        """
+        source_format = validate_upload(filename, data, self._settings)
+        if source_format is SourceFormat.BOOK_PDF:
+            check_pdf_readable(data)
+        else:
+            parse_book_document(data)
+        return source_format
+
+    def import_stored(
+        self,
+        *,
+        stored_filename: str,
+        filename: str,
+        title: str | None = None,
+        course_id: int | None = None,
+    ) -> BookRow:
+        """Import an upload :meth:`check_upload` accepted and the caller already stored.
+
+        Raises:
+            InvalidBookDocumentError: the document failed a check :meth:`check_upload`
+                does not make, e.g. a PDF with no extractable text. The stored file is
+                the caller's to remove.
+        """
+        data = resolve_stored_path(stored_filename, self._settings).read_bytes()
+        source_format = validate_upload(filename, data, self._settings)
+        document = self._read_document(data, filename, source_format)
+        return self._create_book(
+            document,
+            data=data,
+            filename=filename,
+            stored_name=stored_filename,
+            source_format=source_format,
+            title=title,
+            course_id=course_id,
+        )
+
+    def _read_document(
+        self, data: bytes, filename: str, source_format: SourceFormat
+    ) -> BookDocument:
+        if source_format is SourceFormat.BOOK_PDF:
+            return extract_book_document(data, source_filename=filename)
+        return parse_book_document(data)
+
+    def _create_book(
+        self,
+        document: BookDocument,
+        *,
+        data: bytes,
+        filename: str,
+        stored_name: str,
+        source_format: SourceFormat,
+        title: str | None,
+        course_id: int | None,
+    ) -> BookRow:
         book = self._books.add(
             BookRow(
                 course_id=course_id,
@@ -107,7 +181,7 @@ class BookImportService:
         logger.info(
             "Imported book %s from %s: %d chapter(s), %d section(s), status=%s",
             book.id,
-            stored_path.name,
+            stored_name,
             len(document.chapters),
             document.section_count,
             book.status,

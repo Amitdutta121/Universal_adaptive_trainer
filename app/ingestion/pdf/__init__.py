@@ -29,7 +29,29 @@ from app.errors import InvalidBookDocumentError
 from app.ingestion.pdf.assemble import build_book_document
 from app.ingestion.schema import BookDocument, validate_payload
 
-__all__ = ["extract_book_document"]
+__all__ = ["check_pdf_readable", "extract_book_document"]
+
+
+def _open(data: bytes) -> pymupdf.Document:
+    try:
+        return pymupdf.open(stream=data, filetype="pdf")
+    except Exception as exc:  # pymupdf raises its own, undocumented exception types
+        raise InvalidBookDocumentError(
+            "This file could not be read as a PDF.",
+            detail=str(exc),
+        ) from exc
+
+
+def check_pdf_readable(data: bytes) -> None:
+    """Refuse bytes that are not a readable PDF, without extracting anything.
+
+    Opening is quick where extraction is not, so an import can refuse a corrupt file
+    while the professor is still in the dialog and leave the slow part to a job.
+
+    Raises:
+        InvalidBookDocumentError: the bytes are not a readable PDF.
+    """
+    _open(data).close()
 
 
 def extract_book_document(data: bytes, *, source_filename: str) -> BookDocument:
@@ -39,14 +61,7 @@ def extract_book_document(data: bytes, *, source_filename: str) -> BookDocument:
         InvalidBookDocumentError: the bytes are not a readable PDF, or every
             page turned out to have no extractable text.
     """
-    try:
-        doc = pymupdf.open(stream=data, filetype="pdf")
-    except Exception as exc:  # pymupdf raises its own, undocumented exception types
-        raise InvalidBookDocumentError(
-            "This file could not be read as a PDF.",
-            detail=str(exc),
-        ) from exc
-
+    doc = _open(data)
     try:
         payload = build_book_document(doc, source_filename=source_filename)
     finally:

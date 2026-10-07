@@ -2524,6 +2524,12 @@ Now every long action is a job the Studio's header **Jobs** button lists
   resumes its fixed plan at `start_at`; a coverage fill takes the gaps it did not reach or that
   failed; a round starts the next round; a judge run is submitted again); a background job is
   retried once.
+- Book import is a `background_jobs` row too (`book_import`). `POST /books` keeps the quick
+  checks (type, size, a JSON document's structure, whether a PDF opens), stores the file and
+  answers `202`; extracting a textbook PDF's text, which can take minutes, runs in the job. A
+  document refused there leaves neither rows nor its file. A running import cannot be
+  cancelled (it is one step) and is not retried (a refused document is refused again); the
+  import dialog closes and opens the job's run window instead of waiting on "Validating…".
 
 **Consequences.** A restart loses in-flight generation (marked failed, made questions kept)
 rather than resuming it; that is the trade for no extra process. The UI polls (2 s while
