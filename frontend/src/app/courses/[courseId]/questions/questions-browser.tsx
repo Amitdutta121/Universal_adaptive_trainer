@@ -197,20 +197,25 @@ function FilterLabel({ children }: { children: string }) {
 /**
  * One filter as a button that names the filter and what it keeps ("Status: Approved +1"),
  * opening a checklist so several values can be kept at once. The menu stays open while
- * ticking; no values ticked means the filter is off.
+ * ticking; no values ticked means the filter is off. `capitalize` is for enum labels;
+ * names an instructor typed (topics) are shown as written.
  */
-function FilterMultiSelect<T extends string>({
+function FilterMultiSelect<T extends string | number>({
   label,
   allLabel,
   value,
   options,
   onChange,
+  capitalize = true,
+  disabled = false,
 }: {
   label: string;
   allLabel: string;
   value: readonly T[];
   options: readonly { value: T; label: string; count?: number }[];
   onChange: (value: T[]) => void;
+  capitalize?: boolean;
+  disabled?: boolean;
 }) {
   const chosen = options.filter((option) => value.includes(option.value));
   const toggle = (option: T, on: boolean) =>
@@ -223,13 +228,17 @@ function FilterMultiSelect<T extends string>({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="h-9 min-w-40 justify-between font-normal">
-          <span>
+        <Button
+          variant="outline"
+          className="h-9 min-w-40 max-w-72 justify-between font-normal"
+          disabled={disabled}
+        >
+          <span className="truncate">
             <span className="text-muted-foreground">{label}:</span>{" "}
             {chosen.length === 0 ? (
               allLabel
             ) : (
-              <span className="capitalize">
+              <span className={capitalize ? "capitalize" : undefined}>
                 {chosen[0].label}
                 {chosen.length > 1 ? (
                   <span className="text-muted-foreground"> +{chosen.length - 1}</span>
@@ -240,14 +249,14 @@ function FilterMultiSelect<T extends string>({
           <ChevronDown className="size-4 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-56">
+      <DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto">
         {options.map((option) => (
           <DropdownMenuCheckboxItem
             key={option.value}
             checked={value.includes(option.value)}
             onCheckedChange={(on) => toggle(option.value, on)}
             onSelect={(event) => event.preventDefault()}
-            className="capitalize"
+            className={capitalize ? "capitalize" : undefined}
           >
             {option.label}
             {option.count !== undefined ? (
@@ -491,6 +500,10 @@ export function QuestionsBrowser() {
     "question_type",
     parseAsArrayOf(parseAsStringLiteral(QUESTION_TYPES)).withDefault([]),
   );
+  const [topic, setTopic] = useQueryState(
+    "topic",
+    parseAsArrayOf(parseAsInteger).withDefault([]),
+  );
   const [runId, setRunId] = useQueryState("run_id", parseAsString);
   const [previewId, setPreviewId] = useQueryState("preview", parseAsInteger);
   const [sorting, setSorting] = useState<SortingState>([{ id: "created_at", desc: true }]);
@@ -500,6 +513,15 @@ export function QuestionsBrowser() {
   // The bank shows the taxonomy chosen in the header, like every other page.
   const selectedTaxonomy = useApprovedCurriculum();
   const selectedTaxonomyId = selectedTaxonomy.data?.version.id ?? null;
+  const topics = useMemo(
+    () =>
+      [...(selectedTaxonomy.data?.topics ?? [])]
+        .sort((a, b) => a.position - b.position)
+        .map((each) => ({ value: each.id, label: each.name })),
+    [selectedTaxonomy.data?.topics],
+  );
+  const topicName = (id: number) =>
+    topics.find((each) => each.value === id)?.label ?? `Topic ${id}`;
 
   const deferredQuery = useDeferredValue(query);
   const params = useMemo(
@@ -507,9 +529,11 @@ export function QuestionsBrowser() {
       limit,
       ...(status.length > 0 ? { status } : {}),
       ...(selectedTaxonomyId !== null ? { curriculum_version_id: selectedTaxonomyId } : {}),
+      // Server-side like status, so a topic's older questions are not cut off by `limit`.
+      ...(topic.length > 0 ? { topic_id: topic } : {}),
       ...(runId ? { run_id: runId } : {}),
     }),
-    [limit, status, selectedTaxonomyId, runId],
+    [limit, status, selectedTaxonomyId, topic, runId],
   );
   const { data, isPending, isError, error } = useQuestions(params);
 
@@ -568,6 +592,13 @@ export function QuestionsBrowser() {
           label: "difficulty",
           value: difficulty.join(", "),
           onClear: () => void setDifficulty(null),
+        }
+      : null,
+    topic.length > 0
+      ? {
+          label: "topic",
+          value: topic.map(topicName).join(", "),
+          onClear: () => void setTopic(null),
         }
       : null,
     questionType.length > 0
@@ -677,6 +708,15 @@ export function QuestionsBrowser() {
                 }))}
                 onChange={(value) => void setQuestionType(value.length > 0 ? value : null)}
               />
+              <FilterMultiSelect
+                label="Topic"
+                allLabel="All topics"
+                value={topic}
+                options={topics}
+                capitalize={false}
+                disabled={topics.length === 0}
+                onChange={(value) => void setTopic(value.length > 0 ? value : null)}
+              />
               <Button
                 variant="ghost"
                 size="sm"
@@ -686,6 +726,7 @@ export function QuestionsBrowser() {
                   void setQuery("");
                   void setDifficulty(null);
                   void setQuestionType(null);
+                  void setTopic(null);
                   void setRunId(null);
                 }}
               >

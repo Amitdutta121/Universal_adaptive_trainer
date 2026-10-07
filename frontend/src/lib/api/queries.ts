@@ -355,6 +355,8 @@ type QuestionListParams = {
   /** Any of these; the API takes the parameter repeated. */
   status?: QuestionStatus[];
   curriculum_version_id?: number;
+  /** Any of these topics, repeated like `status`. */
+  topic_id?: number[];
   section_id?: number;
   run_id?: string;
 };

@@ -457,6 +457,7 @@ def test_question_list_is_empty_before_any_generation(client: TestClient) -> Non
         "total": 0,
         "status": None,
         "curriculum_version_id": None,
+        "topic_id": None,
         "run_id": None,
     }
 
@@ -505,6 +506,30 @@ def test_question_list_filters_by_any_of_several_statuses(
     assert sorted(q["id"] for q in payload["questions"]) == sorted([approved.id, rejected.id])
     assert sorted(payload["status"]) == ["approved", "rejected"]
     assert payload["total"] == 3
+
+
+def test_question_list_filters_by_any_of_several_topics_across_the_whole_bank(
+    client: TestClient, session: Session
+) -> None:
+    """``topic_id`` repeats and is applied before ``limit``, like the status filter."""
+    from app.persistence.models import QuestionRow
+
+    old_topic_1 = QuestionRow(prompt="Topic 1.", topic_id=1)
+    topic_2 = QuestionRow(prompt="Topic 2.", topic_id=2)
+    session.add_all([old_topic_1, topic_2])
+    session.flush()
+    for i in range(3):
+        session.add(QuestionRow(prompt=f"Topic 3, #{i}.", topic_id=3))
+    session.add(QuestionRow(prompt="No topic."))
+    session.commit()
+
+    response = client.get("/api/questions", params={"topic_id": [1, 2], "limit": 2})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert sorted(q["id"] for q in payload["questions"]) == sorted([old_topic_1.id, topic_2.id])
+    assert sorted(payload["topic_id"]) == [1, 2]
+    assert payload["total"] == 6
 
 
 def test_question_list_filters_by_section_across_the_whole_bank(

@@ -1061,6 +1061,8 @@ class QuestionListResponse(BaseModel):
     #: client can tell a narrowed listing from a bank that happens to hold only these rows.
     status: list[QuestionStatus] | None = None
     curriculum_version_id: int | None = None
+    #: The topic filter (any of these), echoed back like ``status``.
+    topic_id: list[int] | None = None
     run_id: str | None = None
 
 
