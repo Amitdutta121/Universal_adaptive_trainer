@@ -1568,6 +1568,9 @@ export function useRound(
             const status = query.state.data?.status;
             return status === "done" || status === "failed" ? false : ROUND_POLL_MS;
           },
+    // Each poll can bring a new question into the review queue; a professor who switches
+    // tabs while a round generates comes back to it already there.
+    refetchIntervalInBackground: true,
   });
 }
 
