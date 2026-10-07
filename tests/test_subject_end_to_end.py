@@ -15,6 +15,7 @@ from typing import Any
 
 import book_documents as docs
 import pytest
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 from llm_fakes import MetricJudgeClient
 from pydantic import BaseModel
@@ -109,13 +110,12 @@ def _material(
     client: TestClient, course_id: int, book: dict[str, Any], taxonomy: dict[str, Any]
 ) -> tuple[int, int, int, list[int]]:
     """Import the book and the taxonomy into the course: (version, section, topic, subtopics)."""
-    uploaded = client.post(
-        "/api/books",
+    uploaded = upload_book(
+        client,
         headers=_in(course_id),
         files={"file": ("book.json", docs.to_bytes(book), "application/json")},
     )
-    assert uploaded.status_code == 201, uploaded.text
-    sections = client.get(f"/api/books/{uploaded.json()['id']}/sections", headers=_in(course_id))
+    sections = client.get(f"/api/books/{uploaded['id']}/sections", headers=_in(course_id))
     assert sections.status_code == 200, sections.text
 
     imported = client.post(

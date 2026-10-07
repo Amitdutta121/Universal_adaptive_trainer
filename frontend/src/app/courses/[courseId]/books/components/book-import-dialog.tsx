@@ -11,16 +11,21 @@
  * Both paths end in the same multipart upload, because both are the same
  * document: a reply from an assistant is text long before it is a file.
  *
- * A rejection is shown with the backend's own message and detail — "the document
- * does not match the expected structure", and the field that was wrong — because
- * that text is what tells them what to fix. Nothing is stored on a rejection, so
- * what they entered is left where it is and the modal stays open. The form lives
+ * Submitting runs only the quick checks (type, size, a JSON document's structure,
+ * whether a PDF opens) and starts the import as a background job: the modal closes
+ * and the job's run window opens (`?job=`), so a long PDF never holds the professor
+ * here. The Jobs panel announces when the book is ready, or why it was refused.
+ *
+ * A quick-check rejection is shown with the backend's own message and detail — "the
+ * document does not match the expected structure", and the field that was wrong —
+ * because that text is what tells them what to fix. Nothing is stored on a rejection,
+ * so what they entered is left where it is and the modal stays open. The form lives
  * inside the dialog's content, so closing the modal clears it.
  */
 
 import { ChevronDown, Upload } from "lucide-react";
+import { parseAsString, useQueryState } from "nuqs";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -46,6 +51,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
   const [title, setTitle] = useState("");
   const [localProblem, setLocalProblem] = useState<string | null>(null);
   const importBook = useImportBook();
+  const [, setJobParam] = useQueryState("job", parseAsString);
 
   const fileFieldId = useId();
   const pasteFieldId = useId();
@@ -89,15 +95,13 @@ function ImportForm({ onImported }: { onImported: () => void }) {
     if (!document) return;
 
     try {
-      const book = await importBook.mutateAsync({ file: document, title: titleOverride(title) });
-      toast.success(`Imported “${book.title}”`, {
-        description:
-          book.status === "partial"
-            ? "The document validated but declares caveats — it is marked partial."
-            : "The document validated with no caveats declared.",
+      const started = await importBook.mutateAsync({
+        file: document,
+        title: titleOverride(title),
       });
-      // Only closed on success: a refused document is still the professor's work.
+      // Only closed once accepted: a refused document is still the professor's work.
       onImported();
+      void setJobParam(started.job_id);
     } catch {
       // Rendered from `importBook.error` below, with the backend's own wording.
     }
@@ -175,7 +179,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
 
       <div className="flex justify-end">
         <Button type="submit" disabled={importBook.isPending}>
-          {importBook.isPending ? "Validating…" : "Import book"}
+          {importBook.isPending ? "Uploading…" : "Import book"}
         </Button>
       </div>
     </form>

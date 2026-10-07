@@ -12,6 +12,7 @@ export type JobStatus = Job["status"];
 export const KIND_LABEL: Record<Job["kind"], string> = {
   bulk_generation: "Bulk generation",
   coverage_fill: "Coverage fill",
+  book_import: "Book import",
   question_round: "Question round",
   judge_run: "Judge run",
 };
@@ -85,6 +86,14 @@ export function outcomeText(job: Job): string {
       ]
         .filter(Boolean)
         .join(" · ");
+    case "book_import": {
+      const result = job.result;
+      if (!result || !("book" in result)) return "Imported";
+      const { book } = result;
+      return book.status === "partial"
+        ? `Imported “${book.title}” (partial)`
+        : `Imported “${book.title}”`;
+    }
     case "coverage_fill": {
       // `done` counts gap cells handled; a skipped cell made no question.
       const result = job.result;
@@ -105,6 +114,8 @@ export function linkLabel(job: Job): string {
       return "Open in review";
     case "judge_run":
       return "Open judges";
+    case "book_import":
+      return "Open book";
     default:
       return "Open these questions";
   }

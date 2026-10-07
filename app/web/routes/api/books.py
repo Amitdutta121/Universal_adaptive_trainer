@@ -1,7 +1,9 @@
 """Book endpoints: import a structured book document, read it back, edit, delete.
 
 Import is all-or-nothing. An invalid document raises before any row is written,
-and the error handler renders the reason as JSON (see :mod:`app.errors`).
+and the error handler renders the reason as JSON (see :mod:`app.errors`). The checks
+quick enough to wait for run in the request; extracting a PDF's text can take minutes
+for a textbook, so the import itself is a background job (ADR-062) the Jobs panel shows.
 
 Editing covers the row's labels only -- title, author, notes. Structure is
 declared by the imported document (ADR-015), so correcting a chapter means
@@ -23,7 +25,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.domain.enums import SourceFormat
+from app.domain.enums import JobKind, SourceFormat
 from app.errors import NotFoundError
 from app.ingestion import (
     SCHEMA_VERSION,
@@ -37,17 +39,22 @@ from app.ingestion import (
     book_authoring_prompt,
     example_json,
 )
-from app.ingestion.storage import resolve_stored_path
+from app.ingestion.storage import resolve_stored_path, store_upload
+from app.jobs.queue import JobQueueDep
+from app.jobs.runner import Progress, create_job, execute
+from app.persistence.models import BackgroundJobRow
 from app.persistence.repositories import BookRepository, BookStructureRepository
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookDeletion,
     BookDetail,
     BookDocumentGuide,
+    BookImportResult,
     BookListResponse,
     BookMetadataUpdate,
     BookSummary,
     ChapterOut,
+    JobStartedResponse,
     SectionDetail,
     SectionListResponse,
     SectionSummary,
@@ -84,14 +91,19 @@ def _book_in_course(session: Session, book_id: int, course: int | None) -> None:
     ensure_in_course(BookRepository(session).get(book_id).course_id, course, f"Book {book_id}")
 
 
-@router.post("", response_model=BookSummary, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=JobStartedResponse, status_code=status.HTTP_202_ACCEPTED)
 def import_book(
     session: DbSession,
     course: CourseScope,
+    queue: JobQueueDep,
     file: Annotated[UploadFile, File()],
     title: Annotated[str, Form()] = "",
-) -> BookSummary:
-    """Validate and import an uploaded book JSON document.
+) -> JobStartedResponse:
+    """Check an uploaded book document, store it, and import it as a background job.
+
+    The type, the size, a JSON document's structure and whether a PDF opens are
+    checked here, so the professor still sees those refusals in the import dialog.
+    Extracting a PDF's text is :func:`run_book_import`'s, after the ``202``.
 
     Reading the spooled file synchronously is safe here: the route runs in a
     worker thread, so it does not block the event loop.
@@ -99,15 +111,50 @@ def import_book(
     data = file.file.read()
     filename = file.filename or "upload"
     try:
-        book = BookImportService(session).import_upload(
-            filename=filename, data=data, title=title, course_id=course
-        )
+        BookImportService(session).check_upload(filename=filename, data=data)
     except Exception:
-        session.rollback()
         logger.info("Rejected book upload %r", filename)
         raise
+    stored_name, _ = store_upload(data, filename, get_settings())
+    job = create_job(
+        session,
+        kind=JobKind.BOOK_IMPORT,
+        title=f"Import book · {filename}",
+        total=1,
+        request={"stored_filename": stored_name, "filename": filename, "title": title},
+        course_id=course,
+    )
     session.commit()
-    return BookSummary.from_row(book)
+    queue.submit(run_book_import, job.id)
+    return JobStartedResponse(job_id=f"job-{job.id}")
+
+
+def run_book_import(job_id: int, *, session_factory=None) -> None:
+    """Background body of ``POST /books``: import the stored upload, then record the book."""
+    execute(job_id, _book_import, session_factory=session_factory)
+
+
+def _book_import(session: Session, job: BackgroundJobRow, _progress: Progress) -> dict:
+    request = job.request or {}
+    stored_filename = request["stored_filename"]
+    try:
+        book = BookImportService(session).import_stored(
+            stored_filename=stored_filename,
+            filename=request["filename"],
+            title=request.get("title") or "",
+            course_id=job.course_id,
+        )
+        session.commit()
+    except Exception:
+        # All-or-nothing, as before the import was a job: a refused document leaves
+        # neither rows nor its file behind.
+        session.rollback()
+        resolve_stored_path(stored_filename, get_settings()).unlink(missing_ok=True)
+        raise
+    # Counted directly, not through ``progress``: that would honour a cancel arriving
+    # after the book is already saved. A running import cannot be stopped (jobs route).
+    job.done = 1
+    return BookImportResult(book=BookSummary.from_row(book)).model_dump(mode="json")
 
 
 @router.get("/document-guide", response_model=BookDocumentGuide)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import book_documents as docs
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -26,14 +27,12 @@ def _in(course_id: int) -> dict[str, str]:
 
 
 def _import_book(client: TestClient, course_id: int, title: str) -> dict:
-    response = client.post(
-        "/api/books",
+    return upload_book(
+        client,
         headers=_in(course_id),
         data={"title": title},
         files={"file": ("book.json", docs.to_bytes(docs.think_python()), "application/json")},
     )
-    assert response.status_code == 201, response.text
-    return response.json()
 
 
 def _import_taxonomy(client: TestClient, course_id: int, label: str) -> dict:

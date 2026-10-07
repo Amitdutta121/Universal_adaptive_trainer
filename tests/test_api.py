@@ -10,6 +10,7 @@ from __future__ import annotations
 import book_documents as docs
 import pymupdf
 import pytest
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -36,14 +37,12 @@ VALID_TAXONOMY = (
 
 
 def _import_book(client: TestClient) -> dict:
-    response = client.post(
-        "/api/books",
+    return upload_book(
+        client,
         files={
             "file": ("think_python.json", docs.to_bytes(docs.think_python()), "application/json")
         },
     )
-    assert response.status_code == 201, response.text
-    return response.json()
 
 
 def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
@@ -56,12 +55,7 @@ def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
 
 
 def _import_pdf_book(client: TestClient) -> dict:
-    response = client.post(
-        "/api/books",
-        files={"file": ("textbook.pdf", _one_page_pdf(), "application/pdf")},
-    )
-    assert response.status_code == 201, response.text
-    return response.json()
+    return upload_book(client, files={"file": ("textbook.pdf", _one_page_pdf(), "application/pdf")})
 
 
 def _import_taxonomy(client: TestClient) -> dict:

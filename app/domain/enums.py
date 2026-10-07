@@ -386,12 +386,13 @@ class RoundStatus(StrEnum):
 class JobKind(StrEnum):
     """What a background job stored in ``background_jobs`` does.
 
-    Question rounds and judge re-runs keep their own tables; these are the two long
+    Question rounds and judge re-runs keep their own tables; these are the long
     professor actions that used to be one blocking request.
     """
 
     BULK_GENERATION = "bulk_generation"
     COVERAGE_FILL = "coverage_fill"
+    BOOK_IMPORT = "book_import"
 
 
 class CustomJudgeKind(StrEnum):

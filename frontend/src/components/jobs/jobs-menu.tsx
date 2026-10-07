@@ -86,8 +86,8 @@ export function JobsMenu() {
               </p>
             ) : all.length === 0 ? (
               <p className="px-3.5 py-6 text-center text-muted-foreground text-sm">
-                Nothing has run in this course yet. Generation runs, question rounds and judge runs
-                show up here.
+                Nothing has run in this course yet. Generation runs, book imports, question rounds
+                and judge runs show up here.
               </p>
             ) : (
               <>

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 
 from app.domain.enums import ExtractionWarningCode, StructureSource, WarningSeverity
@@ -120,13 +121,12 @@ class TestDocumentGuideEndpoint:
     def test_the_example_it_serves_imports(self, client: TestClient) -> None:
         """End to end: what the page shows is what the upload endpoint accepts."""
         example = client.get("/api/books/document-guide").json()["example_json"]
-        response = client.post(
-            "/api/books",
+        book = upload_book(
+            client,
             files={"file": ("example.json", example.encode("utf-8"), "application/json")},
         )
-        assert response.status_code == 201, response.text
         # It declares a guessed boundary, so it is imported with caveats.
-        assert response.json()["status"] == "partial"
+        assert book["status"] == "partial"
 
     def test_the_route_is_not_shadowed_by_the_book_id_route(self, client: TestClient) -> None:
         """`/books/document-guide` must not be read as a book id."""

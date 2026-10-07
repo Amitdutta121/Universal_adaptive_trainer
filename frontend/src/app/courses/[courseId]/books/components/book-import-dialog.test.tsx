@@ -5,8 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BookImportDialog } from "./book-import-dialog";
 
 const mutateAsync = vi.fn();
+const { setJobParam } = vi.hoisted(() => ({ setJobParam: vi.fn() }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
+vi.mock("nuqs", () => ({
+  parseAsString: {},
+  useQueryState: () => [null, setJobParam],
+}));
 // The guide's own card is not what is under test here.
 vi.mock("./document-guide-card", () => ({ DocumentGuideCard: () => <div>guide card</div> }));
 vi.mock("@/lib/api/queries", () => ({
@@ -32,6 +36,7 @@ const DOCUMENT = '{"schema_version":"1","title":"T","chapters":[]}';
 
 beforeEach(() => {
   mutateAsync.mockReset();
+  setJobParam.mockReset();
 });
 
 describe("BookImportDialog", () => {
@@ -49,8 +54,8 @@ describe("BookImportDialog", () => {
     expect(screen.getByText("guide card")).toBeInTheDocument();
   });
 
-  it("imports a chosen file with its title override and closes on success", async () => {
-    mutateAsync.mockResolvedValue({ title: "Custom", status: "imported" });
+  it("starts the import with its title override, closes, and opens the job", async () => {
+    mutateAsync.mockResolvedValue({ job_id: "job-7" });
     const user = userEvent.setup();
     render(<Harness />);
 
@@ -62,10 +67,11 @@ describe("BookImportDialog", () => {
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ file, title: "Custom" }));
     await waitFor(() => expect(screen.getByText("closed")).toBeInTheDocument());
+    expect(setJobParam).toHaveBeenCalledWith("job-7");
   });
 
   it("imports pasted JSON as a document", async () => {
-    mutateAsync.mockResolvedValue({ title: "T", status: "imported" });
+    mutateAsync.mockResolvedValue({ job_id: "job-8" });
     const user = userEvent.setup();
     render(<Harness />);
 
@@ -92,6 +98,7 @@ describe("BookImportDialog", () => {
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
     expect(screen.getByText("open")).toBeInTheDocument();
     expect(screen.getByLabelText("Paste JSON instead of a file")).toHaveValue(DOCUMENT);
+    expect(setJobParam).not.toHaveBeenCalled();
   });
 
   it("says what is missing when nothing was chosen, and sends nothing", async () => {
