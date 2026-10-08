@@ -18,7 +18,8 @@ Allowed dependencies
     ``app.domain``, ``app.errors``, ``app.persistence``, and the pure label
     functions of ``app.calibration`` (used by :mod:`app.feedback.outcomes` to
     place a landed review in its quadrant cell). :mod:`app.feedback.lessons`
-    also calls the learners of ``app.personalization`` and ``app.evaluation``.
+    also calls the learners of ``app.personalization`` and ``app.evaluation``;
+    :mod:`app.feedback.service` writes each review's episode through ``app.memory``.
     Must not import ``app.generation`` (that direction would create a cycle:
     generation reads preference, preference reads feedback).
 """
@@ -30,10 +31,16 @@ from sqlalchemy.orm import Session
 from app.domain.enums import ReviewDecision
 from app.errors import DomainRuleError
 from app.feedback.outcomes import ReviewOutcome, route_review_outcome
-from app.feedback.service import submit_review
+from app.feedback.service import delete_review, submit_review
 from app.persistence.models import ProfessorReviewRow
 
-__all__ = ["ReviewOutcome", "record_review", "route_review_outcome", "submit_review"]
+__all__ = [
+    "ReviewOutcome",
+    "delete_review",
+    "record_review",
+    "route_review_outcome",
+    "submit_review",
+]
 
 
 def record_review(

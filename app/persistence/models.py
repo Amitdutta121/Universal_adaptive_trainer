@@ -838,6 +838,11 @@ class ProfessorReviewRow(TimestampMixin, Base):
     )
 
     question: Mapped[QuestionRow] = relationship(back_populates="reviews")
+    #: The episode this review left in memory (ADR-063). Deleted with the review: SQLite
+    #: enforces no ``ondelete``, so the ORM cascade is what removes it.
+    episode: Mapped[MemoryEpisodeRow | None] = relationship(
+        back_populates="review", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class QuestionSetVersionRow(TimestampMixin, Base):
@@ -1036,6 +1041,83 @@ class ReviewOutcomeRow(TimestampMixin, Base):
 
     review: Mapped[ProfessorReviewRow] = relationship()
     question: Mapped[QuestionRow] = relationship()
+
+
+class MemoryEpisodeRow(TimestampMixin, Base):
+    """One reviewed question as memory keeps it: the episode (ADR-063 point 3, ADR-064).
+
+    Written when the professor's verdict lands and frozen there: the text the professor saw
+    (for an edit, their version, with the generated one kept), where the question claimed to
+    sit, the verdict with its reasons and comment, the professor's corrections, and what
+    every judge said about the question at that moment. The generator retrieves episodes as
+    examples (:mod:`app.retrieval.examples`); the judges will read the same rows (m11).
+
+    ``source`` says what produced the verdict: ``review`` today; audits of judge-rejected
+    drafts and borderline judge failures will add their own values (m9, m10), which is why
+    ``review_id`` may be ``NULL``. Scoped by ``subject``, the course's personal key
+    (:attr:`app.subjects.SubjectProfile.personal_key`), so one professor's or subject's
+    memory never reaches another's.
+    """
+
+    __tablename__ = "memory_episodes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: One episode per review; deleting the review deletes it.
+    review_id: Mapped[int | None] = mapped_column(
+        ForeignKey("professor_reviews.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        default=None,
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(16), default="review")
+    subject: Mapped[str] = mapped_column(String(100), index=True)
+    question_type: Mapped[QuestionType | None] = mapped_column(
+        StrEnumType(QuestionType, 32), default=None, index=True
+    )
+    #: Where the question claimed to sit when it was reviewed (before any correction).
+    topic_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    subtopic_ids: Mapped[list[int]] = mapped_column(
+        "subtopic_ids_json", JsonList, default=list, nullable=True
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(StrEnumType(Difficulty, 16))
+    #: Prompt, code and options as reviewed (:func:`app.retrieval.duplicates.embed_text`);
+    #: for an edit, the professor's version.
+    text: Mapped[str] = mapped_column(Text)
+    #: For an edit, the generated text the professor rewrote; otherwise ``NULL``.
+    original_text: Mapped[str | None] = mapped_column(Text, default=None)
+    decision: Mapped[ReviewDecision] = mapped_column(StrEnumType(ReviewDecision, 16))
+    reasons: Mapped[list[RejectionReason]] = mapped_column(
+        "reasons_json", EnumList(RejectionReason), default=list, nullable=True
+    )
+    comment: Mapped[str | None] = mapped_column(Text, default=None)
+    corrected_difficulty: Mapped[Difficulty | None] = mapped_column(
+        StrEnumType(Difficulty, 16), default=None
+    )
+    corrected_subtopic_ids: Mapped[list[int] | None] = mapped_column(
+        "corrected_subtopic_ids_json", _NullableReviewIds, default=None, nullable=True
+    )
+    #: Every judge's answer at review time, keyed by metric id:
+    #: ``{"passed", "status", "rationale", "issue_codes", "proposed_difficulty",
+    #: "proposed_subtopic_ids"}``. Empty when the question was never judged.
+    judge_verdicts: Mapped[dict] = mapped_column(
+        "judge_verdicts_json", JsonObject, default=dict, nullable=True
+    )
+    rubric_version: Mapped[str | None] = mapped_column(String(50), default=None)
+
+    review: Mapped[ProfessorReviewRow | None] = relationship(back_populates="episode")
+
+    @property
+    def effective_difficulty(self) -> Difficulty:
+        """The professor's difficulty when they corrected it, else the reviewed one."""
+        return self.corrected_difficulty or self.difficulty
+
+    @property
+    def effective_subtopic_ids(self) -> list[int]:
+        """The professor's subtopics when they corrected them, else the reviewed ones."""
+        return list(self.corrected_subtopic_ids or self.subtopic_ids or [])
 
 
 class JudgePromptRow(TimestampMixin, Base):

@@ -84,23 +84,60 @@ def render_taxonomy(version: CurriculumVersionRow) -> str:
 EXAMPLE_PROMPT_CHARS = 600
 
 
+#: Characters of the professor's comment shown with an example or a rejected question.
+COMMENT_CHARS = 300
+
+
+@dataclass(frozen=True)
+class ShownExample:
+    """An example question with the professor's comment on it, if they left one."""
+
+    text: str
+    comment: str | None = None
+
+
+@dataclass(frozen=True)
+class RejectedExample:
+    """A similar question the professor rejected, and why (reasons, then comment)."""
+
+    text: str
+    because: str
+
+
 @dataclass(frozen=True)
 class RoundExamples:
-    """What a round target is shown from the bank (ADR-063 point 3), as prompt text.
+    """What a round target is shown from memory and the bank (ADR-063 point 3), as prompt text.
 
     ``accepted``: approved questions of the same type, subtopic and difficulty -- match their
     level. ``style_only``: approved questions of the same type from elsewhere -- match their
-    form, not their content or level. ``in_bank``: the nearest existing questions of the cell,
-    which the new question must not repeat.
+    form, not their content or level. Either may carry the professor's comment. ``in_bank``:
+    the nearest existing questions of the cell, which the new question must not repeat.
+    ``rejected``: at most one similar question the professor rejected, with why.
     """
 
-    accepted: Sequence[str] = ()
-    style_only: Sequence[str] = ()
+    accepted: Sequence[str | ShownExample] = ()
+    style_only: Sequence[str | ShownExample] = ()
     in_bank: Sequence[str] = ()
+    rejected: RejectedExample | None = None
 
 
 def _shown(texts: Sequence[str]) -> list[str]:
     return [text.strip()[:EXAMPLE_PROMPT_CHARS] for text in texts if text and text.strip()]
+
+
+def _shown_examples(items: Sequence[str | ShownExample]) -> list[tuple[str, str | None]]:
+    """``(text, comment)`` per non-empty example, both trimmed to their limits."""
+    shown = []
+    for item in items:
+        example = item if isinstance(item, ShownExample) else ShownExample(item)
+        for text in _shown([example.text]):
+            comment = (example.comment or "").strip()[:COMMENT_CHARS] or None
+            shown.append((text, comment))
+    return shown
+
+
+def _with_comment(line: str, comment: str | None) -> list[str]:
+    return [line] + ([f"  Professor's comment: {comment}"] if comment else [])
 
 
 def render_round_target(
@@ -133,24 +170,34 @@ def render_round_target(
         ]
     examples = examples or RoundExamples()
     number = 0
-    accepted = _shown(examples.accepted)
+    accepted = _shown_examples(examples.accepted)
     if accepted:
         lines += [
             "",
             "The professor accepted these questions for the same subtopic and difficulty. "
             "Match their level and quality; do not copy or paraphrase them.",
         ]
-        for number, text in enumerate(accepted, start=1):
-            lines.append(f"Example {number}: {text}")
-    style_only = _shown(examples.style_only)
+        for number, (text, comment) in enumerate(accepted, start=1):
+            lines += _with_comment(f"Example {number}: {text}", comment)
+    style_only = _shown_examples(examples.style_only)
     if style_only:
         lines += [
             "",
             "Style only: the professor accepted these questions of the same type for other "
             "subtopics or difficulties. Match their form only, not their content or level.",
         ]
-        for offset, text in enumerate(style_only, start=1):
-            lines.append(f"Example {number + offset} (style only): {text}")
+        for offset, (text, comment) in enumerate(style_only, start=1):
+            lines += _with_comment(f"Example {number + offset} (style only): {text}", comment)
+    rejected = examples.rejected
+    rejected_text = _shown([rejected.text]) if rejected else []
+    because = rejected.because.strip()[:COMMENT_CHARS] if rejected else ""
+    if rejected_text and because:
+        lines += [
+            "",
+            f"The professor rejected a similar question because: {because}",
+            "Do not repeat that mistake.",
+            f"Rejected: {rejected_text[0]}",
+        ]
     in_bank = _shown(examples.in_bank)
     if in_bank:
         lines += [

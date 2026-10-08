@@ -1,7 +1,8 @@
 """Replay round example retrieval on the real bank (ADR-063 point 3, m3).
 
 **Spends API: one embedding call per approved question, plus one for the bank (cents).**
-Run it on a *copy* of the database, migrated to head (it needs ``question_embeddings``); it
+Run it on a *copy* of the database, migrated to head (it needs ``question_embeddings`` and
+``memory_episodes``, where examples are read from); it
 writes the copy's embedding cache, so a second run costs only the per-target queries:
 
     cp data/adaptive_trainer.db /tmp/replay.db
@@ -40,6 +41,7 @@ from app.persistence.models import BookSectionRow, ProfessorReviewRow, QuestionR
 from app.retrieval.duplicates import QuestionEmbeddingStore
 from app.retrieval.embedder import Embedder
 from app.retrieval.examples import EXAMPLE_PAIR_THRESHOLD, MAX_EXAMPLES, retrieve_for_target
+from app.subjects import profile_for_version
 
 METHODS = ("DB", "REC")
 
@@ -135,6 +137,7 @@ def replay(session: Session, embedder: Embedder) -> dict[str, dict[str, Any]]:
             session,
             embedder,
             curriculum_version_id=target.curriculum_version_id,
+            subject=profile_for_version(session, target.curriculum_version_id).personal_key,
             question_type=target.question_type,
             subtopic_id=subtopic_id,
             difficulty=target.difficulty,
@@ -143,7 +146,7 @@ def replay(session: Session, embedder: Embedder) -> dict[str, dict[str, Any]]:
         )
         picks = {
             "DB": _db_examples(target, subtopic_id, pool),
-            "REC": [by_id[example.question_id] for example in found.examples],
+            "REC": [by_id[ex.question_id] for ex in found.examples if ex.question_id in by_id],
         }
         for method, picked in picks.items():
             entry = stats[method]

@@ -37,9 +37,16 @@ from app.errors import DomainRuleError, LLMRequestError
 from app.evaluation import DifficultyVerdict, GeneratabilityVerdict
 from app.evaluation import custom as custom_module
 from app.evaluation.custom import CustomJudgeResult
+from app.feedback import submit_review
 from app.generation import rounds as rounds_module
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
-from app.generation.prompts import RoundExamples, build_prompt, render_round_target
+from app.generation.prompts import (
+    RejectedExample,
+    RoundExamples,
+    ShownExample,
+    build_prompt,
+    render_round_target,
+)
 from app.generation.rounds import (
     next_round,
     plan_targets,
@@ -205,6 +212,13 @@ def _question(
         target_subtopic_id=subtopic.id if style_id else None,
     )
     session.add(row)
+    session.commit()
+    return row
+
+
+def _professor_approved(session: Session, row: QuestionRow) -> QuestionRow:
+    """Approve ``row`` through a review: examples are read from its memory episode."""
+    submit_review(session, question_id=row.id, decision=ReviewDecision.APPROVE)
     session.commit()
     return row
 
@@ -629,14 +643,17 @@ def test_run_round_reports_progress_and_examples(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
     setup = _setup(session, env, [(env.while_loops.id, "medium", 4)])
-    _question(
+    _professor_approved(
         session,
-        env,
-        env.while_loops,
-        "medium",
-        QuestionStatus.APPROVED,
-        prompt="Accepted: what does a while loop do?",
-        question_type=QuestionType.MULTIPLE_CHOICE,
+        _question(
+            session,
+            env,
+            env.while_loops,
+            "medium",
+            QuestionStatus.APPROVED,
+            prompt="Accepted: what does a while loop do?",
+            question_type=QuestionType.MULTIPLE_CHOICE,
+        ),
     )
     row = start_round(session, setup.id, size=2, rng=random.Random(1))
     session.commit()
@@ -1046,12 +1063,19 @@ def _examples(session: Session, env: SimpleNamespace, embedder: object = None) -
     )
 
 
+def _texts(examples: Sequence[ShownExample | str]) -> list[str]:
+    return [item.text if isinstance(item, ShownExample) else item for item in examples]
+
+
 def _approved(
     session: Session, env: SimpleNamespace, subtopic: SubtopicRow, prompt: str, **kwargs: Any
 ) -> QuestionRow:
     kwargs.setdefault("question_type", MCQ)
-    return _question(
-        session, env, subtopic, "medium", QuestionStatus.APPROVED, prompt=prompt, **kwargs
+    return _professor_approved(
+        session,
+        _question(
+            session, env, subtopic, "medium", QuestionStatus.APPROVED, prompt=prompt, **kwargs
+        ),
     )
 
 
@@ -1071,8 +1095,8 @@ def test_examples_are_only_of_the_targets_question_type(
 
     found = _examples(session, env, embedder)
 
-    assert found.accepted == ["Choice alpha"]
-    assert found.style_only == []
+    assert _texts(found.accepted) == ["Choice alpha"]
+    assert _texts(found.style_only) == []
     # The other-type question of the cell is still something not to repeat.
     assert found.in_bank == ["Write code while"]
 
@@ -1090,8 +1114,8 @@ def test_an_empty_cell_falls_back_to_same_topic_then_similarity(
 
     found = _examples(session, env, MarkerEmbedder())
 
-    assert found.accepted == []
-    assert found.style_only == ["Same topic beta", "Other topic while while"]
+    assert _texts(found.accepted) == []
+    assert _texts(found.style_only) == ["Same topic beta", "Other topic while while"]
     assert found.in_bank == []
 
 
@@ -1102,10 +1126,10 @@ def test_no_two_examples_are_near_identical(session: Session, env: SimpleNamespa
 
     found = _examples(session, env, MarkerEmbedder())
 
-    assert found.accepted == ["Choice while alpha again", "Choice beta"]
+    assert _texts(found.accepted) == ["Choice while alpha again", "Choice beta"]
     first, second = (
         np.asarray(vector) / np.linalg.norm(vector)
-        for vector in MarkerEmbedder().embed(found.accepted)
+        for vector in MarkerEmbedder().embed(_texts(found.accepted))
     )
     assert float(first @ second) <= EXAMPLE_PAIR_THRESHOLD
     # The skipped twin is in the cell, so it is shown as already in the bank.
@@ -1142,7 +1166,7 @@ def test_without_a_working_embedder_examples_and_the_bank_are_newest_first(
 
     found = _examples(session, env, embedder)
 
-    assert found.accepted == ["Newest choice", "New choice"]
+    assert _texts(found.accepted) == ["Newest choice", "New choice"]
     assert found.in_bank == ["Pending three", "Pending two", "Pending one"]
 
 
@@ -1154,9 +1178,12 @@ def test_the_target_block_labels_style_only_examples_and_lists_the_bank() -> Non
         topic_name="Loops",
         style=STYLE_A,
         examples=RoundExamples(
-            accepted=["What does a while loop do?"],
+            accepted=[ShownExample("What does a while loop do?", "  Good: one idea.  ")],
             style_only=["  Which slice gives 'el'?  ", ""],
             in_bank=["Which loop repeats while a condition holds?", "What ends a while loop?"],
+            rejected=RejectedExample(
+                "What is a loop?", "Too easy / trivial; asks for a definition"
+            ),
         ),
     )
     assert block == "\n".join(
@@ -1173,10 +1200,16 @@ def test_the_target_block_labels_style_only_examples_and_lists_the_bank() -> Non
             "The professor accepted these questions for the same subtopic and difficulty. "
             "Match their level and quality; do not copy or paraphrase them.",
             "Example 1: What does a while loop do?",
+            "  Professor's comment: Good: one idea.",
             "",
             "Style only: the professor accepted these questions of the same type for other "
             "subtopics or difficulties. Match their form only, not their content or level.",
             "Example 2 (style only): Which slice gives 'el'?",
+            "",
+            "The professor rejected a similar question because: Too easy / trivial; asks for "
+            "a definition",
+            "Do not repeat that mistake.",
+            "Rejected: What is a loop?",
             "",
             "Already in the bank for this subtopic and difficulty -- assess something "
             "different from each of these:",
@@ -1186,7 +1219,7 @@ def test_the_target_block_labels_style_only_examples_and_lists_the_bank() -> Non
         ]
     )
     bare = render_round_target(subtopic=subtopic, topic_name="Loops", style=None)
-    assert "Example" not in bare and "Existing" not in bare
+    assert "Example" not in bare and "Existing" not in bare and "Rejected" not in bare
 
 
 def test_a_round_prompt_carries_examples_and_the_bank(

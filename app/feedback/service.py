@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, QuestionStatus, RejectionReason, ReviewDecision
 from app.domain.questions import Question, apply_professor_edit
-from app.errors import DomainRuleError
+from app.errors import DomainRuleError, NotFoundError
+from app.memory import record_review_episode, snapshot_question
 from app.persistence.models import (
     ProfessorReviewRow,
     QuestionRow,
     QuestionSubtopicRow,
+    ReviewOutcomeRow,
     SubtopicRow,
     TopicRow,
 )
@@ -49,8 +51,12 @@ def submit_review(
     stored as given, whatever the decision, because attribution reads them as direct
     evidence about the difficulty and subtopic judges. Rejection permits an optional
     comment without requiring structured reasons or classification corrections.
+
+    The review is also written into memory as an episode (:mod:`app.memory`, ADR-063): the
+    question as reviewed, the verdict, and the judges' verdicts. No model call.
     """
     question = QuestionRepository(session).get(question_id)
+    reviewed = snapshot_question(question)
     reason_list = list(reasons or [])
     if corrected_subtopic_ids is not None:
         if not corrected_subtopic_ids:
@@ -162,7 +168,24 @@ def submit_review(
         reviewed_generator_name=question.generator_name,
         reviewed_generator_version=question.generator_version,
     )
-    return ProfessorReviewRepository(session).add(review)
+    review = ProfessorReviewRepository(session).add(review)
+    record_review_episode(session, review, reviewed)
+    return review
+
+
+def delete_review(session: Session, review_id: int) -> None:
+    """Delete a review, its episode and its outcome. Flushes; the caller commits.
+
+    The episode goes with the review (ORM cascade), so it is never retrieved again; the
+    outcome row is deleted explicitly because SQLite enforces no ``ondelete``. The question
+    keeps whatever status and fields the review gave it.
+    """
+    review = session.get(ProfessorReviewRow, review_id)
+    if review is None:
+        raise NotFoundError(f"Review {review_id} not found.")
+    session.execute(delete(ReviewOutcomeRow).where(ReviewOutcomeRow.review_id == review_id))
+    session.delete(review)
+    session.flush()
 
 
 def _check_subtopics_in_taxonomy(

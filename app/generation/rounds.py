@@ -50,7 +50,12 @@ from app.evaluation import new_run_id
 from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
 from app.feedback.lessons import apply_pending_lessons
-from app.generation.prompts import RoundExamples, base_type_instruction
+from app.generation.prompts import (
+    RejectedExample,
+    RoundExamples,
+    ShownExample,
+    base_type_instruction,
+)
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
 from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
@@ -430,11 +435,14 @@ def accepted_examples(
     embedder: Embedder | None = None,
     limit: int = MAX_EXAMPLES_PER_CELL,
 ) -> RoundExamples:
-    """Approved questions of ``question_type`` to match, and the cell's questions not to repeat.
+    """Approved questions of ``question_type`` to match, the cell's questions not to repeat,
+    and at most one similar question the professor rejected, with why.
 
-    The order is :func:`app.retrieval.examples.retrieve_for_target`'s (ADR-063 point 3): the
-    cell, then the same topic, then the rest, by similarity to the target's ``section_id``
-    when there is an embedder; examples from outside the cell are labelled "style only".
+    Examples and the rejected question come from the memory episodes of the course's subject
+    (:mod:`app.memory`), examples with the professor's comment. The order is
+    :func:`app.retrieval.examples.retrieve_for_target`'s (ADR-063 point 3): the cell, then the
+    same topic, then the rest, by similarity to the target's ``section_id`` when there is an
+    embedder; examples from outside the cell are labelled "style only".
     """
     subtopic_id, difficulty = cell
     section_text = (
@@ -444,16 +452,27 @@ def accepted_examples(
         session,
         embedder,
         curriculum_version_id=curriculum_version_id,
+        subject=profile_for_version(session, curriculum_version_id).personal_key,
         question_type=question_type,
         subtopic_id=subtopic_id,
         difficulty=difficulty,
         section_text=section_text,
         limit=limit,
     )
+    rejected = found.rejected
     return RoundExamples(
-        accepted=[example.text for example in found.examples if example.same_cell],
-        style_only=[example.text for example in found.examples if not example.same_cell],
+        accepted=[
+            ShownExample(example.text, example.comment)
+            for example in found.examples
+            if example.same_cell
+        ],
+        style_only=[
+            ShownExample(example.text, example.comment)
+            for example in found.examples
+            if not example.same_cell
+        ],
         in_bank=[question.text for question in found.in_bank],
+        rejected=RejectedExample(rejected.text, rejected.because) if rejected else None,
     )
 
 

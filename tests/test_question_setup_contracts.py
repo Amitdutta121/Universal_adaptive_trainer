@@ -75,7 +75,7 @@ def test_a_0004_database_is_upgraded_keeping_its_rows(engine: Engine) -> None:
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
         row = connection.execute(text("SELECT prompt, style_id, round_id FROM questions")).one()
-    assert version == "0014_question_embeddings"
+    assert version == "0015_memory_episodes"
     assert tuple(row) == ("Old question", None, None)
 
 

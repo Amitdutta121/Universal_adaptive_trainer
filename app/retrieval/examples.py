@@ -1,8 +1,10 @@
 """What a round target is shown from the bank (ADR-063 point 3).
 
-Two lists per target (one subtopic x difficulty cell, one question type):
+Two lists per target (one subtopic x difficulty cell, one question type), and one warning:
 
-* **Examples** -- approved questions to match. The same question type is required (a
+* **Examples** -- questions the professor approved or edited, read from memory episodes
+  (:mod:`app.memory`) of the course's subject only, as the professor left them (an edit's
+  text is theirs) and with their comment. The same question type is required (a
   multiple-choice example teaches a code-writing target the wrong shape). Ranked in tiers:
   the exact cell, then the same topic, then the rest; within a tier by cosine to the target
   (:func:`example_query`), or newest first without an embedder. A candidate scoring above
@@ -12,6 +14,12 @@ Two lists per target (one subtopic x difficulty cell, one question type):
 * **Already in the bank** -- the questions nearest the target in its cell, approved or
   awaiting review, any type: what the generator must not repeat. Newest first without an
   embedder.
+* **Rejected** -- at most one episode of the same subject and type the professor rejected
+  with a reason or comment, the nearest by the same tiers and cosine: "the professor
+  rejected a similar question because ...".
+
+A question reviewed more than once counts by its latest review. An episode's cell is the
+professor's corrected difficulty and subtopics when they made any.
 
 Vectors come from the ``question_embeddings`` cache (:class:`QuestionEmbeddingStore`), so a
 target costs one embedding call: the query plus any question not yet cached. An embedder
@@ -32,7 +40,8 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, QuestionStatus, QuestionType
+from app.domain.enums import Difficulty, QuestionStatus, QuestionType, ReviewDecision
+from app.memory import MemoryEpisodeRepository, rejection_because
 from app.persistence.models import QuestionRow, SubtopicRow
 from app.retrieval.duplicates import QuestionEmbeddingStore, embed_text, text_hash
 from app.retrieval.embedder import Embedder
@@ -75,12 +84,24 @@ class BankQuestion:
     text: str
     #: In the target's own subtopic x difficulty cell.
     same_cell: bool
+    #: The professor's comment on it (examples only).
+    comment: str | None = None
+
+
+@dataclass(frozen=True)
+class RejectedQuestion:
+    """A similar question the professor rejected, and why."""
+
+    question_id: int
+    text: str
+    because: str
 
 
 @dataclass(frozen=True)
 class TargetExamples:
     examples: list[BankQuestion]
     in_bank: list[BankQuestion]
+    rejected: RejectedQuestion | None = None
 
 
 def retrieve_for_target(
@@ -88,6 +109,7 @@ def retrieve_for_target(
     embedder: Embedder | None,
     *,
     curriculum_version_id: int,
+    subject: str,
     question_type: QuestionType,
     subtopic_id: int,
     difficulty: Difficulty,
@@ -96,10 +118,12 @@ def retrieve_for_target(
     in_bank_limit: int = MAX_IN_BANK,
     exclude_ids: Collection[int] = (),
 ) -> TargetExamples:
-    """Examples and already-in-the-bank questions for one target. Never raises on the embedder.
+    """Examples, already-in-the-bank questions and one rejected question for one target.
+    Never raises on the embedder.
 
-    ``exclude_ids`` leaves questions out of both lists (the replay uses it to hide questions
-    approved after the target it replays).
+    ``subject`` is the course's personal key: only its episodes are read. ``exclude_ids``
+    leaves questions out of every list (the replay uses it to hide questions approved after
+    the target it replays).
     """
     subtopic = session.get(SubtopicRow, subtopic_id)
     stmt = (
@@ -114,18 +138,38 @@ def retrieve_for_target(
         stmt = stmt.where(QuestionRow.id.not_in(exclude_ids))
     rows = list(session.scalars(stmt))  # newest first: the order without an embedder
 
+    episodes = MemoryEpisodeRepository(session)
+    approved = episodes.latest_per_question(
+        subject=subject,
+        question_type=question_type,
+        decisions=(ReviewDecision.APPROVE, ReviewDecision.EDIT),
+        exclude_question_ids=exclude_ids,
+    )
+    rejected = [
+        pair
+        for pair in episodes.latest_per_question(
+            subject=subject,
+            question_type=question_type,
+            decisions=(ReviewDecision.REJECT,),
+            exclude_question_ids=exclude_ids,
+        )
+        if rejection_because(pair[0])
+    ]
+    episode_of = {question.id: episode for episode, question in approved + rejected}
+
     def in_cell(row: QuestionRow) -> bool:
+        if row.id in episode_of:
+            episode = episode_of[row.id]
+            return episode.effective_difficulty == difficulty and (
+                subtopic_id in episode.effective_subtopic_ids
+            )
         return row.difficulty == difficulty and (
             subtopic_id in row.subtopic_ids or row.target_subtopic_id == subtopic_id
         )
 
-    candidates = [
-        row
-        for row in rows
-        if row.status == QuestionStatus.APPROVED and row.question_type == question_type
-    ]
+    candidates = [question for _, question in approved]
     cell = [row for row in rows if in_cell(row)]
-    pool = list({row.id: row for row in candidates + cell}.values())
+    pool = list({row.id: row for row in candidates + [q for _, q in rejected] + cell}.values())
 
     vectors: dict[int, np.ndarray] = {}
     scores: dict[int, float] = {}
@@ -148,27 +192,45 @@ def retrieve_for_target(
             return 0
         return 1 if topic_id is not None and row.topic_id == topic_id else 2
 
+    # An episode is shown as reviewed (an edit as the professor left it); the bank as stored.
     texts = {row.id: embed_text(row.prompt, row.content) for row in pool}
+    texts.update({key: episode.text for key, episode in episode_of.items()})
 
     def too_close(row: QuestionRow, other: QuestionRow) -> bool:
         if vectors:
             return float(vectors[row.id] @ vectors[other.id]) > EXAMPLE_PAIR_THRESHOLD
         return text_hash(texts[row.id]) == text_hash(texts[other.id])
 
-    # Stable sorts keep newest-first within a tier when there are no scores.
-    ranked = sorted(candidates, key=lambda row: (tier(row), -scores.get(row.id, 0.0)))
+    def ranked(questions: list[QuestionRow]) -> list[QuestionRow]:
+        # Stable sorts keep newest-first within a tier when there are no scores.
+        return sorted(questions, key=lambda row: (tier(row), -scores.get(row.id, 0.0)))
+
     picked: list[QuestionRow] = []
-    for row in ranked:
+    for row in ranked(candidates):
         if len(picked) == limit:
             break
         if not any(too_close(row, other) for other in picked):
             picked.append(row)
+
+    nearest_rejected = next(iter(ranked([question for _, question in rejected])), None)
 
     shown = {row.id for row in picked}
     nearest = sorted(
         (row for row in cell if row.id not in shown), key=lambda row: -scores.get(row.id, 0.0)
     )[:in_bank_limit]
     return TargetExamples(
-        examples=[BankQuestion(row.id, texts[row.id], tier(row) == 0) for row in picked],
+        examples=[
+            BankQuestion(row.id, texts[row.id], tier(row) == 0, episode_of[row.id].comment)
+            for row in picked
+        ],
         in_bank=[BankQuestion(row.id, texts[row.id], True) for row in nearest],
+        rejected=(
+            RejectedQuestion(
+                nearest_rejected.id,
+                texts[nearest_rejected.id],
+                rejection_because(episode_of[nearest_rejected.id]),
+            )
+            if nearest_rejected is not None
+            else None
+        ),
     )
