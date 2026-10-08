@@ -55,6 +55,7 @@ from app.persistence.models import (
     QuestionEvaluationRow,
     QuestionRow,
     QuestionSetupRow,
+    QuestionSimilarityRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
@@ -833,3 +834,129 @@ def test_round_execution_claim_is_idempotent(session, engine, env, monkeypatch):
     _run(engine, row.id, None)
     assert calls == [row.id]
     assert _round(engine, row.id).status == RoundStatus.DONE
+
+
+# ------------------------------------------------------------------ duplicates (ADR-063 point 6)
+
+
+class ScoredEmbedder(KeywordEmbedder):
+    """Places the round's draft at a chosen cosine to the stored "Existing" question.
+
+    Every other text (section retrieval) embeds as :class:`KeywordEmbedder` does. ``scores``
+    is consumed one per check; the last one repeats.
+    """
+
+    def __init__(self, scores: list[float]) -> None:
+        self.scores = scores
+        self.checks = 0
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        vectors = []
+        for text in texts:
+            if text.startswith("Existing"):
+                vectors.append([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            elif text.startswith("Which loop repeats"):
+                score = self.scores[min(self.checks, len(self.scores) - 1)]
+                self.checks += 1
+                vectors.append([score, (1 - score**2) ** 0.5, 0.0, 0.0, 0.0, 0.0])
+            else:
+                vectors.extend(super().embed([text]))
+        return vectors
+
+
+def _flags(engine: Engine, question_id: int) -> list[QuestionSimilarityRow]:
+    with Session(engine) as fresh:
+        return list(
+            fresh.scalars(
+                select(QuestionSimilarityRow).where(
+                    QuestionSimilarityRow.question_id == question_id
+                )
+            )
+        )
+
+
+def _dup_round(session: Session, env: SimpleNamespace, prompt: str) -> tuple[int, int]:
+    existing = _question(
+        session, env, env.while_loops, "medium", QuestionStatus.APPROVED, prompt=prompt
+    )
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    return existing.id, _queue(session, setup, [_target(env)]).id
+
+
+def _mcq_client(env: SimpleNamespace) -> MetricJudgeClient:
+    return MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+
+def test_an_exact_duplicate_is_retried_quoting_it_then_kept_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    """The fake draft never changes, so every attempt is a duplicate: the correction quotes
+    the stored question, and the last attempt is kept with a flag rather than dropped."""
+    draft = _mcq(env.while_loops.topic_id, env.while_loops.id)
+    existing_id, round_id = _dup_round(
+        session, env, "\n".join([draft.prompt, *draft.options]).upper()
+    )
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client)
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    retry_prompt = client.generation_calls[1]["prompt"]
+    assert "Your question failed the check 'duplicate' (it is too similar to: WHICH LOOP" in (
+        retry_prompt
+    )
+    (question,) = _round_questions(engine, round_id)
+    assert [c.name for c in question.generation_attempts[0].failed_checks] == ["duplicate"]
+    assert question.generation_attempts[-1].usable
+    (flag,) = _flags(engine, question.id)
+    assert (flag.similar_question_id, flag.score) == (existing_id, 1.0)
+    done = _round(engine, round_id)
+    assert (done.produced, done.dropped) == (1, 0)
+
+
+def test_a_cosine_at_093_is_retried(session: Session, engine: Engine, env: SimpleNamespace) -> None:
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.93, 0.10]))
+
+    assert len(client.generation_calls) == 2
+    assert "too similar to: Existing question about loops" in client.generation_calls[1]["prompt"]
+    (question,) = _round_questions(engine, round_id)
+    assert _flags(engine, question.id) == []
+
+
+def test_a_cosine_at_080_is_kept_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80]))
+
+    assert len(client.generation_calls) == 1
+    (question,) = _round_questions(engine, round_id)
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert flag.score == pytest.approx(0.80, abs=1e-5)
+    assert flag.model == KeywordEmbedder.model
+
+
+def test_a_duplicate_on_the_last_attempt_is_stored_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.95]))
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    (question,) = _round_questions(engine, round_id)
+    assert question.status is QuestionStatus.VALIDATION_PASSED
+    assert question.pedagogical_eval["metrics"]
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert flag.score == pytest.approx(0.95, abs=1e-5)
+    assert _round(engine, round_id).dropped == 0

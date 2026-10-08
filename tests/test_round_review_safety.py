@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.domain.enums import CustomJudgeKind, Difficulty, JudgeMetricId, QuestionType
-from app.domain.questions import Question
+from app.domain.questions import GenerationAttempt, Question
 from app.evaluation.custom import CustomJudgeResult, CustomRule
 from app.evaluation.schema import (
     MetricResult,
@@ -13,8 +13,9 @@ from app.evaluation.schema import (
     PedagogicalEvalStatus,
     PedagogicalEvaluation,
 )
-from app.generation.review import RoundReview
+from app.generation.review import DUPLICATE_CHECK, RoundReview
 from app.generation.spec import QuestionSpec
+from app.retrieval.duplicates import SimilarQuestion
 
 
 def _review(metrics, rules=()):
@@ -78,3 +79,70 @@ def test_confirmed_target_can_use_a_passing_legacy_verdict_without_proposed_ids(
     metrics = _passing()
     metrics[1].proposed_subtopic_ids = []
     assert not _review(metrics)(Question(prompt="Q", subtopic_ids=[2]))
+
+
+# ------------------------------------------------------------------ duplicates (ADR-063 point 6)
+
+
+def _similar(score, *, exact=False):
+    return SimilarQuestion(
+        question_id=7, text="Old question text", score=score, exact=exact, model="fake-embed"
+    )
+
+
+def _dup_review(matches, judged):
+    def evaluate(question):
+        judged.append(question)
+        return PedagogicalEvaluation(status=PedagogicalEvalStatus.COMPLETED, metrics=_passing())
+
+    return RoundReview(
+        SimpleNamespace(evaluate=evaluate),
+        (),
+        spec=QuestionSpec(
+            curriculum_version_id=1,
+            question_type=QuestionType.MULTIPLE_CHOICE,
+            difficulty=Difficulty.MEDIUM,
+            source_section_ids=[1],
+            target_subtopic_id=2,
+        ),
+        duplicates=lambda question: matches,
+        max_attempts=3,
+    )
+
+
+def _attempt(number):
+    return Question(
+        prompt="Q",
+        subtopic_ids=[2],
+        generation_attempts=[GenerationAttempt(number=number, accepted=True)],
+    )
+
+
+@pytest.mark.parametrize("match", [_similar(0.93), _similar(1.0, exact=True)])
+def test_a_duplicate_fails_the_attempt_quoting_it_before_any_judge(match):
+    judged = []
+    review = _dup_review([match], judged)
+
+    (failed,) = review(_attempt(1))
+
+    assert failed.name == DUPLICATE_CHECK
+    assert failed.detail == "it is too similar to: Old question text"
+    assert judged == []
+
+
+def test_a_similar_question_below_the_duplicate_line_passes_and_is_remembered():
+    judged = []
+    review = _dup_review([_similar(0.80)], judged)
+
+    assert review(_attempt(1)) == []
+    assert len(judged) == 1
+    assert [match.score for match in review.last_similar] == [0.80]
+
+
+def test_on_the_last_attempt_a_duplicate_is_judged_and_kept():
+    judged = []
+    review = _dup_review([_similar(0.95)], judged)
+
+    assert review(_attempt(3)) == []
+    assert len(judged) == 1 and review.last_evaluation is not None
+    assert [match.score for match in review.last_similar] == [0.95]

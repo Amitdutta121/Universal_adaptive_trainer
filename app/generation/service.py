@@ -19,11 +19,11 @@ from app.evaluation import PedagogicalJudge, new_run_id, record_evaluation, skip
 from app.evaluation.custom import CustomRule
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
-from app.generation.review import RoundReview
+from app.generation.review import DuplicateCheck, RoundReview
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
-from app.persistence.models import CurriculumVersionRow, QuestionRow
+from app.persistence.models import CurriculumVersionRow, QuestionRow, QuestionSimilarityRow
 from app.persistence.repositories import QuestionRepository, _source_section_ids
 
 
@@ -269,6 +269,7 @@ class GenerationService:
         rules: Sequence[CustomRule] = (),
         examples: list[str] | None = None,
         run_id: str | None = None,
+        duplicates: DuplicateCheck | None = None,
     ) -> QuestionRow | None:
         """Generate one round question, judged inside the retry loop; ``None`` when dropped.
 
@@ -277,6 +278,11 @@ class GenerationService:
         ``MAX_GENERATION_ATTEMPTS`` a question that still fails is **not stored**. A stored
         question carries ``style_id``, ``round_id`` and ``target_subtopic_id``, keeps the
         judge evaluation that passed it (no second judge run), and lands in the review queue.
+
+        ``duplicates`` (ADR-063 point 6) runs before the judges: a duplicate is retried with
+        "too similar to: ...", except on the last attempt, where it is judged as usual and, if
+        kept, stored with a :class:`QuestionSimilarityRow` per resembled question -- as is any
+        kept question that only resembles one.
 
         Flushes; the caller commits.
 
@@ -289,10 +295,10 @@ class GenerationService:
                 "Round generation needs a target subtopic.",
                 detail="Use generate_for_sections for section-only specs.",
             )
-        review = RoundReview(self._judge, rules, spec=spec, client=self._client)
-        question = self._question_for_round(
-            spec, version=version, review=review, examples=examples
+        review = RoundReview(
+            self._judge, rules, spec=spec, client=self._client, duplicates=duplicates
         )
+        question = self._question_for_round(spec, version=version, review=review, examples=examples)
         if not question.generation_attempts or not question.generation_attempts[-1].usable:
             return None
         evaluation = review.last_evaluation
@@ -316,6 +322,15 @@ class GenerationService:
             trigger=EvaluationTrigger.GENERATION,
         )
         stored.custom_results = [result.model_dump(mode="json") for result in review.last_custom]
+        for match in review.last_similar:
+            self._session.add(
+                QuestionSimilarityRow(
+                    question_id=row.id,
+                    similar_question_id=match.question_id,
+                    score=match.score,
+                    model=match.model,
+                )
+            )
         self._session.flush()
         from app.evaluation.trust import route_generated_question
 

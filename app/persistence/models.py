@@ -650,7 +650,7 @@ class QuestionSubtopicRow(Base):
 
 class QuestionSimilarityRow(Base):
     """A flagged possible duplicate, written after a generation run (coverage
-    Generate m3).
+    Generate m3) or when a round keeps a question that resembles one (ADR-063).
 
     Directional: ``question_id`` is the freshly generated question, and
     ``similar_question_id`` the pre-existing approved/validation-passed
@@ -678,6 +678,29 @@ class QuestionSimilarityRow(Base):
     similar_question: Mapped[QuestionRow] = relationship(
         foreign_keys=[similar_question_id], lazy="selectin"
     )
+
+
+class QuestionEmbeddingRow(Base):
+    """A cached embedding of one question's duplicate-check text (ADR-063 point 6).
+
+    Derived, like ``section_embeddings``: rebuilt on demand by
+    :class:`app.retrieval.duplicates.QuestionEmbeddingStore`. ``text_hash`` is the SHA-256 of
+    the *normalised* check text (prompt + code + options), so an edited question is re-embedded
+    and an exact duplicate is found without any embedding call.
+    """
+
+    __tablename__ = "question_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    text_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class QuestionEvaluationRow(TimestampMixin, Base):

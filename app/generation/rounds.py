@@ -22,7 +22,8 @@ subtopic's evidence section). A hard target asks the generatability judge once, 
 any draft: if the lesson cannot support a hard question, the target is skipped and the
 reason is stored, separate from a drop. Otherwise
 :meth:`GenerationService.generate_round_question` judges inside the retry loop and drops
-what still fails after the last attempt.
+what still fails after the last attempt -- except a duplicate of a stored question, which is
+retried and, on the last attempt, kept with a similarity flag (ADR-063 point 6).
 """
 
 from __future__ import annotations
@@ -67,6 +68,7 @@ from app.persistence.repositories import (
     QuestionSetupRepository,
 )
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
+from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
 from app.styles import QuestionStyle, get_library
 from app.subjects import profile_for_version
@@ -495,6 +497,8 @@ def _generate_round(
         else None
     )
     service = GenerationService(session, client=client)
+    # Without an embedder only exact duplicates are caught (ADR-063 point 6).
+    duplicates = DuplicateChecker(session, embedder)
     run_id = new_run_id()
     targets = list(row.targets or [])
     produced = dropped = skipped = 0
@@ -554,6 +558,7 @@ def _generate_round(
                         rules=rules,
                         examples=accepted_examples(session, version_id, (subtopic_id, difficulty)),
                         run_id=run_id,
+                        duplicates=duplicates,
                     )
                     outcome = "produced" if question is not None else "dropped"
                 except InvalidQuestionSpecError as exc:

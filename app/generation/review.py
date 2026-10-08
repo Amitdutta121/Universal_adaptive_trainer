@@ -8,17 +8,25 @@ checks :func:`~app.generation.attempts.generate_with_retries` feeds back.
 
 Round questions require every requested check to pass. An unavailable judge is not
 evidence of a wrong question, but it cannot certify a question for this round either.
+
+A duplicate of a stored question (ADR-063 point 6) is the one exception to "drop what still
+fails": it is retried like any failed check, but on the last attempt it is judged and kept,
+with a similarity flag for the professor. The duplicate check itself is injected
+(:data:`DuplicateCheck`), because finding one needs embeddings and ``app.generation`` must
+not import ``app.retrieval``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
 from app.domain.enums import JudgeMetricId
 from app.domain.questions import Question, QuestionCheck
 from app.evaluation import MetricStatus, PedagogicalEvaluation, PedagogicalJudge
 from app.evaluation import custom as custom_judges
 from app.evaluation.custom import CustomJudgeResult, CustomRule
+from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.spec import QuestionSpec
 from app.llm import StructuredLLMClient
 
@@ -27,6 +35,31 @@ TARGET_SUBTOPIC_CHECK = "target_subtopic"
 DIFFICULTY_JUDGE_CHECK = "difficulty_judge"
 TOPIC_JUDGE_CHECK = "topic_judge"
 CUSTOM_RULE_CHECK = "custom_rule"
+DUPLICATE_CHECK = "duplicate"
+
+#: How much of the duplicate's text the correction quotes.
+DUPLICATE_QUOTE_CHARS = 400
+
+
+class SimilarMatch(Protocol):
+    """A stored question the new one resembles (``app.retrieval.duplicates.SimilarQuestion``)."""
+
+    @property
+    def question_id(self) -> int: ...
+    @property
+    def text(self) -> str: ...
+    @property
+    def score(self) -> float: ...
+    @property
+    def model(self) -> str: ...
+    @property
+    def duplicate(self) -> bool:
+        """Too close to keep without a retry."""
+        ...
+
+
+#: Returns the stored questions an unsaved question resembles, best first; empty when none.
+DuplicateCheck = Callable[[Question], Sequence[SimilarMatch]]
 
 
 def _failed(name: str, detail: str, evidence: str | None = None) -> QuestionCheck:
@@ -50,6 +83,8 @@ class RoundReview:
         *,
         spec: QuestionSpec,
         client: StructuredLLMClient | None = None,
+        duplicates: DuplicateCheck | None = None,
+        max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> None:
         if spec.target_subtopic_id is None:
             raise ValueError("RoundReview needs a round spec (target_subtopic_id set).")
@@ -58,12 +93,17 @@ class RoundReview:
         self._spec = spec
         self._target = spec.target_subtopic_id
         self._client = client
+        self._duplicates = duplicates
+        self._max_attempts = max_attempts
         self.last_evaluation: PedagogicalEvaluation | None = None
         self.last_custom: list[CustomJudgeResult] = []
+        #: Stored questions the last reviewed attempt resembles; flagged when it is kept.
+        self.last_similar: list[SimilarMatch] = []
 
     def __call__(self, question: Question) -> list[QuestionCheck]:
         self.last_evaluation = None
         self.last_custom = []
+        self.last_similar = []
 
         # The generator's own claim must name the target before any judge is paid for.
         if self._target not in question.subtopic_ids:
@@ -75,6 +115,21 @@ class RoundReview:
                     f"{self._target} in subtopic_ids.",
                 )
             ]
+
+        # Before the judges: a duplicate is retried anyway, so judging it would be wasted.
+        if self._duplicates is not None:
+            self.last_similar = list(self._duplicates(question))
+            duplicate = next((match for match in self.last_similar if match.duplicate), None)
+            number = question.generation_attempts[-1].number if question.generation_attempts else 1
+            if duplicate is not None and number < self._max_attempts:
+                return [
+                    _failed(
+                        DUPLICATE_CHECK,
+                        f"it is too similar to: {duplicate.text[:DUPLICATE_QUOTE_CHARS]}",
+                        "Write a question that asks something different, not the same "
+                        "question reworded.",
+                    )
+                ]
 
         failed: list[QuestionCheck] = []
         evaluation = self._judge.evaluate(question)
