@@ -17,6 +17,7 @@ from app.generation.attempts import (
     generate_with_retries,
 )
 from app.generation.prompts import (
+    RoundExamples,
     base_type_instruction,
     build_prompt,
     instruction_fingerprint,
@@ -36,11 +37,11 @@ from app.generation.spec import (
     build_question_spec,
     require_approved_version,
 )
-from app.question_types.output_prediction import observed_expected_output
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import CurriculumVersionRow
 from app.persistence.repositories import TypeInstructionRepository
+from app.question_types.output_prediction import observed_expected_output
 from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_course_id
 
 if TYPE_CHECKING:
@@ -140,7 +141,7 @@ class BaseQuestionGenerator:
         version: CurriculumVersionRow,
         instructor_feedback: str | None = None,
         review: QuestionReview | None = None,
-        examples: list[str] | None = None,
+        examples: RoundExamples | None = None,
         follow_up: str | None = None,
         max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> Question:
@@ -158,9 +159,9 @@ class BaseQuestionGenerator:
         instructor asked for a new version of an existing question.
 
         A round spec (``spec.target_subtopic_id`` set) adds the target subtopic, its style
-        and up to a few accepted ``examples`` to the prompt; ``review`` judges each clean
-        attempt inside the retry loop (:func:`generate_with_retries`). Both are unused on a
-        section-only spec.
+        and the ``examples`` retrieved for it (:class:`RoundExamples`) to the prompt;
+        ``review`` judges each clean attempt inside the retry loop
+        (:func:`generate_with_retries`). Both are unused on a section-only spec.
         """
         if self._retrieval is None:
             raise DomainRuleError(
@@ -247,7 +248,7 @@ class BaseQuestionGenerator:
         spec: QuestionSpec,
         version: CurriculumVersionRow,
         profile: SubjectProfile,
-        examples: list[str] | None,
+        examples: RoundExamples | None,
     ) -> str:
         """The target block of a round spec: subtopic, library style, accepted examples."""
         from app.styles import get_library

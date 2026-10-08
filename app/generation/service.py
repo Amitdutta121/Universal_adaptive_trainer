@@ -19,6 +19,7 @@ from app.evaluation import PedagogicalJudge, new_run_id, record_evaluation, skip
 from app.evaluation.custom import CustomRule
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
+from app.generation.prompts import RoundExamples
 from app.generation.review import DuplicateCheck, RoundReview
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
@@ -267,7 +268,7 @@ class GenerationService:
         version: CurriculumVersionRow,
         round_id: int | None,
         rules: Sequence[CustomRule] = (),
-        examples: list[str] | None = None,
+        examples: RoundExamples | None = None,
         run_id: str | None = None,
         duplicates: DuplicateCheck | None = None,
     ) -> QuestionRow | None:
@@ -282,7 +283,8 @@ class GenerationService:
         ``duplicates`` (ADR-063 point 6) runs before the judges: a duplicate is retried with
         "too similar to: ...", except on the last attempt, where it is judged as usual and, if
         kept, stored with a :class:`QuestionSimilarityRow` per resembled question -- as is any
-        kept question that only resembles one.
+        kept question that only resembles one. A kept duplicate always goes to the review
+        queue, never auto-approved by trust routing.
 
         Flushes; the caller commits.
 
@@ -334,7 +336,13 @@ class GenerationService:
         self._session.flush()
         from app.evaluation.trust import route_generated_question
 
-        route_generated_question(self._session, row, review.last_custom)
+        # A duplicate kept on the last attempt waits for the professor, who sees its flag.
+        route_generated_question(
+            self._session,
+            row,
+            review.last_custom,
+            hold_for_review=any(match.duplicate for match in review.last_similar),
+        )
         return row
 
     def _question_for_round(
@@ -343,7 +351,7 @@ class GenerationService:
         *,
         version: CurriculumVersionRow,
         review: RoundReview,
-        examples: list[str] | None,
+        examples: RoundExamples | None,
     ) -> Question:
         """One round question. A hard cell is a valid medium question, then a harder one."""
         if spec.difficulty is not Difficulty.HARD:

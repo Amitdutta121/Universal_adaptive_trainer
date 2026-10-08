@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from app.domain.enums import QuestionType
 from app.evaluation.prompts import difficulty_bands
@@ -82,14 +84,33 @@ def render_taxonomy(version: CurriculumVersionRow) -> str:
 EXAMPLE_PROMPT_CHARS = 600
 
 
+@dataclass(frozen=True)
+class RoundExamples:
+    """What a round target is shown from the bank (ADR-063 point 3), as prompt text.
+
+    ``accepted``: approved questions of the same type, subtopic and difficulty -- match their
+    level. ``style_only``: approved questions of the same type from elsewhere -- match their
+    form, not their content or level. ``in_bank``: the nearest existing questions of the cell,
+    which the new question must not repeat.
+    """
+
+    accepted: Sequence[str] = ()
+    style_only: Sequence[str] = ()
+    in_bank: Sequence[str] = ()
+
+
+def _shown(texts: Sequence[str]) -> list[str]:
+    return [text.strip()[:EXAMPLE_PROMPT_CHARS] for text in texts if text and text.strip()]
+
+
 def render_round_target(
     *,
     subtopic: SubtopicRow,
     topic_name: str,
     style: QuestionStyle | None,
-    examples: list[str] | None = None,
+    examples: RoundExamples | None = None,
 ) -> str:
-    """The block a round spec adds: the subtopic to assess, the style, accepted examples.
+    """The block a round spec adds: the subtopic, the style, examples, what not to repeat.
 
     A round is aimed (docs/QUESTION_SETUP_PLAN.md): unlike section-only generation, the
     subtopic is part of the request, and the topic judge then checks the question really
@@ -110,15 +131,35 @@ def render_round_target(
             f"What the student does: {style.summary}",
             f"How the answer is checked: {style.checked_by}",
         ]
-    shown = [text.strip() for text in examples or [] if text and text.strip()]
-    if shown:
+    examples = examples or RoundExamples()
+    number = 0
+    accepted = _shown(examples.accepted)
+    if accepted:
         lines += [
             "",
             "The professor accepted these questions for the same subtopic and difficulty. "
             "Match their level and quality; do not copy or paraphrase them.",
         ]
-        for number, text in enumerate(shown, start=1):
-            lines.append(f"Example {number}: {text[:EXAMPLE_PROMPT_CHARS]}")
+        for number, text in enumerate(accepted, start=1):
+            lines.append(f"Example {number}: {text}")
+    style_only = _shown(examples.style_only)
+    if style_only:
+        lines += [
+            "",
+            "Style only: the professor accepted these questions of the same type for other "
+            "subtopics or difficulties. Match their form only, not their content or level.",
+        ]
+        for offset, text in enumerate(style_only, start=1):
+            lines.append(f"Example {number + offset} (style only): {text}")
+    in_bank = _shown(examples.in_bank)
+    if in_bank:
+        lines += [
+            "",
+            "Already in the bank for this subtopic and difficulty -- assess something "
+            "different from each of these:",
+        ]
+        for index, text in enumerate(in_bank, start=1):
+            lines.append(f"Existing {index}: {text}")
     lines.append("--- end target ---")
     return "\n".join(lines)
 

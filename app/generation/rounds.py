@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, QuestionStatus, RoundStatus
+from app.domain.enums import Difficulty, QuestionStatus, QuestionType, RoundStatus
 from app.errors import (
     AdaptiveTrainerError,
     ConfigurationError,
@@ -50,7 +50,7 @@ from app.evaluation import new_run_id
 from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
 from app.feedback.lessons import apply_pending_lessons
-from app.generation.prompts import base_type_instruction
+from app.generation.prompts import RoundExamples, base_type_instruction
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
 from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
@@ -60,7 +60,6 @@ from app.persistence.models import (
     GenerationRoundRow,
     QuestionRow,
     QuestionSetupRow,
-    QuestionSubtopicRow,
 )
 from app.persistence.repositories import (
     CustomJudgeRepository,
@@ -70,6 +69,7 @@ from app.persistence.repositories import (
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
 from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
+from app.retrieval.examples import retrieve_for_target
 from app.styles import QuestionStyle, get_library
 from app.subjects import profile_for_version
 
@@ -82,7 +82,7 @@ DEFAULT_ROUND_SIZE = 10
 STYLE_REJECT_FACTOR = 0.5
 #: A style rejected this many times in a cell is no longer drawn there.
 STYLE_EXCLUDE_REJECTS = 2
-#: Accepted questions of a cell shown to the generator as examples.
+#: Accepted questions shown to the generator as examples (same type; ADR-063 point 3).
 MAX_EXAMPLES_PER_CELL = 2
 
 #: Same floor as ``app.web.routes.api.coverage.MIN_SECTION_SCORE`` (generation must not
@@ -421,23 +421,40 @@ def _section_for(
 
 
 def accepted_examples(
-    session: Session, curriculum_version_id: int, cell: Cell, *, limit: int = MAX_EXAMPLES_PER_CELL
-) -> list[str]:
-    """Prompts of the newest approved questions in a cell, for the generator to match."""
+    session: Session,
+    curriculum_version_id: int,
+    cell: Cell,
+    question_type: QuestionType,
+    *,
+    section_id: int | None = None,
+    embedder: Embedder | None = None,
+    limit: int = MAX_EXAMPLES_PER_CELL,
+) -> RoundExamples:
+    """Approved questions of ``question_type`` to match, and the cell's questions not to repeat.
+
+    The order is :func:`app.retrieval.examples.retrieve_for_target`'s (ADR-063 point 3): the
+    cell, then the same topic, then the rest, by similarity to the target's ``section_id``
+    when there is an embedder; examples from outside the cell are labelled "style only".
+    """
     subtopic_id, difficulty = cell
-    stmt = (
-        select(QuestionRow.prompt)
-        .join(QuestionSubtopicRow, QuestionSubtopicRow.question_id == QuestionRow.id)
-        .where(
-            QuestionRow.curriculum_version_id == curriculum_version_id,
-            QuestionRow.status == QuestionStatus.APPROVED,
-            QuestionRow.difficulty == difficulty,
-            QuestionSubtopicRow.subtopic_id == subtopic_id,
-        )
-        .order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
-        .limit(limit)
+    section_text = (
+        SourceRetrieval(session).get_section(section_id).text if section_id is not None else ""
     )
-    return list(session.scalars(stmt))
+    found = retrieve_for_target(
+        session,
+        embedder,
+        curriculum_version_id=curriculum_version_id,
+        question_type=question_type,
+        subtopic_id=subtopic_id,
+        difficulty=difficulty,
+        section_text=section_text,
+        limit=limit,
+    )
+    return RoundExamples(
+        accepted=[example.text for example in found.examples if example.same_cell],
+        style_only=[example.text for example in found.examples if not example.same_cell],
+        in_bank=[question.text for question in found.in_bank],
+    )
 
 
 def _skip_reason(notes: list[str]) -> str | None:
@@ -556,7 +573,14 @@ def _generate_round(
                         version=version,
                         round_id=round_id,
                         rules=rules,
-                        examples=accepted_examples(session, version_id, (subtopic_id, difficulty)),
+                        examples=accepted_examples(
+                            session,
+                            version_id,
+                            (subtopic_id, difficulty),
+                            style.question_type,
+                            section_id=section_id,
+                            embedder=embedder,
+                        ),
                         run_id=run_id,
                         duplicates=duplicates,
                     )

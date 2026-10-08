@@ -5,8 +5,8 @@ to serve, or only a question this student has already answered, :func:`next_for_
 plans one target for the cell the adaptive engine wanted and records a ``QUEUED``
 :class:`LiveQuestionJobRow` instead of serving. :func:`run_live_job` then runs in the
 background with the setup's aligned generator -- the same path as a setup round: an approved
-style drawn by the professor's rejects, the newest approved questions of the cell as
-examples, the answer check, the difficulty and topic judges and the custom rules, retried
+style drawn by the professor's rejects, examples and "already in the bank" questions
+(ADR-063 point 3), the answer check, the difficulty and topic judges and the custom rules, retried
 with the failure reason and dropped if it still fails. The client polls ``/next``; once the
 job is ``DONE`` that question is served to this student.
 
@@ -372,7 +372,14 @@ def _generate(
         version=version,
         round_id=None,
         rules=rules,
-        examples=accepted_examples(session, version.id, (job.subtopic_id, difficulty)),
+        examples=accepted_examples(
+            session,
+            version.id,
+            (job.subtopic_id, difficulty),
+            style.question_type,
+            section_id=section_id,
+            embedder=embedder,
+        ),
         run_id=new_run_id(),
     )
     if question is None:

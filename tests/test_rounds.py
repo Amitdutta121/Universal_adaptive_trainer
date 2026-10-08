@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import book_documents as docs
+import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -29,6 +30,7 @@ from app.domain.enums import (
     Difficulty,
     QuestionStatus,
     QuestionType,
+    ReviewDecision,
     RoundStatus,
 )
 from app.errors import DomainRuleError, LLMRequestError
@@ -37,7 +39,7 @@ from app.evaluation import custom as custom_module
 from app.evaluation.custom import CustomJudgeResult
 from app.generation import rounds as rounds_module
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
-from app.generation.prompts import build_prompt
+from app.generation.prompts import RoundExamples, build_prompt, render_round_target
 from app.generation.rounds import (
     next_round,
     plan_targets,
@@ -52,6 +54,7 @@ from app.persistence.models import (
     CurriculumVersionRow,
     CustomJudgeRow,
     GenerationRoundRow,
+    ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
     QuestionSetupRow,
@@ -62,6 +65,7 @@ from app.persistence.models import (
 )
 from app.persistence.repositories import BookStructureRepository, GenerationRoundRepository
 from app.retrieval import SectionEmbeddingStore
+from app.retrieval.examples import EXAMPLE_PAIR_THRESHOLD
 from app.styles import QuestionStyle
 from app.web.routes.api.coverage import get_generation_client
 
@@ -187,6 +191,7 @@ def _question(
     *,
     style_id: str | None = None,
     prompt: str = "Q?",
+    question_type: QuestionType | None = None,
 ) -> QuestionRow:
     row = QuestionRow(
         curriculum_version_id=env.version.id,
@@ -195,6 +200,7 @@ def _question(
         difficulty=Difficulty(difficulty),
         status=status,
         prompt=prompt,
+        question_type=question_type,
         style_id=style_id,
         target_subtopic_id=subtopic.id if style_id else None,
     )
@@ -630,6 +636,7 @@ def test_run_round_reports_progress_and_examples(
         "medium",
         QuestionStatus.APPROVED,
         prompt="Accepted: what does a while loop do?",
+        question_type=QuestionType.MULTIPLE_CHOICE,
     )
     row = start_round(session, setup.id, size=2, rng=random.Random(1))
     session.commit()
@@ -648,7 +655,9 @@ def test_run_round_reports_progress_and_examples(
         0,
     )
     assert done.started_at is not None and done.finished_at is not None
-    assert "Accepted: what does a while loop do?" in client.generation_calls[0]["prompt"]
+    assert (
+        "Example 1: Accepted: what does a while loop do?" in (client.generation_calls[0]["prompt"])
+    )
     questions = _round_questions(engine, row.id)
     assert len(questions) == 2
     assert {q.spec["source_section_ids"][0] for q in questions} == {env.sections[0].id}
@@ -960,3 +969,265 @@ def test_a_duplicate_on_the_last_attempt_is_stored_with_a_flag(
     assert flag.similar_question_id == existing_id
     assert flag.score == pytest.approx(0.95, abs=1e-5)
     assert _round(engine, round_id).dropped == 0
+
+
+def _record_routing(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """The ``hold_for_review`` of every trust routing call."""
+    import app.evaluation.trust as trust
+
+    held: list[bool] = []
+    route = trust.route_generated_question
+
+    def recording(session: Session, row: QuestionRow, custom: Any = None, **kwargs: Any) -> str:
+        held.append(kwargs.get("hold_for_review", False))
+        return route(session, row, custom, **kwargs)
+
+    monkeypatch.setattr(trust, "route_generated_question", recording)
+    return held
+
+
+def test_a_duplicate_kept_on_the_last_attempt_is_held_for_review(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Trust routing must not auto-approve it: the professor has to see the flag."""
+    held = _record_routing(monkeypatch)
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+
+    _run(engine, round_id, _mcq_client(env), ScoredEmbedder([0.95]))
+
+    assert held == [True]
+    (question,) = _round_questions(engine, round_id)
+    assert question.trust_provenance == "pending"
+
+
+def test_a_question_that_only_resembles_one_is_routed_as_usual(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+
+    _run(engine, round_id, _mcq_client(env), ScoredEmbedder([0.80]))
+
+    assert held == [False]
+
+
+# ------------------------------------------------------------------ examples (ADR-063 point 3)
+
+
+class MarkerEmbedder:
+    """Counts marker words. A target's query (section 0 + subtopic "While loops") holds only
+    "while", so a question's cosine to the target is its share of "while"."""
+
+    model = "marker-test-v1"
+    VOCAB = ("alpha", "beta", "gamma", "while")
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[float(t.lower().count(word)) for word in self.VOCAB] for t in texts]
+
+
+class FailingEmbedder:
+    model = "failing-test-v1"
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        raise LLMRequestError("embeddings are down")
+
+
+MCQ = QuestionType.MULTIPLE_CHOICE
+
+
+def _examples(session: Session, env: SimpleNamespace, embedder: object = None) -> RoundExamples:
+    return rounds_module.accepted_examples(
+        session,
+        env.version.id,
+        (env.while_loops.id, Difficulty.MEDIUM),
+        MCQ,
+        section_id=env.sections[0].id,
+        embedder=embedder,  # type: ignore[arg-type]
+    )
+
+
+def _approved(
+    session: Session, env: SimpleNamespace, subtopic: SubtopicRow, prompt: str, **kwargs: Any
+) -> QuestionRow:
+    kwargs.setdefault("question_type", MCQ)
+    return _question(
+        session, env, subtopic, "medium", QuestionStatus.APPROVED, prompt=prompt, **kwargs
+    )
+
+
+def _pending(session: Session, env: SimpleNamespace, prompt: str, **kwargs: Any) -> QuestionRow:
+    kwargs.setdefault("status", QuestionStatus.GENERATED)
+    return _question(session, env, env.while_loops, "medium", prompt=prompt, **kwargs)
+
+
+@pytest.mark.parametrize("embedder", [None, MarkerEmbedder()], ids=["no-embedder", "embedder"])
+def test_examples_are_only_of_the_targets_question_type(
+    session: Session, env: SimpleNamespace, embedder: object
+) -> None:
+    """Regression: the cell lookup returned any type (73% of examples were another type)."""
+    _approved(session, env, env.while_loops, "Choice alpha")
+    _approved(session, env, env.while_loops, "Write code while", question_type=QuestionType.CODING)
+    _approved(session, env, env.slicing, "Slice code", question_type=QuestionType.CODING)
+
+    found = _examples(session, env, embedder)
+
+    assert found.accepted == ["Choice alpha"]
+    assert found.style_only == []
+    # The other-type question of the cell is still something not to repeat.
+    assert found.in_bank == ["Write code while"]
+
+
+def test_an_empty_cell_falls_back_to_same_topic_then_similarity(
+    session: Session, env: SimpleNamespace
+) -> None:
+    for_loops = SubtopicRow(topic_id=env.while_loops.topic_id, name="For loops", position=1)
+    session.add(for_loops)
+    session.commit()
+    _approved(session, env, for_loops, "Same topic beta")
+    _approved(session, env, for_loops, "Same topic while", question_type=QuestionType.CODING)
+    _approved(session, env, env.slicing, "Other topic while while")
+    _approved(session, env, env.slicing, "Other topic gamma")  # newest, but least similar
+
+    found = _examples(session, env, MarkerEmbedder())
+
+    assert found.accepted == []
+    assert found.style_only == ["Same topic beta", "Other topic while while"]
+    assert found.in_bank == []
+
+
+def test_no_two_examples_are_near_identical(session: Session, env: SimpleNamespace) -> None:
+    _approved(session, env, env.while_loops, "Choice beta")
+    _approved(session, env, env.while_loops, "Choice while alpha")
+    _approved(session, env, env.while_loops, "Choice while alpha again")  # cosine 1.0 to above
+
+    found = _examples(session, env, MarkerEmbedder())
+
+    assert found.accepted == ["Choice while alpha again", "Choice beta"]
+    first, second = (
+        np.asarray(vector) / np.linalg.norm(vector)
+        for vector in MarkerEmbedder().embed(found.accepted)
+    )
+    assert float(first @ second) <= EXAMPLE_PAIR_THRESHOLD
+    # The skipped twin is in the cell, so it is shown as already in the bank.
+    assert found.in_bank == ["Choice while alpha"]
+
+
+def test_already_in_the_bank_is_the_three_nearest_of_the_cell(
+    session: Session, env: SimpleNamespace
+) -> None:
+    """Approved or awaiting review, by cosine to the target (not by age); never rejected or
+    another difficulty."""
+    _pending(session, env, "while while gamma")  # 0.89
+    _question(session, env, env.while_loops, "medium", QuestionStatus.APPROVED, prompt="while beta")
+    _pending(session, env, "while while while", status=QuestionStatus.VALIDATION_PASSED)  # 1.0
+    _pending(session, env, "gamma")  # newest, cosine 0
+    _pending(session, env, "while", status=QuestionStatus.REJECTED)
+    _question(session, env, env.while_loops, "easy", QuestionStatus.APPROVED, prompt="while")
+
+    found = _examples(session, env, MarkerEmbedder())
+
+    assert found.in_bank == ["while while while", "while while gamma", "while beta"]
+
+
+@pytest.mark.parametrize("embedder", [None, FailingEmbedder()], ids=["none", "failing"])
+def test_without_a_working_embedder_examples_and_the_bank_are_newest_first(
+    session: Session, env: SimpleNamespace, embedder: object
+) -> None:
+    _approved(session, env, env.while_loops, "Old choice")
+    _approved(session, env, env.while_loops, "New choice")
+    _approved(session, env, env.while_loops, "Newest choice")
+    _approved(session, env, env.slicing, "Elsewhere choice")
+    for prompt in ("Pending one", "Pending two", "Pending three"):
+        _pending(session, env, prompt)
+
+    found = _examples(session, env, embedder)
+
+    assert found.accepted == ["Newest choice", "New choice"]
+    assert found.in_bank == ["Pending three", "Pending two", "Pending one"]
+
+
+def test_the_target_block_labels_style_only_examples_and_lists_the_bank() -> None:
+    """Snapshot of the round target block with every kind of example."""
+    subtopic = SubtopicRow(id=7, name="While loops", description="Using a while loop.")
+    block = render_round_target(
+        subtopic=subtopic,
+        topic_name="Loops",
+        style=STYLE_A,
+        examples=RoundExamples(
+            accepted=["What does a while loop do?"],
+            style_only=["  Which slice gives 'el'?  ", ""],
+            in_bank=["Which loop repeats while a condition holds?", "What ends a while loop?"],
+        ),
+    )
+    assert block == "\n".join(
+        [
+            "--- target ---",
+            "The question must assess this subtopic: [subtopic 7] While loops -- Using a while "
+            "loop. (topic: Loops).",
+            "Set topic_id to its topic and include 7 in subtopic_ids.",
+            "",
+            "Write it in this question style: Pick the right concept.",
+            "What the student does: Pick the right concept: pick the one right option.",
+            "How the answer is checked: Compares the chosen option with the key",
+            "",
+            "The professor accepted these questions for the same subtopic and difficulty. "
+            "Match their level and quality; do not copy or paraphrase them.",
+            "Example 1: What does a while loop do?",
+            "",
+            "Style only: the professor accepted these questions of the same type for other "
+            "subtopics or difficulties. Match their form only, not their content or level.",
+            "Example 2 (style only): Which slice gives 'el'?",
+            "",
+            "Already in the bank for this subtopic and difficulty -- assess something "
+            "different from each of these:",
+            "Existing 1: Which loop repeats while a condition holds?",
+            "Existing 2: What ends a while loop?",
+            "--- end target ---",
+        ]
+    )
+    bare = render_round_target(subtopic=subtopic, topic_name="Loops", style=None)
+    assert "Example" not in bare and "Existing" not in bare
+
+
+def test_a_round_prompt_carries_examples_and_the_bank(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    _approved(session, env, env.slicing, "Elsewhere: which slice?")
+    _pending(session, env, "Pending: while?")
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    round_id = _queue(session, setup, [_target(env)]).id
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client)
+
+    prompt = client.generation_calls[0]["prompt"]
+    assert "Example 1 (style only): Elsewhere: which slice?" in prompt
+    assert "Existing 1: Pending: while?" in prompt
+
+
+def test_the_replay_script_reports_both_methods(session: Session, env: SimpleNamespace) -> None:
+    """scripts/replay_retrieval.py with a fake embedder. Approved in order: a coding question
+    of the cell, an MCQ elsewhere, an MCQ of the cell. For the last, the old lookup shows the
+    coding question; the implemented one shows the MCQ from elsewhere."""
+    from scripts.replay_retrieval import replay
+
+    for subtopic, prompt, kind in (
+        (env.while_loops, "Write a while loop", QuestionType.CODING),
+        (env.slicing, "Which slice?", MCQ),
+        (env.while_loops, "Which loop repeats while?", MCQ),
+    ):
+        row = _approved(session, env, subtopic, prompt, question_type=kind)
+        row.content = {"sources": [{"section_id": env.sections[0].id}]}
+        session.add(ProfessorReviewRow(question_id=row.id, decision=ReviewDecision.APPROVE))
+        session.commit()
+
+    report = replay(session, MarkerEmbedder())
+
+    # The first target has nothing approved before it; the second finds nothing either way.
+    assert {
+        method: (r["targets"], r["coverage"], r["same_type"]) for method, r in report.items()
+    } == {
+        "DB": (2, 0.5, 0.0),
+        "REC": (2, 0.5, 1.0),
+    }
+    assert report["REC"]["same_subtopic"] == 0.0
