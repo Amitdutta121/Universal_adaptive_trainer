@@ -2,8 +2,9 @@
 
 The four cells each call for something different, and these check that the call
 is made per review rather than only when someone opens the calibration page:
-both-rejected relearns the type instruction, the two disagreeing cells name the
-judge at fault, and every placeable review is written to the dataset.
+both-rejected relearns the type instruction (at the next round's lesson run,
+ADR-063), the two disagreeing cells name the judge at fault, and every placeable
+review is written to the dataset.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ from app.domain.enums import (
 from app.errors import LLMRequestError
 from app.evaluation import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.feedback import route_review_outcome, submit_review
+from app.feedback.lessons import apply_pending_lessons
+from app.generation.prompts import base_type_instruction
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import (
     ProfessorReviewRepository,
@@ -38,6 +41,7 @@ from app.persistence.repositories import (
     TypeInstructionRepository,
 )
 from app.personalization import LearnedRule, LearnedRules
+from app.subjects import PYTHON_PROFILE
 
 
 class Rewriter:
@@ -321,6 +325,8 @@ def test_a_partial_evaluation_is_not_placed(session: Session) -> None:
 
 
 # ------------------------------------------------------- the confirmed-bad cell acts
+#
+# The review only records; the lesson is learned at the start of the next round (ADR-063).
 
 
 def _reject_through_the_api(client: TestClient, question_id: int) -> dict[str, Any]:
@@ -332,7 +338,21 @@ def _reject_through_the_api(client: TestClient, question_id: int) -> dict[str, A
     return response.json()
 
 
-def test_both_rejecting_relearns_the_instruction_on_submit(
+def _next_round_lessons(session: Session):
+    session.expire_all()
+    return apply_pending_lessons(
+        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
+    )
+
+
+def _stored(session: Session, review_id: int):
+    session.expire_all()
+    stored = ReviewOutcomeRepository(session).get_for_review(review_id)
+    assert stored is not None
+    return stored
+
+
+def test_both_rejecting_relearns_the_instruction_next_round(
     client: TestClient, session: Session, rewriter: Rewriter
 ) -> None:
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
@@ -340,10 +360,13 @@ def test_both_rejecting_relearns_the_instruction_on_submit(
     body = _reject_through_the_api(client, question.id)
 
     assert body["outcome"]["cell"] == QuadrantCell.CONFIRMED_BAD.value
-    assert body["outcome"]["instruction_refreshed"] is True
-    assert body["outcome"]["refresh_rule_count"] == 1
-    assert rewriter.calls == 1
+    assert body["outcome"]["instruction_refreshed"] is False
+    assert rewriter.calls == 0
 
+    _next_round_lessons(session)
+
+    assert rewriter.calls == 1
+    assert _stored(session, body["id"]).instruction_refreshed is True
     stored = TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE)
     assert stored is not None
     assert "Name the defect in the prompt." in stored.instruction
@@ -355,7 +378,7 @@ def test_a_missed_review_teaches_the_generator_and_the_judge(
     """Two things went wrong, so two things learn."""
     judge_calls: list[str] = []
     monkeypatch.setattr(
-        "app.web.routes.api.feedback.refresh_judge_prompt",
+        "app.feedback.lessons.refresh_judge_prompt",
         lambda _session, metric, **_kw: judge_calls.append(metric.value) or object(),
     )
     question = _question(session, evaluation=_evaluation(JudgeGate.APPROVED))
@@ -364,10 +387,11 @@ def test_a_missed_review_teaches_the_generator_and_the_judge(
         f"/api/questions/{question.id}/review",
         json={"decision": "reject", "reasons": ["too_easy"]},
     ).json()
-
     assert body["outcome"]["cell"] == QuadrantCell.MISSED.value
+    _next_round_lessons(session)
+
     # The generator wrote a question the professor rejected...
-    assert body["outcome"]["instruction_refreshed"] is True
+    assert _stored(session, body["id"]).instruction_refreshed is True
     assert rewriter.calls == 1
     # ...and the judge passed it.
     assert judge_calls == [JudgeMetricId.DIFFICULTY.value]
@@ -378,15 +402,16 @@ def test_a_false_alarm_teaches_only_the_judge(
 ) -> None:
     """The professor approved it, so the generator did nothing wrong."""
     monkeypatch.setattr(
-        "app.web.routes.api.feedback.refresh_judge_prompt",
+        "app.feedback.lessons.refresh_judge_prompt",
         lambda _session, _metric, **_kw: object(),
     )
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 
     body = client.post(f"/api/questions/{question.id}/review", json={"decision": "approve"}).json()
+    _next_round_lessons(session)
 
     assert body["outcome"]["cell"] == QuadrantCell.FALSE_ALARM.value
-    assert body["outcome"]["instruction_refreshed"] is False
+    assert _stored(session, body["id"]).instruction_refreshed is False
     assert rewriter.calls == 0
 
 
@@ -396,13 +421,14 @@ def test_the_other_cells_spend_no_model_call(
     question = _question(session, evaluation=_evaluation(JudgeGate.APPROVED))
 
     response = client.post(f"/api/questions/{question.id}/review", json={"decision": "approve"})
+    _next_round_lessons(session)
 
     assert response.status_code == 201
     assert response.json()["outcome"]["cell"] == QuadrantCell.CONFIRMED_GOOD.value
     assert rewriter.calls == 0
 
 
-def test_a_failed_refresh_keeps_the_review_and_reports_it(
+def test_a_failed_refresh_keeps_the_review_and_records_it(
     client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The verdict is the professor's work; a provider outage must not discard it."""
@@ -411,13 +437,10 @@ def test_a_failed_refresh_keeps_the_review_and_reports_it(
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 
     body = _reject_through_the_api(client, question.id)
+    run = _next_round_lessons(session)
 
-    assert body["outcome"]["instruction_refreshed"] is False
-    assert "provider" in (body["outcome"]["refresh_error"] or "").lower()
-
-    session.expire_all()
+    assert "provider" in (run.error or "").lower()
     assert ProfessorReviewRepository(session).count() == 1
-    stored = ReviewOutcomeRepository(session).get_for_review(body["id"])
-    assert stored is not None
+    stored = _stored(session, body["id"])
     assert stored.instruction_refreshed is False
-    assert stored.refresh_error
+    assert "provider" in (stored.refresh_error or "").lower()

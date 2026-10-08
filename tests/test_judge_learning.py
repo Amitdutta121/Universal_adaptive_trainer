@@ -36,8 +36,15 @@ from app.evaluation.judge_learning import (
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
 from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
 from app.feedback import route_review_outcome, submit_review
+from app.feedback.lessons import apply_pending_lessons
+from app.generation.prompts import base_type_instruction
 from app.persistence.models import QuestionRow
-from app.persistence.repositories import JudgePromptRepository, QuestionRepository
+from app.persistence.repositories import (
+    JudgePromptRepository,
+    QuestionRepository,
+    ReviewOutcomeRepository,
+)
+from app.subjects import PYTHON_PROFILE
 
 DIFFICULTY = JudgeMetricId.DIFFICULTY
 
@@ -346,7 +353,14 @@ def test_render_keeps_the_shipped_text_when_nothing_is_learned() -> None:
     assert render_judge_prompt("Base text.", []) == "Base text."
 
 
-# ------------------------------------------------------- firing on a submitted review
+# ------------------------------------------- firing on the next round's lesson run (ADR-063)
+
+
+def _next_round_lessons(session: Session):
+    session.expire_all()
+    return apply_pending_lessons(
+        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
+    )
 
 
 def test_a_disagreeing_review_relearns_the_named_judge(
@@ -375,7 +389,11 @@ def test_a_disagreeing_review_relearns_the_named_judge(
     assert response.status_code == 201
     body = response.json()
     assert body["outcome"]["cell"] == "missed"
-    assert body["outcome"]["judges_refreshed"] == [DIFFICULTY.value]
+    assert rewriter.calls == 0
+    _next_round_lessons(session)
+    assert ReviewOutcomeRepository(session).get_for_review(body["id"]).judges_refreshed == [
+        DIFFICULTY
+    ]
     assert rewriter.calls == 1
 
     row = JudgePromptRepository(session).get(DIFFICULTY)
@@ -398,6 +416,7 @@ def test_an_agreeing_review_relearns_no_judge(
     session.commit()
 
     response = client.post(f"/api/questions/{question.id}/review", json={"decision": "approve"})
+    _next_round_lessons(session)
 
     assert response.json()["outcome"]["judges_refreshed"] == []
     assert rewriter.calls == 0
@@ -427,6 +446,7 @@ def test_a_hand_written_judge_is_never_overwritten(
         f"/api/questions/{question.id}/review",
         json={"decision": "reject", "reasons": ["too_easy"]},
     )
+    _next_round_lessons(session)
 
     assert rewriter.calls == 0
     row = JudgePromptRepository(session).get(DIFFICULTY)
@@ -466,9 +486,11 @@ def test_a_failed_relearn_keeps_the_review(
     )
 
     assert response.status_code == 201
-    outcome = response.json()["outcome"]
-    assert outcome["judges_refreshed"] == []
-    assert "provider" in (outcome["refresh_error"] or "").lower()
+    run = _next_round_lessons(session)
+    assert "provider" in (run.error or "").lower()
+    outcome = ReviewOutcomeRepository(session).get_for_review(response.json()["id"])
+    assert outcome.judges_refreshed == []
+    assert "provider" in (outcome.refresh_error or "").lower()
 
 
 # --------------------------------------------------------------- the API and page

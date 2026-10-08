@@ -14,7 +14,9 @@ Planning (synchronous, no model call):
   in that style and cell halves the weight, two rejects exclude it. When every style is
   excluded, the least-rejected ones are used rather than leaving the cell unreachable.
 
-Running (background): per target, retrieve the section that best teaches the subtopic
+Running (background): first the **lesson run** (ADR-063) learns from the reviews since the
+last round, so the whole round is generated with them; a failure there is recorded on the
+round and does not stop it. Then, per target, retrieve the section that best teaches the subtopic
 (embedding retrieval as in ``POST /coverage/generation-runs``, falling back to the
 subtopic's evidence section). A hard target asks the generatability judge once, before
 any draft: if the lesson cannot support a hard question, the target is skipped and the
@@ -46,6 +48,8 @@ from app.errors import (
 from app.evaluation import new_run_id
 from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
+from app.feedback.lessons import apply_pending_lessons
+from app.generation.prompts import base_type_instruction
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
 from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
@@ -579,6 +583,40 @@ def _generate_round(
         raise LLMRequestError(provider_errors[-1], detail="Every target of the round failed.")
 
 
+def _apply_lessons(
+    session: Session, row: GenerationRoundRow, client: StructuredLLMClient | None
+) -> None:
+    """Learn from the pending reviews of this round's subject, and say so on the round.
+
+    Never raises: a round with stale lessons is still a round, and the error on the row is
+    what tells the professor this one was generated without them.
+    """
+    round_id = row.id
+    setup = QuestionSetupRepository(session).get(row.setup_id)
+    try:
+        run = apply_pending_lessons(
+            session,
+            round_id=round_id,
+            profile=profile_for_version(session, setup.curriculum_version_id),
+            base_instruction=base_type_instruction,
+            client=client,
+        )
+        applied, error = run.applied, run.error
+    except Exception as exc:
+        logger.exception("round %s: the lesson run failed", round_id)
+        session.rollback()
+        applied = 0
+        error = (
+            exc.message
+            if isinstance(exc, AdaptiveTrainerError)
+            else f"Lessons were not applied ({type(exc).__name__})."
+        )
+    GenerationRoundRepository(session).update(
+        round_id, lessons_applied=applied, lessons_error=error
+    )
+    session.commit()
+
+
 def run_round(
     round_id: int,
     *,
@@ -589,7 +627,8 @@ def run_round(
     """Background body: generate every target of a round and record progress.
 
     Opens its own session (it runs after the request's session is closed). Sets ``RUNNING``
-    and ``started_at``; per target generates -> answer check -> enabled judges -> custom judges
+    and ``started_at``; applies the pending review lessons (``lessons_applied`` /
+    ``lessons_error``); per target generates -> answer check -> enabled judges -> custom judges
     (``app.evaluation.custom.run_custom_judges``), retrying with the failure reason up to
     ``MAX_GENERATION_ATTEMPTS`` and dropping on final failure. Stored questions carry
     ``style_id``, ``round_id`` and ``target_subtopic_id``. Increments ``produced`` / ``dropped``
@@ -622,6 +661,7 @@ def run_round(
             session.rollback()
             return
         session.commit()
+        _apply_lessons(session, row, client)
         _generate_round(
             session,
             row,

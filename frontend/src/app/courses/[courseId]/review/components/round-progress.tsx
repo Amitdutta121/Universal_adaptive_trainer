@@ -33,6 +33,16 @@ function counts(round: GenerationRound): string {
   return `produced ${round.produced}, dropped ${round.dropped}${skip} of ${round.requested}`;
 }
 
+/** What the round's lesson run learned from the reviews before it generated (ADR-063). */
+function lessons(round: GenerationRound): string {
+  const applied = round.lessons_applied ?? 0;
+  const parts = [
+    applied > 0 ? `Applied lessons from ${applied} review${applied === 1 ? "" : "s"}.` : "",
+    round.lessons_error ? `Some lessons were not applied: ${round.lessons_error}` : "",
+  ];
+  return parts.filter(Boolean).join(" ");
+}
+
 /** One line under the header while a round generates, and its outcome once it ends. */
 export function RoundProgressStrip({
   roundId,
@@ -60,10 +70,12 @@ export function RoundProgressStrip({
   } else if (round.status === "queued") {
     message = `Round ${round.number} queued: ${round.requested} questions requested`;
   } else if (round.status === "running") {
-    message = `Generating round ${round.number}: ${counts(round)}`;
+    const learned = lessons(round);
+    message = `Generating round ${round.number}: ${counts(round)}${learned ? `. ${learned}` : ""}`;
   } else if (round.status === "done") {
     const why = round.skip_reason ? ` ${round.skip_reason}` : "";
-    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.`;
+    const learned = lessons(round);
+    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.${learned ? ` ${learned}` : ""}`;
   } else {
     message = `Round ${round.number} failed${round.error ? `: ${round.error}` : "."}`;
   }

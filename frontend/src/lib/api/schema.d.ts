@@ -877,7 +877,7 @@ export interface paths {
         put?: never;
         /**
          * Create Review
-         * @description Record a professor verdict, then act on the cell it lands in (ADR-037).
+         * @description Record a professor verdict and the cell it lands in (ADR-037). No model call.
          */
         post: operations["create_review_api_questions__question_id__review_post"];
         delete?: never;
@@ -3630,6 +3630,13 @@ export interface components {
             skipped: number;
             /** Skip Reason */
             skip_reason?: string | null;
+            /**
+             * Lessons Applied
+             * @default 0
+             */
+            lessons_applied: number;
+            /** Lessons Error */
+            lessons_error?: string | null;
             /** Error */
             error: string | null;
             /**

@@ -1302,8 +1302,8 @@ class ReviewOutcomeOut(BaseModel):
     held_out: bool
     #: What the cell calls for, stated rather than left for the client to map.
     action: str
-    #: Only the confirmed-bad cell relearns the generator, and only if the model
-    #: answered.
+    #: Filled by the next round's lesson run (ADR-063), so always unset when the
+    #: review is submitted.
     instruction_refreshed: bool = False
     refresh_error: str | None = None
     refresh_rule_count: int | None = None
@@ -1336,16 +1336,16 @@ CELL_ACTIONS: dict[QuadrantCell, str] = {
     ),
     QuadrantCell.MISSED: (
         "Two things went wrong: the generator wrote a question you would not keep, and the "
-        "judge passed it. So this type's instruction relearns and the named judge relearns. "
+        "judge passed it. So this type's instruction and the named judge relearn next round. "
         "The only cell that makes auto-acceptance unsafe."
     ),
     QuadrantCell.FALSE_ALARM: (
-        "The judge flagged a question you approved, so the named judge relearns. This costs "
-        "review time, never a student."
+        "The judge flagged a question you approved, so the named judge relearns next round. "
+        "This costs review time, never a student."
     ),
     QuadrantCell.CONFIRMED_BAD: (
         "The judge was right and the question was not good enough. The generator is what "
-        "to fix, so this type's instruction is relearned from your reviews."
+        "to fix, so this type's instruction is relearned from your reviews next round."
     ),
 }
 
@@ -2612,6 +2612,9 @@ class GenerationRoundOut(BaseModel):
     dropped: int
     skipped: int = 0
     skip_reason: str | None = None
+    #: Reviews the round learned from before generating, and why some were not (ADR-063).
+    lessons_applied: int = 0
+    lessons_error: str | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -2629,6 +2632,8 @@ class GenerationRoundOut(BaseModel):
             dropped=row.dropped,
             skipped=row.skipped,
             skip_reason=row.skip_reason,
+            lessons_applied=row.lessons_applied or 0,
+            lessons_error=row.lessons_error,
             error=row.error,
             created_at=row.created_at,
             started_at=row.started_at,

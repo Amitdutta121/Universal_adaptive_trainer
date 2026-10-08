@@ -2538,8 +2538,9 @@ question in flight, which can take a minute with judge calls.
 
 ## ADR-063 — The generator learns from memory, once per round, behind safeguards
 
-**Status:** proposed. Amends ADR-033 and ADR-037 (lessons reach the generator before the next
-round, not the next question). Judge learning is ADR-064. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md` m1–m7.
+**Status:** proposed; decisions 1–2 accepted and implemented (m1: a review makes no model
+call; `app/feedback/lessons.py` runs at the start of each round). Amends ADR-033 and ADR-037
+(lessons reach the generator before the next round, not the next question). Judge learning is ADR-064. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md` m1–m7.
 
 What we measured on copies of the dev database (2026-10-07/08):
 

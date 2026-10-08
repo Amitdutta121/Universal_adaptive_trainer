@@ -275,7 +275,9 @@ export function ReviewVerdictBar({
             <span className="review-kbd">Enter</span>
           </Button>
           {onSkip ? (
-            <Button variant="outline" onClick={onSkip} disabled={isSubmitting}>
+            // Not disabled while a review saves: saving makes no model call, and the
+            // professor may move on before it lands.
+            <Button variant="outline" onClick={onSkip}>
               Skip
               <ChevronRight className="size-4" />
             </Button>

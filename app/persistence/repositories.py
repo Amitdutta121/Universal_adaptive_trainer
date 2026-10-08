@@ -1119,6 +1119,15 @@ class ReviewOutcomeRepository:
             )
         return list(self._session.scalars(stmt))
 
+    def list_pending_lessons(self) -> list[ReviewOutcomeRow]:
+        """Rows no lesson run has learned from yet (ADR-063), oldest first."""
+        stmt = (
+            select(ReviewOutcomeRow)
+            .where(ReviewOutcomeRow.lessons_round_id.is_(None))
+            .order_by(ReviewOutcomeRow.created_at, ReviewOutcomeRow.id)
+        )
+        return list(self._session.scalars(stmt))
+
     def list_in_cells(
         self,
         cells: Collection[QuadrantCell],

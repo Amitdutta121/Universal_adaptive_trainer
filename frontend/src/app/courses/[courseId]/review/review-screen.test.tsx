@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JudgeRail } from "./components/review-feedback";
 import { ReviewScreen } from "./review-screen";
@@ -48,6 +49,7 @@ let currentSetup: {
   setup: { id: number; latest_round: { id: number; status: string } | null } | null;
 } = { setup: null };
 let roundData: unknown;
+let submitPending = false;
 
 function makeDetail(): QuestionDetail {
   return {
@@ -107,7 +109,7 @@ vi.mock("@/lib/api/queries", () => ({
     isError: false,
     error: null,
   }),
-  useSubmitReview: () => ({ mutateAsync: submitReview, isPending: false }),
+  useSubmitReview: () => ({ mutateAsync: submitReview, isPending: submitPending }),
   useCurrentSetup: () => ({ data: currentSetup, isError: false, error: null }),
   useStartNextRound: () => ({ mutateAsync: startNextRound, isPending: false }),
   useRound: (roundId: number | null) => ({
@@ -123,6 +125,8 @@ beforeEach(() => {
   invalidateQueries.mockReset();
   currentSetup = { setup: null };
   roundData = undefined;
+  submitPending = false;
+  vi.mocked(toast.error).mockReset();
   submitReview.mockReset().mockResolvedValue({ outcome: null });
   startNextRound.mockReset().mockResolvedValue({ round_id: 9 });
 });
@@ -211,6 +215,34 @@ describe("ReviewScreen verdict", () => {
     expect(submitReview.mock.calls[0][0].body).not.toHaveProperty("reasons");
   });
 
+  it("keeps Skip enabled while a review saves", () => {
+    submitPending = true;
+    render(<ReviewScreen />);
+    expect(screen.getByRole("button", { name: /Saving/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Skip/ })).toBeEnabled();
+  });
+
+  it("does not claim a refresh happened when the review is saved", async () => {
+    submitReview.mockResolvedValue({
+      outcome: {
+        cell: "confirmed_bad",
+        action: "This type's instruction is relearned from your reviews next round.",
+        attributed_labels: [],
+        refresh_error: "stale error",
+      },
+    });
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(screen.getByRole("button", { name: /Reject and continue/ }));
+
+    expect(toast.error).toHaveBeenCalledWith("confirmed bad", {
+      description: "This type's instruction is relearned from your reviews next round.",
+    });
+  });
+
   it("keeps Edit as a secondary action", async () => {
     const user = userEvent.setup();
     render(<ReviewScreen />);
@@ -259,6 +291,31 @@ describe("Generate next round", () => {
       "Generating round 2: produced 4, dropped 1 of 10",
     );
     expect(screen.getByRole("button", { name: /Generate next round/ })).toBeDisabled();
+  });
+
+  it("says how many reviews the round learned from, or why it could not", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 10,
+      produced: 0,
+      dropped: 0,
+      lessons_applied: 3,
+      lessons_error: null,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Applied lessons from 3 reviews.",
+    );
+
+    roundData = { ...(roundData as object), lessons_applied: 0, lessons_error: "provider down" };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Some lessons were not applied: provider down",
+    );
   });
 });
 

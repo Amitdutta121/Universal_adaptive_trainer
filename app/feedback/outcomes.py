@@ -7,9 +7,8 @@ submit and while the answer can still be acted on.
 
 Only the free work lives here: cross the judge gate with the professor verdict,
 name the judges at fault, and write the dataset row. The paid work -- relearning
-a type instruction, which costs a model call -- is triggered by the caller in
-:mod:`app.web.routes.api.feedback`, because that is the layer allowed to reach
-across subsystems.
+a type instruction or a judge, which costs model calls -- happens in the next
+round's lesson run (:mod:`app.feedback.lessons`, ADR-063).
 
 A question with no usable judge verdict produces **no row**. Recording it as a
 cell would invent a judge opinion where none exists, and the dataset would then

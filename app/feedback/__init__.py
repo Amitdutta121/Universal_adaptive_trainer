@@ -17,7 +17,8 @@ Key rules
 Allowed dependencies
     ``app.domain``, ``app.errors``, ``app.persistence``, and the pure label
     functions of ``app.calibration`` (used by :mod:`app.feedback.outcomes` to
-    place a landed review in its quadrant cell).
+    place a landed review in its quadrant cell). :mod:`app.feedback.lessons`
+    also calls the learners of ``app.personalization`` and ``app.evaluation``.
     Must not import ``app.generation`` (that direction would create a cycle:
     generation reads preference, preference reads feedback).
 """

@@ -1006,6 +1006,10 @@ class ReviewOutcomeRow(TimestampMixin, Base):
     judges_refreshed: Mapped[list[JudgeMetricId]] = mapped_column(
         "judges_refreshed_json", EnumList(JudgeMetricId), default=list, nullable=True
     )
+    #: The round whose lesson run learned from this review (ADR-063). ``NULL`` means the
+    #: lesson is still pending; ``0`` marks reviews learned on submit, before lesson runs.
+    #: Not a foreign key: deleting a round must not make its reviews pending again.
+    lessons_round_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
 
     review: Mapped[ProfessorReviewRow] = relationship()
     question: Mapped[QuestionRow] = relationship()
@@ -1128,6 +1132,10 @@ class GenerationRoundRow(TimestampMixin, Base):
     skipped: Mapped[int] = mapped_column(Integer, default=0)
     #: Why those hard targets were skipped, in the judge's words.
     skip_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Reviews the round's lesson run learned from before it generated (ADR-063).
+    lessons_applied: Mapped[int] = mapped_column(Integer, default=0)
+    #: Why some of those lessons were not learned. The round generates regardless.
+    lessons_error: Mapped[str | None] = mapped_column(Text, default=None)
     #: Why the round failed, in the professor's terms. Never a credential.
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

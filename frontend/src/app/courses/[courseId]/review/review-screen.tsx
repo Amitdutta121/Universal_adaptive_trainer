@@ -109,12 +109,12 @@ export function ReviewScreen() {
         });
       } else {
         const destructive = outcome.cell === "missed" || outcome.cell === "confirmed_bad";
+        // `action` says the lesson is learned next round; nothing was relearned yet (ADR-063).
         const description = [
           outcome.action,
           outcome.attributed_labels.length > 0
             ? `Judges named at fault: ${outcome.attributed_labels.join(", ")}.`
             : "",
-          outcome.refresh_error ?? "",
         ]
           .filter(Boolean)
           .join(" ");
