@@ -157,15 +157,16 @@ function agreement(stat: JudgeStat | undefined): { value: string; caption: strin
   };
 }
 
-function rewriteText(stat: JudgeStat | undefined, stats: JudgeStats | undefined): string | null {
-  if (!stat || !stats) return null;
-  if (!stats.learning_enabled) return "Automatic rewrites are off";
+// Judges learn from the round's reviews (memory guidelines and past cases) when the next
+// round starts (ADR-064, m11); there is no per-judge rewrite threshold any more.
+function learningText(stats: JudgeStats | undefined): string | null {
+  if (!stats) return null;
+  if (!stats.learning_enabled) return "Learning from reviews is off";
   if (stats.learning_paused) {
     const n = stats.trusted_style_count;
-    return `Rewrites paused while ${n} style${n === 1 ? "" : "s"} skip${n === 1 ? "s" : ""} review`;
+    return `Learning paused while ${n} style${n === 1 ? "" : "s"} skip${n === 1 ? "s" : ""} review`;
   }
-  const have = Math.min(stat.learnable_disagreements, stat.disagreements_needed);
-  return `Next rewrite: ${have} of ${stat.disagreements_needed} disagreements`;
+  return "Learns from your reviews at the start of each round";
 }
 
 // Every window, custom rules included, must be trusted before a style skips review,
@@ -430,7 +431,7 @@ function JudgeCard({
   const ruleKeys = occurrenceKeys(prompt.rules);
   const heldOut = parseHeldOutAgreement(prompt.note);
   const label = judgeLabel(prompt);
-  const rewrite = rewriteText(stat, stats);
+  const learning = learningText(stats);
   const agreed = agreement(stat);
 
   return (
@@ -474,7 +475,7 @@ function JudgeCard({
           </div>
           <p className="mt-1 text-muted-foreground text-sm">{agreed.caption}</p>
         </div>
-        {rewrite ? <CardDescription className="text-xs">{rewrite}</CardDescription> : null}
+        {learning ? <CardDescription className="text-xs">{learning}</CardDescription> : null}
       </CardHeader>
       <CardContent className="space-y-4">
         <Button

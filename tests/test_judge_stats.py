@@ -1,6 +1,5 @@
-"""The Judges page numbers: per-judge agreement, rewrite progress, trust per style."""
+"""The Judges page numbers: per-judge agreement, trust per style."""
 
-from app.config import get_settings
 from app.persistence.models import CourseRow
 from tests import test_trust_freeze
 from tests.conftest import TEST_PROFESSOR_ID
@@ -16,9 +15,7 @@ def test_stats_on_an_empty_bank(client):
     assert body["judges"][0]["observations"] == 0
     assert body["judges"][0]["agreement_rate"] is None
     assert body["learning_paused"] is False
-    assert (
-        body["judges"][0]["disagreements_needed"] == get_settings().judge_repair_min_disagreements
-    )
+    assert "disagreements_needed" not in body["judges"][0]
 
 
 def test_stats_report_a_trusted_style_and_the_pause(client, session, taxonomy):

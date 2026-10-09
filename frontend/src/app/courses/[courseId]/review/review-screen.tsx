@@ -83,6 +83,11 @@ export function ReviewScreen() {
     if (!detail || !canSubmit || submitReview.isPending) return;
     const body: Schemas["ReviewRequest"] = {
       decision: form.effectiveDecision,
+      // Reasons are optional and only mean something on a reject or an edit (the backend
+      // drops them on an approve). Audit "Agree" submits a reject, so it carries them too.
+      ...(form.effectiveDecision !== "approve" && form.reasons.length > 0
+        ? { reasons: form.reasons }
+        : {}),
       ...(form.comment.trim() ? { comment: form.comment.trim() } : {}),
       // The final values, always; the backend compares them with the judges' answers.
       corrected_difficulty: form.difficulty,
@@ -325,6 +330,8 @@ export function ReviewScreen() {
             onConfirmDifficulty={form.confirmDifficulty}
             onConfirmSubtopics={form.confirmSubtopics}
             comment={form.comment}
+            reasons={form.reasons}
+            onReasonsChange={form.setReasons}
             isSubmitting={submitReview.isPending}
             canSubmit={canSubmit}
             onDecisionChange={form.setDecision}

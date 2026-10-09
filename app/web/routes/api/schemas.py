@@ -1573,9 +1573,6 @@ class JudgeStatsOut(BaseModel):
     observations: int
     agreements: int
     agreement_rate: float | None
-    #: Disagreements a rewrite could learn from now (held-out third excluded).
-    learnable_disagreements: int
-    disagreements_needed: int
 
 
 class JudgeStatsResponse(BaseModel):
@@ -1585,7 +1582,7 @@ class JudgeStatsResponse(BaseModel):
     held_out_pairs: int
     held_out_needed: int
     learning_enabled: bool
-    #: True while any style of this subject is trusted; automatic rewrites wait.
+    #: True while any style of this subject is trusted; the judges' round learning waits.
     learning_paused: bool
     trusted_style_count: int
     min_observations: int

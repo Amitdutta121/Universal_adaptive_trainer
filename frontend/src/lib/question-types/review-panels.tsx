@@ -50,7 +50,8 @@ export function TestsPanel({
   testsEdit: string;
   onTestsEdit: (value: string) => void;
 }) {
-  const tests = presentTests(detail.content?.tests);
+  // The row's tests are current (an edit rewrites them); generated content is the fallback.
+  const tests = presentTests(detail.tests) ?? presentTests(detail.content?.tests);
   // Reports written before C8 carry the two old checks; newer ones carry one `gradable` check
   // (usable tests and a reference that passes them, via the grader's check_spec).
   const harness = checkByName(detail.validation_checks, "harness_valid");

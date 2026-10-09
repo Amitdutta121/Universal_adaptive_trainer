@@ -4067,10 +4067,6 @@ export interface components {
             agreements: number;
             /** Agreement Rate */
             agreement_rate: number | null;
-            /** Learnable Disagreements */
-            learnable_disagreements: number;
-            /** Disagreements Needed */
-            disagreements_needed: number;
         };
         /** JudgeStatsResponse */
         JudgeStatsResponse: {

@@ -219,6 +219,37 @@ describe("ReviewScreen verdict", () => {
     expect(submitReview.mock.calls[0][0].body).not.toHaveProperty("reasons");
   });
 
+  it("sends the reasons picked for a reject, and none once switched back to accept", async () => {
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+
+    expect(screen.queryByRole("button", { name: "Reasons" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await user.click(screen.getByRole("button", { name: "Reasons" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Too easy" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Ambiguous" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Reasons" })).toHaveTextContent("Too easy +1");
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(screen.getByRole("button", { name: /Reject and continue/ }));
+
+    expect(submitReview).toHaveBeenCalledWith({
+      questionId: 42,
+      body: {
+        decision: "reject",
+        reasons: ["too_easy", "ambiguous"],
+        corrected_difficulty: "hard",
+        corrected_subtopic_ids: [2],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+    expect(screen.queryByRole("button", { name: "Reasons" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Accept and continue/ }));
+    expect(submitReview.mock.calls[1][0].body).not.toHaveProperty("reasons");
+  });
+
   it("keeps Skip enabled while a review saves", () => {
     submitPending = true;
     render(<ReviewScreen />);

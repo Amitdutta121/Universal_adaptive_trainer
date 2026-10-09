@@ -135,8 +135,6 @@ def judge_stats(
                 observations=observations,
                 agreements=agreements,
                 agreement_rate=agreements / observations if observations else None,
-                learnable_disagreements=len(disagreements_for(session, metric, profile=profile)),
-                disagreements_needed=settings.judge_repair_min_disagreements,
             )
         )
     trusted_count = sum(item.report.trusted for item in subject_wide)

@@ -17,6 +17,9 @@ import {
   DIFFICULTIES,
   DIFFICULTY_LABEL,
   type Difficulty,
+  REJECTION_REASON_GROUPS,
+  REJECTION_REASON_LABEL,
+  type RejectionReason,
   type ReviewDecision,
   type SubtopicOption,
 } from "../review-types";
@@ -127,6 +130,64 @@ function SubtopicPicker({
   );
 }
 
+/** Optional structured reasons for a reject or an edit, grouped by the judge they blame. */
+function ReasonPicker({
+  value,
+  onChange,
+}: {
+  value: readonly RejectionReason[];
+  onChange: (value: RejectionReason[]) => void;
+}) {
+  const toggle = (reason: RejectionReason, on: boolean) =>
+    onChange(on ? [...value, reason] : value.filter((each) => each !== reason));
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          aria-label="Reasons"
+          className="h-9 max-w-[16rem] justify-between font-normal"
+        >
+          <span className="truncate">
+            {value.length === 0 ? (
+              <span className="text-muted-foreground">Reasons (optional)</span>
+            ) : (
+              <>
+                {REJECTION_REASON_LABEL[value[0]]}
+                {value.length > 1 ? (
+                  <span className="text-muted-foreground"> +{value.length - 1}</span>
+                ) : null}
+              </>
+            )}
+          </span>
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-80 min-w-64 overflow-y-auto">
+        {REJECTION_REASON_GROUPS.map((group, index) => (
+          <Fragment key={group.label}>
+            {index > 0 ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuLabel className="text-muted-foreground text-xs">
+              {group.label}
+            </DropdownMenuLabel>
+            {group.reasons.map((reason) => (
+              <DropdownMenuCheckboxItem
+                key={reason}
+                checked={value.includes(reason)}
+                onCheckedChange={(on) => toggle(reason, on)}
+                onSelect={(event) => event.preventDefault()}
+              >
+                {REJECTION_REASON_LABEL[reason]}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </Fragment>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 type ReviewVerdictBarProps = {
   decision: ReviewDecision;
   effectiveDecision: ReviewDecision;
@@ -138,6 +199,8 @@ type ReviewVerdictBarProps = {
   onConfirmDifficulty: () => void;
   onConfirmSubtopics: () => void;
   comment: string;
+  reasons: RejectionReason[];
+  onReasonsChange: (value: RejectionReason[]) => void;
   isSubmitting: boolean;
   canSubmit: boolean;
   onDecisionChange: (decision: ReviewDecision) => void;
@@ -152,7 +215,8 @@ type ReviewVerdictBarProps = {
 
 /**
  * The professor's verdict on one question: confirm or correct its difficulty and subtopics,
- * then accept or reject it (reject takes an optional one-line comment). Editing the question
+ * then accept or reject it (reject and edit take optional reasons and a one-line comment;
+ * audit Agree is a reject, so it takes reasons too). Editing the question
  * itself stays available as a secondary action.
  */
 export function ReviewVerdictBar({
@@ -166,6 +230,8 @@ export function ReviewVerdictBar({
   onConfirmDifficulty,
   onConfirmSubtopics,
   comment,
+  reasons,
+  onReasonsChange,
   isSubmitting,
   canSubmit,
   onDecisionChange,
@@ -285,6 +351,10 @@ export function ReviewVerdictBar({
               </Button>
             </>
           )}
+
+          {effectiveDecision === "reject" || effectiveDecision === "edit" ? (
+            <ReasonPicker value={reasons} onChange={onReasonsChange} />
+          ) : null}
 
           {audit || effectiveDecision === "reject" || effectiveDecision === "edit" ? (
             <Input

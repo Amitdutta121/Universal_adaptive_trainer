@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Difficulty, QuestionDetail, ReviewDecision } from "./review-types";
+import type {
+  Difficulty,
+  QuestionDetail,
+  RejectionReason,
+  ReviewDecision,
+} from "./review-types";
 
 function judgeMetric(detail: QuestionDetail, metric: "difficulty" | "subtopic") {
   return detail.pedagogical_eval?.metrics?.find((item) => item.metric === metric) ?? null;
@@ -21,6 +26,8 @@ export function presetSubtopicIds(detail: QuestionDetail): number[] {
 export function useReviewForm(detail: QuestionDetail | null) {
   const [decision, setDecision] = useState<ReviewDecision>("approve");
   const [comment, setComment] = useState("");
+  // Optional structured reasons for a reject or an edit; they say which judge was wrong.
+  const [reasons, setReasons] = useState<RejectionReason[]>([]);
   const [promptEdit, setPromptEdit] = useState("");
   const [referenceEdit, setReferenceEdit] = useState("");
   const [testsEdit, setTestsEdit] = useState("");
@@ -35,6 +42,7 @@ export function useReviewForm(detail: QuestionDetail | null) {
     if (!detail) return;
     setDecision(detail.question.audit ? "reject" : "approve");
     setComment("");
+    setReasons([]);
     setPromptEdit(detail.question.prompt);
     setReferenceEdit(detail.reference_solution ?? "");
     setTestsEdit(detail.tests ?? "");
@@ -61,6 +69,8 @@ export function useReviewForm(detail: QuestionDetail | null) {
     setDecision,
     comment,
     setComment,
+    reasons,
+    setReasons,
     promptEdit,
     setPromptEdit,
     referenceEdit,

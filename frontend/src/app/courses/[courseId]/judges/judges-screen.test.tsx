@@ -99,16 +99,12 @@ vi.mock("@/lib/api/queries", () => ({
           observations: 20,
           agreements: 18,
           agreement_rate: 0.9,
-          learnable_disagreements: 3,
-          disagreements_needed: 5,
         },
         {
           metric: "subtopic",
           observations: 0,
           agreements: 0,
           agreement_rate: null,
-          learnable_disagreements: 0,
-          disagreements_needed: 5,
         },
       ],
       styles: [
@@ -167,13 +163,16 @@ describe("Judge scorecard", () => {
 });
 
 describe("JudgesScreen stats", () => {
-  it("shows professor agreement and rewrite progress per judge", () => {
+  it("shows professor agreement and when each judge learns", () => {
     paused = false;
     render(<JudgesScreen />);
     expect(screen.getByText("90%")).toBeInTheDocument();
     expect(screen.getByText("18/20 agreed")).toBeInTheDocument();
     expect(screen.getByText("No reviewed questions under this prompt yet")).toBeInTheDocument();
-    expect(screen.getAllByText("Next rewrite: 3 of 5 disagreements")[0]).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Learns from your reviews at the start of each round")[0],
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Next rewrite/)).not.toBeInTheDocument();
   });
 
   it("keeps the prompt behind More", async () => {
@@ -194,11 +193,11 @@ describe("JudgesScreen stats", () => {
     expect(screen.getByText("Building trust: 12 of 20 reviews")).toBeInTheDocument();
   });
 
-  it("says when rewrites are paused", () => {
+  it("says when learning is paused", () => {
     paused = true;
     render(<JudgesScreen />);
     expect(
-      screen.getAllByText("Rewrites paused while 1 style skips review")[0],
+      screen.getAllByText("Learning paused while 1 style skips review")[0],
     ).toBeInTheDocument();
     expect(screen.getByText("Skips review")).toBeInTheDocument();
   });

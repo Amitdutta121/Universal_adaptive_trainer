@@ -80,18 +80,33 @@ export function presentBlocks(
   return blocks.length > 0 ? blocks : null;
 }
 
+/**
+ * The question's test cases, from either stored shape: the row's `tests` column (a JSON
+ * string whose entries carry `assert`) or the generated `content.tests` list (entries carry
+ * `assert_code`). Returns null when there is no usable test.
+ */
 export function presentTests(
   value: unknown,
 ): Array<{ stdin: string; stdout?: string | null; assert?: string | null }> | null {
+  if (typeof value === "string") {
+    try {
+      return presentTests(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
   if (!Array.isArray(value)) return null;
   const tests = value
     .filter((entry) => typeof entry === "object" && entry !== null)
     .map((entry) => entry as Record<string, unknown>)
-    .map((entry) => ({
-      stdin: typeof entry.stdin === "string" ? entry.stdin : "",
-      stdout: typeof entry.stdout === "string" ? entry.stdout : null,
-      assert: typeof entry.assert === "string" ? entry.assert : null,
-    }))
+    .map((entry) => {
+      const assertion = entry.assert ?? entry.assert_code;
+      return {
+        stdin: typeof entry.stdin === "string" ? entry.stdin : "",
+        stdout: typeof entry.stdout === "string" ? entry.stdout : null,
+        assert: typeof assertion === "string" ? assertion : null,
+      };
+    })
     .filter((entry) => entry.stdout || entry.assert);
   return tests.length > 0 ? tests : null;
 }
