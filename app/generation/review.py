@@ -14,12 +14,21 @@ fails": it is retried like any failed check, but on the last attempt it is judge
 with a similarity flag for the professor. The duplicate check itself is injected
 (:data:`DuplicateCheck`), because finding one needs embeddings and ``app.generation`` must
 not import ``app.retrieval``.
+
+A question only *resembling* a stored one (the soft band below the duplicate line) can still
+be the same idea reworded. For the nearest such match one cheap structured call
+(:class:`ConceptChecker`, injected as :data:`ConceptCheck`) asks whether both assess the same
+concept in the same way; "yes" is retried like a duplicate, and on the last attempt the
+question is kept, flagged and held for review. Without a model the check is skipped.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from typing import Protocol
+
+from pydantic import BaseModel, Field
 
 from app.domain.enums import JudgeMetricId
 from app.domain.questions import Question, QuestionCheck
@@ -34,7 +43,9 @@ from app.evaluation.severity import (
 )
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.spec import QuestionSpec
-from app.llm import StructuredLLMClient
+from app.llm import StructuredLLMClient, get_structured_client
+
+logger = logging.getLogger(__name__)
 
 #: Check names, as they appear on an attempt's ``failed_checks`` and in the correction.
 TARGET_SUBTOPIC_CHECK = "target_subtopic"
@@ -43,6 +54,7 @@ TOPIC_JUDGE_CHECK = "topic_judge"
 ISSUES_JUDGE_CHECK = "issues_judge"
 CUSTOM_RULE_CHECK = "custom_rule"
 DUPLICATE_CHECK = "duplicate"
+SAME_CONCEPT_CHECK = "same_concept"
 
 #: How much of the duplicate's text the correction quotes.
 DUPLICATE_QUOTE_CHARS = 400
@@ -69,6 +81,64 @@ class SimilarMatch(Protocol):
 DuplicateCheck = Callable[[Question], Sequence[SimilarMatch]]
 
 
+class SameConceptVerdict(BaseModel):
+    """Do two questions assess the same concept in the same way?"""
+
+    same: bool = Field(description="True when both assess the same concept in the same way.")
+    reason: str = Field(description="One sentence: why.")
+
+
+#: Asks whether an unsaved question assesses the same idea as a resembled stored one;
+#: ``None`` when it could not tell (no model, a provider failure).
+ConceptCheck = Callable[[Question, SimilarMatch], SameConceptVerdict | None]
+
+CONCEPT_SYSTEM = (
+    "You compare two assessment questions. Answer same=true only if a student who can answer "
+    "one could answer the other with the same knowledge and the same reasoning -- the same "
+    "concept assessed the same way, merely reworded or with trivially different values. "
+    "Different aspects, skills or misconceptions of one topic are not the same."
+)
+
+
+def _question_text(question: Question) -> str:
+    """Prompt, code and options, as the duplicate check compares them."""
+    content = question.content or {}
+    parts = [question.prompt or ""]
+    if content.get("code"):
+        parts.append(str(content["code"]))
+    if isinstance(content.get("options"), list):
+        parts.extend(str(option) for option in content["options"])
+    return "\n".join(parts)
+
+
+class ConceptChecker:
+    """The :data:`ConceptCheck` of a round: one structured call per soft-band match.
+
+    Never raises: without a configured model, or on any provider failure, it answers
+    ``None`` and the question is treated as merely similar.
+    """
+
+    def __init__(self, client: StructuredLLMClient | None = None) -> None:
+        self._client = client
+
+    def __call__(self, question: Question, match: SimilarMatch) -> SameConceptVerdict | None:
+        try:
+            llm = self._client or get_structured_client()
+            return llm.complete_structured(
+                system=CONCEPT_SYSTEM,
+                prompt=(
+                    f"Question 1 (new):\n{_question_text(question)[: DUPLICATE_QUOTE_CHARS * 2]}"
+                    "\n\nQuestion 2 (already in the bank):\n"
+                    f"{match.text[: DUPLICATE_QUOTE_CHARS * 2]}\n\n"
+                    "Do these two questions assess the same concept in the same way?"
+                ),
+                response_model=SameConceptVerdict,
+            )
+        except Exception:
+            logger.warning("concept check skipped", exc_info=True)
+            return None
+
+
 def _failed(name: str, detail: str, evidence: str | None = None) -> QuestionCheck:
     return QuestionCheck(
         name=name, passed=False, deterministic=False, detail=detail, evidence=evidence
@@ -91,6 +161,7 @@ class RoundReview:
         spec: QuestionSpec,
         client: StructuredLLMClient | None = None,
         duplicates: DuplicateCheck | None = None,
+        concepts: ConceptCheck | None = None,
         max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> None:
         if spec.target_subtopic_id is None:
@@ -101,11 +172,14 @@ class RoundReview:
         self._target = spec.target_subtopic_id
         self._client = client
         self._duplicates = duplicates
+        self._concepts = concepts
         self._max_attempts = max_attempts
         self.last_evaluation: PedagogicalEvaluation | None = None
         self.last_custom: list[CustomJudgeResult] = []
         #: Stored questions the last reviewed attempt resembles; flagged when it is kept.
         self.last_similar: list[SimilarMatch] = []
+        #: The soft-band match the last attempt assesses the same idea as; held when kept.
+        self.last_same_concept: SimilarMatch | None = None
         #: Last judge-failed draft, so a later passing attempt can still leave an audit (m9).
         self.last_failed_question: Question | None = None
         self.last_failed_evaluation: PedagogicalEvaluation | None = None
@@ -116,6 +190,7 @@ class RoundReview:
         self.last_evaluation = None
         self.last_custom = []
         self.last_similar = []
+        self.last_same_concept = None
         self.last_notes = []
 
         # The generator's own claim must name the target before any judge is paid for.
@@ -143,6 +218,21 @@ class RoundReview:
                         "question reworded.",
                     )
                 ]
+            nearest = next((match for match in self.last_similar if not match.duplicate), None)
+            if duplicate is None and nearest is not None and self._concepts is not None:
+                verdict = self._concepts(question, nearest)
+                if verdict is not None and verdict.same:
+                    self.last_same_concept = nearest
+                    if number < self._max_attempts:
+                        return [
+                            _failed(
+                                SAME_CONCEPT_CHECK,
+                                "it assesses the same idea as: "
+                                f"{nearest.text[:DUPLICATE_QUOTE_CHARS]}",
+                                f"{verdict.reason} Assess a different idea or a different "
+                                "way of using it, not the same question reworded.",
+                            )
+                        ]
 
         failed: list[QuestionCheck] = []
         evaluation = self._judge.evaluate(question)

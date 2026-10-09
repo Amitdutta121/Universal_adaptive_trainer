@@ -28,7 +28,7 @@ from app.evaluation.schema import MetricStatus
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
 from app.generation.prompts import RoundExamples
-from app.generation.review import DuplicateCheck, RoundReview
+from app.generation.review import ConceptCheck, DuplicateCheck, RoundReview
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
@@ -283,6 +283,7 @@ class GenerationService:
         examples: RoundExamples | None = None,
         run_id: str | None = None,
         duplicates: DuplicateCheck | None = None,
+        concepts: ConceptCheck | None = None,
     ) -> QuestionRow | None:
         """Generate one round question, judged inside the retry loop; ``None`` when dropped.
 
@@ -296,7 +297,9 @@ class GenerationService:
         "too similar to: ...", except on the last attempt, where it is judged as usual and, if
         kept, stored with a :class:`QuestionSimilarityRow` per resembled question -- as is any
         kept question that only resembles one. A kept duplicate always goes to the review
-        queue, never auto-approved by trust routing.
+        queue, never auto-approved by trust routing. ``concepts`` asks, for the nearest match
+        below the duplicate line, whether it is the same idea reworded; "yes" is treated like
+        a duplicate (retried; kept, flagged and held on the last attempt).
 
         Flushes; the caller commits.
 
@@ -310,7 +313,12 @@ class GenerationService:
                 detail="Use generate_for_sections for section-only specs.",
             )
         review = RoundReview(
-            self._judge, rules, spec=spec, client=self._client, duplicates=duplicates
+            self._judge,
+            rules,
+            spec=spec,
+            client=self._client,
+            duplicates=duplicates,
+            concepts=concepts,
         )
         question = self._question_for_round(spec, version=version, review=review, examples=examples)
         if not question.generation_attempts or not question.generation_attempts[-1].usable:
@@ -355,7 +363,8 @@ class GenerationService:
             self._session,
             row,
             review.last_custom,
-            hold_for_review=any(match.duplicate for match in review.last_similar),
+            hold_for_review=review.last_same_concept is not None
+            or any(match.duplicate for match in review.last_similar),
         )
         self._maybe_store_audit(spec, review, round_id)
         return row

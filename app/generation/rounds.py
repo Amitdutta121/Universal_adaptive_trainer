@@ -64,6 +64,7 @@ from app.generation.prompts import (
     RoundExamples,
     ShownExample,
 )
+from app.generation.review import ConceptChecker
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
 from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
@@ -629,6 +630,8 @@ def _generate_round(
     )
     # Without an embedder only exact duplicates are caught (ADR-063 point 6).
     duplicates = DuplicateChecker(session, embedder)
+    # A resembling (not duplicate) question may be the same idea reworded: one cheap call.
+    concepts = ConceptChecker(client)
     run_id = new_run_id()
     targets = list(row.targets or [])
     produced = dropped = skipped = first_passed = 0
@@ -705,6 +708,7 @@ def _generate_round(
                         ),
                         run_id=run_id,
                         duplicates=duplicates,
+                        concepts=concepts,
                     )
                     outcome = "produced" if question is not None else "dropped"
                     attempts = question.generation_attempts if question is not None else []

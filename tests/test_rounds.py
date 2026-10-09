@@ -1046,6 +1046,105 @@ def test_a_duplicate_kept_on_the_last_attempt_is_held_for_review(
     assert question.trust_provenance == "pending"
 
 
+class ConceptClient(MetricJudgeClient):
+    """Also answers the concept check: the same idea (``same``) or not."""
+
+    def __init__(self, *, same: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.same = same
+        self.concept_prompts: list[str] = []
+
+    def complete_structured(
+        self, *, system: str, prompt: str, response_model: type[BaseModel], **kwargs: Any
+    ) -> BaseModel:
+        from app.generation.review import SameConceptVerdict
+
+        if response_model is SameConceptVerdict:
+            self.concept_prompts.append(prompt)
+            return SameConceptVerdict(same=self.same, reason="Both ask what a while loop does.")
+        return super().complete_structured(
+            system=system, prompt=prompt, response_model=response_model, **kwargs
+        )
+
+
+def _concept_client(env: SimpleNamespace, *, same: bool) -> ConceptClient:
+    return ConceptClient(
+        same=same,
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        difficulty=Difficulty.MEDIUM,
+    )
+
+
+def test_the_same_idea_reworded_in_the_soft_band_is_retried(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _concept_client(env, same=True)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80, 0.10]))
+
+    assert len(client.concept_prompts) == 1
+    assert "Existing question about loops" in client.concept_prompts[0]
+    assert len(client.generation_calls) == 2
+    assert (
+        "failed the check 'same_concept' (it assesses the same idea as: Existing question "
+        "about loops)" in client.generation_calls[1]["prompt"]
+    )
+    (question,) = _round_questions(engine, round_id)
+    assert [c.name for c in question.generation_attempts[0].failed_checks] == ["same_concept"]
+    assert _flags(engine, question.id) == []
+
+
+def test_a_different_idea_in_the_soft_band_is_kept_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _concept_client(env, same=False)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80]))
+
+    assert len(client.concept_prompts) == 1
+    assert len(client.generation_calls) == 1
+    (question,) = _round_questions(engine, round_id)
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert held == [False]
+
+
+def test_the_same_idea_on_the_last_attempt_is_kept_flagged_and_held(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _concept_client(env, same=True)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80]))
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    (question,) = _round_questions(engine, round_id)
+    assert question.generation_attempts[-1].usable
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert held == [True]
+    assert question.trust_provenance == "pending"
+    assert _round(engine, round_id).dropped == 0
+
+
+def test_without_a_model_the_concept_check_is_skipped() -> None:
+    from app.domain.questions import Question
+    from app.generation.review import ConceptChecker
+
+    class NoModel:
+        description = "none"
+
+        def complete_structured(self, **_: Any) -> BaseModel:
+            raise LLMRequestError("no provider configured")
+
+    match = SimpleNamespace(question_id=1, text="x", score=0.8, model="m", duplicate=False)
+    assert ConceptChecker(NoModel())(Question(prompt="q"), match) is None  # type: ignore[arg-type]
+
+
 def test_a_question_that_only_resembles_one_is_routed_as_usual(
     session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
