@@ -9,8 +9,9 @@ review of their scope, so one call per scope sees all the new evidence.
 Judges learn as in ADR-039 (:func:`refresh_judge_prompt` for the judges a review contradicted;
 m11 moves them to memory). The generator learns **guidelines** (ADR-063 points 3-4, m5): for
 each type the professor rejected or rewrote, one :func:`~app.memory.distill_guidelines` call
-turns the new reviews into edit operations on that type's guidelines. Judges first, then the
-generator (ADR-063's order).
+turns the new reviews into edit operations on that type's guidelines; the failed attempts of
+round questions the professor approved become retry episodes (m6, no model call). Judges
+first, then the generator (ADR-063's order).
 
 A provider failure is recorded on the outcome rows it concerns and returned, never raised:
 the round must still generate, and a silent failure would leave the professor believing a
@@ -35,7 +36,7 @@ from app.evaluation.judge_learning import refresh_judge_prompt
 from app.evaluation.trust_scope import trusted_scopes
 from app.feedback.outcomes import _outcome_from_row
 from app.llm import StructuredLLMClient
-from app.memory import distill_guidelines, generator_target
+from app.memory import distill_guidelines, generator_target, record_retry_episodes
 from app.persistence.models import ReviewOutcomeRow
 from app.persistence.repositories import JudgePromptRepository, ReviewOutcomeRepository
 from app.subjects import SubjectProfile
@@ -78,6 +79,7 @@ def apply_pending_lessons(
     if settings.judge_learning_enabled:
         errors += _learn_judges(session, pending, profile, client, failed)
     if settings.generator_learning_enabled:
+        _learn_retries(session, pending)
         errors += _learn_generator(session, pending, profile, round_id, client, failed)
 
     learned = [row for row in pending if row.id not in failed]
@@ -172,6 +174,17 @@ def _learn_judges(
                 failed_rows.add(row.id)
     session.commit()
     return list(failed.values())
+
+
+def _learn_retries(session: Session, rows: list[ReviewOutcomeRow]) -> None:
+    """Keep the failed attempts of each approved round question as retry episodes (m6).
+
+    No model call; :func:`~app.memory.record_retry_episodes` ignores rejected questions and
+    questions not generated in a round.
+    """
+    for row in rows:
+        record_retry_episodes(session, row.review)
+    session.commit()
 
 
 def _learn_generator(

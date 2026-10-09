@@ -1279,6 +1279,9 @@ class GenerationRoundRow(TimestampMixin, Base):
     #: What the drift check saw in this round's questions (answer position, option count,
     #: stem length); ``NULL`` when nothing looked off (ADR-063 point 4).
     drift_warning: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Stored questions whose first attempt passed every check (m6); out of ``produced`` +
+    #: ``dropped``. ``NULL`` for rounds generated before it was counted.
+    first_attempt_passed: Mapped[int | None] = mapped_column(Integer, default=None)
     #: Why the round failed, in the professor's terms. Never a credential.
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

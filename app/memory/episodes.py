@@ -5,17 +5,23 @@ every judge's verdict on the same question at that moment, so the generator (exa
 "rejected because ...") and later the judges (m11) learn from the same rows. Recording one
 makes no model call and no embedding call: retrieval reuses the question's cached vector
 (``question_embeddings``).
+
+A round question the professor approved also leaves one **retry episode** per failed attempt
+(m6): what the attempt got wrong and what it was told, shown to later targets of the same
+type and subtopic as "avoid: ...".
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, ReviewDecision
+from app.domain.enums import Difficulty, QuestionType, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
+from app.domain.questions import GenerationAttempt
 from app.memory.repository import MemoryEpisodeRepository
 from app.persistence.models import MemoryEpisodeRow, ProfessorReviewRow, QuestionRow
 from app.retrieval.duplicates import embed_text
@@ -23,6 +29,11 @@ from app.subjects import profile_for_version
 
 #: ``MemoryEpisodeRow.source`` of an episode written from a professor review.
 SOURCE_REVIEW = "review"
+#: ``MemoryEpisodeRow.source`` of a failed attempt of a round question the professor approved.
+SOURCE_RETRY = "retry"
+
+#: Retry lessons shown per target.
+MAX_RETRY_LESSONS = 3
 
 #: The fields of one judge's answer an episode keeps (``MetricResult`` minus its id).
 _VERDICT_FIELDS = (
@@ -104,6 +115,99 @@ def record_review_episode(
             rubric_version=evaluation.get("rubric_version"),
         )
     )
+
+
+def _attempt_lesson(attempt: GenerationAttempt) -> tuple[str, str | None] | None:
+    """What a failed attempt got wrong, and what it was told to do; ``None`` if nothing.
+
+    An unreadable reply teaches nothing about the question, so it is left out.
+    """
+    if attempt.usable or attempt.malformed:
+        return None
+    wrong = [check.detail or check.name for check in attempt.failed_checks]
+    if not attempt.accepted and attempt.detail:
+        wrong.insert(0, attempt.detail)
+    if not wrong:
+        return None
+    fix = " ".join(check.evidence for check in attempt.failed_checks if check.evidence)
+    return "; ".join(wrong), fix or None
+
+
+def record_retry_episodes(session: Session, review: ProfessorReviewRow) -> list[MemoryEpisodeRow]:
+    """Turn the failed attempts of an approved round question into retry episodes (m6).
+
+    A round question is one generated for a target subtopic. One episode per failed attempt,
+    filed under that subtopic and the requested difficulty, without a review id (the
+    review's own episode holds it). A rejected question teaches nothing: its fix was not
+    good enough. Once per question; a repeat returns nothing. No model call.
+    """
+    question = review.question
+    if review.decision is ReviewDecision.REJECT or question.target_subtopic_id is None:
+        return []
+    repository = MemoryEpisodeRepository(session)
+    if repository.of_source(SOURCE_RETRY, question_id=question.id):
+        return []
+    spec = question.spec if isinstance(question.spec, dict) else {}
+    difficulty = Difficulty(spec.get("difficulty") or question.difficulty)
+    subtopic_ids = [question.target_subtopic_id]
+    subject = profile_for_version(session, question.curriculum_version_id).personal_key
+    episodes: list[MemoryEpisodeRow] = []
+    for attempt in question.generation_attempts or []:
+        lesson = _attempt_lesson(attempt)
+        if lesson is None:
+            continue
+        wrong, fix = lesson
+        episodes.append(
+            repository.add(
+                MemoryEpisodeRow(
+                    question_id=question.id,
+                    source=SOURCE_RETRY,
+                    subject=subject,
+                    question_type=question.question_type,
+                    topic_id=question.topic_id,
+                    subtopic_ids=subtopic_ids,
+                    difficulty=difficulty,
+                    text=wrong,
+                    decision=review.decision,
+                    comment=fix,
+                    judge_verdicts={},
+                )
+            )
+        )
+    return episodes
+
+
+def retry_lessons(
+    session: Session,
+    *,
+    subject: str,
+    question_type: QuestionType,
+    subtopic_id: int,
+    difficulty: Difficulty,
+    limit: int = MAX_RETRY_LESSONS,
+    exclude_question_ids: Collection[int] = (),
+) -> list[str]:
+    """The "avoid" lines for a target, from retry episodes of its type and subtopic.
+
+    Only questions still approved count. The target's difficulty first, then newest first;
+    the same lesson is shown once.
+    """
+    rows = MemoryEpisodeRepository(session).of_source(
+        SOURCE_RETRY,
+        subject=subject,
+        question_type=question_type,
+        approved_only=True,
+        exclude_question_ids=exclude_question_ids,
+    )
+    rows = sorted(
+        (row for row in rows if subtopic_id in (row.subtopic_ids or [])),
+        key=lambda row: row.difficulty != difficulty,
+    )
+    lines = dict.fromkeys(
+        f"({row.difficulty.value}) {row.text}" + (f" -- {row.comment}" if row.comment else "")
+        for row in rows
+    )
+    return list(lines)[:limit]
 
 
 def rejection_because(episode: MemoryEpisodeRow) -> str:

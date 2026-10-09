@@ -112,13 +112,15 @@ class RoundExamples:
     level. ``style_only``: approved questions of the same type from elsewhere -- match their
     form, not their content or level. Either may carry the professor's comment. ``in_bank``:
     the nearest existing questions of the cell, which the new question must not repeat.
-    ``rejected``: at most one similar question the professor rejected, with why.
+    ``rejected``: at most one similar question the professor rejected, with why. ``avoid``:
+    what failed attempts of approved questions of this type and subtopic got wrong.
     """
 
     accepted: Sequence[str | ShownExample] = ()
     style_only: Sequence[str | ShownExample] = ()
     in_bank: Sequence[str] = ()
     rejected: RejectedExample | None = None
+    avoid: Sequence[str] = ()
 
 
 def _shown(texts: Sequence[str]) -> list[str]:
@@ -198,6 +200,15 @@ def render_round_target(
             "Do not repeat that mistake.",
             f"Rejected: {rejected_text[0]}",
         ]
+    avoid = _shown(examples.avoid)
+    if avoid:
+        lines += [
+            "",
+            "Earlier drafts for this subtopic failed these checks before a fixed version was "
+            "approved. Avoid the same mistakes:",
+        ]
+        for index, text in enumerate(avoid, start=1):
+            lines.append(f"Avoid {index}: {text}")
     in_bank = _shown(examples.in_bank)
     if in_bank:
         lines += [

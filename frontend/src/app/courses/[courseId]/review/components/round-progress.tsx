@@ -33,6 +33,14 @@ function counts(round: GenerationRound): string {
   return `produced ${round.produced}, dropped ${round.dropped}${skip} of ${round.requested}`;
 }
 
+/** How many generated targets passed on their first attempt (ADR-063, m6). */
+function firstAttempt(round: GenerationRound): string {
+  const attempted = round.produced + round.dropped;
+  const passed = round.first_attempt_passed;
+  if (passed == null || attempted === 0) return "";
+  return `First-attempt pass rate: ${passed} of ${attempted} (${Math.round((passed / attempted) * 100)}%).`;
+}
+
 /** What the round's lesson run learned from the reviews before it generated (ADR-063). */
 function lessons(round: GenerationRound): string {
   const applied = round.lessons_applied ?? 0;
@@ -76,7 +84,8 @@ export function RoundProgressStrip({
     const why = round.skip_reason ? ` ${round.skip_reason}` : "";
     const learned = lessons(round);
     const drift = round.drift_warning ? ` ${round.drift_warning}` : "";
-    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.${learned ? ` ${learned}` : ""}${drift}`;
+    const first = firstAttempt(round);
+    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.${first ? ` ${first}` : ""}${learned ? ` ${learned}` : ""}${drift}`;
   } else {
     message = `Round ${round.number} failed${round.error ? `: ${round.error}` : "."}`;
   }

@@ -342,6 +342,31 @@ describe("Generate next round", () => {
       "Possible drift: all 5 multiple-choice answers are option A.",
     );
   });
+
+  it("shows the first-attempt pass rate once the round is done", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 5,
+      produced: 3,
+      dropped: 0,
+      first_attempt_passed: 2,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+
+    roundData = { ...(roundData as object), status: "done", dropped: 1 };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "First-attempt pass rate: 2 of 4 (50%).",
+    );
+
+    roundData = { ...(roundData as object), first_attempt_passed: null };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).not.toHaveTextContent("First-attempt");
+  });
 });
 
 describe("Questions arriving during a round", () => {

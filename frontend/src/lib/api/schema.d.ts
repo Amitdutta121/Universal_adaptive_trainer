@@ -3637,6 +3637,8 @@ export interface components {
             lessons_error?: string | null;
             /** Drift Warning */
             drift_warning?: string | null;
+            /** First Attempt Passed */
+            first_attempt_passed?: number | null;
             /** Error */
             error: string | null;
             /**

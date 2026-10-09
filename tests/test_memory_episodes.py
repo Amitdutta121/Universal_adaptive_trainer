@@ -19,20 +19,26 @@ from app.domain.enums import (
     RejectionReason,
     ReviewDecision,
 )
+from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.feedback import delete_review, route_review_outcome, submit_review
+from app.feedback.lessons import apply_pending_lessons
 from app.generation import rounds as rounds_module
 from app.generation.prompts import RoundExamples
+from app.memory import SOURCE_RETRY, record_retry_episodes
 from app.persistence.database import _alembic_config, init_db
 from app.persistence.models import (
     CourseRow,
     CurriculumVersionRow,
+    GenerationRoundRow,
     MemoryEpisodeRow,
     ProfessorReviewRow,
     QuestionRow,
+    QuestionSetupRow,
     ReviewOutcomeRow,
     SubtopicRow,
     TopicRow,
 )
+from app.subjects import profile_for_version
 
 MCQ = QuestionType.MULTIPLE_CHOICE
 OWNER = uuid.UUID("12345678-1234-5678-1234-567812345678")
@@ -404,6 +410,148 @@ def test_another_courses_episodes_are_never_retrieved(
         session, sibling.version.id, (sibling.while_loops.id, Difficulty.MEDIUM), MCQ
     )
     assert _texts(sibling_found.style_only) == ["Own while"]
+
+
+# ------------------------------------------------------------------ retry episodes (m6)
+
+#: A failed attempt as the round's retry loop records it, then the attempt that passed.
+FAILED_ATTEMPT = GenerationAttempt(
+    number=1,
+    accepted=True,
+    failed_checks=[
+        QuestionCheck(
+            name="difficulty_judge",
+            passed=False,
+            deterministic=False,
+            detail="a reviewer rated it hard, but it must be medium",
+            evidence="Reviewer: three nested loops. Make the question genuinely medium.",
+        )
+    ],
+)
+PASSED_ATTEMPT = GenerationAttempt(number=2, accepted=True)
+AVOID_LINE = (
+    "(medium) a reviewer rated it hard, but it must be medium -- Reviewer: three nested "
+    "loops. Make the question genuinely medium."
+)
+
+
+def _round_question(
+    session: Session,
+    env: SimpleNamespace,
+    prompt: str,
+    *,
+    subtopic: SubtopicRow | None = None,
+    question_type: QuestionType = MCQ,
+    attempts: Sequence[GenerationAttempt] = (FAILED_ATTEMPT, PASSED_ATTEMPT),
+) -> QuestionRow:
+    setup = QuestionSetupRow(curriculum_version_id=env.version.id)
+    session.add(setup)
+    session.flush()
+    round_row = GenerationRoundRow(setup_id=setup.id, number=1)
+    session.add(round_row)
+    session.flush()
+    row = _question(session, env, prompt, subtopic=subtopic, question_type=question_type)
+    row.round_id = round_row.id
+    row.target_subtopic_id = (subtopic or env.while_loops).id
+    row.spec = {"difficulty": "medium"}
+    row.generation_attempts = list(attempts)
+    session.commit()
+    return row
+
+
+def _retry_episodes(session: Session) -> list[MemoryEpisodeRow]:
+    return [episode for episode in _episodes(session) if episode.source == SOURCE_RETRY]
+
+
+def test_an_approved_round_question_leaves_one_retry_episode_per_failed_attempt(
+    session: Session, env: SimpleNamespace
+) -> None:
+    approved = _round_question(session, env, "Approved after a retry")
+    review = _review(session, approved, ReviewDecision.APPROVE)
+
+    (episode,) = record_retry_episodes(session, review)
+
+    assert (episode.source, episode.review_id, episode.question_id) == (
+        SOURCE_RETRY,
+        None,
+        approved.id,
+    )
+    assert episode.text == "a reviewer rated it hard, but it must be medium"
+    assert episode.comment == FAILED_ATTEMPT.failed_checks[0].evidence
+    assert (episode.subtopic_ids, episode.difficulty) == ([env.while_loops.id], Difficulty.MEDIUM)
+    assert episode.subject == f"intro_python@{OWNER.hex}"
+    # Once per question.
+    assert record_retry_episodes(session, review) == []
+    assert len(_retry_episodes(session)) == 1
+
+
+def test_a_rejected_or_first_time_question_leaves_no_retry_episode(
+    session: Session, env: SimpleNamespace
+) -> None:
+    rejected = _round_question(session, env, "Rejected after a retry")
+    first_time = _round_question(session, env, "Passed at once", attempts=[PASSED_ATTEMPT])
+    outside_round = _question(session, env, "Not from a round")
+    outside_round.generation_attempts = [FAILED_ATTEMPT, PASSED_ATTEMPT]
+    session.commit()
+
+    reject = _review(session, rejected, ReviewDecision.REJECT, reasons=[RejectionReason.AMBIGUOUS])
+    assert record_retry_episodes(session, reject) == []
+    for row in (first_time, outside_round):
+        assert record_retry_episodes(session, _review(session, row, ReviewDecision.APPROVE)) == []
+    assert _retry_episodes(session) == []
+
+
+def test_the_lesson_run_writes_retry_episodes_for_approvals_only(
+    session: Session, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.feedback.lessons.refresh_judge_prompt", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.feedback.lessons.distill_guidelines",
+        lambda *_a, **_k: SimpleNamespace(changed=False),
+    )
+    approved = _round_question(session, env, "Approved after a retry")
+    rejected = _round_question(session, env, "Rejected after a retry")
+    _review(session, approved, ReviewDecision.APPROVE)
+    _review(session, rejected, ReviewDecision.REJECT, reasons=[RejectionReason.AMBIGUOUS])
+
+    run = apply_pending_lessons(
+        session, round_id=approved.round_id, profile=profile_for_version(session, env.version.id)
+    )
+
+    assert run.applied == 2
+    assert [episode.question_id for episode in _retry_episodes(session)] == [approved.id]
+
+
+def test_retry_lessons_are_retrieved_for_the_same_type_and_subtopic(
+    session: Session, env: SimpleNamespace
+) -> None:
+    same = _round_question(session, env, "Same type and subtopic")
+    other_subtopic = _round_question(session, env, "For loops", subtopic=env.for_loops)
+    other_type = _round_question(session, env, "Coding", question_type=QuestionType.CODING)
+    for row in (same, other_subtopic, other_type):
+        record_retry_episodes(session, _review(session, row, ReviewDecision.APPROVE))
+    session.commit()
+
+    assert _examples(session, env).avoid == [AVOID_LINE]
+
+    # A later reject withdraws the approval, and with it the lesson.
+    _review(session, same, ReviewDecision.REJECT, reasons=[RejectionReason.AMBIGUOUS])
+    assert _examples(session, env).avoid == []
+
+
+def test_deleting_the_approval_deletes_its_retry_episodes(
+    session: Session, env: SimpleNamespace
+) -> None:
+    row = _round_question(session, env, "Approved after a retry")
+    review = _review(session, row, ReviewDecision.APPROVE)
+    record_retry_episodes(session, review)
+    session.commit()
+
+    delete_review(session, review.id)
+    session.commit()
+
+    assert _retry_episodes(session) == []
+    assert _examples(session, env).avoid == []
 
 
 # ------------------------------------------------------------------ migration

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.domain.enums import GuidelineStatus, QuestionType, ReviewDecision
+from app.domain.enums import GuidelineStatus, QuestionStatus, QuestionType, ReviewDecision
 from app.persistence.models import (
     MemoryEpisodeRow,
     MemoryGuidelineRow,
@@ -62,6 +62,45 @@ class MemoryEpisodeRepository:
         for episode, question in self._session.execute(stmt):
             latest.setdefault(episode.question_id, (episode, question))
         return [pair for pair in latest.values() if pair[0].decision in decisions]
+
+    def of_source(
+        self,
+        source: str,
+        *,
+        question_id: int | None = None,
+        subject: str | None = None,
+        question_type: QuestionType | None = None,
+        approved_only: bool = False,
+        exclude_question_ids: Collection[int] = (),
+    ) -> list[MemoryEpisodeRow]:
+        """Episodes of ``source`` matching every filter given, newest first.
+
+        ``approved_only`` keeps those whose question is still ``APPROVED``.
+        """
+        stmt = (
+            select(MemoryEpisodeRow)
+            .join(QuestionRow, MemoryEpisodeRow.question_id == QuestionRow.id)
+            .where(MemoryEpisodeRow.source == source)
+            .order_by(MemoryEpisodeRow.created_at.desc(), MemoryEpisodeRow.id.desc())
+        )
+        if question_id is not None:
+            stmt = stmt.where(MemoryEpisodeRow.question_id == question_id)
+        if subject is not None:
+            stmt = stmt.where(MemoryEpisodeRow.subject == subject)
+        if question_type is not None:
+            stmt = stmt.where(MemoryEpisodeRow.question_type == question_type)
+        if approved_only:
+            stmt = stmt.where(QuestionRow.status == QuestionStatus.APPROVED)
+        if exclude_question_ids:
+            stmt = stmt.where(MemoryEpisodeRow.question_id.not_in(exclude_question_ids))
+        return list(self._session.scalars(stmt))
+
+    def delete_of_source(self, source: str, *, question_id: int) -> None:
+        self._session.execute(
+            delete(MemoryEpisodeRow).where(
+                MemoryEpisodeRow.source == source, MemoryEpisodeRow.question_id == question_id
+            )
+        )
 
 
 class MemoryGuidelineRepository:

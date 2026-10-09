@@ -2,7 +2,8 @@
 
 Responsibility
     Keep **episodes**: reviewed questions with the professor's verdict, reasons, comment and
-    corrections, and every judge's verdict at review time (``memory_episodes``). Keep
+    corrections, and every judge's verdict at review time (``memory_episodes``), plus the
+    failed attempts of approved round questions as retry episodes. Keep
     **guidelines** (semantic memory, ``memory_guidelines``): short rules per target
     (``generator:<type>``; ``judge:<metric>`` in m11), edited by operations the lesson run
     distils from new reviews, active only with two supporting reviews or the professor's
@@ -23,11 +24,14 @@ Allowed dependencies
 """
 
 from app.memory.episodes import (
+    SOURCE_RETRY,
     SOURCE_REVIEW,
     ReviewedQuestion,
     judge_verdicts,
+    record_retry_episodes,
     record_review_episode,
     rejection_because,
+    retry_lessons,
     snapshot_question,
 )
 from app.memory.guidelines import (
@@ -49,6 +53,7 @@ from app.memory.repository import MemoryEpisodeRepository, MemoryGuidelineReposi
 
 __all__ = [
     "ACTIVE_SUPPORT",
+    "SOURCE_RETRY",
     "SOURCE_REVIEW",
     "DistillResult",
     "GuidelineEdits",
@@ -64,9 +69,11 @@ __all__ = [
     "forget_review",
     "generator_target",
     "judge_verdicts",
+    "record_retry_episodes",
     "record_review_episode",
     "refusal_reason",
     "rejection_because",
     "render_with_guidelines",
+    "retry_lessons",
     "snapshot_question",
 ]

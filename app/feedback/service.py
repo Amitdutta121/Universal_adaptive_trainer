@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 from app.domain.enums import Difficulty, QuestionStatus, RejectionReason, ReviewDecision
 from app.domain.questions import Question, apply_professor_edit
 from app.errors import DomainRuleError, NotFoundError
-from app.memory import forget_review, record_review_episode, snapshot_question
+from app.memory import (
+    SOURCE_RETRY,
+    MemoryEpisodeRepository,
+    forget_review,
+    record_review_episode,
+    snapshot_question,
+)
 from app.persistence.models import (
     ProfessorReviewRow,
     QuestionRow,
@@ -178,7 +184,8 @@ def delete_review(session: Session, review_id: int) -> None:
 
     The episode goes with the review (ORM cascade), so it is never retrieved again; the
     outcome row is deleted explicitly because SQLite enforces no ``ondelete``. The review
-    stops supporting any guideline it taught (:func:`app.memory.forget_review`). The question
+    stops supporting any guideline it taught (:func:`app.memory.forget_review`), and the retry
+    episodes its approval let the question's failed attempts teach go too. The question
     keeps whatever status and fields the review gave it.
     """
     review = session.get(ProfessorReviewRow, review_id)
@@ -186,6 +193,7 @@ def delete_review(session: Session, review_id: int) -> None:
         raise NotFoundError(f"Review {review_id} not found.")
     session.execute(delete(ReviewOutcomeRow).where(ReviewOutcomeRow.review_id == review_id))
     forget_review(session, review_id)
+    MemoryEpisodeRepository(session).delete_of_source(SOURCE_RETRY, question_id=review.question_id)
     session.delete(review)
     session.flush()
 

@@ -2657,6 +2657,9 @@ class GenerationRoundOut(BaseModel):
     lessons_error: str | None = None
     #: What the drift check saw in the round's questions, if anything looked off (ADR-063).
     drift_warning: str | None = None
+    #: Targets whose first attempt passed, out of ``produced + dropped``; ``None`` for rounds
+    #: generated before it was counted (m6).
+    first_attempt_passed: int | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -2677,6 +2680,7 @@ class GenerationRoundOut(BaseModel):
             lessons_applied=row.lessons_applied or 0,
             lessons_error=row.lessons_error,
             drift_warning=row.drift_warning,
+            first_attempt_passed=row.first_attempt_passed,
             error=row.error,
             created_at=row.created_at,
             started_at=row.started_at,

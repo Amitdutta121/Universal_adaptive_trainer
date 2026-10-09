@@ -438,7 +438,8 @@ def accepted_examples(
     limit: int = MAX_EXAMPLES_PER_CELL,
 ) -> RoundExamples:
     """Approved questions of ``question_type`` to match, the cell's questions not to repeat,
-    and at most one similar question the professor rejected, with why.
+    at most one similar question the professor rejected, with why, and the retry lessons of
+    the type and subtopic.
 
     Examples and the rejected question come from the memory episodes of the course's subject
     (:mod:`app.memory`), examples with the professor's comment. The order is
@@ -475,6 +476,7 @@ def accepted_examples(
         ],
         in_bank=[question.text for question in found.in_bank],
         rejected=RejectedExample(rejected.text, rejected.because) if rejected else None,
+        avoid=found.avoid,
     )
 
 
@@ -539,7 +541,7 @@ def _generate_round(
     duplicates = DuplicateChecker(session, embedder)
     run_id = new_run_id()
     targets = list(row.targets or [])
-    produced = dropped = skipped = 0
+    produced = dropped = skipped = first_passed = 0
     skip_notes: list[str] = []
     provider_errors: list[str] = []
 
@@ -606,6 +608,9 @@ def _generate_round(
                         duplicates=duplicates,
                     )
                     outcome = "produced" if question is not None else "dropped"
+                    attempts = question.generation_attempts if question is not None else []
+                    if attempts and attempts[0].usable:
+                        first_passed += 1
                 except InvalidQuestionSpecError as exc:
                     logger.warning("round %s: target refused: %s", round_id, exc.detail)
                 except (LLMRequestError, MalformedModelOutputError) as exc:
@@ -626,6 +631,7 @@ def _generate_round(
             dropped=dropped,
             skipped=skipped,
             skip_reason=_skip_reason(skip_notes),
+            first_attempt_passed=first_passed,
         )
         session.commit()
 
@@ -681,8 +687,8 @@ def run_round(
     (``app.evaluation.custom.run_custom_judges``), retrying with the failure reason up to
     ``MAX_GENERATION_ATTEMPTS`` and dropping on final failure. Stored questions carry
     ``style_id``, ``round_id`` and ``target_subtopic_id``. Increments ``produced`` / ``dropped``
-    and commits after each target so polling sees progress. Ends ``DONE`` with
-    ``finished_at``, or ``FAILED`` with ``error`` -- never raises out of the task.
+    / ``first_attempt_passed`` and commits after each target so polling sees progress. Ends
+    ``DONE`` with ``finished_at``, or ``FAILED`` with ``error`` -- never raises out of the task.
 
     ``client`` / ``embedder`` / ``session_factory`` default to the live ones; tests inject
     fakes. A round that is not ``QUEUED`` is left alone, so a repeated task is harmless.

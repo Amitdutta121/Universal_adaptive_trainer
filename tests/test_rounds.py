@@ -322,6 +322,27 @@ def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     assert question.pedagogical_eval["metrics"]
     done = _round(engine, row.id)
     assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 1, 0)
+    assert done.first_attempt_passed == 0
+
+
+def test_the_round_counts_targets_that_passed_on_their_first_attempt(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    from app.web.routes.api.schemas import GenerationRoundOut
+
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    _run(engine, row.id, client)
+
+    done = _round(engine, row.id)
+    assert (done.produced, done.first_attempt_passed) == (1, 1)
+    assert GenerationRoundOut.from_row(done).first_attempt_passed == 1
+    # Rounds from before the count say nothing rather than zero.
+    assert GenerationRoundOut.from_row(row).first_attempt_passed is None
 
 
 def test_a_hard_cell_hardens_a_question_that_passed_the_answer_check(
@@ -1220,6 +1241,25 @@ def test_the_target_block_labels_style_only_examples_and_lists_the_bank() -> Non
     )
     bare = render_round_target(subtopic=subtopic, topic_name="Loops", style=None)
     assert "Example" not in bare and "Existing" not in bare and "Rejected" not in bare
+    assert "Avoid" not in bare
+
+
+def test_the_target_block_lists_retry_lessons_before_the_bank() -> None:
+    block = render_round_target(
+        subtopic=SubtopicRow(id=7, name="While loops"),
+        topic_name="Loops",
+        style=None,
+        examples=RoundExamples(
+            in_bank=["What ends a while loop?"],
+            avoid=["(medium) a reviewer rated it hard, but it must be medium"],
+        ),
+    )
+    assert (
+        "Earlier drafts for this subtopic failed these checks before a fixed version was "
+        "approved. Avoid the same mistakes:\n"
+        "Avoid 1: (medium) a reviewer rated it hard, but it must be medium\n"
+        "\nAlready in the bank"
+    ) in block
 
 
 def test_a_round_prompt_carries_examples_and_the_bank(

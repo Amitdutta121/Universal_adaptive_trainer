@@ -28,16 +28,31 @@ from app.domain.enums import (
     ReviewDecision,
     RoundStatus,
 )
+from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.errors import LLMRequestError
 from app.evaluation import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.feedback import route_review_outcome, submit_review
 from app.feedback.lessons import apply_pending_lessons
-from app.persistence.models import CourseRow, CurriculumVersionRow, QuestionRow, ReviewOutcomeRow
+from app.persistence.models import (
+    CourseRow,
+    CurriculumVersionRow,
+    GenerationRoundRow,
+    QuestionRow,
+    ReviewOutcomeRow,
+)
 from app.persistence.repositories import QuestionRepository, ReviewOutcomeRepository
 from app.subjects import PYTHON_PROFILE
 from app.web.routes.api.schemas import GenerationRoundOut
 from tests import test_rounds
-from tests.test_rounds import _mcq, _queue, _round, _run, _setup, _target
+from tests.test_rounds import (
+    DifficultySequenceClient,
+    _mcq,
+    _queue,
+    _round,
+    _run,
+    _setup,
+    _target,
+)
 
 env = test_rounds.env
 fake_library = test_rounds.fake_library
@@ -288,6 +303,76 @@ def test_frozen_learning_consumes_the_reviews_without_learning(
     run = apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
     assert (run.applied, refreshes.calls) == (1, [])
+
+
+def test_an_approved_retry_fix_reaches_the_next_rounds_prompt(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    """m6: the lesson run keeps the failed attempt of an approved round question, and the next
+    target of the same type and subtopic is told to avoid it."""
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    earlier = GenerationRoundRow(setup_id=setup.id, number=0, status=RoundStatus.DONE)
+    session.add(earlier)
+    session.flush()
+    question = _question(session, gate=JudgeGate.APPROVED, version_id=env.version.id)
+    question.round_id = earlier.id
+    question.target_subtopic_id = env.while_loops.id
+    question.spec = {"difficulty": "medium"}
+    question.generation_attempts = [
+        GenerationAttempt(
+            number=1,
+            accepted=True,
+            failed_checks=[
+                QuestionCheck(
+                    name="topic_judge",
+                    passed=False,
+                    deterministic=False,
+                    detail="a reviewer says it assesses subtopic(s) [99], not the target",
+                )
+            ],
+        ),
+        GenerationAttempt(number=2, accepted=True),
+    ]
+    session.commit()
+    review = submit_review(session, question_id=question.id, decision=ReviewDecision.APPROVE)
+    route_review_outcome(session, review)
+    session.commit()
+
+    row = _queue(session, setup, [_target(env)])
+    client = _round_client(env)
+    _run(engine, row.id, client)
+
+    assert _round(engine, row.id).lessons_applied == 1
+    assert (
+        "Avoid 1: (medium) a reviewer says it assesses subtopic(s) [99], not the target"
+        in client.generation_calls[0]["prompt"]
+    )
+
+
+def test_the_simulation_logs_first_attempt_passes_per_round(
+    session: Session, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smoke test of scripts/simulate_review_loop.py with fakes (the real run spends API)."""
+    from scripts.simulate_review_loop import simulate
+
+    monkeypatch.setattr("app.feedback.lessons.distill_guidelines", TypeRefreshes())
+    monkeypatch.setattr("app.feedback.lessons.refresh_judge_prompt", lambda *_a, **_k: None)
+    client = DifficultySequenceClient(
+        difficulties=[Difficulty.HARD, Difficulty.EASY],
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+    )
+
+    log = simulate(
+        session,
+        version_id=env.version.id,
+        style=test_rounds.STYLE_A.id,
+        sections={env.while_loops.id: env.sections[0].id},
+        rounds=2,
+        client=client,
+    )
+
+    assert [entry["first_attempt_passed"] for entry in log["rounds"]] == [0, 1]
+    assert [entry["produced"] for entry in log["rounds"]] == [1, 1]
 
 
 def test_the_round_api_reports_the_lessons(session: Session, env: SimpleNamespace) -> None:

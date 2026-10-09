@@ -17,6 +17,8 @@ Two lists per target (one subtopic x difficulty cell, one question type), and on
 * **Rejected** -- at most one episode of the same subject and type the professor rejected
   with a reason or comment, the nearest by the same tiers and cosine: "the professor
   rejected a similar question because ...".
+* **Avoid** -- retry episodes of the same type and subtopic (m6): what failed attempts of
+  questions the professor then approved got wrong.
 
 A question reviewed more than once counts by its latest review. An episode's cell is the
 professor's corrected difficulty and subtopics when they made any.
@@ -34,14 +36,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, QuestionStatus, QuestionType, ReviewDecision
-from app.memory import MemoryEpisodeRepository, rejection_because
+from app.memory import MemoryEpisodeRepository, rejection_because, retry_lessons
 from app.persistence.models import QuestionRow, SubtopicRow
 from app.retrieval.duplicates import QuestionEmbeddingStore, embed_text, text_hash
 from app.retrieval.embedder import Embedder
@@ -102,6 +104,8 @@ class TargetExamples:
     examples: list[BankQuestion]
     in_bank: list[BankQuestion]
     rejected: RejectedQuestion | None = None
+    #: What earlier attempts of approved questions of this type and subtopic got wrong.
+    avoid: list[str] = field(default_factory=list)
 
 
 def retrieve_for_target(
@@ -232,5 +236,13 @@ def retrieve_for_target(
             )
             if nearest_rejected is not None
             else None
+        ),
+        avoid=retry_lessons(
+            session,
+            subject=subject,
+            question_type=question_type,
+            subtopic_id=subtopic_id,
+            difficulty=difficulty,
+            exclude_question_ids=exclude_ids,
         ),
     )
