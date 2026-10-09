@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
-from app.domain.enums import Difficulty, JudgeMetricId, QuestionType
+from app.domain.enums import Difficulty, GuidelineStatus, JudgeMetricId, QuestionType
 from app.domain.questions import Question
 from app.evaluation.prompts import SYSTEM_PROMPT_FOR, rubric_version_for, system_prompt_for
 from app.evaluation.service import PedagogicalJudge
@@ -25,8 +25,8 @@ from app.generation.principles import COMMON_SYSTEM, common_system
 from app.generation.schemas import MultipleChoiceDraft
 from app.generation.spec import build_question_spec
 from app.ingestion import BookImportService
-from app.persistence.models import CourseRow
-from app.persistence.repositories import JudgePromptRepository, TypeInstructionRepository
+from app.persistence.models import CourseRow, MemoryGuidelineRow
+from app.persistence.repositories import JudgePromptRepository
 from app.subjects import PYTHON_PROFILE, profile_for, profile_for_course_id
 from tests.conftest import TEST_PROFESSOR_ID
 
@@ -117,13 +117,16 @@ def test_a_course_less_taxonomy_still_gets_the_golden_python_prompt(session, set
 
 def test_a_learned_instruction_reaches_only_its_own_subject(session, settings) -> None:
     physics_course = _course(session, "physics", None)
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        # The course's owner's own Physics rules (ADR-059).
-        subject=profile_for_course_id(session, physics_course).personal_key,
-        instruction="PHYSICS-ONLY RULE",
-        rules=[],
-        review_count=1,
+    session.add(
+        MemoryGuidelineRow(
+            target="generator:multiple_choice",
+            # The course's owner's own Physics guidelines (ADR-059).
+            subject=profile_for_course_id(session, physics_course).personal_key,
+            text="PHYSICS-ONLY RULE",
+            review_ids=[1, 2],
+            status=GuidelineStatus.ACTIVE,
+            confirmed_by_professor=False,
+        )
     )
     session.commit()
     physics_client, _ = _generate(session, settings, physics_course)

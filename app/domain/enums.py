@@ -383,6 +383,21 @@ class RoundStatus(StrEnum):
         return self in (RoundStatus.DONE, RoundStatus.FAILED)
 
 
+class GuidelineStatus(StrEnum):
+    """Where a learned guideline stands (ADR-063 point 4).
+
+    Only ``ACTIVE`` ones are sent: at least two distinct supporting reviews, or the
+    professor's confirmation. ``PENDING`` waits for that. ``RETIRED`` was dropped, merged,
+    or deleted by the professor; ``REFUSED`` was an output-contract rule the deterministic
+    filter would not store as a preference. Both are kept for the record, never sent.
+    """
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    RETIRED = "retired"
+    REFUSED = "refused"
+
+
 class JobKind(StrEnum):
     """What a background job stored in ``background_jobs`` does.
 

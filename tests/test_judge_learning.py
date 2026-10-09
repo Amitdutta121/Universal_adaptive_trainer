@@ -37,7 +37,6 @@ from app.evaluation.judge_prompts import effective_rubric_version, resolve_syste
 from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
 from app.feedback import route_review_outcome, submit_review
 from app.feedback.lessons import apply_pending_lessons
-from app.generation.prompts import base_type_instruction
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import (
     JudgePromptRepository,
@@ -358,9 +357,7 @@ def test_render_keeps_the_shipped_text_when_nothing_is_learned() -> None:
 
 def _next_round_lessons(session: Session):
     session.expire_all()
-    return apply_pending_lessons(
-        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
-    )
+    return apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
 
 def test_a_disagreeing_review_relearns_the_named_judge(

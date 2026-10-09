@@ -1,5 +1,6 @@
 /**
- * The judges route: the difficulty judge, the topic-alignment judge, and this
+ * The judges route: the difficulty judge, the topic-alignment judge, the generator
+ * guidelines (`/api/guidelines`, ADR-063), and this
  * taxonomy's custom rules.
  *
  * The two built-in judges are backed by `GET/PUT/DELETE /api/judge-prompts`
@@ -17,7 +18,7 @@ export default function JudgesPage() {
     <div className="space-y-6 pb-16">
       <PageHeader
         title="Judges"
-        summary="The difficulty judge, the topic-alignment judge, and this taxonomy's custom rules. Edit a prompt to change what a built-in judge checks, or revert it to the text it shipped with."
+        summary="The difficulty judge, the topic-alignment judge, the generator guidelines learned from your reviews, and this taxonomy's custom rules. Edit a prompt to change what a built-in judge checks, or revert it to the text it shipped with."
         actions={<RunJudgesButton />}
       />
       <JudgesScreen />

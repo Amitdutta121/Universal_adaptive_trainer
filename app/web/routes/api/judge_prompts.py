@@ -250,7 +250,7 @@ def refresh(
 ) -> JudgePromptRefreshResponse:
     """Re-learn one judge's prompt from the questions it got wrong (ADR-039).
 
-    The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
+    Manual, as the generator's retired refresh was (m5 moved it to guidelines). Reads only
     the disagreements this judge is named in, minus the held-out third, so the
     reserved questions stay available to score the result.
     """

@@ -23,7 +23,9 @@ any draft: if the lesson cannot support a hard question, the target is skipped a
 reason is stored, separate from a drop. Otherwise
 :meth:`GenerationService.generate_round_question` judges inside the retry loop and drops
 what still fails after the last attempt -- except a duplicate of a stored question, which is
-retried and, on the last attempt, kept with a similarity flag (ADR-063 point 6).
+retried and, on the last attempt, kept with a similarity flag (ADR-063 point 6). Once the
+targets are done, a deterministic **drift check** (:mod:`app.generation.drift`) compares the
+round's questions with the previous round's and stores any warning on the round.
 """
 
 from __future__ import annotations
@@ -50,11 +52,11 @@ from app.evaluation import new_run_id
 from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
 from app.feedback.lessons import apply_pending_lessons
+from app.generation.drift import check_round_drift
 from app.generation.prompts import (
     RejectedExample,
     RoundExamples,
     ShownExample,
-    base_type_instruction,
 )
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
@@ -646,7 +648,6 @@ def _apply_lessons(
             session,
             round_id=round_id,
             profile=profile_for_version(session, setup.curriculum_version_id),
-            base_instruction=base_type_instruction,
             client=client,
         )
         applied, error = run.applied, run.error
@@ -716,7 +717,12 @@ def run_round(
             client=client,
             embedder=embedder if embedder is not None else default_embedder(),
         )
-        rounds.update(round_id, status=RoundStatus.DONE, finished_at=datetime.now(UTC))
+        rounds.update(
+            round_id,
+            status=RoundStatus.DONE,
+            finished_at=datetime.now(UTC),
+            drift_warning=check_round_drift(session, row),
+        )
         session.commit()
     except JobCancelled:
         session.rollback()

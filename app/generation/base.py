@@ -39,8 +39,8 @@ from app.generation.spec import (
 )
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
+from app.memory import active_guidelines, generator_target, render_with_guidelines
 from app.persistence.models import CurriculumVersionRow
-from app.persistence.repositories import TypeInstructionRepository
 from app.question_types.output_prediction import observed_expected_output
 from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_course_id
 
@@ -76,34 +76,40 @@ class BaseQuestionGenerator:
     def _type_instruction(
         self, question_type: QuestionType, profile: SubjectProfile = PYTHON_PROFILE
     ) -> tuple[str | None, dict[str, object]]:
-        """The instruction to send, and the stamp naming it (ADR-033, ADR-040).
+        """The instruction to send, and the stamp naming it (ADR-033, ADR-040, ADR-063).
 
-        Read per generation rather than cached, so a refresh takes effect on the
-        next question instead of the next process.
+        The shipped instruction plus this subject's **active** guidelines for the type
+        (:mod:`app.memory`); pending ones are not sent. Read per generation rather than
+        cached, so a lesson run or a professor's confirm takes effect on the next question.
 
-        Returns the learned override or ``None`` for the shipped text, plus a
-        record of which one was used. The stamp fingerprints the text that will
-        actually be sent, not the row it came from: what a question was generated
-        from is the only thing worth recording, and a question generated before a
-        refresh must not later appear to have used the newer instruction.
+        Returns the rendered text, or ``None`` for the shipped text alone, plus a record of
+        which one was used. The stamp fingerprints the text that will actually be sent and
+        names the guidelines in it: a question generated before a guideline changed must
+        not later appear to have used the newer instruction.
         """
-        row = (
-            TypeInstructionRepository(self._session).get(
-                question_type, subject=profile.personal_key
+        guidelines = (
+            active_guidelines(
+                self._session,
+                target=generator_target(question_type),
+                subject=profile.personal_key,
             )
             if self._session is not None
-            else None
+            else []
         )
-        effective = row.instruction if row is not None else base_type_instruction(question_type)
+        base = base_type_instruction(question_type)
+        effective = render_with_guidelines(base, [row.text for row in guidelines])
         stamp = {
             "type_instruction": {
-                "source": "learned" if row is not None else "shipped",
+                "source": "learned" if guidelines else "shipped",
                 "fingerprint": instruction_fingerprint(effective),
-                "rule_count": len(row.rules or []) if row is not None else 0,
-                "review_count": row.review_count if row is not None else 0,
+                "rule_count": len(guidelines),
+                "guideline_ids": [row.id for row in guidelines],
+                "review_count": len(
+                    {review for row in guidelines for review in row.review_ids or []}
+                ),
             }
         }
-        return (row.instruction if row is not None else None), stamp
+        return (effective if guidelines else None), stamp
 
     def generate(self, request: GenerationRequest) -> list[Question]:
         """Generate one unpersisted question for every requested source section.

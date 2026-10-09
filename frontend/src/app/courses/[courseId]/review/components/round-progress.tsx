@@ -75,7 +75,8 @@ export function RoundProgressStrip({
   } else if (round.status === "done") {
     const why = round.skip_reason ? ` ${round.skip_reason}` : "";
     const learned = lessons(round);
-    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.${learned ? ` ${learned}` : ""}`;
+    const drift = round.drift_warning ? ` ${round.drift_warning}` : "";
+    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.${learned ? ` ${learned}` : ""}${drift}`;
   } else {
     message = `Round ${round.number} failed${round.error ? `: ${round.error}` : "."}`;
   }

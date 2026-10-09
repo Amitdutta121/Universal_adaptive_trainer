@@ -45,6 +45,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidelineStatus,
     JobKind,
     JudgeBatchStatus,
     JudgeMetricId,
@@ -1120,6 +1121,40 @@ class MemoryEpisodeRow(TimestampMixin, Base):
         return list(self.corrected_subtopic_ids or self.subtopic_ids or [])
 
 
+class MemoryGuidelineRow(TimestampMixin, Base):
+    """One learned guideline: semantic memory (ADR-063 points 3-4, ADR-064).
+
+    A short rule distilled from reviews, owned by a ``target``: ``generator:<question type>``
+    (m5), later ``judge:<metric>`` (m11). The lesson run edits these rows with operations
+    (add, merge, support, retire) -- the list is never rewritten -- so ``review_ids`` is the
+    evidence each one has accumulated. Only ``ACTIVE`` rows are sent; a row is active with at
+    least two distinct supporting reviews or ``confirmed_by_professor``. Scoped by
+    ``subject``, the course's personal key, like episodes.
+    """
+
+    __tablename__ = "memory_guidelines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(100), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    #: The distinct reviews that support this guideline.
+    review_ids: Mapped[list[int]] = mapped_column(
+        "review_ids_json", JsonList, default=list, nullable=True
+    )
+    status: Mapped[GuidelineStatus] = mapped_column(
+        StrEnumType(GuidelineStatus, 16), default=GuidelineStatus.PENDING, index=True
+    )
+    confirmed_by_professor: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Why it was refused or retired ("merged into 12", "deleted by the professor", ...).
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The rounds whose lesson run created it and last changed it (``NULL``: migrated or
+    #: changed outside a round).
+    created_round_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_round_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
 class JudgePromptRow(TimestampMixin, Base):
     """A professor-edited system prompt for one metric judge (ADR-038).
 
@@ -1241,6 +1276,9 @@ class GenerationRoundRow(TimestampMixin, Base):
     lessons_applied: Mapped[int] = mapped_column(Integer, default=0)
     #: Why some of those lessons were not learned. The round generates regardless.
     lessons_error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: What the drift check saw in this round's questions (answer position, option count,
+    #: stem length); ``NULL`` when nothing looked off (ADR-063 point 4).
+    drift_warning: Mapped[str | None] = mapped_column(Text, default=None)
     #: Why the round failed, in the professor's terms. Never a credential.
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

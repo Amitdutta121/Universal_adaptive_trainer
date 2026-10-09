@@ -33,6 +33,21 @@ const trustWindow = (observations: number, agreements: number, trusted = false) 
 
 let paused = false;
 
+const confirmGuideline = vi.fn();
+const deleteGuideline = vi.fn();
+const guideline = (id: number, text: string, status: "pending" | "active", support: number) => ({
+  id,
+  target: "generator:multiple_choice",
+  question_type: "multiple_choice",
+  text,
+  status,
+  support_count: support,
+  review_ids: Array.from({ length: support }, (_, i) => i + 1),
+  confirmed_by_professor: false,
+  created_at: "2026-10-08T00:00:00Z",
+  updated_at: null,
+});
+
 vi.mock("@/lib/api/queries", () => ({
   useApprovedCurriculum: () => ({ isPending: false, data: { version: { id: 5 } } }),
   useJudgePrompts: () => ({
@@ -88,6 +103,19 @@ vi.mock("@/lib/api/queries", () => ({
       min_acceptance: 0.9,
     },
   }),
+  useGuidelines: () => ({
+    isPending: false,
+    error: null,
+    data: {
+      active_support: 2,
+      guidelines: [
+        guideline(11, "Put a short code block in the stem.", "active", 2),
+        guideline(12, "Ask the question directly.", "pending", 1),
+      ],
+    },
+  }),
+  useConfirmGuideline: () => ({ mutateAsync: confirmGuideline, isPending: false }),
+  useDeleteGuideline: () => ({ mutateAsync: deleteGuideline, isPending: false }),
   useRevertJudgePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSaveJudgePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -134,5 +162,28 @@ describe("JudgesScreen stats", () => {
     render(<JudgesScreen />);
     await userEvent.click(screen.getAllByRole("button", { name: "Edit prompt" })[0]);
     expect(await screen.findByText(/Saving resets trust: 1 style goes back/)).toBeInTheDocument();
+  });
+});
+
+describe("Generator guidelines", () => {
+  it("lists pending and active guidelines with their support", () => {
+    render(<JudgesScreen />);
+    const active = screen.getByText("Put a short code block in the stem.").closest("tr");
+    const pending = screen.getByText("Ask the question directly.").closest("tr");
+    expect(active).toHaveTextContent("2/2");
+    expect(active).toHaveTextContent("active");
+    expect(pending).toHaveTextContent("1/2");
+    expect(pending).toHaveTextContent("pending");
+    // Only a pending guideline can be confirmed; both can be deleted.
+    expect(screen.getAllByRole("button", { name: "Confirm" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(2);
+  });
+
+  it("confirms and deletes by id", async () => {
+    render(<JudgesScreen />);
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(confirmGuideline).toHaveBeenCalledWith(12);
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    expect(deleteGuideline).toHaveBeenCalledWith(11);
   });
 });

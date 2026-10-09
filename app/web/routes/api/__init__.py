@@ -45,6 +45,7 @@ _professor_only = [
     questions.router,
     feedback.router,
     instructions.router,
+    instructions.guidelines_router,
     judge_prompts.router,
     calibration.router,
     coverage.router,

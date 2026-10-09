@@ -6,24 +6,24 @@ never waits on a provider. Each affected judge and each affected question type i
 **once** per run however many reviews named it -- the existing learners already read every
 review of their scope, so one call per scope sees all the new evidence.
 
-What is learned is unchanged from ADR-037 / ADR-039: :func:`refresh_judge_prompt` for the
-judges a review contradicted, :func:`refresh_type_instruction` for the types the professor
-rejected or rewrote. Judges first, then the generator (ADR-063's order).
+Judges learn as in ADR-039 (:func:`refresh_judge_prompt` for the judges a review contradicted;
+m11 moves them to memory). The generator learns **guidelines** (ADR-063 points 3-4, m5): for
+each type the professor rejected or rewrote, one :func:`~app.memory.distill_guidelines` call
+turns the new reviews into edit operations on that type's guidelines. Judges first, then the
+generator (ADR-063's order).
 
 A provider failure is recorded on the outcome rows it concerns and returned, never raised:
 the round must still generate, and a silent failure would leave the professor believing a
 lesson landed that did not. Those rows stay pending, so the next round tries again.
 
 Allowed dependencies
-    Those of :mod:`app.feedback`, plus the learners of ``app.personalization`` and
-    ``app.evaluation``. The shipped type instruction comes in as ``base_instruction``
-    because it lives in ``app.generation``, which this package must not import.
+    Those of :mod:`app.feedback`, plus the judge learner of ``app.evaluation`` and the
+    guideline distiller of ``app.memory``.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -35,9 +35,9 @@ from app.evaluation.judge_learning import refresh_judge_prompt
 from app.evaluation.trust_scope import trusted_scopes
 from app.feedback.outcomes import _outcome_from_row
 from app.llm import StructuredLLMClient
+from app.memory import distill_guidelines, generator_target
 from app.persistence.models import ReviewOutcomeRow
 from app.persistence.repositories import JudgePromptRepository, ReviewOutcomeRepository
-from app.personalization import refresh_type_instruction
 from app.subjects import SubjectProfile
 from app.subjects.resolve import key_of_version, storage_keys_by_version
 
@@ -60,7 +60,6 @@ def apply_pending_lessons(
     *,
     round_id: int,
     profile: SubjectProfile,
-    base_instruction: Callable[[QuestionType], str],
     client: StructuredLLMClient | None = None,
 ) -> LessonRun:
     """Learn from every pending review of ``profile``'s subject and mark it learned.
@@ -79,7 +78,7 @@ def apply_pending_lessons(
     if settings.judge_learning_enabled:
         errors += _learn_judges(session, pending, profile, client, failed)
     if settings.generator_learning_enabled:
-        errors += _learn_generator(session, pending, profile, base_instruction, client, failed)
+        errors += _learn_generator(session, pending, profile, round_id, client, failed)
 
     learned = [row for row in pending if row.id not in failed]
     for row in learned:
@@ -179,14 +178,15 @@ def _learn_generator(
     session: Session,
     rows: list[ReviewOutcomeRow],
     profile: SubjectProfile,
-    base_instruction: Callable[[QuestionType], str],
+    round_id: int,
     client: StructuredLLMClient | None,
     failed_rows: set[int],
 ) -> list[str]:
-    """Relearn each type whose questions the professor did not accept, once.
+    """Distil each type whose questions the professor did not accept into guidelines, once.
 
     Both the ``confirmed_bad`` and the ``missed`` cell: what the judge thought does not
-    change the generator's lesson (ADR-037).
+    change the generator's lesson (ADR-037). The evidence is only this run's reviews of the
+    type; what earlier reviews taught is already in the guidelines the distiller edits.
     """
     by_type: dict[QuestionType, list[ReviewOutcomeRow]] = {}
     for row in rows:
@@ -196,13 +196,16 @@ def _learn_generator(
     errors: list[str] = []
     for question_type, of_type in by_type.items():
         try:
-            learned = refresh_type_instruction(
+            learned = distill_guidelines(
                 session,
-                question_type,
-                base_instruction=base_instruction(question_type),
-                client=client,
+                target=generator_target(question_type),
                 subject=profile.personal_key,
+                question_type=question_type,
+                review_ids=[row.review_id for row in of_type],
+                round_id=round_id,
+                client=client,
             )
+            session.commit()
         except (AdaptiveTrainerError, OSError) as exc:
             session.rollback()
             detail = getattr(exc, "message", None) or str(exc)
@@ -214,6 +217,6 @@ def _learn_generator(
             logger.warning("Relearning %s failed: %s", question_type.value, detail)
             continue
         for row in of_type:
-            row.instruction_refreshed = learned is not None
+            row.instruction_refreshed = learned.changed
         session.commit()
     return errors

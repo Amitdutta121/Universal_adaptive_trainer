@@ -317,6 +317,31 @@ describe("Generate next round", () => {
       "Some lessons were not applied: provider down",
     );
   });
+
+  it("shows the drift warning when the watched round finishes", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 5,
+      produced: 4,
+      dropped: 0,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+
+    roundData = {
+      ...(roundData as object),
+      status: "done",
+      produced: 5,
+      drift_warning: "Possible drift: all 5 multiple-choice answers are option A.",
+    };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Possible drift: all 5 multiple-choice answers are option A.",
+    );
+  });
 });
 
 describe("Questions arriving during a round", () => {

@@ -52,7 +52,6 @@ LLM_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/jobs/{job_id}/retry"): "/api/jobs/job-999999/retry",
     ("POST", "/api/evaluation/batch-runs"): "/api/evaluation/batch-runs",
     ("POST", "/api/evaluation/batch-runs/{run_id}/poll"): "/api/evaluation/batch-runs/x/poll",
-    ("POST", "/api/instructions/{question_type}/refresh"): "/api/instructions/true_false/refresh",
     ("POST", "/api/judge-prompts/{metric}/refresh"): "/api/judge-prompts/issues/refresh",
 }
 
@@ -68,6 +67,7 @@ READ_ONLY = [
     "/api/coverage",
     "/api/judge-prompts",
     "/api/instructions",
+    "/api/guidelines",
     "/api/counts",
 ]
 

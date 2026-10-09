@@ -54,6 +54,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidelineStatus,
     JudgeBatchStatus,
     JudgeMetricId,
     MasteryBand,
@@ -81,6 +82,7 @@ from app.persistence.models import (
     CustomJudgeRow,
     GenerationRoundRow,
     JudgeBatchRunRow,
+    MemoryGuidelineRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
@@ -1627,12 +1629,11 @@ class JudgePromptRefreshResponse(BaseModel):
 
 
 class TypeInstructionOut(BaseModel):
-    """What the generator is told for one question type (ADR-033).
+    """What the generator is told for one question type (ADR-033, ADR-063).
 
-    ``learned`` distinguishes an instruction built from reviews from the shipped
-    default, so a professor can see at a glance which types their feedback has
-    actually reached. ``available_reviews`` is how many reviews a refresh would
-    draw on now, which is what makes a stale instruction visible.
+    ``instruction`` is the shipped text plus the type's **active** guidelines, ``rules`` their
+    texts, and ``learned`` whether there is any. ``review_count`` is the distinct reviews
+    behind them; ``available_reviews`` how many reviews of the type exist.
     """
 
     question_type: QuestionType
@@ -1648,13 +1649,52 @@ class TypeInstructionListResponse(BaseModel):
     instructions: list[TypeInstructionOut]
 
 
-class TypeInstructionRefreshResponse(BaseModel):
-    question_type: QuestionType
-    #: False when the type has no reviews yet, leaving the shipped text in place.
-    learned: bool
-    rule_count: int
-    review_count: int
-    instruction: str
+class GuidelineOut(BaseModel):
+    """One learned guideline (ADR-063): pending until two reviews or a confirm, then sent."""
+
+    id: int
+    #: ``generator:<question type>`` (``judge:<metric>`` from m11).
+    target: str
+    #: The question type of a generator guideline, else ``None``.
+    question_type: QuestionType | None
+    text: str
+    status: GuidelineStatus
+    #: Distinct reviews supporting it; two make it active.
+    support_count: int
+    review_ids: list[int]
+    confirmed_by_professor: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: MemoryGuidelineRow) -> GuidelineOut:
+        kind, _, name = row.target.partition(":")
+        question_type = (
+            QuestionType(name)
+            if kind == "generator" and name in {item.value for item in QuestionType}
+            else None
+        )
+        review_ids = list(dict.fromkeys(row.review_ids or []))
+        return cls(
+            id=row.id,
+            target=row.target,
+            question_type=question_type,
+            text=row.text,
+            status=row.status,
+            support_count=len(review_ids),
+            review_ids=review_ids,
+            confirmed_by_professor=row.confirmed_by_professor,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class GuidelineListResponse(BaseModel):
+    """``GET /api/guidelines``: the course subject's pending and active guidelines."""
+
+    #: Distinct supporting reviews that make a guideline active without a confirm.
+    active_support: int
+    guidelines: list[GuidelineOut]
 
 
 # ---------------------------------------------------------------------- calibration
@@ -2615,6 +2655,8 @@ class GenerationRoundOut(BaseModel):
     #: Reviews the round learned from before generating, and why some were not (ADR-063).
     lessons_applied: int = 0
     lessons_error: str | None = None
+    #: What the drift check saw in the round's questions, if anything looked off (ADR-063).
+    drift_warning: str | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -2634,6 +2676,7 @@ class GenerationRoundOut(BaseModel):
             skip_reason=row.skip_reason,
             lessons_applied=row.lessons_applied or 0,
             lessons_error=row.lessons_error,
+            drift_warning=row.drift_warning,
             error=row.error,
             created_at=row.created_at,
             started_at=row.started_at,

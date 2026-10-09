@@ -32,7 +32,6 @@ from app.errors import LLMRequestError
 from app.evaluation import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.feedback import route_review_outcome, submit_review
 from app.feedback.lessons import apply_pending_lessons
-from app.generation.prompts import base_type_instruction
 from app.persistence.models import CourseRow, CurriculumVersionRow, QuestionRow, ReviewOutcomeRow
 from app.persistence.repositories import QuestionRepository, ReviewOutcomeRepository
 from app.subjects import PYTHON_PROFILE
@@ -108,17 +107,17 @@ def _round_client(env: SimpleNamespace) -> MetricJudgeClient:
 
 
 class TypeRefreshes:
-    """Stands in for ``refresh_type_instruction``, counting calls per type."""
+    """Stands in for ``distill_guidelines``, counting calls per type."""
 
     def __init__(self, *, fail: bool = False) -> None:
         self.calls: list[QuestionType] = []
         self.fail = fail
 
-    def __call__(self, _session: Session, question_type: QuestionType, **_kwargs: Any):
+    def __call__(self, _session: Session, *, question_type: QuestionType, **_kwargs: Any):
         self.calls.append(question_type)
         if self.fail:
             raise LLMRequestError("The provider is unavailable.", detail="502 from provider")
-        return SimpleNamespace(rules=[{"rule": "Name the defect."}])
+        return SimpleNamespace(changed=True)
 
 
 # ------------------------------------------------------------------ a review only records
@@ -139,7 +138,7 @@ def test_a_review_makes_no_model_call_and_leaves_its_lesson_pending(
     gate: JudgeGate,
     decision: str,
 ) -> None:
-    monkeypatch.setattr("app.personalization.instructions.get_structured_client", NoModel)
+    monkeypatch.setattr("app.memory.guidelines.get_structured_client", NoModel)
     monkeypatch.setattr("app.evaluation.judge_learning.get_structured_client", NoModel)
     monkeypatch.setattr("app.llm.get_structured_client", NoModel)
     question = _question(session, gate=gate)
@@ -165,7 +164,7 @@ def test_three_rejects_of_one_type_relearn_it_once_at_the_next_round(
     session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     refreshes = TypeRefreshes()
-    monkeypatch.setattr("app.feedback.lessons.refresh_type_instruction", refreshes)
+    monkeypatch.setattr("app.feedback.lessons.distill_guidelines", refreshes)
     for _ in range(3):
         _reject(session, _question(session, gate=JudgeGate.REJECT, version_id=env.version.id))
     assert [row.lessons_round_id for row in _outcomes(engine)] == [None, None, None]
@@ -183,9 +182,7 @@ def test_three_rejects_of_one_type_relearn_it_once_at_the_next_round(
     assert (done.lessons_applied, done.lessons_error) == (3, None)
 
     # Already learned: the next run has nothing to do.
-    again = apply_pending_lessons(
-        session, round_id=99, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
-    )
+    again = apply_pending_lessons(session, round_id=99, profile=PYTHON_PROFILE)
     assert (again.applied, refreshes.calls) == (0, [MC])
 
 
@@ -197,7 +194,7 @@ def test_each_judge_relearns_once_however_many_reviews_named_it(
         "app.feedback.lessons.refresh_judge_prompt",
         lambda _session, metric, **_kw: judge_calls.append(metric) or object(),
     )
-    monkeypatch.setattr("app.feedback.lessons.refresh_type_instruction", TypeRefreshes())
+    monkeypatch.setattr("app.feedback.lessons.distill_guidelines", TypeRefreshes())
     for _ in range(2):
         question = _question(session, gate=JudgeGate.APPROVED)
         review = submit_review(
@@ -209,9 +206,7 @@ def test_each_judge_relearns_once_however_many_reviews_named_it(
         assert route_review_outcome(session, review).cell is QuadrantCell.MISSED
         session.commit()
 
-    run = apply_pending_lessons(
-        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
-    )
+    run = apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
     assert judge_calls == [JudgeMetricId.DIFFICULTY]
     assert run.applied == 2
@@ -226,7 +221,7 @@ def _all_outcomes(session: Session) -> list[ReviewOutcomeRow]:
 def test_a_failing_refresh_does_not_fail_the_round(
     session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.feedback.lessons.refresh_type_instruction", TypeRefreshes(fail=True))
+    monkeypatch.setattr("app.feedback.lessons.distill_guidelines", TypeRefreshes(fail=True))
     _reject(session, _question(session, gate=JudgeGate.REJECT, version_id=env.version.id))
 
     setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
@@ -264,7 +259,7 @@ def test_another_subjects_reviews_wait_for_their_own_round(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     refreshes = TypeRefreshes()
-    monkeypatch.setattr("app.feedback.lessons.refresh_type_instruction", refreshes)
+    monkeypatch.setattr("app.feedback.lessons.distill_guidelines", refreshes)
     course = CourseRow(name="Physics course", subject="physics")
     session.add(course)
     session.flush()
@@ -273,9 +268,7 @@ def test_another_subjects_reviews_wait_for_their_own_round(
     session.commit()
     _reject(session, _question(session, gate=JudgeGate.REJECT, version_id=version.id))
 
-    run = apply_pending_lessons(
-        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
-    )
+    run = apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
     assert (run.applied, refreshes.calls) == (0, [])
     (outcome,) = _all_outcomes(session)
@@ -289,12 +282,10 @@ def test_frozen_learning_consumes_the_reviews_without_learning(
     monkeypatch.setenv("GENERATOR_LEARNING_ENABLED", "false")
     get_settings.cache_clear()
     refreshes = TypeRefreshes()
-    monkeypatch.setattr("app.feedback.lessons.refresh_type_instruction", refreshes)
+    monkeypatch.setattr("app.feedback.lessons.distill_guidelines", refreshes)
     _reject(session, _question(session, gate=JudgeGate.APPROVED))
 
-    run = apply_pending_lessons(
-        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
-    )
+    run = apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
     assert (run.applied, refreshes.calls) == (1, [])
 

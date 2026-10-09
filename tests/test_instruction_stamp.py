@@ -14,17 +14,22 @@ from llm_fakes import metric_results
 from sqlalchemy.orm import Session
 
 from app.curriculum import TaxonomyImportService
-from app.domain.enums import Difficulty, JudgeGate, QuestionStatus, QuestionType
+from app.domain.enums import (
+    Difficulty,
+    GuidelineStatus,
+    JudgeGate,
+    QuestionStatus,
+    QuestionType,
+)
 from app.evaluation import PedagogicalEvaluation
 from app.evaluation.schema import PedagogicalEvalStatus
 from app.generation.base import BaseQuestionGenerator
 from app.generation.prompts import base_type_instruction, instruction_fingerprint
 from app.ingestion import BookImportService
-from app.persistence.models import QuestionRow
-from app.persistence.repositories import (
-    QuestionRepository,
-    TypeInstructionRepository,
-)
+from app.memory import render_with_guidelines
+from app.persistence.models import MemoryGuidelineRow, QuestionRow
+from app.persistence.repositories import QuestionRepository
+from app.subjects import PYTHON_PROFILE
 from app.web.routes.api.schemas import InstructionStamp, QuestionSummary
 
 TAXONOMY = (
@@ -75,19 +80,36 @@ def test_an_unlearned_type_is_stamped_shipped(session: Session) -> None:
     )
 
 
-def test_a_learned_type_is_stamped_learned(session: Session) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="BASE\n\nThis professor additionally requires:\n- Keep options short.",
-        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
-        review_count=4,
+def _guideline(
+    session: Session,
+    text: str,
+    review_ids: list[int],
+    *,
+    question_type: QuestionType = QuestionType.MULTIPLE_CHOICE,
+    status: GuidelineStatus = GuidelineStatus.ACTIVE,
+) -> MemoryGuidelineRow:
+    row = MemoryGuidelineRow(
+        target=f"generator:{question_type.value}",
+        subject=PYTHON_PROFILE.personal_key,
+        text=text,
+        review_ids=review_ids,
+        status=status,
+        confirmed_by_professor=False,
     )
+    session.add(row)
     session.commit()
+    return row
+
+
+def test_a_learned_type_is_stamped_learned(session: Session) -> None:
+    row = _guideline(session, "Keep options short.", [1, 2, 3, 4])
+    _guideline(session, "Only pending.", [5], status=GuidelineStatus.PENDING)
 
     stamp = _stamp(session, QuestionType.MULTIPLE_CHOICE)
 
     assert stamp["source"] == "learned"
     assert stamp["rule_count"] == 1
+    assert stamp["guideline_ids"] == [row.id]
     assert stamp["review_count"] == 4
     assert stamp["fingerprint"] != instruction_fingerprint(
         base_type_instruction(QuestionType.MULTIPLE_CHOICE)
@@ -96,34 +118,25 @@ def test_a_learned_type_is_stamped_learned(session: Session) -> None:
 
 def test_relearning_changes_the_name(session: Session) -> None:
     """Two questions written from different instructions must not look alike."""
-    repository = TypeInstructionRepository(session)
-    repository.upsert(
-        QuestionType.MULTIPLE_CHOICE, instruction="ONE", rules=[{"rule": "a"}], review_count=1
-    )
-    session.commit()
+    _guideline(session, "a", [1, 2])
     before = _stamp(session, QuestionType.MULTIPLE_CHOICE)["fingerprint"]
 
-    repository.upsert(
-        QuestionType.MULTIPLE_CHOICE, instruction="TWO", rules=[{"rule": "b"}], review_count=2
-    )
-    session.commit()
+    _guideline(session, "b", [3, 4])
 
     assert _stamp(session, QuestionType.MULTIPLE_CHOICE)["fingerprint"] != before
 
 
 def test_the_stamp_names_the_text_that_is_sent(session: Session) -> None:
     """Not the row: what the model read is the only honest provenance."""
-    TypeInstructionRepository(session).upsert(
-        QuestionType.CODING, instruction="EXACT TEXT SENT", rules=[], review_count=3
-    )
-    session.commit()
+    _guideline(session, "EXACT RULE SENT", [1, 2], question_type=QuestionType.CODING)
 
     instruction, stamp = BaseQuestionGenerator(session=session)._type_instruction(
         QuestionType.CODING
     )
 
-    assert instruction == "EXACT TEXT SENT"
-    assert stamp["type_instruction"]["fingerprint"] == instruction_fingerprint("EXACT TEXT SENT")
+    sent = render_with_guidelines(base_type_instruction(QuestionType.CODING), ["EXACT RULE SENT"])
+    assert instruction == sent
+    assert stamp["type_instruction"]["fingerprint"] == instruction_fingerprint(sent)
 
 
 # ------------------------------------------------------- what reaches the client

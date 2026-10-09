@@ -2,7 +2,7 @@
 
 The four cells each call for something different, and these check that the call
 is made per review rather than only when someone opens the calibration page:
-both-rejected relearns the type instruction (at the next round's lesson run,
+both-rejected teaches the type's guidelines (at the next round's lesson run,
 ADR-063), the two disagreeing cells name the judge at fault, and every placeable
 review is written to the dataset.
 """
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.domain.enums import (
     CalibrationLabel,
     Difficulty,
+    GuidelineStatus,
     JudgeGate,
     JudgeMetricId,
     QuadrantCell,
@@ -32,20 +33,18 @@ from app.errors import LLMRequestError
 from app.evaluation import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.feedback import route_review_outcome, submit_review
 from app.feedback.lessons import apply_pending_lessons
-from app.generation.prompts import base_type_instruction
+from app.memory import GuidelineEdits, GuidelineOperation, MemoryGuidelineRepository
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import (
     ProfessorReviewRepository,
     QuestionRepository,
     ReviewOutcomeRepository,
-    TypeInstructionRepository,
 )
-from app.personalization import LearnedRule, LearnedRules
 from app.subjects import PYTHON_PROFILE
 
 
 class Rewriter:
-    """Stands in for the instruction rewriter, counting how often it is called."""
+    """Stands in for the guideline distiller, counting how often it is called."""
 
     def __init__(self, *, fail: bool = False) -> None:
         self.calls = 0
@@ -59,14 +58,19 @@ class Rewriter:
         self.calls += 1
         if self.fail:
             raise LLMRequestError("The provider is unavailable.", detail="502 from provider")
-        return LearnedRules(rules=[LearnedRule(rule="Name the defect in the prompt.")])
+        ids = [int(part.split(",")[0]) for part in prompt.split('"review_id": ')[1:]]
+        return GuidelineEdits(
+            operations=[
+                GuidelineOperation(op="add", text="Name the defect in the prompt.", review_ids=ids)
+            ]
+        )
 
 
 @pytest.fixture
 def rewriter(monkeypatch: pytest.MonkeyPatch) -> Rewriter:
     """Intercept the model call the confirmed-bad cell makes."""
     fake = Rewriter()
-    monkeypatch.setattr("app.personalization.instructions.get_structured_client", lambda: fake)
+    monkeypatch.setattr("app.memory.guidelines.get_structured_client", lambda: fake)
     return fake
 
 
@@ -340,9 +344,7 @@ def _reject_through_the_api(client: TestClient, question_id: int) -> dict[str, A
 
 def _next_round_lessons(session: Session):
     session.expire_all()
-    return apply_pending_lessons(
-        session, round_id=1, profile=PYTHON_PROFILE, base_instruction=base_type_instruction
-    )
+    return apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
 
 def _stored(session: Session, review_id: int):
@@ -352,7 +354,7 @@ def _stored(session: Session, review_id: int):
     return stored
 
 
-def test_both_rejecting_relearns_the_instruction_next_round(
+def test_both_rejecting_teaches_the_guidelines_next_round(
     client: TestClient, session: Session, rewriter: Rewriter
 ) -> None:
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
@@ -367,9 +369,15 @@ def test_both_rejecting_relearns_the_instruction_next_round(
 
     assert rewriter.calls == 1
     assert _stored(session, body["id"]).instruction_refreshed is True
-    stored = TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE)
-    assert stored is not None
-    assert "Name the defect in the prompt." in stored.instruction
+    (guideline,) = MemoryGuidelineRepository(session).list_for(
+        subject=PYTHON_PROFILE.personal_key,
+        statuses=[GuidelineStatus.PENDING, GuidelineStatus.ACTIVE],
+    )
+    # One review: learned, but pending until a second one agrees (ADR-063 point 4).
+    assert (guideline.text, guideline.status) == (
+        "Name the defect in the prompt.",
+        GuidelineStatus.PENDING,
+    )
 
 
 def test_a_missed_review_teaches_the_generator_and_the_judge(
@@ -433,7 +441,7 @@ def test_a_failed_refresh_keeps_the_review_and_records_it(
 ) -> None:
     """The verdict is the professor's work; a provider outage must not discard it."""
     failing = Rewriter(fail=True)
-    monkeypatch.setattr("app.personalization.instructions.get_structured_client", lambda: failing)
+    monkeypatch.setattr("app.memory.guidelines.get_structured_client", lambda: failing)
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 
     body = _reject_through_the_api(client, question.id)
