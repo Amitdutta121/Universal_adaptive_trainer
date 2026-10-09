@@ -29,6 +29,7 @@ from app.calibration import (
     CalibrationPair,
     CalibrationReport,
     DifficultyConfusion,
+    JudgeScorecardReport,
     MetricAgreement,
     QuadrantCell,
     QuadrantCounts,
@@ -1581,6 +1582,36 @@ class JudgeStatsResponse(BaseModel):
     min_observations: int
     min_agreement: float
     min_acceptance: float
+
+
+class JudgeScorecardOut(BaseModel):
+    """One judge on ``GET /api/judges/scorecard`` (ADR-064, m8)."""
+
+    metric: JudgeMetricId
+    n: int
+    agreements: int
+    agreement: float | None
+    kappa: float | None
+    agreement_low: float | None
+    agreement_high: float | None
+    missed: int
+    false_alarms: int
+    flags: int
+    flag_rate: float | None
+    retries: int
+    drops: int
+
+
+class JudgeScorecardResponse(BaseModel):
+    """Per-judge agreement, κ, Wilson 95% range, and round retries/drops."""
+
+    judges: list[JudgeScorecardOut]
+
+    @classmethod
+    def from_report(cls, report: JudgeScorecardReport) -> JudgeScorecardResponse:
+        return cls(
+            judges=[JudgeScorecardOut.model_validate(row.model_dump()) for row in report.judges]
+        )
 
 
 class JudgePromptRequest(BaseModel):

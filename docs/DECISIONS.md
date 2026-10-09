@@ -2593,8 +2593,12 @@ and first-attempt pass rate rises across rounds.
 
 ## ADR-064 — Judges learn from memory on both sides of their decisions, frozen per round
 
-**Status:** proposed. Supersedes ADR-039's rewrite-and-gate learning; keeps its held-out check.
-Milestones: `docs/LEARNING_MEMORY_MILESTONES.md` m8–m11.
+**Status:** proposed; decision 1 accepted and implemented (m8: `app/calibration/scorecard.py`,
+`GET /api/judges/scorecard`; agreement, Cohen's κ and a Wilson 95% range per judge; difficulty
+and subtopic scored against the professor's confirmed values on every review; retries and drops
+attributed from `generation_attempts`; the table is on the Judges page). Supersedes ADR-039's
+rewrite-and-gate learning; keeps its held-out check. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md`
+m8–m11.
 
 Of 222 routed reviews, judges raised 67 false alarms and 27 misses. In rounds, a draft a judge
 fails is retried or dropped and never reviewed, so the most common judge mistake is invisible

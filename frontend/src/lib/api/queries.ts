@@ -86,6 +86,9 @@ export const qk = {
     list: () => ["judge-prompts", "list"] as const,
     stats: () => ["judge-prompts", "stats"] as const,
   },
+  judges: {
+    scorecard: () => ["judges", "scorecard"] as const,
+  },
   coverage: {
     all: ["coverage"] as const,
     report: (setVersionId?: number) => ["coverage", setVersionId ?? null] as const,
@@ -1099,6 +1102,17 @@ export const judgeStatsQuery = () =>
   });
 
 export const useJudgeStats = () => useQuery(judgeStatsQuery());
+
+/** Per-judge scorecard: agreement, κ, Wilson 95% range, retries and drops (ADR-064, m8). */
+export const judgeScorecardQuery = () =>
+  queryOptions({
+    queryKey: qk.judges.scorecard(),
+    queryFn: () => unwrap(api.GET("/api/judges/scorecard")),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+export const useJudgeScorecard = () => useQuery(judgeScorecardQuery());
 
 type JudgeMetricId = Schemas["JudgeMetricId"];
 

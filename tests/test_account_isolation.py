@@ -192,6 +192,7 @@ PATH_IDS = {
 SHIPPED_LISTS = {
     ("GET", "/api/judge-prompts"): {"prompts"},
     ("GET", "/api/judge-prompts/stats"): {"judges"},  # one zeroed row per shipped judge
+    ("GET", "/api/judges/scorecard"): {"judges"},  # one zeroed row per shipped judge
     ("GET", "/api/instructions"): {"instructions"},
     ("GET", "/api/styles"): {"styles"},
     # One zeroed row per shipped judge metric.

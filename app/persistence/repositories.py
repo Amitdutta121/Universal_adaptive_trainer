@@ -809,6 +809,18 @@ class QuestionRepository:
             stmt = stmt.where(questions_in_course(course_id))
         return list(self._session.scalars(stmt))
 
+    def list_round_questions(self, *, course_id: int | None = None) -> list[QuestionRow]:
+        """Questions a setup round produced, including drafts whose last attempt failed.
+
+        The scorecard attributes retries and drops from ``generation_attempts`` on these
+        rows. Unbounded: a sample of recent rounds would under-count a judge that failed
+        early and recovered.
+        """
+        stmt = select(QuestionRow).where(QuestionRow.round_id.is_not(None)).order_by(QuestionRow.id)
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        return list(self._session.scalars(stmt))
+
     def count_reviewed(
         self, *, course_id: int | None = None, curriculum_version_id: int | None = None
     ) -> int:

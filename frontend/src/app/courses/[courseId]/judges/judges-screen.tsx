@@ -5,12 +5,15 @@
  * `GET /api/judge-prompts`. Issues and generatability still come back from that
  * list; this screen does not show them.
  *
- * Each card leads with how often the professor agreed with that judge
- * (`GET /api/judge-prompts/stats`); the prompt in force and its learned rules
- * open under "More". A built-in judge is changed by rewriting its system prompt
- * (ADR-038). Below the cards: which styles have earned trust (skip review) and
- * what each still lacks, the generator guidelines learned from reviews
- * (`GET /api/guidelines`, ADR-063), then the taxonomy's custom rules.
+ * The scorecard (`GET /api/judges/scorecard`, ADR-064) is the measuring stick:
+ * agreement with a 95% range, κ, misses, false alarms, flag rate, and the retries
+ * and drops each judge caused in rounds. Each card then leads with how often the
+ * professor agreed with that judge (`GET /api/judge-prompts/stats`); the prompt
+ * in force and its learned rules open under "More". A built-in judge is changed
+ * by rewriting its system prompt (ADR-038). Below the cards: which styles have
+ * earned trust (skip review) and what each still lacks, the generator guidelines
+ * learned from reviews (`GET /api/guidelines`, ADR-063), then the taxonomy's
+ * custom rules.
  */
 
 import { ChevronDown, Gavel, Scale, TrendingUp, Undo2 } from "lucide-react";
@@ -39,16 +42,30 @@ import {
   useDeleteGuideline,
   useGuidelines,
   useJudgePrompts,
+  useJudgeScorecard,
   useJudgeStats,
   useRevertJudgePrompt,
   useSaveJudgePrompt,
 } from "@/lib/api/queries";
-import type { Guideline, JudgePrompt, JudgeStat, JudgeStats, StyleTrust } from "@/lib/api/types";
+import type {
+  Guideline,
+  JudgePrompt,
+  JudgeScorecard,
+  JudgeStat,
+  JudgeStats,
+  StyleTrust,
+} from "@/lib/api/types";
 import { questionTypeLabel } from "@/lib/question-types/registry";
 
 const SHOWN_METRICS = ["difficulty", "subtopic"] as const;
 
 const JUDGE_LABELS: Record<(typeof SHOWN_METRICS)[number], string> = {
+  difficulty: "Difficulty",
+  subtopic: "Topic alignment",
+};
+
+const SCORECARD_LABELS: Record<string, string> = {
+  issues: "Issues",
   difficulty: "Difficulty",
   subtopic: "Topic alignment",
 };
@@ -120,6 +137,16 @@ function percent(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+function agreementRange(row: JudgeScorecard): string {
+  if (row.n === 0 || row.agreement_low == null || row.agreement_high == null) return "–";
+  return `${percent(row.agreement_low)}–${percent(row.agreement_high)}`;
+}
+
+function kappaText(row: JudgeScorecard): string {
+  if (row.n === 0 || row.kappa == null) return "–";
+  return row.kappa.toFixed(2);
+}
+
 function agreement(stat: JudgeStat | undefined): { value: string; caption: string } {
   if (!stat || stat.observations === 0 || stat.agreement_rate == null) {
     return { value: "–", caption: "No reviewed questions under this prompt yet" };
@@ -150,6 +177,73 @@ function styleStatus(style: StyleTrust, minimum: number): string {
   const fewest = Math.min(...windows.map((metric) => metric.observations));
   if (fewest < minimum) return `Building trust: ${fewest} of ${minimum} reviews`;
   return "Below 90% agreement";
+}
+
+function ScorecardCard() {
+  const { data, error, isPending } = useJudgeScorecard();
+
+  return (
+    <Card className="review-panel">
+      <CardHeader className="gap-2">
+        <div className="review-eyebrow">Scorecard</div>
+        <CardTitle className="text-lg">How each judge is doing</CardTitle>
+        <CardDescription>
+          Agreement with you on reviewed questions, with a 95% range and Cohen&apos;s κ. Retries
+          and drops come from rounds, attributed to the judge whose check failed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error ? <QueryError error={error} /> : null}
+        {isPending ? (
+          <TableSkeleton rows={3} />
+        ) : !data ||
+          data.judges.every((row) => row.n === 0 && row.retries === 0 && row.drops === 0) ? (
+          <p className="text-muted-foreground text-sm">No reviewed questions yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 font-medium">Judge</th>
+                  <th className="font-medium">Agreement</th>
+                  <th className="font-medium">95%</th>
+                  <th className="font-medium">κ</th>
+                  <th className="font-medium">Misses</th>
+                  <th className="font-medium">False alarms</th>
+                  <th className="font-medium">Flag rate</th>
+                  <th className="font-medium">Retries</th>
+                  <th className="font-medium">Drops</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.judges.map((row) => (
+                  <tr key={row.metric} className="border-border border-t">
+                    <td className="py-2 pr-4">{SCORECARD_LABELS[row.metric] ?? row.metric}</td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {row.n === 0 || row.agreement == null
+                        ? "–"
+                        : `${row.agreements}/${row.n} (${percent(row.agreement)})`}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{agreementRange(row)}</td>
+                    <td className="py-2 pr-4 tabular-nums">{kappaText(row)}</td>
+                    <td className="py-2 pr-4 tabular-nums">{row.n === 0 ? "–" : row.missed}</td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {row.n === 0 ? "–" : row.false_alarms}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {row.n === 0 || row.flag_rate == null ? "–" : percent(row.flag_rate)}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{row.retries}</td>
+                    <td className="py-2 tabular-nums">{row.drops}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function StyleTrustCard({ stats }: { stats: JudgeStats }) {
@@ -614,6 +708,8 @@ export function JudgesScreen() {
 
   return (
     <div className="space-y-6">
+      <ScorecardCard />
+
       {error ? <QueryError error={error} /> : null}
 
       {isPending ? (

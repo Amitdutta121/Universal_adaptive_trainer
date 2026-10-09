@@ -1103,6 +1103,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/judges/scorecard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Judge Scorecard
+         * @description Agreement, κ, Wilson 95% range, misses, false alarms, flag rate, retries and drops.
+         */
+        get: operations["judge_scorecard_api_judges_scorecard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/calibration/results": {
         parameters: {
             query?: never;
@@ -3995,6 +4015,45 @@ export interface components {
             eligible: number;
             /** Active Run Id */
             active_run_id?: string | null;
+        };
+        /**
+         * JudgeScorecardOut
+         * @description One judge on ``GET /api/judges/scorecard`` (ADR-064, m8).
+         */
+        JudgeScorecardOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** N */
+            n: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement */
+            agreement: number | null;
+            /** Kappa */
+            kappa: number | null;
+            /** Agreement Low */
+            agreement_low: number | null;
+            /** Agreement High */
+            agreement_high: number | null;
+            /** Missed */
+            missed: number;
+            /** False Alarms */
+            false_alarms: number;
+            /** Flags */
+            flags: number;
+            /** Flag Rate */
+            flag_rate: number | null;
+            /** Retries */
+            retries: number;
+            /** Drops */
+            drops: number;
+        };
+        /**
+         * JudgeScorecardResponse
+         * @description Per-judge agreement, κ, Wilson 95% range, and round retries/drops.
+         */
+        JudgeScorecardResponse: {
+            /** Judges */
+            judges: components["schemas"]["JudgeScorecardOut"][];
         };
         /**
          * JudgeStatsOut
@@ -7745,6 +7804,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JudgePromptRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judge_scorecard_api_judges_scorecard_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeScorecardResponse"];
                 };
             };
             /** @description Validation Error */

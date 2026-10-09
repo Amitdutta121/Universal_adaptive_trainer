@@ -48,6 +48,26 @@ const guideline = (id: number, text: string, status: "pending" | "active", suppo
   updated_at: null,
 });
 
+const scorecardRow = (
+  metric: "issues" | "difficulty" | "subtopic",
+  extras: Record<string, number | null> = {},
+) => ({
+  metric,
+  n: 20,
+  agreements: 18,
+  agreement: 0.9,
+  kappa: 0.6,
+  agreement_low: 0.699,
+  agreement_high: 0.972,
+  missed: 1,
+  false_alarms: 1,
+  flags: 2,
+  flag_rate: 0.1,
+  retries: 0,
+  drops: 0,
+  ...extras,
+});
+
 vi.mock("@/lib/api/queries", () => ({
   useApprovedCurriculum: () => ({ isPending: false, data: { version: { id: 5 } } }),
   useJudgePrompts: () => ({
@@ -57,6 +77,17 @@ vi.mock("@/lib/api/queries", () => ({
       prompts: [prompt("difficulty"), prompt("subtopic")],
       rubric_version: "r",
       shipped_rubric_version: "r",
+    },
+  }),
+  useJudgeScorecard: () => ({
+    isPending: false,
+    error: null,
+    data: {
+      judges: [
+        scorecardRow("issues", { false_alarms: 4, missed: 2, retries: 0, drops: 0 }),
+        scorecardRow("difficulty", { retries: 3, drops: 1 }),
+        scorecardRow("subtopic", { n: 0, agreements: 0, agreement: null, kappa: null }),
+      ],
     },
   }),
   useJudgeStats: () => ({
@@ -119,6 +150,21 @@ vi.mock("@/lib/api/queries", () => ({
   useRevertJudgePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSaveJudgePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
+
+describe("Judge scorecard", () => {
+  it("shows agreement with a 95% range, kappa, false alarms, retries and drops", () => {
+    render(<JudgesScreen />);
+    expect(screen.getByText("How each judge is doing")).toBeInTheDocument();
+    const issues = screen.getByText("Issues").closest("tr");
+    const difficulty = screen.getAllByText("Difficulty")[0].closest("tr");
+    expect(issues).toHaveTextContent("18/20 (90%)");
+    expect(issues).toHaveTextContent("70%–97%");
+    expect(issues).toHaveTextContent("0.60");
+    expect(issues).toHaveTextContent("4");
+    expect(difficulty).toHaveTextContent("3");
+    expect(difficulty).toHaveTextContent("1");
+  });
+});
 
 describe("JudgesScreen stats", () => {
   it("shows professor agreement and rewrite progress per judge", () => {
