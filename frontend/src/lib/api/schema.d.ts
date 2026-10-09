@@ -3639,6 +3639,8 @@ export interface components {
             drift_warning?: string | null;
             /** First Attempt Passed */
             first_attempt_passed?: number | null;
+            /** Saturated */
+            saturated?: string | null;
             /** Error */
             error: string | null;
             /**

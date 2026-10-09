@@ -492,7 +492,7 @@ def test_sqlite_0005_upgrade_preserves_rows_and_adds_only_trust_schema(engine):
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0017_first_attempt_passed"
+            == "0018_subtopic_facets"
         )
         assert connection.execute(text("SELECT prompt,trust_provenance FROM questions")).one() == (
             "Old",

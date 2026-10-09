@@ -54,6 +54,9 @@ class QuestionSpec(BaseModel):
     #: the retry loop and drops it on final failure instead of storing it.
     target_subtopic_id: int | None = None
     style_id: str | None = None
+    #: Round specs only: the facet of the subtopic this question must assess
+    #: (:mod:`app.generation.facets`).
+    facet: str | None = None
 
     @property
     def is_round_spec(self) -> bool:
@@ -62,11 +65,13 @@ class QuestionSpec(BaseModel):
     def stored(self) -> dict[str, object]:
         """The spec as frozen on the question.
 
-        A section-only spec omits the two round fields, so questions generated outside a
-        round keep exactly the ``spec_json`` they had before rounds existed.
+        A section-only spec omits the round fields, and a spec without a facet omits it, so
+        questions keep exactly the ``spec_json`` they had before rounds and facets existed.
         """
-        exclude = None if self.is_round_spec else {"target_subtopic_id", "style_id"}
-        return self.model_dump(mode="json", exclude=exclude)
+        exclude = set() if self.is_round_spec else {"target_subtopic_id", "style_id"}
+        if self.facet is None:
+            exclude.add("facet")
+        return self.model_dump(mode="json", exclude=exclude or None)
 
 
 class SubtopicOwner(BaseModel):
@@ -133,11 +138,12 @@ def build_question_spec(
     seed: str | None = None,
     target_subtopic_id: int | None = None,
     style_id: str | None = None,
+    facet: str | None = None,
 ) -> QuestionSpec:
     """Resolve and validate one generation request before the model runs.
 
-    ``target_subtopic_id`` / ``style_id`` make it a round spec; the target must be a
-    subtopic of this version.
+    ``target_subtopic_id`` / ``style_id`` (and ``facet``) make it a round spec; the target
+    must be a subtopic of this version.
 
     Raises:
         InvalidQuestionSpecError: the curriculum is not approved, a source
@@ -181,6 +187,7 @@ def build_question_spec(
             seed=seed,
             target_subtopic_id=target_subtopic_id,
             style_id=style_id,
+            facet=facet if target_subtopic_id is not None else None,
         )
     except ValidationError as exc:
         raise InvalidQuestionSpecError(

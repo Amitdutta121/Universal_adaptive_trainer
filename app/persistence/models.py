@@ -1155,6 +1155,24 @@ class MemoryGuidelineRow(TimestampMixin, Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
+class SubtopicFacetRow(TimestampMixin, Base):
+    """The facets of one subtopic: the distinct things a question about it can assess (m7).
+
+    Listed once by a model call and reused by every later round, so two targets of a cell
+    can be told to assess different things, and a cell whose facets are all covered is
+    known to be saturated without another call.
+    """
+
+    __tablename__ = "subtopic_facets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    facets: Mapped[list[str]] = mapped_column("facets_json", JsonList, default=list)
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
+
+
 class JudgePromptRow(TimestampMixin, Base):
     """A professor-edited system prompt for one metric judge (ADR-038).
 
@@ -1268,7 +1286,8 @@ class GenerationRoundRow(TimestampMixin, Base):
     requested: Mapped[int] = mapped_column(Integer, default=0)
     produced: Mapped[int] = mapped_column(Integer, default=0)
     dropped: Mapped[int] = mapped_column(Integer, default=0)
-    #: Hard targets the lesson cannot support. Not stored, and not a drop.
+    #: Hard targets the lesson cannot support, and targets of a cell found saturated while
+    #: the round ran (m7). Not stored, and not a drop.
     skipped: Mapped[int] = mapped_column(Integer, default=0)
     #: Why those hard targets were skipped, in the judge's words.
     skip_reason: Mapped[str | None] = mapped_column(Text, default=None)
@@ -1282,6 +1301,9 @@ class GenerationRoundRow(TimestampMixin, Base):
     #: Stored questions whose first attempt passed every check (m6); out of ``produced`` +
     #: ``dropped``. ``NULL`` for rounds generated before it was counted.
     first_attempt_passed: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Cells left out because every facet of their subtopic is covered (m7), e.g.
+    #: "While loops (medium)"; ``NULL`` when none.
+    saturated: Mapped[str | None] = mapped_column(Text, default=None)
     #: Why the round failed, in the professor's terms. Never a credential.
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

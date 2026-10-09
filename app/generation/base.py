@@ -283,5 +283,9 @@ class BaseQuestionGenerator:
             else None
         )
         return render_round_target(
-            subtopic=subtopic, topic_name=topic.name, style=style, examples=examples
+            subtopic=subtopic,
+            topic_name=topic.name,
+            style=style,
+            examples=examples,
+            facet=spec.facet,
         )

@@ -85,7 +85,10 @@ export function RoundProgressStrip({
     const learned = lessons(round);
     const drift = round.drift_warning ? ` ${round.drift_warning}` : "";
     const first = firstAttempt(round);
-    message = `Round ${round.number} done: ${counts(round)}.${why} New questions are in the queue.${first ? ` ${first}` : ""}${learned ? ` ${learned}` : ""}${drift}`;
+    const saturated = round.saturated
+      ? ` Saturated, every facet already covered: ${round.saturated}.`
+      : "";
+    message = `Round ${round.number} done: ${counts(round)}.${why}${saturated} New questions are in the queue.${first ? ` ${first}` : ""}${learned ? ` ${learned}` : ""}${drift}`;
   } else {
     message = `Round ${round.number} failed${round.error ? `: ${round.error}` : "."}`;
   }

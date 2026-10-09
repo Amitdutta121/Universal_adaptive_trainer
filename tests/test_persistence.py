@@ -95,7 +95,7 @@ class TestMigrations:
     def test_a_fresh_database_is_upgraded_to_head(self, engine: Engine) -> None:
         with engine.connect() as connection:
             version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "0017_first_attempt_passed"
+        assert version == "0018_subtopic_facets"
 
     def test_the_migrations_build_exactly_the_models(self, engine: Engine) -> None:
         # ADR-057: Alembic is the only schema source, so a model change without a

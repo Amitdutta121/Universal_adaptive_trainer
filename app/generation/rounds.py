@@ -13,10 +13,15 @@ Planning (synchronous, no model call):
   (and able to be written at that difficulty): each professor reject of a round question
   in that style and cell halves the weight, two rejects exclude it. When every style is
   excluded, the least-rejected ones are used rather than leaving the cell unreachable.
+* A cell whose subtopic's **facets** are already listed (:mod:`app.generation.facets`) gets
+  at most one target per facet its questions do not cover; with none left it is
+  **saturated**, gets no target, and the round names it.
 
 Running (background): first the **lesson run** (ADR-063) learns from the reviews since the
 last round, so the whole round is generated with them; a failure there is recorded on the
-round and does not stop it. Then, per target, retrieve the section that best teaches the subtopic
+round and does not stop it. Then each target is given a facet (:func:`assign_facets`, which
+lists a subtopic's facets the first time; a target whose cell turns out saturated is skipped).
+Then, per target, retrieve the section that best teaches the subtopic
 (embedding retrieval as in ``POST /coverage/generation-runs``, falling back to the
 subtopic's evidence section). A hard target asks the generatability judge once, before
 any draft: if the lesson cannot support a hard question, the target is skipped and the
@@ -53,6 +58,7 @@ from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
 from app.feedback.lessons import apply_pending_lessons
 from app.generation.drift import check_round_drift
+from app.generation.facets import covered_facets, facets_for, open_facets, stored_facets
 from app.generation.prompts import (
     RejectedExample,
     RoundExamples,
@@ -67,6 +73,7 @@ from app.persistence.models import (
     GenerationRoundRow,
     QuestionRow,
     QuestionSetupRow,
+    SubtopicRow,
 )
 from app.persistence.repositories import (
     CustomJudgeRepository,
@@ -190,8 +197,13 @@ def plan_targets(
     size: int,
     rng: random.Random | None = None,
     cell_deficits: dict[Cell, int] | None = None,
+    saturated: list[Cell] | None = None,
 ) -> list[dict[str, object]]:
-    """Up to ``size`` targets ``{"subtopic_id", "difficulty", "style_id"}`` for one round."""
+    """Up to ``size`` targets ``{"subtopic_id", "difficulty", "style_id"}`` for one round.
+
+    A cell whose subtopic's facets are already listed gets at most one target per facet its
+    questions do not cover; with none left it is appended to ``saturated`` and gets none.
+    """
     rng = rng or random.Random()
     version = require_approved_version(session, setup.curriculum_version_id)
     known_subtopics = {s.id for topic in version.topics for s in topic.subtopics}
@@ -199,6 +211,8 @@ def plan_targets(
     library = {style.id: style for style in get_library(profile.storage_key)}
     counts = cell_counts(session, version.id)
     rejects = style_rejects(session, version.id)
+    listed = stored_facets(session, known_subtopics)
+    covered = covered_facets(session, version.id) if listed else {}
 
     order: list[Cell] = []
     deficit: dict[Cell, int] = {}
@@ -215,6 +229,13 @@ def plan_targets(
         candidates = _cell_styles(setup, library, cell)
         if missing <= 0 or not candidates:
             continue
+        if cell[0] in listed:
+            remaining = len(open_facets(listed[cell[0]], covered.get(cell, {})))
+            if remaining == 0:
+                if saturated is not None:
+                    saturated.append(cell)
+                continue
+            missing = min(missing, remaining)
         order.append(cell)
         deficit[cell] = missing
         styles[cell] = candidates
@@ -293,12 +314,14 @@ def refill_round(
     _lock_taxonomy(session, setup.curriculum_version_id)
     if active_round(session, setup.curriculum_version_id) is not None:
         return None
+    saturated: list[Cell] = []
     targets = plan_targets(
         session,
         setup,
         size=max(0, min(size, DEFAULT_ROUND_SIZE)),
         rng=rng,
         cell_deficits=cell_deficits,
+        saturated=saturated,
     )
     if not targets:
         return None
@@ -310,21 +333,34 @@ def refill_round(
             targets=targets,
             requested=len(targets),
             status=RoundStatus.QUEUED,
+            saturated=_cell_labels(session, saturated),
         )
     )
+
+
+def _cell_labels(session: Session, cells: list[Cell]) -> str | None:
+    """``"While loops (medium); Slicing (easy)"``, or ``None`` for no cells."""
+    labels = []
+    for subtopic_id, difficulty in dict.fromkeys(cells):
+        subtopic = session.get(SubtopicRow, subtopic_id)
+        name = subtopic.name if subtopic is not None else f"subtopic {subtopic_id}"
+        labels.append(f"{name} ({difficulty.value})")
+    return "; ".join(labels) or None
 
 
 def _create_round(
     session: Session, setup: QuestionSetupRow, *, size: int, rng: random.Random | None
 ) -> GenerationRoundRow:
     rounds = GenerationRoundRepository(session)
-    targets = plan_targets(session, setup, size=size, rng=rng)
+    saturated: list[Cell] = []
+    targets = plan_targets(session, setup, size=size, rng=rng, saturated=saturated)
     row = GenerationRoundRow(
         setup_id=setup.id,
         number=rounds.next_number(setup.id),
         targets=targets,
         requested=len(targets),
         status=RoundStatus.QUEUED if targets else RoundStatus.DONE,
+        saturated=_cell_labels(session, saturated),
     )
     if not targets:
         row.finished_at = datetime.now(UTC)
@@ -508,6 +544,55 @@ def _hard_lesson_supported(
     )
 
 
+def assign_facets(
+    session: Session,
+    version: CurriculumVersionRow,
+    targets: list[dict],
+    *,
+    client: StructuredLLMClient | None,
+) -> tuple[list[str | None], list[Cell]]:
+    """A facet per target, and the cells found saturated (their targets get ``None``).
+
+    Lists the facets of each subtopic not listed yet (one call each, committed). Each target
+    gets the first facet its cell's questions do not cover and no earlier target of the
+    cell took. A subtopic whose facets cannot be listed (any failure) leaves its targets
+    without a facet rather than costing the round.
+    """
+    named = {
+        subtopic.id: (subtopic, topic.name)
+        for topic in version.topics
+        for subtopic in topic.subtopics
+    }
+    facets: dict[int, list[str]] = {}
+    for subtopic_id in dict.fromkeys(int(target["subtopic_id"]) for target in targets):
+        if subtopic_id not in named:
+            continue
+        try:
+            facets[subtopic_id] = facets_for(session, *named[subtopic_id], client=client)
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            logger.warning("round: no facets for subtopic %s: %s", subtopic_id, exc)
+    covered = covered_facets(session, version.id) if facets else {}
+    assigned: list[str | None] = []
+    saturated: list[Cell] = []
+    taken: dict[Cell, set[str]] = defaultdict(set)
+    for target in targets:
+        cell = (int(target["subtopic_id"]), Difficulty(target["difficulty"]))
+        listed = facets.get(cell[0])
+        if not listed:
+            assigned.append(None)
+            continue
+        free = open_facets(listed, set(covered.get(cell, {})) | taken[cell])
+        if not free:
+            assigned.append(None)
+            saturated.append(cell)
+            continue
+        taken[cell].add(free[0])
+        assigned.append(free[0])
+    return assigned, saturated
+
+
 def _generate_round(
     session: Session,
     row: GenerationRoundRow,
@@ -544,8 +629,13 @@ def _generate_round(
     produced = dropped = skipped = first_passed = 0
     skip_notes: list[str] = []
     provider_errors: list[str] = []
+    facets, saturated = assign_facets(session, version, targets, client=client)
+    if saturated:
+        labels = [row.saturated, _cell_labels(session, saturated)]
+        rounds.update(round_id, saturated="; ".join(label for label in labels if label))
+        session.commit()
 
-    for target in targets:
+    for index, target in enumerate(targets):
         # Asked to stop from the Jobs panel: the targets already done are committed.
         raise_if_cancelled(session, row)
         subtopic_id = int(target["subtopic_id"])
@@ -553,7 +643,10 @@ def _generate_round(
         style = library.get(str(target.get("style_id")))
         outcome = "dropped"
         section_id = _section_for(retriever, version, subtopic_id)
-        if style is None or section_id is None:
+        if (subtopic_id, difficulty) in saturated and facets[index] is None:
+            outcome = "skipped"
+            logger.info("round %s: cell %s/%s is saturated", round_id, subtopic_id, difficulty)
+        elif style is None or section_id is None:
             logger.warning(
                 "round %s: dropped subtopic %s/%s: %s",
                 round_id,
@@ -590,6 +683,7 @@ def _generate_round(
                         source_section_ids=[section_id],
                         target_subtopic_id=subtopic_id,
                         style_id=style.id,
+                        facet=facets[index],
                     )
                     question = service.generate_round_question(
                         spec,

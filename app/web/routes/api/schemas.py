@@ -2660,6 +2660,8 @@ class GenerationRoundOut(BaseModel):
     #: Targets whose first attempt passed, out of ``produced + dropped``; ``None`` for rounds
     #: generated before it was counted (m6).
     first_attempt_passed: int | None = None
+    #: Cells not generated because every facet of their subtopic is covered (m7).
+    saturated: str | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -2681,6 +2683,7 @@ class GenerationRoundOut(BaseModel):
             lessons_error=row.lessons_error,
             drift_warning=row.drift_warning,
             first_attempt_passed=row.first_attempt_passed,
+            saturated=row.saturated,
             error=row.error,
             created_at=row.created_at,
             started_at=row.started_at,

@@ -11,7 +11,9 @@ The m5 acceptance run (ADR-063, docs/LEARNING_MEMORY_MILESTONES.md): the option-
 <= 40% in rounds 2-4 despite the adversarial reviews, and compliance with the professor's
 hidden standard is at least the pre-m5 run's (code in the stem 2/6 -> 5/6 -> 6/6). The m6
 run: the first-attempt pass count of round 4 is at least round 1's, as the failed attempts of
-approved questions come back as "avoid" lines.
+approved questions come back as "avoid" lines. The m7 run: soft duplicate flags per round fall
+versus the same run with ``--no-facets`` (one facet listing call per subtopic, and embeddings
+for the duplicate check when an embedder is configured).
 
 Each round of ``--rounds``:
 
@@ -37,7 +39,7 @@ states the standard. Five adversarial reviews are injected at fixed (round, slot
 option A".
 
 Per round the output records G1, G2, the option-A rate, attempts, first-attempt passes,
-drops, the drift warning,
+soft duplicate flags, each question's facet, drops, the drift warning,
 the lessons applied, and a snapshot of every generator guideline with its status and support.
 """
 
@@ -50,7 +52,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, QuestionType
@@ -59,12 +61,14 @@ from app.domain.enums import ReviewDecision as D
 from app.feedback import route_review_outcome, submit_review
 from app.feedback.lessons import apply_pending_lessons
 from app.generation.drift import drift_warning
-from app.generation.rounds import accepted_examples
+from app.generation.rounds import accepted_examples, assign_facets, default_embedder
 from app.generation.service import GenerationService
 from app.generation.spec import build_question_spec, require_approved_version
 from app.llm import StructuredLLMClient
 from app.persistence.database import init_db
-from app.persistence.models import MemoryGuidelineRow, QuestionRow
+from app.persistence.models import MemoryGuidelineRow, QuestionRow, QuestionSimilarityRow
+from app.retrieval.duplicates import DuplicateChecker
+from app.retrieval.embedder import Embedder
 from app.subjects import profile_for_version
 
 #: The dev database's Python taxonomy, style, and the sections the live round-1 retriever
@@ -178,18 +182,30 @@ def simulate(
     sections: dict[int, int] = SECTIONS,
     rounds: int = ROUNDS,
     client: StructuredLLMClient | None = None,
+    embedder: Embedder | None = None,
+    use_facets: bool = True,
     out: Path | None = None,
 ) -> dict[str, Any]:
     """Run the loop; returns (and, with ``out``, writes after every round) the log."""
     version = require_approved_version(session, version_id)
     profile = profile_for_version(session, version_id)
     service = GenerationService(session, client=client)
+    duplicates = DuplicateChecker(session, embedder)
     log: dict[str, Any] = {"rounds": []}
     previous: list[QuestionRow] = []
 
     for rnd in range(1, rounds + 1):
         started = time.time()
         lessons = apply_pending_lessons(session, round_id=rnd, profile=profile, client=client)
+        targets = [
+            {"subtopic_id": subtopic_id, "difficulty": Difficulty.EASY.value}
+            for subtopic_id in sections
+        ]
+        facets = (
+            assign_facets(session, version, targets, client=client)[0]
+            if use_facets
+            else [None] * len(targets)
+        )
         questions: list[dict[str, Any]] = []
         rows: list[QuestionRow] = []
         for slot, (subtopic_id, section_id) in enumerate(sections.items()):
@@ -201,6 +217,7 @@ def simulate(
                 source_section_ids=[section_id],
                 target_subtopic_id=subtopic_id,
                 style_id=style,
+                facet=facets[slot],
             )
             examples = accepted_examples(
                 session,
@@ -211,7 +228,11 @@ def simulate(
             )
             try:
                 row = service.generate_round_question(
-                    spec, version=version, round_id=None, examples=examples
+                    spec,
+                    version=version,
+                    round_id=None,
+                    examples=examples,
+                    duplicates=duplicates,
                 )
             except Exception as exc:  # a provider failure counts as a drop, recorded
                 session.rollback()
@@ -232,6 +253,12 @@ def simulate(
                     "attempts": len(row.generation_attempts or []),
                     "first_attempt": bool(
                         row.generation_attempts and row.generation_attempts[0].usable
+                    ),
+                    "facet": facets[slot],
+                    "soft_flags": session.scalar(
+                        select(func.count())
+                        .select_from(QuestionSimilarityRow)
+                        .where(QuestionSimilarityRow.question_id == row.id)
                     ),
                     "status": str(row.status),
                     "G1": g1(prompt),
@@ -285,6 +312,7 @@ def simulate(
                 "option_a_rate": (answers.count(0) / len(answers)) if answers else None,
                 "attempts": sum(q["attempts"] for q in produced),
                 "first_attempt_passed": sum(q["first_attempt"] for q in produced),
+                "soft_flags": sum(q["soft_flags"] for q in produced),
                 "drift_warning": drift_warning(rows, previous),
                 "guidelines": guidelines_snapshot(session),
                 "questions": questions,
@@ -299,7 +327,8 @@ def simulate(
             f"round {rnd}: G1 {latest['G1']}/{latest['produced']}, "
             f"G2 {latest['G2']}/{latest['produced']}, option A {latest['option_a_rate']}, "
             f"drops {latest['dropped']}, first attempt "
-            f"{latest['first_attempt_passed']}/{len(questions)}, lessons {lessons.applied}",
+            f"{latest['first_attempt_passed']}/{len(questions)}, soft flags "
+            f"{latest['soft_flags']}, lessons {lessons.applied}",
             flush=True,
         )
     return log
@@ -314,6 +343,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", type=int, default=VERSION, help="approved taxonomy id")
     parser.add_argument("--style", default=STYLE)
     parser.add_argument("--rounds", type=int, default=ROUNDS)
+    parser.add_argument(
+        "--no-facets", action="store_true", help="generate without facets (the m6 baseline)"
+    )
     args = parser.parse_args(argv)
     if not args.db.exists():
         print(f"no database at {args.db}", file=sys.stderr)
@@ -323,7 +355,13 @@ def main(argv: list[str] | None = None) -> int:
     with Session(engine) as session:
         clear_learning_state(session)
         simulate(
-            session, version_id=args.version, style=args.style, rounds=args.rounds, out=args.out
+            session,
+            version_id=args.version,
+            style=args.style,
+            rounds=args.rounds,
+            embedder=default_embedder(),
+            use_facets=not args.no_facets,
+            out=args.out,
         )
     print("written", args.out)
     return 0

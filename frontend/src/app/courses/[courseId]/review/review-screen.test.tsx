@@ -367,6 +367,31 @@ describe("Generate next round", () => {
     rerender(<ReviewScreen />);
     expect(screen.getByTestId("round-progress")).not.toHaveTextContent("First-attempt");
   });
+
+  it("names the saturated cells once the round is done", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 2,
+      produced: 1,
+      dropped: 0,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+
+    roundData = {
+      ...(roundData as object),
+      status: "done",
+      skipped: 1,
+      saturated: "While loops (medium)",
+    };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Saturated, every facet already covered: While loops (medium).",
+    );
+  });
 });
 
 describe("Questions arriving during a round", () => {

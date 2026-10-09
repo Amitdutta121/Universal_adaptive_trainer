@@ -148,6 +148,7 @@ def render_round_target(
     topic_name: str,
     style: QuestionStyle | None,
     examples: RoundExamples | None = None,
+    facet: str | None = None,
 ) -> str:
     """The block a round spec adds: the subtopic, the style, examples, what not to repeat.
 
@@ -163,6 +164,10 @@ def render_round_target(
         f"{description} (topic: {topic_name}).",
         f"Set topic_id to its topic and include {subtopic.id} in subtopic_ids.",
     ]
+    if facet:
+        lines.append(
+            f"Assess this facet of the subtopic: {facet}. Other questions cover its other facets."
+        )
     if style is not None:
         lines += [
             "",

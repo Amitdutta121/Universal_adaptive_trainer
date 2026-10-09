@@ -373,6 +373,10 @@ def test_the_simulation_logs_first_attempt_passes_per_round(
 
     assert [entry["first_attempt_passed"] for entry in log["rounds"]] == [0, 1]
     assert [entry["produced"] for entry in log["rounds"]] == [1, 1]
+    # Round 1's question is rejected (an adversarial review), which frees its facet.
+    facets = [entry["questions"][0]["facet"] for entry in log["rounds"]]
+    assert facets == ["facet one", "facet one"]
+    assert all(entry["soft_flags"] == 0 for entry in log["rounds"])
 
 
 def test_the_round_api_reports_the_lessons(session: Session, env: SimpleNamespace) -> None:
