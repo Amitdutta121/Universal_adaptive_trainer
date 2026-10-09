@@ -138,4 +138,24 @@ def check_shared(question: Question, session: Session | None) -> list[QuestionCh
     claim = _claim_check(question)
     if claim is not None:
         checks.append(claim)
+    fences = _fence_check(question)
+    if fences is not None:
+        checks.append(fences)
     return checks
+
+
+def _fence_check(question: Question) -> QuestionCheck | None:
+    """A prompt with an odd number of ``` markers shows the student a broken code block.
+
+    ``None`` for a prompt with no fence, so questions without code keep their report.
+    """
+    count = (question.prompt or "").count("```")
+    if count == 0:
+        return None
+    closed = count % 2 == 0
+    return make_check(
+        "prompt_code_fences_closed",
+        closed,
+        "Code blocks in the prompt are closed",
+        evidence=None if closed else "Close every ``` code block opened in the prompt.",
+    )
