@@ -621,7 +621,12 @@ def _generate_round(
         if embedder is not None
         else None
     )
-    service = GenerationService(session, client=client)
+    service = GenerationService(
+        session,
+        client=client,
+        snapshot_id=row.judge_snapshot_id,
+        memory_as_of=row.started_at,
+    )
     # Without an embedder only exact duplicates are caught (ADR-063 point 6).
     duplicates = DuplicateChecker(session, embedder)
     run_id = new_run_id()
@@ -743,11 +748,12 @@ def _apply_lessons(
     """
     round_id = row.id
     setup = QuestionSetupRepository(session).get(row.setup_id)
+    profile = profile_for_version(session, setup.curriculum_version_id)
     try:
         run = apply_pending_lessons(
             session,
             round_id=round_id,
-            profile=profile_for_version(session, setup.curriculum_version_id),
+            profile=profile,
             client=client,
         )
         applied, error = run.applied, run.error
@@ -760,8 +766,14 @@ def _apply_lessons(
             if isinstance(exc, AdaptiveTrainerError)
             else f"Lessons were not applied ({type(exc).__name__})."
         )
+    from app.evaluation.judge_memory import latest_promoted
+
+    snapshot = latest_promoted(session, profile.personal_key)
     GenerationRoundRepository(session).update(
-        round_id, lessons_applied=applied, lessons_error=error
+        round_id,
+        lessons_applied=applied,
+        lessons_error=error,
+        judge_snapshot_id=snapshot.id if snapshot is not None else None,
     )
     session.commit()
 

@@ -6,12 +6,15 @@ never waits on a provider. Each affected judge and each affected question type i
 **once** per run however many reviews named it -- the existing learners already read every
 review of their scope, so one call per scope sees all the new evidence.
 
-Judges learn as in ADR-039 (:func:`refresh_judge_prompt` for the judges a review contradicted;
-m11 moves them to memory). The generator learns **guidelines** (ADR-063 points 3-4, m5): for
-each type the professor rejected or rewrote, one :func:`~app.memory.distill_guidelines` call
-turns the new reviews into edit operations on that type's guidelines; the failed attempts of
-round questions the professor approved become retry episodes (m6, no model call). Judges
-first, then the generator (ADR-063's order).
+Judges learn MemAlign memory (ADR-064, m11): one
+:func:`~app.evaluation.judge_memory.apply_judge_lessons` call distils
+``judge:<metric>`` guidelines from the pending reviews and freezes a snapshot.
+The generator learns **guidelines** (ADR-063 points 3-4, m5): for each type the professor
+rejected or rewrote, one :func:`~app.memory.distill_guidelines` call turns the new reviews
+into edit operations on that type's guidelines; the failed attempts of round questions the
+professor approved become retry episodes (m6, no model call). Judges first, then the
+generator (ADR-063's order). The rewrite in :func:`refresh_judge_prompt` and its
+five-disagreement threshold are no longer part of this run.
 
 A provider failure is recorded on the outcome rows it concerns and returned, never raised:
 the round must still generate, and a silent failure would leave the professor believing a
@@ -32,13 +35,18 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.domain.enums import JudgeMetricId, QuestionType
 from app.errors import AdaptiveTrainerError
-from app.evaluation.judge_learning import refresh_judge_prompt
+from app.evaluation.judge_memory import apply_judge_lessons, episode_teaches
 from app.evaluation.trust_scope import trusted_scopes
 from app.feedback.outcomes import _outcome_from_row
 from app.llm import StructuredLLMClient
-from app.memory import distill_guidelines, generator_target, record_retry_episodes
+from app.memory import (
+    MemoryEpisodeRepository,
+    distill_guidelines,
+    generator_target,
+    record_retry_episodes,
+)
 from app.persistence.models import ReviewOutcomeRow
-from app.persistence.repositories import JudgePromptRepository, ReviewOutcomeRepository
+from app.persistence.repositories import ReviewOutcomeRepository
 from app.subjects import SubjectProfile
 from app.subjects.resolve import key_of_version, storage_keys_by_version
 
@@ -77,7 +85,7 @@ def apply_pending_lessons(
     errors: list[str] = []
     failed: set[int] = set()
     if settings.judge_learning_enabled:
-        errors += _learn_judges(session, pending, profile, client, failed)
+        errors += _learn_judges(session, pending, profile, client, failed, round_id)
     if settings.generator_learning_enabled:
         _learn_retries(session, pending)
         errors += _learn_generator(session, pending, profile, round_id, client, failed)
@@ -122,58 +130,68 @@ def _learn_judges(
     profile: SubjectProfile,
     client: StructuredLLMClient | None,
     failed_rows: set[int] | None = None,
+    round_id: int | None = None,
 ) -> list[str]:
-    """Relearn each judge a pending review contradicted, once (ADR-039).
+    """Distil each judge the pending reviews teach, then freeze a snapshot (ADR-064).
 
-    Only judges named on an outcome are touched -- a judge nobody contradicted has learned
-    nothing, and rewriting it would change a measured behaviour on no evidence. A
-    hand-written prompt is left alone: a learned rewrite renders onto the *shipped* text and
-    would silently discard what the professor typed. Paused while any style of this subject
-    is trusted under the current panel (docs/TRUST_AND_JUDGE_STATS_PLAN.md).
+    Difficulty and subtopic learn from every review; issues from approvals, issue-reason
+    rejects, and audit / borderline verdicts. A hand-written prompt is left as the base the
+    guidelines render onto. Paused while any style of this subject is trusted under the
+    current panel: a new snapshot would rename it and send trusted styles back to review.
     """
-    named = [row for row in rows if _outcome_from_row(row).calls_for_judge_repair]
-    metrics = list(
-        dict.fromkeys(metric for row in named for metric in row.attributed_metrics or [])
-    )
-    if not metrics:
-        return []
     trusted = trusted_scopes(session, profile)
     if trusted:
-        # A rewrite renames the panel and every trusted style would fall back to review.
         logger.info(
             "Judge learning paused: %s style(s) trusted under the current panel.", len(trusted)
         )
-        for row in named:
+        for row in rows:
             row.judges_refreshed = []
         return []
 
-    repository = JudgePromptRepository(session)
-    refreshed: list[JudgeMetricId] = []
-    failed: dict[JudgeMetricId, str] = {}
-    for metric in metrics:
-        existing = repository.get(metric, subject=profile.personal_key)
-        if existing is not None and not existing.learned:
-            logger.info("Judge %s is hand-written; leaving it alone.", metric.value)
-            continue
-        try:
-            if refresh_judge_prompt(session, metric, client=client, profile=profile) is not None:
-                refreshed.append(metric)
-            session.commit()
-        except (AdaptiveTrainerError, OSError) as exc:
-            session.rollback()
-            failed[metric] = f"{metric.value}: {getattr(exc, 'message', None) or exc}"
-            logger.warning("Relearning the %s judge failed: %s", metric.value, exc)
-
-    for row in named:
-        attributed = list(row.attributed_metrics or [])
-        row.judges_refreshed = [metric for metric in refreshed if metric in attributed]
-        errors = [failed[metric] for metric in attributed if metric in failed]
-        if errors:
-            _record_error(row, "; ".join(errors))
+    try:
+        apply_judge_lessons(
+            session, rows, profile, round_id=round_id, client=client
+        )
+        session.commit()
+    except (AdaptiveTrainerError, OSError) as exc:
+        session.rollback()
+        detail = f"judges: {getattr(exc, 'message', None) or exc}"
+        logger.warning("Relearning the judges failed: %s", exc)
+        for row in rows:
+            _record_error(row, detail)
             if failed_rows is not None:
                 failed_rows.add(row.id)
+        session.commit()
+        return [detail]
+
+    distilled = [
+        metric
+        for metric in (JudgeMetricId.ISSUES, JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC)
+        if any(
+            row.review_id and _episode_teaches(session, row.review_id, metric, profile.personal_key)
+            for row in rows
+        )
+    ]
+    for row in rows:
+        row.judges_refreshed = [
+            metric
+            for metric in distilled
+            if row.review_id
+            and _episode_teaches(session, row.review_id, metric, profile.personal_key)
+        ]
     session.commit()
-    return list(failed.values())
+    return []
+
+
+def _episode_teaches(
+    session: Session, review_id: int, metric: JudgeMetricId, subject: str
+) -> bool:
+    episode = MemoryEpisodeRepository(session).get_for_review(review_id)
+    return (
+        episode is not None
+        and episode.subject == subject
+        and episode_teaches(episode, metric)
+    )
 
 
 def _learn_retries(session: Session, rows: list[ReviewOutcomeRow]) -> None:

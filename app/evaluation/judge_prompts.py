@@ -47,19 +47,31 @@ def resolve_system_prompts(
     return {metric: overrides.get(metric, shipped[metric]) for metric in JudgeMetricId}
 
 
-def effective_rubric_version(session: Session, *, profile: SubjectProfile = PYTHON_PROFILE) -> str:
+def effective_rubric_version(
+    session: Session,
+    *,
+    profile: SubjectProfile = PYTHON_PROFILE,
+    snapshot_id: int | None = None,
+) -> str:
     """Name the panel in force, so two panels can never share a name.
 
     An untouched Intro Python installation returns :data:`RUBRIC_VERSION` unchanged -- there is
     no edit, so claiming a modified judge would be a lie about provenance. Another subject's
     shipped panel is named by :func:`rubric_version_for`; any override appends a fingerprint of
-    all four prompts.
+    all four prompts. A judge-memory snapshot (m11) is part of the panel name so trust
+    continues only while that snapshot stays.
     """
+    from app.evaluation.judge_memory import latest_promoted, memory_rubric_suffix
+
     prompts = resolve_system_prompts(session, profile=profile)
     base = rubric_version_for(profile)
+    if snapshot_id is None:
+        current = latest_promoted(session, profile.personal_key)
+        snapshot_id = current.id if current is not None else None
+    suffix = memory_rubric_suffix(snapshot_id)
     if prompts == system_prompts_for(profile):
-        return base
-    return f"{base}+{fingerprint(prompts)}"
+        return f"{base}{suffix}"
+    return f"{base}+{fingerprint(prompts)}{suffix}"
 
 
 def fingerprint(prompts: dict[JudgeMetricId, str]) -> str:

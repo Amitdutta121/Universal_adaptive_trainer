@@ -180,6 +180,7 @@ def test_three_rejects_of_one_type_relearn_it_once_at_the_next_round(
 ) -> None:
     refreshes = TypeRefreshes()
     monkeypatch.setattr("app.feedback.lessons.distill_guidelines", refreshes)
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     for _ in range(3):
         _reject(session, _question(session, gate=JudgeGate.REJECT, version_id=env.version.id))
     assert [row.lessons_round_id for row in _outcomes(engine)] == [None, None, None]
@@ -204,10 +205,10 @@ def test_three_rejects_of_one_type_relearn_it_once_at_the_next_round(
 def test_each_judge_relearns_once_however_many_reviews_named_it(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    judge_calls: list[JudgeMetricId] = []
+    judge_calls: list[int] = []
     monkeypatch.setattr(
-        "app.feedback.lessons.refresh_judge_prompt",
-        lambda _session, metric, **_kw: judge_calls.append(metric) or object(),
+        "app.feedback.lessons.apply_judge_lessons",
+        lambda _session, rows, _profile, **_kw: judge_calls.append(len(rows)),
     )
     monkeypatch.setattr("app.feedback.lessons.distill_guidelines", TypeRefreshes())
     for _ in range(2):
@@ -223,9 +224,11 @@ def test_each_judge_relearns_once_however_many_reviews_named_it(
 
     run = apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
-    assert judge_calls == [JudgeMetricId.DIFFICULTY]
+    assert judge_calls == [2]
     assert run.applied == 2
-    assert all(o.judges_refreshed == [JudgeMetricId.DIFFICULTY] for o in _all_outcomes(session))
+    assert all(
+        JudgeMetricId.DIFFICULTY in o.judges_refreshed for o in _all_outcomes(session)
+    )
 
 
 def _all_outcomes(session: Session) -> list[ReviewOutcomeRow]:
@@ -237,6 +240,7 @@ def test_a_failing_refresh_does_not_fail_the_round(
     session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("app.feedback.lessons.distill_guidelines", TypeRefreshes(fail=True))
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     _reject(session, _question(session, gate=JudgeGate.REJECT, version_id=env.version.id))
 
     setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
@@ -306,10 +310,15 @@ def test_frozen_learning_consumes_the_reviews_without_learning(
 
 
 def test_an_approved_retry_fix_reaches_the_next_rounds_prompt(
-    session: Session, engine: Engine, env: SimpleNamespace
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """m6: the lesson run keeps the failed attempt of an approved round question, and the next
     target of the same type and subtopic is told to avoid it."""
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.feedback.lessons.distill_guidelines",
+        lambda *_a, **_k: SimpleNamespace(changed=False),
+    )
     setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
     earlier = GenerationRoundRow(setup_id=setup.id, number=0, status=RoundStatus.DONE)
     session.add(earlier)
@@ -356,7 +365,7 @@ def test_the_simulation_logs_first_attempt_passes_per_round(
     from scripts.simulate_review_loop import simulate
 
     monkeypatch.setattr("app.feedback.lessons.distill_guidelines", TypeRefreshes())
-    monkeypatch.setattr("app.feedback.lessons.refresh_judge_prompt", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     client = DifficultySequenceClient(
         difficulties=[Difficulty.HARD, Difficulty.EASY],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),

@@ -33,6 +33,7 @@ def _outcome():
         held_out=False,
         judges_refreshed=None,
         refresh_error=None,
+        review_id=None,
     )
 
 
@@ -59,7 +60,7 @@ def test_trust_earned_under_an_old_panel_does_not_count(session, taxonomy):
 def test_review_relearning_waits_while_a_style_is_trusted(session, taxonomy, monkeypatch):
     profile = seed_current_panel(session, taxonomy)
     calls = []
-    monkeypatch.setattr(lessons, "refresh_judge_prompt", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(lessons, "apply_judge_lessons", lambda *a, **k: calls.append(a))
     outcome = _outcome()
     lessons._learn_judges(session, [outcome], profile, None)
     assert calls == []
@@ -69,7 +70,7 @@ def test_review_relearning_waits_while_a_style_is_trusted(session, taxonomy, mon
 def test_review_relearning_runs_when_nothing_is_trusted(session, taxonomy, monkeypatch):
     profile = profile_for_version(session, taxonomy.id)
     calls = []
-    monkeypatch.setattr(lessons, "refresh_judge_prompt", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(lessons, "apply_judge_lessons", lambda *a, **k: calls.append(a))
     lessons._learn_judges(session, [_outcome()], profile, None)
     assert len(calls) == 1
 

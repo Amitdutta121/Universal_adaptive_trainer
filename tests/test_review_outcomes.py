@@ -355,7 +355,7 @@ def _stored(session: Session, review_id: int):
 
 
 def test_both_rejecting_teaches_the_guidelines_next_round(
-    client: TestClient, session: Session, rewriter: Rewriter
+    client: TestClient, session: Session, rewriter: Rewriter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 
@@ -365,6 +365,7 @@ def test_both_rejecting_teaches_the_guidelines_next_round(
     assert body["outcome"]["instruction_refreshed"] is False
     assert rewriter.calls == 0
 
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     _next_round_lessons(session)
 
     assert rewriter.calls == 1
@@ -384,10 +385,10 @@ def test_a_missed_review_teaches_the_generator_and_the_judge(
     client: TestClient, session: Session, rewriter: Rewriter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two things went wrong, so two things learn."""
-    judge_calls: list[str] = []
+    judge_calls: list[int] = []
     monkeypatch.setattr(
-        "app.feedback.lessons.refresh_judge_prompt",
-        lambda _session, metric, **_kw: judge_calls.append(metric.value) or object(),
+        "app.feedback.lessons.apply_judge_lessons",
+        lambda _session, rows, _profile, **_kw: judge_calls.append(len(rows)),
     )
     question = _question(session, evaluation=_evaluation(JudgeGate.APPROVED))
 
@@ -402,7 +403,8 @@ def test_a_missed_review_teaches_the_generator_and_the_judge(
     assert _stored(session, body["id"]).instruction_refreshed is True
     assert rewriter.calls == 1
     # ...and the judge passed it.
-    assert judge_calls == [JudgeMetricId.DIFFICULTY.value]
+    assert judge_calls == [1]
+    assert JudgeMetricId.DIFFICULTY in _stored(session, body["id"]).judges_refreshed
 
 
 def test_a_false_alarm_teaches_only_the_judge(
@@ -410,8 +412,8 @@ def test_a_false_alarm_teaches_only_the_judge(
 ) -> None:
     """The professor approved it, so the generator did nothing wrong."""
     monkeypatch.setattr(
-        "app.feedback.lessons.refresh_judge_prompt",
-        lambda _session, _metric, **_kw: object(),
+        "app.feedback.lessons.apply_judge_lessons",
+        lambda *_a, **_k: None,
     )
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 
@@ -424,11 +426,12 @@ def test_a_false_alarm_teaches_only_the_judge(
 
 
 def test_the_other_cells_spend_no_model_call(
-    client: TestClient, session: Session, rewriter: Rewriter
+    client: TestClient, session: Session, rewriter: Rewriter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     question = _question(session, evaluation=_evaluation(JudgeGate.APPROVED))
 
     response = client.post(f"/api/questions/{question.id}/review", json={"decision": "approve"})
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     _next_round_lessons(session)
 
     assert response.status_code == 201
@@ -442,6 +445,7 @@ def test_a_failed_refresh_keeps_the_review_and_records_it(
     """The verdict is the professor's work; a provider outage must not discard it."""
     failing = Rewriter(fail=True)
     monkeypatch.setattr("app.memory.guidelines.get_structured_client", lambda: failing)
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     question = _question(session, evaluation=_evaluation(JudgeGate.REJECT))
 
     body = _reject_through_the_api(client, question.id)

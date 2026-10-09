@@ -1058,9 +1058,9 @@ class MemoryEpisodeRow(TimestampMixin, Base):
     every judge said about the question at that moment. The generator retrieves episodes as
     examples (:mod:`app.retrieval.examples`); the judges will read the same rows (m11).
 
-    ``source`` says what produced the verdict: ``review``, ``retry``, or ``audit`` (m9);
-    borderline judge failures add their own value in m10, which is why ``review_id`` may
-    be ``NULL``. Scoped by ``subject``, the course's personal key
+    ``source`` says what produced the verdict: ``review``, ``retry``, ``audit`` (m9), or
+    ``borderline`` (m10). ``review_id`` may be ``NULL`` for audit and borderline rows.
+    Scoped by ``subject``, the course's personal key
     (:attr:`app.subjects.SubjectProfile.personal_key`), so one professor's or subject's
     memory never reaches another's.
     """
@@ -1223,6 +1223,22 @@ class JudgePromptRow(TimestampMixin, Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
+class JudgeMemorySnapshotRow(TimestampMixin, Base):
+    """Frozen judge guidelines for one subject at one moment (ADR-064, m11).
+
+    A round uses one snapshot throughout. A candidate is promoted only if held-out
+    agreement does not drop and the known-bad pass rate does not rise.
+    """
+
+    __tablename__ = "judge_memory_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subject: Mapped[str] = mapped_column(String(50), index=True)
+    #: ``{metric: [guideline texts]}`` at freeze time.
+    guidelines: Mapped[dict] = mapped_column("guidelines_json", JsonObject, default=dict)
+    promoted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class QuestionSetupRow(TimestampMixin, Base):
     """A professor-approved question setup for one taxonomy (docs/QUESTION_SETUP_PLAN.md).
 
@@ -1317,6 +1333,10 @@ class GenerationRoundRow(TimestampMixin, Base):
     #: target and ends the round ``FAILED``; a set value makes that failure a cancellation.
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
+    )
+    #: Judge memory this round froze (ADR-064, m11). ``NULL`` for rounds before snapshots.
+    judge_snapshot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("judge_memory_snapshots.id", ondelete="SET NULL"), default=None
     )
 
     setup: Mapped[QuestionSetupRow] = relationship(back_populates="rounds")

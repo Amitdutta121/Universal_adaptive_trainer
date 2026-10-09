@@ -48,6 +48,7 @@ from app.memory.guidelines import (
     distill_guidelines,
     forget_review,
     generator_target,
+    judge_target,
     refusal_reason,
     render_with_guidelines,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "distill_guidelines",
     "forget_review",
     "generator_target",
+    "judge_target",
     "judge_verdicts",
     "record_retry_episodes",
     "record_review_episode",

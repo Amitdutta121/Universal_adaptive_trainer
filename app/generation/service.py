@@ -9,6 +9,7 @@ learned for its type.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -43,6 +44,8 @@ class GenerationService:
         session: Session,
         *,
         client: StructuredLLMClient | None = None,
+        snapshot_id: int | None = None,
+        memory_as_of: datetime | None = None,
     ) -> None:
         from app.validation import get_question_validator
 
@@ -59,7 +62,9 @@ class GenerationService:
             validator=self._validator,
         )
         self._client = client
-        self._judge = PedagogicalJudge(session, client=client)
+        self._judge = PedagogicalJudge(
+            session, client=client, snapshot_id=snapshot_id, memory_as_of=memory_as_of
+        )
         self._questions = QuestionRepository(session)
 
     def generate_for_sections(

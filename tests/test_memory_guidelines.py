@@ -119,7 +119,17 @@ def _reject(session: Session, comment: str) -> ProfessorReviewRow:
     return review
 
 
+def _skip_judge_lessons() -> None:
+    def _noop(*_a, **_k):
+        return None
+
+    from app.feedback import lessons as lessons_mod
+
+    lessons_mod.apply_judge_lessons = _noop
+
+
 def _lessons(session: Session, client: Distiller, round_id: int = 1) -> None:
+    _skip_judge_lessons()
     apply_pending_lessons(session, round_id=round_id, profile=PYTHON_PROFILE, client=client)
 
 
@@ -407,6 +417,7 @@ def test_a_failing_distiller_leaves_the_reviews_pending(session: Session) -> Non
         raise LLMRequestError("The provider is unavailable.", detail="502")
 
     _reject(session, "Put code in the stem.")
+    _skip_judge_lessons()
     run = apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE, client=Distiller(fail))
 
     assert run.applied == 0 and "provider" in (run.error or "").lower()

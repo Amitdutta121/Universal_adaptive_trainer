@@ -504,7 +504,7 @@ def test_a_rejected_or_first_time_question_leaves_no_retry_episode(
 def test_the_lesson_run_writes_retry_episodes_for_approvals_only(
     session: Session, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.feedback.lessons.refresh_judge_prompt", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "app.feedback.lessons.distill_guidelines",
         lambda *_a, **_k: SimpleNamespace(changed=False),

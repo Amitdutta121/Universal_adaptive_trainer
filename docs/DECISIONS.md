@@ -2593,14 +2593,18 @@ and first-attempt pass rate rises across rounds.
 
 ## ADR-064 — Judges learn from memory on both sides of their decisions, frozen per round
 
-**Status:** proposed; decisions 1–3 accepted and implemented (m8: `app/calibration/scorecard.py`,
+**Status:** accepted. Decisions 1–5 implemented (m8: `app/calibration/scorecard.py`,
 `GET /api/judges/scorecard`; agreement, Cohen's κ and a Wilson 95% range per judge; difficulty
 and subtopic scored against the professor's confirmed values on every review; retries and drops
 attributed from `generation_attempts`; the table is on the Judges page. m9: each round keeps up
 to 2 judge-failed drafts as audit items; agree = confirmed objection, disagree = false alarm;
 episodes use `source=audit`. m10: only a clear judge failure retries — difficulty two bands
 off, no subtopic overlap, or a blocking issue code; a one-band / overlapping / advisory miss
-is kept with a note). Supersedes ADR-039's
+is kept with a note. m11: `app/evaluation/judge_memory.py`; each judge's prompt is the shipped
+text plus `judge:<metric>` guidelines plus the nearest episodes; the lesson run distils judges
+first and freezes a snapshot on the round; a snapshot is promoted only when held-out agreement
+does not drop and the known-bad pass rate does not rise; panel versioning keys on the snapshot
+id; `refresh_judge_prompt`'s rewrite is no longer part of the lesson run). Supersedes ADR-039's
 rewrite-and-gate learning; keeps its held-out check. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md`
 m8–m11.
 
