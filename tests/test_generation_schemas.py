@@ -20,6 +20,7 @@ from app.generation.schemas import (
     prompt_fields_from_draft,
     response_model_for,
     scoring_kind_for,
+    shuffle_options,
 )
 from app.question_types import implemented_types
 
@@ -230,3 +231,38 @@ def test_a_live_draft_subclass_is_still_recognised() -> None:
     assert type_for_draft(live).question_type is QuestionType.MULTIPLE_CHOICE
     prompt, reference, tests = prompt_fields_from_draft(live)
     assert (prompt, reference, tests) == ("Which is mutable?", "list", None)
+
+
+# ------------------------------------------------------------------ answer position
+
+
+def _always_first(prompt: str) -> MultipleChoiceDraft:
+    return MultipleChoiceDraft(
+        topic_id=1,
+        subtopic_ids=[1],
+        prompt=prompt,
+        options=["right", "wrong one", "wrong two", "wrong three"],
+        correct_option_index=0,
+        explanation="Option A is right; (B) and option C are not, nor is answer D.",
+    )
+
+
+def test_a_generator_always_answering_first_gets_a_spread_of_positions() -> None:
+    shuffled = [shuffle_options(_always_first(f"Question {n}?")) for n in range(40)]
+    positions = [draft.correct_option_index for draft in shuffled]
+    assert set(positions) == {0, 1, 2, 3}
+    assert max(positions.count(i) for i in range(4)) <= 20
+    for draft in shuffled:
+        assert draft.options[draft.correct_option_index] == "right"
+        assert sorted(draft.options) == sorted(_always_first("x").options)
+
+
+def test_the_shuffle_is_deterministic_and_relabels_the_explanation() -> None:
+    first = shuffle_options(_always_first("What does print(1) show?"))
+    again = shuffle_options(_always_first("What does print(1) show?"))
+    assert first == again
+    letter = {text: chr(ord("A") + i) for i, text in enumerate(first.options)}
+    assert first.explanation == (
+        f"Option {letter['right']} is right; ({letter['wrong one']}) and option "
+        f"{letter['wrong two']} are not, nor is answer {letter['wrong three']}."
+    )

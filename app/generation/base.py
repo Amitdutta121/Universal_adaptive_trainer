@@ -25,11 +25,13 @@ from app.generation.prompts import (
     render_taxonomy,
 )
 from app.generation.schemas import (
+    MultipleChoiceDraft,
     TaxonomyClaim,
     build_content,
     prompt_fields_from_draft,
     response_model_for,
     scoring_kind_for,
+    shuffle_options,
 )
 from app.generation.spec import (
     QuestionSpec,
@@ -203,6 +205,9 @@ class BaseQuestionGenerator:
         client = self._client or get_structured_client()
 
         def build(draft: TaxonomyClaim, outcome: TaxonomyClaimOutcome) -> Question:
+            if isinstance(draft, MultipleChoiceDraft):
+                # Before any check sees it: the model's own answer position is not random.
+                draft = shuffle_options(draft)
             question_prompt, reference_solution, tests = prompt_fields_from_draft(draft)
             content = build_content(
                 draft,
