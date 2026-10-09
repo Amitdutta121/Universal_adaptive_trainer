@@ -22,6 +22,7 @@ from app.evaluation.judge_memory import (
     apply_judge_lessons,
     capture_snapshot,
     compose_judge_system,
+    episode_confirms,
     episode_teaches,
     latest_promoted,
     memory_rubric_suffix,
@@ -37,7 +38,7 @@ from app.persistence.models import (
     MemoryGuidelineRow,
     QuestionRow,
 )
-from app.persistence.repositories import QuestionRepository
+from app.persistence.repositories import QuestionRepository, ReviewOutcomeRepository
 from app.subjects import PYTHON_PROFILE
 
 DIFFICULTY = JudgeMetricId.DIFFICULTY
@@ -68,6 +69,10 @@ def _episode(
     prompt: str = "What does this loop print?",
     rationale: str = "easy is right",
     created_at: datetime | None = None,
+    comment: str | None = None,
+    verdicts: dict | None = None,
+    corrected_difficulty: Difficulty | None = None,
+    corrected_subtopic_ids: list[int] | None = None,
 ) -> MemoryEpisodeRow:
     question = _question(session, prompt)
     row = MemoryEpisodeRow(
@@ -76,12 +81,15 @@ def _episode(
         subject=SUBJECT,
         question_type=QuestionType.MULTIPLE_CHOICE,
         difficulty=Difficulty.EASY,
+        subtopic_ids=[5],
         text=prompt,
         decision=decision,
         reasons=reasons or [],
-        judge_verdicts={
-            DIFFICULTY.value: {"passed": True, "rationale": rationale, "status": "completed"}
-        },
+        comment=comment,
+        corrected_difficulty=corrected_difficulty,
+        corrected_subtopic_ids=corrected_subtopic_ids,
+        judge_verdicts=verdicts
+        or {DIFFICULTY.value: {"passed": True, "rationale": rationale, "status": "completed"}},
     )
     if created_at is not None:
         row.created_at = created_at
@@ -107,39 +115,182 @@ def _guideline(session: Session, text: str, metric: JudgeMetricId = DIFFICULTY) 
 # ------------------------------------------------------------------ episodes
 
 
-def test_difficulty_and_subtopic_learn_from_every_review(session: Session) -> None:
-    approve = _episode(session, decision=ReviewDecision.APPROVE)
-    reject = _episode(
-        session, decision=ReviewDecision.REJECT, reasons=[RejectionReason.TOO_EASY]
-    )
-    assert episode_teaches(approve, DIFFICULTY)
-    assert episode_teaches(approve, SUBTOPIC)
-    assert episode_teaches(reject, DIFFICULTY)
-    assert episode_teaches(reject, SUBTOPIC)
+def _all_pass() -> dict:
+    return {
+        metric.value: {"passed": True, "status": "completed", "rationale": "fine"}
+        for metric in (DIFFICULTY, SUBTOPIC, ISSUES)
+    }
 
 
-def test_issues_learn_from_approvals_issue_rejects_and_audit_borderline(
+def test_a_distractor_complaint_is_no_evidence_for_difficulty_or_subtopic(
     session: Session,
 ) -> None:
-    approve = _episode(session, decision=ReviewDecision.APPROVE)
+    """The live misrouting: a reject with no reasons and unchanged corrections."""
+    reject = _episode(
+        session,
+        decision=ReviewDecision.REJECT,
+        comment="Ambiguous distractors: B and C are both defensible. Trivial recall.",
+        verdicts=_all_pass(),
+        corrected_difficulty=Difficulty.EASY,
+        corrected_subtopic_ids=[5],
+    )
+    assert not episode_teaches(reject, DIFFICULTY)
+    assert not episode_teaches(reject, SUBTOPIC)
+    assert episode_teaches(reject, ISSUES)
+    # The difficulty and subtopic judges agreed with the professor: confirmation only.
+    assert episode_confirms(reject, DIFFICULTY)
+    assert episode_confirms(reject, SUBTOPIC)
+    assert not episode_confirms(reject, ISSUES)
+
+
+def test_difficulty_learns_from_a_changed_level_or_a_difficulty_reason(
+    session: Session,
+) -> None:
+    moved = _episode(session, verdicts=_all_pass(), corrected_difficulty=Difficulty.MEDIUM)
+    proposed = _episode(
+        session,
+        verdicts={DIFFICULTY.value: {"passed": False, "proposed_difficulty": "hard"}},
+    )
+    reason = _episode(
+        session,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.TOO_EASY],
+        verdicts=_all_pass(),
+    )
+    for episode in (moved, proposed, reason):
+        assert episode_teaches(episode, DIFFICULTY)
+        assert not episode_teaches(episode, SUBTOPIC)
+    assert not episode_teaches(reason, ISSUES)
+
+
+def test_subtopic_learns_from_changed_subtopics_or_the_wrong_topic_reason(
+    session: Session,
+) -> None:
+    moved = _episode(session, verdicts=_all_pass(), corrected_subtopic_ids=[6])
+    proposed = _episode(
+        session,
+        verdicts={SUBTOPIC.value: {"passed": False, "proposed_subtopic_ids": [7]}},
+    )
+    reason = _episode(
+        session,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.WRONG_TOPIC_SUBTOPIC],
+        verdicts=_all_pass(),
+    )
+    for episode in (moved, proposed, reason):
+        assert episode_teaches(episode, SUBTOPIC)
+        assert not episode_teaches(episode, DIFFICULTY)
+    assert not episode_teaches(reason, ISSUES)
+
+
+def test_issues_learn_from_issue_reasons_unattributed_comments_and_false_alarms(
+    session: Session,
+) -> None:
     issue_reject = _episode(
         session,
         decision=ReviewDecision.REJECT,
         reasons=[RejectionReason.TECHNICALLY_INCORRECT],
+        verdicts=_all_pass(),
     )
+    edit_comment = _episode(
+        session, decision=ReviewDecision.EDIT, comment="Wording", verdicts=_all_pass()
+    )
+    false_alarm = _episode(
+        session,
+        decision=ReviewDecision.APPROVE,
+        verdicts={ISSUES.value: {"passed": False}},
+    )
+    agreed = _episode(session, decision=ReviewDecision.APPROVE, verdicts=_all_pass())
+    silent_reject = _episode(session, decision=ReviewDecision.REJECT, verdicts=_all_pass())
     easy_reject = _episode(
-        session, decision=ReviewDecision.REJECT, reasons=[RejectionReason.TOO_EASY]
+        session,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.TOO_EASY],
+        comment="Too easy",
+        verdicts=_all_pass(),
     )
-    audit = _episode(session, source=SOURCE_AUDIT, decision=ReviewDecision.REJECT)
-    borderline = _episode(session, source=SOURCE_BORDERLINE, decision=ReviewDecision.APPROVE)
+    audit = _episode(
+        session,
+        source=SOURCE_AUDIT,
+        decision=ReviewDecision.APPROVE,
+        verdicts={ISSUES.value: {"passed": False}},
+    )
+    borderline = _episode(
+        session,
+        source=SOURCE_BORDERLINE,
+        decision=ReviewDecision.REJECT,
+        reasons=[RejectionReason.POOR_DISTRACTORS],
+    )
     retry = _episode(session, source=SOURCE_RETRY, decision=ReviewDecision.APPROVE)
 
-    assert episode_teaches(approve, ISSUES)
-    assert episode_teaches(issue_reject, ISSUES)
-    assert not episode_teaches(easy_reject, ISSUES)
-    assert episode_teaches(audit, ISSUES)
-    assert episode_teaches(borderline, ISSUES)
-    assert not episode_teaches(retry, ISSUES)
+    for episode in (issue_reject, edit_comment, false_alarm, audit, borderline):
+        assert episode_teaches(episode, ISSUES)
+    for episode in (agreed, silent_reject, easy_reject, retry):
+        assert not episode_teaches(episode, ISSUES)
+    assert episode_confirms(agreed, ISSUES)
+    assert not episode_confirms(retry, ISSUES)
+    for episode in (issue_reject, edit_comment, borderline):
+        assert not episode_teaches(episode, DIFFICULTY)
+        assert not episode_teaches(episode, SUBTOPIC)
+
+
+def test_the_misrouted_reviews_distil_only_the_issues_judge(session: Session) -> None:
+    from llm_fakes import judged
+
+    from app.feedback import route_review_outcome, submit_review
+    from app.memory.guidelines import GuidelineEdits
+
+    systems: list[str] = []
+
+    class Distiller:
+        description = "fake/distiller"
+
+        def complete_structured(self, *, system: str, prompt: str, response_model):
+            systems.append(system)
+            return GuidelineEdits()
+
+    rows = []
+    for _ in range(2):
+        question = _question(session)
+        question.pedagogical_eval = judged(question_id=question.id).model_dump(mode="json")
+        session.commit()
+        review = submit_review(
+            session,
+            question_id=question.id,
+            decision=ReviewDecision.REJECT,
+            comment="Assess the distractors: two are ambiguous.",
+            corrected_difficulty=Difficulty.EASY,
+        )
+        route_review_outcome(session, review)
+        session.commit()
+        rows.append(ReviewOutcomeRepository(session).get_for_review(review.id))
+
+    apply_judge_lessons(session, rows, PYTHON_PROFILE, client=Distiller())
+    assert len(systems) == 1
+    assert "(judge:issues)" in systems[0]
+
+
+def test_difficulty_and_subtopic_guidelines_outside_their_scope_are_refused() -> None:
+    assert refusal_reason("Assess questions for ambiguous distractors.", target="judge:difficulty")
+    assert refusal_reason(
+        "Ensure that distractors in multiple-choice questions are unambiguously incorrect.",
+        target="judge:subtopic",
+    )
+    assert (
+        refusal_reason("Pure recall of a keyword is easy, not medium.", target="judge:difficulty")
+        is None
+    )
+    assert (
+        refusal_reason(
+            "A question on f-strings belongs to the String formatting subtopic.",
+            target="judge:subtopic",
+        )
+        is None
+    )
+    assert (
+        refusal_reason("Ensure distractors are unambiguously incorrect.", target="judge:issues")
+        is None
+    )
 
 
 # ------------------------------------------------------------------ prompt
@@ -178,9 +329,7 @@ def test_judges_in_a_round_ignore_memory_written_during_it(session: Session) -> 
         created_at=datetime.now(UTC),
     )
 
-    prompt = compose_judge_system(
-        session, DIFFICULTY, PYTHON_PROFILE, snapshot=snapshot
-    )
+    prompt = compose_judge_system(session, DIFFICULTY, PYTHON_PROFILE, snapshot=snapshot)
     assert "Older reviewed loop question" in prompt
     assert "Reviewed while this round was running" not in prompt
     assert "must not appear" not in prompt

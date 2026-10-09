@@ -391,7 +391,8 @@ def test_a_disagreeing_review_relearns_the_named_judge(
     _next_round_lessons(session)
     refreshed = ReviewOutcomeRepository(session).get_for_review(body["id"]).judges_refreshed
     assert DIFFICULTY in refreshed
-    assert JudgeMetricId.SUBTOPIC in refreshed
+    # A difficulty reason with the subtopics unchanged is no lesson for the subtopic judge.
+    assert JudgeMetricId.SUBTOPIC not in refreshed
     assert rewriter.calls == 0
     assert JudgePromptRepository(session).get(DIFFICULTY) is None
 
@@ -416,7 +417,8 @@ def test_an_agreeing_review_relearns_no_judge(
 
     assert response.json()["outcome"]["judges_refreshed"] == []
     stored = ReviewOutcomeRepository(session).get_for_review(response.json()["id"])
-    assert JudgeMetricId.ISSUES in stored.judges_refreshed
+    # Every judge matched the professor: a confirmation, not a lesson.
+    assert stored.judges_refreshed == []
     assert rewriter.calls == 0
 
 

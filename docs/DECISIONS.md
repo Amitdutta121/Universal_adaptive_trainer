@@ -2606,7 +2606,12 @@ first and freezes a snapshot on the round; a snapshot is promoted only when held
 does not drop and the known-bad pass rate does not rise; panel versioning keys on the snapshot
 id; `refresh_judge_prompt`'s rewrite is no longer part of the lesson run). Supersedes ADR-039's
 rewrite-and-gate learning; keeps its held-out check. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md`
-m8–m11.
+m8–m11. Routing fix after the 3-round walkthrough: a review is evidence for the difficulty or
+subtopic judge only when the professor's confirmed value differs from the judge's or that
+judge's reason is cited; issue reasons and unattributed reject/edit comments go to the issues
+judge; agreements are retrievable past cases, never distilled (`episode_teaches` /
+`episode_confirms`). Each judge's distillation prompt names its scope, and a difficulty or
+subtopic guideline that is not about difficulty or topic is refused like an output-contract rule.
 
 Of 222 routed reviews, judges raised 67 false alarms and 27 misses. In rounds, a draft a judge
 fails is retried or dropped and never reviewed, so the most common judge mistake is invisible

@@ -60,19 +60,84 @@ class SnapshotScore:
 SnapshotScorer = Callable[[JudgeMemorySnapshotRow], SnapshotScore]
 
 
+#: Reasons that name one judge. A reject or edit citing none of them is generic quality
+#: feedback, which belongs to the issues judge only.
+_ATTRIBUTABLE = frozenset().union(*PROFESSOR_OBJECTIONS.values())
+
+
+def _verdict(episode: MemoryEpisodeRow, metric: JudgeMetricId) -> dict:
+    return (episode.judge_verdicts or {}).get(metric.value) or {}
+
+
+def _judge_value(episode: MemoryEpisodeRow, metric: JudgeMetricId) -> object | None:
+    """What the difficulty or subtopic judge said the value is; ``None`` if it did not say.
+
+    A passing verdict without a proposal agreed with the question as reviewed.
+    """
+    verdict = _verdict(episode, metric)
+    passed = verdict.get("passed")
+    if metric is JudgeMetricId.DIFFICULTY:
+        proposed = verdict.get("proposed_difficulty")
+        if proposed is None and passed is True:
+            proposed = episode.difficulty
+        return None if proposed is None else str(proposed)
+    proposed_ids = verdict.get("proposed_subtopic_ids") or []
+    if not proposed_ids and passed is True:
+        proposed_ids = episode.subtopic_ids or []
+    return frozenset(proposed_ids) if proposed_ids else None
+
+
+def _professor_value(episode: MemoryEpisodeRow, metric: JudgeMetricId) -> object:
+    if metric is JudgeMetricId.DIFFICULTY:
+        return str(episode.effective_difficulty)
+    return frozenset(episode.effective_subtopic_ids)
+
+
 def episode_teaches(episode: MemoryEpisodeRow, metric: JudgeMetricId) -> bool:
-    """Whether this episode is evidence for ``metric`` (m11 acceptance)."""
+    """Whether this episode is evidence a judge's guidelines should learn from.
+
+    Difficulty and subtopic: only when the professor's confirmed value differs from what
+    the judge said, or the professor cited that judge's reason. Issues: an issue reason,
+    a reject or edit with a comment and no attributable reason (generic quality feedback),
+    or an approval the issues judge objected to. A review about something else never
+    reaches a judge's distiller, whatever its comment says.
+    """
     if episode.source not in _CASE_SOURCES:
         return False
+    reasons = set(episode.reasons or [])
+    if reasons & PROFESSOR_OBJECTIONS[metric]:
+        return True
     if metric in (JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC):
-        return True
-    if episode.source in (SOURCE_AUDIT, SOURCE_BORDERLINE):
-        return True
+        said = _judge_value(episode, metric)
+        return said is not None and said != _professor_value(episode, metric)
+    if episode.decision in (ReviewDecision.REJECT, ReviewDecision.EDIT):
+        return bool(episode.comment) and not reasons & _ATTRIBUTABLE
+    return (
+        episode.decision is ReviewDecision.APPROVE
+        and _verdict(episode, metric).get("passed") is False
+    )
+
+
+def episode_confirms(episode: MemoryEpisodeRow, metric: JudgeMetricId) -> bool:
+    """Whether the judge matched the professor here: a past case it may see, not a lesson."""
+    if episode.source not in _CASE_SOURCES or episode_teaches(episode, metric):
+        return False
+    if metric in (JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC):
+        return _judge_value(episode, metric) is not None
+    passed = _verdict(episode, metric).get("passed")
     if episode.decision is ReviewDecision.APPROVE:
-        return True
-    if episode.decision is ReviewDecision.REJECT:
-        return bool(set(episode.reasons or []) & PROFESSOR_OBJECTIONS[JudgeMetricId.ISSUES])
-    return False
+        return passed is True
+    return passed is False
+
+
+def _professor_said(episode: MemoryEpisodeRow, metric: JudgeMetricId) -> str:
+    """The professor's answer to this judge's question, not the overall verdict."""
+    if metric is JudgeMetricId.DIFFICULTY:
+        return f"difficulty {episode.effective_difficulty.value}"
+    if metric is JudgeMetricId.SUBTOPIC:
+        ids = ", ".join(str(i) for i in episode.effective_subtopic_ids) or "-"
+        return f"subtopic ids {ids}"
+    return episode.decision.value if episode.decision is not None else episode.source
 
 
 def render_judge_cases(base: str, cases: Sequence[MemoryEpisodeRow], metric: JudgeMetricId) -> str:
@@ -81,7 +146,7 @@ def render_judge_cases(base: str, cases: Sequence[MemoryEpisodeRow], metric: Jud
         return base
     lines = [base, "", "Past cases for this judge (what you said, what the professor decided):"]
     for episode in cases:
-        verdict = (episode.judge_verdicts or {}).get(metric.value) or {}
+        verdict = _verdict(episode, metric)
         passed = verdict.get("passed")
         if verdict.get("rationale"):
             you = verdict["rationale"]
@@ -91,10 +156,9 @@ def render_judge_cases(base: str, cases: Sequence[MemoryEpisodeRow], metric: Jud
             you = "objected"
         else:
             you = "-"
-        decision = episode.decision.value if episode.decision is not None else episode.source
         lines.append(f"- Question: {episode.text[:240]}")
         lines.append(f"  You said: {you}")
-        lines.append(f"  Professor: {decision}")
+        lines.append(f"  Professor: {_professor_said(episode, metric)}")
     return "\n".join(lines)
 
 
@@ -110,12 +174,11 @@ def retrieve_judge_episodes(
     """The k episodes this judge should see, newest or nearest the question first."""
     rows = [
         row
-        for row in MemoryEpisodeRepository(session).of_source(
-            SOURCE_REVIEW, subject=subject
-        )
+        for row in MemoryEpisodeRepository(session).of_source(SOURCE_REVIEW, subject=subject)
         + MemoryEpisodeRepository(session).of_source(SOURCE_AUDIT, subject=subject)
         + MemoryEpisodeRepository(session).of_source(SOURCE_BORDERLINE, subject=subject)
-        if episode_teaches(row, metric) and _is_before(row.created_at, created_before)
+        if (episode_teaches(row, metric) or episode_confirms(row, metric))
+        and _is_before(row.created_at, created_before)
     ]
     if question is not None and rows:
         query = question.prompt or ""
@@ -217,9 +280,7 @@ def apply_judge_lessons(
     distilled = False
     for metric in _MEMORY_METRICS:
         relevant = [
-            rid
-            for rid in review_ids
-            if _review_teaches(session, rid, metric, profile.personal_key)
+            rid for rid in review_ids if _review_teaches(session, rid, metric, profile.personal_key)
         ]
         if not relevant:
             continue
@@ -253,11 +314,7 @@ def apply_judge_lessons(
 
 def _review_teaches(session: Session, review_id: int, metric: JudgeMetricId, subject: str) -> bool:
     episode = MemoryEpisodeRepository(session).get_for_review(review_id)
-    return (
-        episode is not None
-        and episode.subject == subject
-        and episode_teaches(episode, metric)
-    )
+    return episode is not None and episode.subject == subject and episode_teaches(episode, metric)
 
 
 def _is_before(stamp: datetime | None, cutoff: datetime | None) -> bool:

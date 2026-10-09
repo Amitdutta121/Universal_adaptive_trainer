@@ -134,10 +134,13 @@ def _learn_judges(
 ) -> list[str]:
     """Distil each judge the pending reviews teach, then freeze a snapshot (ADR-064).
 
-    Difficulty and subtopic learn from every review; issues from approvals, issue-reason
-    rejects, and audit / borderline verdicts. A hand-written prompt is left as the base the
-    guidelines render onto. Paused while any style of this subject is trusted under the
-    current panel: a new snapshot would rename it and send trusted styles back to review.
+    Each judge learns only from the reviews that are evidence about it
+    (:func:`~app.evaluation.judge_memory.episode_teaches`): difficulty and subtopic when the
+    professor's value differs from the judge's or their reason was cited; issues from issue
+    reasons, unattributed reject/edit comments, and approvals it objected to. A hand-written
+    prompt is left as the base the guidelines render onto. Paused while any style of this
+    subject is trusted under the current panel: a new snapshot would rename it and send
+    trusted styles back to review.
     """
     trusted = trusted_scopes(session, profile)
     if trusted:
