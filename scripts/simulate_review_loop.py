@@ -1,8 +1,9 @@
 """Closed-loop simulation of the review -> lesson -> generation loop with a scripted professor.
 
-**Spends API: about 24 generations with their judges, plus one guideline distillation per
-round (~$1-2). Run it only on a COPY of the database** -- it clears the copy's reviews,
-outcomes, episodes, guidelines and learned prompts, and stores the generated questions:
+**Spends API: six rounds of generations with their judges, plus one guideline distillation
+per round (~$3-5). Run it only on a COPY of the database** -- it clears the copy's reviews,
+outcomes, episodes, guidelines, snapshots and learned prompts, and stores the generated
+questions:
 
     cp data/adaptive_trainer.db /tmp/sim.db
     python -m scripts.simulate_review_loop /tmp/sim.db /tmp/sim.json
@@ -55,7 +56,8 @@ from typing import Any
 from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, QuestionType
+from app.calibration.scorecard import build_judge_scorecard
+from app.domain.enums import Difficulty, QuestionStatus, QuestionType
 from app.domain.enums import RejectionReason as RR
 from app.domain.enums import ReviewDecision as D
 from app.feedback import route_review_outcome, submit_review
@@ -66,14 +68,19 @@ from app.generation.service import GenerationService
 from app.generation.spec import build_question_spec, require_approved_version
 from app.llm import StructuredLLMClient
 from app.persistence.database import init_db
-from app.persistence.models import MemoryGuidelineRow, QuestionRow, QuestionSimilarityRow
+from app.persistence.models import (
+    MemoryGuidelineRow,
+    ProfessorReviewRow,
+    QuestionRow,
+    QuestionSimilarityRow,
+)
 from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
 from app.subjects import profile_for_version
 
 #: The dev database's Python taxonomy, style, and the sections the live round-1 retriever
 #: chose for its subtopics (so no embedder is needed).
-VERSION, STYLE, ROUNDS = 8, "py.concept_check", 4
+VERSION, STYLE, ROUNDS = 8, "py.concept_check", 6
 SECTIONS = {270: 7, 271: 785, 272: 1601, 273: 1601, 274: 1601, 276: 547}
 
 #: Learning state cleared from the copy; questions, books and taxonomy are kept.
@@ -86,6 +93,7 @@ CLEARED = (
     "type_instructions",
     "judge_prompts",
     "judge_trust_counters",
+    "judge_memory_snapshots",
 )
 
 GOOD_G1 = (
@@ -135,6 +143,8 @@ def g2(prompt: str) -> bool:
 
 def clear_learning_state(session: Session) -> None:
     existing = set(inspect(session.get_bind()).get_table_names())
+    if "generation_rounds" in existing:
+        session.execute(text("UPDATE generation_rounds SET judge_snapshot_id=NULL"))
     for table in CLEARED:
         if table in existing:
             session.execute(text(f"DELETE FROM {table}"))
@@ -162,6 +172,11 @@ def guidelines_snapshot(session: Session) -> list[dict[str, Any]]:
     ]
 
 
+def _scorecard(session: Session, course_id: int | None) -> list[dict[str, Any]]:
+    report = build_judge_scorecard(session, course_id=course_id)
+    return [row.model_dump(mode="json") for row in report.judges]
+
+
 def scripted_review(rnd: int, question: dict[str, Any]) -> tuple[str, D, list[RR], str | None]:
     """What the scripted professor says about one generated question."""
     if (rnd, question["slot"]) in ADVERSARIAL:
@@ -172,6 +187,50 @@ def scripted_review(rnd: int, question: dict[str, Any]) -> tuple[str, D, list[RR
     reasons = [RR.NOT_PEDAGOGICALLY_USEFUL] * ("G1" in bad) + [RR.POOR_WORDING] * ("G2" in bad)
     comment = " ".join([GOOD_G1] * ("G1" in bad) + [GOOD_G2] * ("G2" in bad))
     return "good", D.REJECT, reasons, comment
+
+
+def _review_audits(session: Session, rnd: int) -> list[dict[str, Any]]:
+    """Agree with a judge-failed audit when the hidden standard also rejects it."""
+    reviewed = set(session.scalars(select(ProfessorReviewRow.question_id)))
+    audits = session.scalars(
+        select(QuestionRow).where(
+            QuestionRow.audit.is_(True), QuestionRow.status != QuestionStatus.APPROVED
+        )
+    )
+    out: list[dict[str, Any]] = []
+    for row in audits:
+        if row.id in reviewed:
+            continue
+        prompt = row.prompt or ""
+        if g1(prompt) and g2(prompt):
+            kind, decision, reasons, comment = "audit_disagree", D.APPROVE, [], None
+        else:
+            kind, decision, reasons, comment = (
+                "audit_agree",
+                D.REJECT,
+                [RR.NOT_PEDAGOGICALLY_USEFUL],
+                "The judge was right to stop this draft.",
+            )
+        review = submit_review(
+            session,
+            question_id=row.id,
+            decision=decision,
+            reasons=reasons,
+            comment=comment,
+        )
+        outcome = route_review_outcome(session, review)
+        session.commit()
+        out.append(
+            {
+                "qid": row.id,
+                "review_id": review.id,
+                "kind": kind,
+                "decision": str(decision),
+                "cell": outcome.cell.value if outcome is not None else None,
+                "round": rnd,
+            }
+        )
+    return out
 
 
 def simulate(
@@ -296,6 +355,7 @@ def simulate(
                         "cell": outcome.cell.value if outcome is not None else None,
                     }
                 )
+            reviews.extend(_review_audits(session, rnd))
 
         produced = [q for q in questions if not q["dropped"]]
         answers = [q["correct_idx"] for q in produced if isinstance(q["correct_idx"], int)]
@@ -315,6 +375,7 @@ def simulate(
                 "soft_flags": sum(q["soft_flags"] for q in produced),
                 "drift_warning": drift_warning(rows, previous),
                 "guidelines": guidelines_snapshot(session),
+                "scorecard": _scorecard(session, version.course_id),
                 "questions": questions,
                 "reviews": reviews,
             }
