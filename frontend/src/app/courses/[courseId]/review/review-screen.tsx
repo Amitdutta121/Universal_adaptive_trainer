@@ -248,6 +248,15 @@ export function ReviewScreen() {
 
       {detail ? (
         <>
+          {detail.borderline_notes?.length ? (
+            <div className="review-banner" data-tone="warn" data-testid="borderline-banner">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
+              <div>
+                <div className="review-banner-title">A judge is unsure</div>
+                <p className="review-banner-copy">{detail.borderline_notes.join(". ")}.</p>
+              </div>
+            </div>
+          ) : null}
           {detail.question.audit ? (
             <div className="review-banner" data-tone="warn" data-testid="audit-banner">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />

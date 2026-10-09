@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.calibration import (
@@ -247,6 +248,41 @@ def test_a_judge_that_flagged_the_requested_level_the_professor_kept_is_a_false_
     difficulty = _row_for(build_judge_scorecard(session), DIFFICULTY)
     assert (difficulty.n, difficulty.agreements, difficulty.false_alarms) == (1, 0, 1)
     assert difficulty.flag_rate == 1.0
+
+
+def test_a_borderline_keep_is_a_scorecard_observation_and_a_borderline_episode(
+    session: Session,
+) -> None:
+    from app.memory import SOURCE_BORDERLINE
+    from app.persistence.models import MemoryEpisodeRow
+
+    version, topic, subs = _taxonomy(session)
+    row = _question(
+        session,
+        version=version,
+        topic=topic,
+        subtopic_ids=[subs[0].id],
+        difficulty=Difficulty.MEDIUM,
+        spec={
+            "difficulty": Difficulty.MEDIUM.value,
+            "subtopic_ids": [subs[0].id],
+        },
+        evaluation=_evaluation(
+            difficulty=Difficulty.HARD,
+            difficulty_passed=False,
+            subtopic_ids=[subs[0].id],
+        ),
+    )
+    row.target_subtopic_id = subs[0].id
+    session.commit()
+    _review(session, row, corrected_difficulty=Difficulty.MEDIUM)
+
+    difficulty = _row_for(build_judge_scorecard(session), DIFFICULTY)
+    assert (difficulty.n, difficulty.false_alarms) == (1, 1)
+    episode = session.scalars(
+        select(MemoryEpisodeRow).where(MemoryEpisodeRow.question_id == row.id)
+    ).one()
+    assert episode.source == SOURCE_BORDERLINE
 
 
 # ------------------------------------------------------- issues / agreement

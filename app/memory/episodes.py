@@ -33,6 +33,8 @@ SOURCE_REVIEW = "review"
 SOURCE_RETRY = "retry"
 #: ``MemoryEpisodeRow.source`` of a verdict on a judge-rejected audit draft (m9).
 SOURCE_AUDIT = "audit"
+#: ``MemoryEpisodeRow.source`` of a verdict on a borderline-kept judge failure (m10).
+SOURCE_BORDERLINE = "borderline"
 
 #: Retry lessons shown per target.
 MAX_RETRY_LESSONS = 3
@@ -84,7 +86,11 @@ def judge_verdicts(evaluation: dict[str, Any] | None) -> dict[str, dict[str, Any
 
 
 def record_review_episode(
-    session: Session, review: ProfessorReviewRow, reviewed: ReviewedQuestion
+    session: Session,
+    review: ProfessorReviewRow,
+    reviewed: ReviewedQuestion,
+    *,
+    source: str | None = None,
 ) -> MemoryEpisodeRow:
     """Write the episode for a review just saved. ``reviewed`` is :func:`snapshot_question`
     taken before the review was applied. One per review: a repeat returns the stored one."""
@@ -99,7 +105,7 @@ def record_review_episode(
         MemoryEpisodeRow(
             review_id=review.id,
             question_id=question.id,
-            source=SOURCE_AUDIT if question.audit else SOURCE_REVIEW,
+            source=source or (SOURCE_AUDIT if question.audit else SOURCE_REVIEW),
             subject=profile_for_version(session, question.curriculum_version_id).personal_key,
             question_type=question.question_type,
             topic_id=reviewed.topic_id,

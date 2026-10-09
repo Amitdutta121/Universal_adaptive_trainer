@@ -298,10 +298,10 @@ def _target(env: SimpleNamespace, difficulty: str = "medium", style: str = STYLE
 def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy")])
     client = DifficultySequenceClient(
-        difficulties=[Difficulty.HARD, Difficulty.MEDIUM],
+        difficulties=[Difficulty.HARD, Difficulty.EASY],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
     )
 
@@ -310,7 +310,7 @@ def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     assert len(client.generation_calls) == 2
     retry_prompt = client.generation_calls[1]["prompt"]
     assert "--- correction ---" in retry_prompt
-    assert "difficulty_judge" in retry_prompt and "must be medium" in retry_prompt
+    assert "difficulty_judge" in retry_prompt and "must be easy" in retry_prompt
     first_prompt = client.generation_calls[0]["prompt"]
     assert "--- target ---" in first_prompt
     assert f"[subtopic {env.while_loops.id}] While loops" in first_prompt
@@ -446,8 +446,8 @@ def test_a_hard_cell_still_generates_when_the_generatability_judge_cannot_answer
 def test_a_question_still_failing_after_the_last_attempt_is_dropped(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy")])
     client = DifficultySequenceClient(
         difficulties=[Difficulty.HARD],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),

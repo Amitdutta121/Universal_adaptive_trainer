@@ -4418,6 +4418,8 @@ export interface components {
             original_tests: string | null;
             /** Reviews */
             reviews: components["schemas"]["ReviewOut"][];
+            /** Borderline Notes */
+            borderline_notes?: string[];
         };
         /**
          * QuestionKind

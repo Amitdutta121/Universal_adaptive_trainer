@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import Difficulty, QuestionStatus, RejectionReason, ReviewDecision
 from app.domain.questions import Question, apply_professor_edit
 from app.errors import DomainRuleError, NotFoundError
+from app.evaluation import PedagogicalEvaluation
+from app.evaluation.severity import borderline_notes
 from app.memory import (
+    SOURCE_AUDIT,
+    SOURCE_BORDERLINE,
     SOURCE_RETRY,
+    SOURCE_REVIEW,
     MemoryEpisodeRepository,
     forget_review,
     record_review_episode,
@@ -175,7 +181,7 @@ def submit_review(
         reviewed_generator_version=question.generator_version,
     )
     review = ProfessorReviewRepository(session).add(review)
-    record_review_episode(session, review, reviewed)
+    record_review_episode(session, review, reviewed, source=_episode_source(question))
     return review
 
 
@@ -196,6 +202,29 @@ def delete_review(session: Session, review_id: int) -> None:
     MemoryEpisodeRepository(session).delete_of_source(SOURCE_RETRY, question_id=review.question_id)
     session.delete(review)
     session.flush()
+
+
+def _episode_source(question: QuestionRow) -> str:
+    """Audit and borderline keeps are their own episode sources (m9, m10)."""
+    if question.audit:
+        return SOURCE_AUDIT
+    spec = question.spec if isinstance(question.spec, dict) else {}
+    try:
+        requested = Difficulty(spec.get("difficulty") or question.difficulty)
+    except ValueError:
+        requested = question.difficulty
+    target = question.target_subtopic_id
+    evaluation = None
+    if isinstance(question.pedagogical_eval, dict):
+        try:
+            evaluation = PedagogicalEvaluation.model_validate(question.pedagogical_eval)
+        except ValidationError:
+            evaluation = None
+    if target is not None and borderline_notes(
+        evaluation, requested_difficulty=requested, target_subtopic_id=target
+    ):
+        return SOURCE_BORDERLINE
+    return SOURCE_REVIEW
 
 
 def _check_subtopics_in_taxonomy(

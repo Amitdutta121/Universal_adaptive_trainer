@@ -172,8 +172,8 @@ def _audit_question(
 def test_a_dropped_judge_failure_stores_one_audit_draft(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy")])
     client = DifficultySequenceClient(
         difficulties=[Difficulty.HARD],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
@@ -194,8 +194,8 @@ def test_a_dropped_judge_failure_stores_one_audit_draft(
 def test_a_round_keeps_at_most_two_audit_drafts(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env), _target(env), _target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy"), _target(env, "easy"), _target(env, "easy")])
     client = DifficultySequenceClient(
         difficulties=[Difficulty.HARD],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
@@ -210,10 +210,10 @@ def test_a_round_keeps_at_most_two_audit_drafts(
 def test_a_kept_question_that_retried_a_judge_still_leaves_an_audit(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy")])
     client = DifficultySequenceClient(
-        difficulties=[Difficulty.HARD, Difficulty.MEDIUM],
+        difficulties=[Difficulty.HARD, Difficulty.EASY],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
     )
 

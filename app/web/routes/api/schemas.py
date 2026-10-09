@@ -1057,6 +1057,8 @@ class QuestionDetail(BaseModel):
     original_reference_solution: str | None
     original_tests: str | None
     reviews: list[ReviewOut]
+    #: Judge failures that were kept as borderline rather than retried (m10).
+    borderline_notes: list[str] = Field(default_factory=list)
 
 
 class QuestionListResponse(BaseModel):

@@ -26,6 +26,12 @@ from app.domain.questions import Question, QuestionCheck
 from app.evaluation import MetricStatus, PedagogicalEvaluation, PedagogicalJudge
 from app.evaluation import custom as custom_judges
 from app.evaluation.custom import CustomJudgeResult, CustomRule
+from app.evaluation.severity import (
+    borderline_notes,
+    difficulty_is_clear,
+    issues_are_clear,
+    subtopic_is_clear,
+)
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.spec import QuestionSpec
 from app.llm import StructuredLLMClient
@@ -34,6 +40,7 @@ from app.llm import StructuredLLMClient
 TARGET_SUBTOPIC_CHECK = "target_subtopic"
 DIFFICULTY_JUDGE_CHECK = "difficulty_judge"
 TOPIC_JUDGE_CHECK = "topic_judge"
+ISSUES_JUDGE_CHECK = "issues_judge"
 CUSTOM_RULE_CHECK = "custom_rule"
 DUPLICATE_CHECK = "duplicate"
 
@@ -102,11 +109,14 @@ class RoundReview:
         #: Last judge-failed draft, so a later passing attempt can still leave an audit (m9).
         self.last_failed_question: Question | None = None
         self.last_failed_evaluation: PedagogicalEvaluation | None = None
+        #: Borderline judge notes on a kept attempt (m10).
+        self.last_notes: list[str] = []
 
     def __call__(self, question: Question) -> list[QuestionCheck]:
         self.last_evaluation = None
         self.last_custom = []
         self.last_similar = []
+        self.last_notes = []
 
         # The generator's own claim must name the target before any judge is paid for.
         if self._target not in question.subtopic_ids:
@@ -154,31 +164,29 @@ class RoundReview:
                     "The difficulty judge must confirm the requested level.",
                 )
             )
-        if (
-            difficulty is not None
-            and difficulty.status is MetricStatus.COMPLETED
+        elif (
+            difficulty.passed is not True
             and difficulty.proposed_difficulty is not None
             and difficulty.proposed_difficulty is not self._spec.difficulty
         ):
             wanted = self._spec.difficulty.value
-            failed.append(
-                _failed(
-                    DIFFICULTY_JUDGE_CHECK,
-                    f"a reviewer rated it {difficulty.proposed_difficulty.value}, "
-                    f"but it must be {wanted}",
-                    f"Reviewer: {difficulty.rationale or 'no rationale'} "
-                    f"Make the question genuinely {wanted}.",
+            if difficulty_is_clear(self._spec.difficulty, difficulty.proposed_difficulty):
+                failed.append(
+                    _failed(
+                        DIFFICULTY_JUDGE_CHECK,
+                        f"a reviewer rated it {difficulty.proposed_difficulty.value}, "
+                        f"but it must be {wanted}",
+                        f"Reviewer: {difficulty.rationale or 'no rationale'} "
+                        f"Make the question genuinely {wanted}.",
+                    )
                 )
-            )
 
         topic = evaluation.metric(JudgeMetricId.SUBTOPIC)
+        proposed_ids = list(topic.proposed_subtopic_ids or []) if topic is not None else []
         if (
             topic is None
             or topic.status is not MetricStatus.COMPLETED
-            or (
-                topic.passed is not True
-                and self._target in (topic.proposed_subtopic_ids or question.subtopic_ids)
-            )
+            or (topic.passed is not True and not proposed_ids)
         ):
             failed.append(
                 _failed(
@@ -187,20 +195,37 @@ class RoundReview:
                     "The topic judge must confirm the target subtopic.",
                 )
             )
-        if (
-            topic is not None
-            and topic.status is MetricStatus.COMPLETED
-            and self._target not in (topic.proposed_subtopic_ids or question.subtopic_ids)
-        ):
+        elif topic.passed is not True and subtopic_is_clear(self._target, proposed_ids):
             failed.append(
                 _failed(
                     TOPIC_JUDGE_CHECK,
-                    f"a reviewer says it assesses subtopic(s) {topic.proposed_subtopic_ids}, "
+                    f"a reviewer says it assesses subtopic(s) {proposed_ids}, "
                     f"not the target subtopic {self._target}",
                     f"Reviewer: {topic.rationale or 'no rationale'} "
                     f"Make the question clearly assess subtopic {self._target}.",
                 )
             )
+
+        issues = evaluation.metric(JudgeMetricId.ISSUES)
+        if (
+            issues is not None
+            and issues.status is MetricStatus.COMPLETED
+            and issues.passed is False
+            and issues_are_clear(issues.issue_codes)
+        ):
+            failed.append(
+                _failed(
+                    ISSUES_JUDGE_CHECK,
+                    "the issues judge found a blocking defect",
+                    issues.rationale or "Fix the incorrect answer, tests, or technical error.",
+                )
+            )
+
+        self.last_notes = borderline_notes(
+            evaluation,
+            requested_difficulty=self._spec.difficulty,
+            target_subtopic_id=self._target,
+        )
 
         if self._rules:
             # Looked up on the module so the owner's implementation (and test fakes) apply.

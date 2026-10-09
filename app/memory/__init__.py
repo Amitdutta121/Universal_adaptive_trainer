@@ -25,6 +25,7 @@ Allowed dependencies
 
 from app.memory.episodes import (
     SOURCE_AUDIT,
+    SOURCE_BORDERLINE,
     SOURCE_RETRY,
     SOURCE_REVIEW,
     ReviewedQuestion,
@@ -55,6 +56,7 @@ from app.memory.repository import MemoryEpisodeRepository, MemoryGuidelineReposi
 __all__ = [
     "ACTIVE_SUPPORT",
     "SOURCE_AUDIT",
+    "SOURCE_BORDERLINE",
     "SOURCE_RETRY",
     "SOURCE_REVIEW",
     "DistillResult",

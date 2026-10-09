@@ -30,6 +30,7 @@ from app.evaluation import (
     humanize_judge_error_detail,
     new_run_id,
 )
+from app.evaluation.severity import borderline_notes
 from app.evaluation.trust import judge_trust
 from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
 from app.ingestion import SourceRetrieval
@@ -553,6 +554,7 @@ def get_question(session: DbSession, course: CourseScope, question_id: int) -> Q
         original_reference_solution=question.original_reference_solution,
         original_tests=question.original_tests,
         reviews=[ReviewOut.from_row(review) for review in question.reviews],
+        borderline_notes=_borderline_notes(question, evaluation),
     )
 
 
@@ -606,4 +608,20 @@ def personalization_evidence(question: QuestionRow) -> PersonalizationEvidence |
         preference_ids=preference_ids if isinstance(preference_ids, list) else [],
         review_ids=review_ids if isinstance(review_ids, list) else [],
         profile_version=str(profile_version) if profile_version is not None else None,
+    )
+
+
+def _borderline_notes(
+    question: QuestionRow, evaluation: PedagogicalEvaluation | None
+) -> list[str]:
+    spec = question.spec if isinstance(question.spec, dict) else {}
+    try:
+        requested = Difficulty(spec.get("difficulty") or question.difficulty)
+    except ValueError:
+        requested = question.difficulty
+    target = question.target_subtopic_id
+    if target is None:
+        return []
+    return borderline_notes(
+        evaluation, requested_difficulty=requested, target_subtopic_id=target
     )

@@ -70,6 +70,7 @@ function makeDetail(): QuestionDetail {
     taxonomy: { curriculum: "Python", topic: "Basics", subtopics: ["Variables"] },
     validation_passed: true,
     validation_checks: [{ name: "answer_matches", passed: true }],
+    borderline_notes: [] as string[],
     pedagogical_eval: {
       status: "completed",
       gate: "needs_review",
@@ -244,6 +245,17 @@ describe("ReviewScreen verdict", () => {
     expect(toast.error).toHaveBeenCalledWith("confirmed bad", {
       description: "This type's instruction is relearned from your reviews next round.",
     });
+  });
+
+  it("shows the borderline judge note on the review card", () => {
+    detail = {
+      ...makeDetail(),
+      borderline_notes: ["difficulty judge thinks this may be medium"],
+    };
+    render(<ReviewScreen />);
+    expect(screen.getByTestId("borderline-banner")).toHaveTextContent(
+      "difficulty judge thinks this may be medium",
+    );
   });
 
   it("marks an audit draft and records agree as a reject", async () => {
