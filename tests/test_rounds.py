@@ -279,7 +279,13 @@ def _round(engine: Engine, round_id: int) -> GenerationRoundRow:
 
 def _round_questions(engine: Engine, round_id: int) -> list[QuestionRow]:
     with Session(engine) as fresh:
-        return list(fresh.scalars(select(QuestionRow).where(QuestionRow.round_id == round_id)))
+        return list(
+            fresh.scalars(
+                select(QuestionRow).where(
+                    QuestionRow.round_id == round_id, QuestionRow.audit.is_(False)
+                )
+            )
+        )
 
 
 def _target(env: SimpleNamespace, difficulty: str = "medium", style: str = STYLE_A.id) -> dict:
@@ -452,7 +458,9 @@ def test_a_question_still_failing_after_the_last_attempt_is_dropped(
     assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
     assert _round_questions(engine, row.id) == []
     with Session(engine) as fresh:
-        assert fresh.scalars(select(QuestionRow)).all() == []
+        audits = list(fresh.scalars(select(QuestionRow).where(QuestionRow.audit.is_(True))))
+    assert len(audits) == 1
+    assert audits[0].audit_metric == "difficulty"
     done = _round(engine, row.id)
     assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 0, 1)
 

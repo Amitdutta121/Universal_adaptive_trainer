@@ -31,6 +31,8 @@ from app.subjects import profile_for_version
 SOURCE_REVIEW = "review"
 #: ``MemoryEpisodeRow.source`` of a failed attempt of a round question the professor approved.
 SOURCE_RETRY = "retry"
+#: ``MemoryEpisodeRow.source`` of a verdict on a judge-rejected audit draft (m9).
+SOURCE_AUDIT = "audit"
 
 #: Retry lessons shown per target.
 MAX_RETRY_LESSONS = 3
@@ -97,7 +99,7 @@ def record_review_episode(
         MemoryEpisodeRow(
             review_id=review.id,
             question_id=question.id,
-            source=SOURCE_REVIEW,
+            source=SOURCE_AUDIT if question.audit else SOURCE_REVIEW,
             subject=profile_for_version(session, question.curriculum_version_id).personal_key,
             question_type=question.question_type,
             topic_id=reviewed.topic_id,
@@ -142,7 +144,11 @@ def record_retry_episodes(session: Session, review: ProfessorReviewRow) -> list[
     good enough. Once per question; a repeat returns nothing. No model call.
     """
     question = review.question
-    if review.decision is ReviewDecision.REJECT or question.target_subtopic_id is None:
+    if (
+        question.audit
+        or review.decision is ReviewDecision.REJECT
+        or question.target_subtopic_id is None
+    ):
         return []
     repository = MemoryEpisodeRepository(session)
     if repository.of_source(SOURCE_RETRY, question_id=question.id):

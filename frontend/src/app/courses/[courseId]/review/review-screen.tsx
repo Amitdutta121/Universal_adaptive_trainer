@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Loader2 } from "lucide-react";
+import { AlertCircle, ExternalLink, Loader2 } from "lucide-react";
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { toast } from "sonner";
@@ -126,7 +126,9 @@ export function ReviewScreen() {
         }
       }
 
-      await setAfter(detail.question.id);
+      if (!detail.question.audit) {
+        await setAfter(detail.question.id);
+      }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Failed to save review.";
       toast.error("Review not saved", { description: message });
@@ -246,6 +248,20 @@ export function ReviewScreen() {
 
       {detail ? (
         <>
+          {detail.question.audit ? (
+            <div className="review-banner" data-tone="warn" data-testid="audit-banner">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
+              <div>
+                <div className="review-banner-title">A judge rejected this — do you agree?</div>
+                <p className="review-banner-copy">
+                  {detail.question.audit_metric === "topic" ? "Topic" : "Difficulty"} judge
+                  {detail.question.audit_reason
+                    ? `: ${detail.question.audit_reason}`
+                    : " flagged this draft."}
+                </p>
+              </div>
+            </div>
+          ) : null}
           <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="min-w-0 space-y-4">
               <ReviewQuestionSurface
@@ -308,6 +324,7 @@ export function ReviewScreen() {
             onCommentChange={form.setComment}
             onSubmit={onSubmit}
             onSkip={() => void setAfter(detail.question.id)}
+            audit={detail.question.audit}
           />
         </>
       ) : null}

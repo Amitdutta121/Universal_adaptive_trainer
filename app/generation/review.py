@@ -99,6 +99,9 @@ class RoundReview:
         self.last_custom: list[CustomJudgeResult] = []
         #: Stored questions the last reviewed attempt resembles; flagged when it is kept.
         self.last_similar: list[SimilarMatch] = []
+        #: Last judge-failed draft, so a later passing attempt can still leave an audit (m9).
+        self.last_failed_question: Question | None = None
+        self.last_failed_evaluation: PedagogicalEvaluation | None = None
 
     def __call__(self, question: Question) -> list[QuestionCheck]:
         self.last_evaluation = None
@@ -219,4 +222,9 @@ class RoundReview:
                     failed.append(
                         _failed(CUSTOM_RULE_CHECK, f'no result for rule "{rule.rule_text}"')
                     )
+        if failed and any(
+            check.name in (DIFFICULTY_JUDGE_CHECK, TOPIC_JUDGE_CHECK) for check in failed
+        ):
+            self.last_failed_question = question.model_copy(deep=True)
+            self.last_failed_evaluation = evaluation
         return failed

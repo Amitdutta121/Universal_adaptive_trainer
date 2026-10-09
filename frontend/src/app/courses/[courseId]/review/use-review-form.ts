@@ -33,7 +33,7 @@ export function useReviewForm(detail: QuestionDetail | null) {
 
   useEffect(() => {
     if (!detail) return;
-    setDecision("approve");
+    setDecision(detail.question.audit ? "reject" : "approve");
     setComment("");
     setPromptEdit(detail.question.prompt);
     setReferenceEdit(detail.reference_solution ?? "");

@@ -60,6 +60,9 @@ function makeDetail(): QuestionDetail {
       kind: "discrete",
       difficulty: "easy",
       subtopic_ids: [1],
+      audit: false,
+      audit_metric: null,
+      audit_reason: null,
     },
     reference_solution: null,
     tests: null,
@@ -240,6 +243,37 @@ describe("ReviewScreen verdict", () => {
 
     expect(toast.error).toHaveBeenCalledWith("confirmed bad", {
       description: "This type's instruction is relearned from your reviews next round.",
+    });
+  });
+
+  it("marks an audit draft and records agree as a reject", async () => {
+    detail = {
+      ...makeDetail(),
+      question: {
+        ...makeDetail().question,
+        audit: true,
+        audit_metric: "difficulty",
+        audit_reason: "this is hard, not easy",
+      },
+    };
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+    expect(screen.getByTestId("audit-banner")).toHaveTextContent(
+      "A judge rejected this — do you agree?",
+    );
+    expect(screen.getByTestId("audit-banner")).toHaveTextContent("this is hard, not easy");
+    expect(screen.queryByRole("button", { name: /Skip/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit question/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(screen.getByRole("button", { name: /Agree and continue/ }));
+    expect(submitReview).toHaveBeenCalledWith({
+      questionId: 42,
+      body: {
+        decision: "reject",
+        corrected_difficulty: "hard",
+        corrected_subtopic_ids: [2],
+      },
     });
   });
 

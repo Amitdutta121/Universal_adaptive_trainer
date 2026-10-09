@@ -4606,6 +4606,15 @@ export interface components {
              * @default false
              */
             live_generated: boolean;
+            /**
+             * Audit
+             * @default false
+             */
+            audit: boolean;
+            /** Audit Metric */
+            audit_metric?: string | null;
+            /** Audit Reason */
+            audit_reason?: string | null;
         };
         /**
          * QuestionTaxonomy

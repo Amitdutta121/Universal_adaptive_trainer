@@ -959,6 +959,10 @@ class QuestionSummary(BaseModel):
     #: Generated on demand for a student who had nothing left to answer; that student may
     #: have seen it before the professor did.
     live_generated: bool = False
+    #: A judge-rejected draft kept so the professor can say whether they agree (m9).
+    audit: bool = False
+    audit_metric: str | None = None
+    audit_reason: str | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -1001,6 +1005,9 @@ class QuestionSummary(BaseModel):
             target_subtopic_id=row.target_subtopic_id,
             trust_provenance=row.trust_provenance,
             live_generated=bool(row.live_generated),
+            audit=bool(row.audit),
+            audit_metric=row.audit_metric,
+            audit_reason=row.audit_reason,
         )
 
 

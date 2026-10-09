@@ -12,11 +12,18 @@ from collections.abc import Callable, Sequence
 
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, EvaluationTrigger, QuestionType
+from app.domain.enums import Difficulty, EvaluationTrigger, JudgeMetricId, QuestionType
 from app.domain.questions import Question
 from app.errors import InvalidQuestionSpecError
-from app.evaluation import PedagogicalJudge, new_run_id, record_evaluation, skipped_evaluation
+from app.evaluation import (
+    PedagogicalEvaluation,
+    PedagogicalJudge,
+    new_run_id,
+    record_evaluation,
+    skipped_evaluation,
+)
 from app.evaluation.custom import CustomRule
+from app.evaluation.schema import MetricStatus
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
 from app.generation.prompts import RoundExamples
@@ -302,9 +309,11 @@ class GenerationService:
         )
         question = self._question_for_round(spec, version=version, review=review, examples=examples)
         if not question.generation_attempts or not question.generation_attempts[-1].usable:
+            self._maybe_store_audit(spec, review, round_id)
             return None
         evaluation = review.last_evaluation
         if evaluation is None:
+            self._maybe_store_audit(spec, review, round_id)
             return None
 
         row = self._row_from_question(question)
@@ -343,6 +352,7 @@ class GenerationService:
             review.last_custom,
             hold_for_review=any(match.duplicate for match in review.last_similar),
         )
+        self._maybe_store_audit(spec, review, round_id)
         return row
 
     def _question_for_round(
@@ -418,6 +428,66 @@ class GenerationService:
             created_at=question.created_at,
             updated_at=question.updated_at,
         )
+
+    def _maybe_store_audit(
+        self,
+        spec: QuestionSpec,
+        review: RoundReview,
+        round_id: int | None,
+    ) -> None:
+        """Keep at most two judge-failed drafts per round for the professor to confirm."""
+        if round_id is None:
+            return
+        question = review.last_failed_question
+        evaluation = review.last_failed_evaluation
+        if question is None or evaluation is None:
+            return
+        metric = _audit_metric(evaluation)
+        if metric is None:
+            return
+        if self._questions.count_audit_for_round(round_id) >= 2:
+            return
+        row = self._row_from_question(question)
+        row.style_id = spec.style_id
+        row.round_id = round_id
+        row.target_subtopic_id = spec.target_subtopic_id
+        row.audit = True
+        row.audit_metric = metric
+        row.audit_reason = _audit_reason(evaluation, metric)
+        row = self._questions.add(row)
+        report = question.validation_report or self._validator.validate(question)
+        row.validation_report = report
+        row.status = report.resulting_status()
+        evaluation = evaluation.model_copy(update={"question_id": row.id})
+        record_evaluation(
+            self._session,
+            row.id,
+            evaluation,
+            run_id=new_run_id(),
+            trigger=EvaluationTrigger.GENERATION,
+        )
+        self._session.flush()
+
+
+def _audit_metric(evaluation: PedagogicalEvaluation) -> str | None:
+    """Which completed judge failed first; skip ERROR / skipped panels."""
+    difficulty = evaluation.metric(JudgeMetricId.DIFFICULTY)
+    if (
+        difficulty is not None
+        and difficulty.status is MetricStatus.COMPLETED
+        and difficulty.passed is False
+    ):
+        return "difficulty"
+    topic = evaluation.metric(JudgeMetricId.SUBTOPIC)
+    if topic is not None and topic.status is MetricStatus.COMPLETED and topic.passed is False:
+        return "topic"
+    return None
+
+
+def _audit_reason(evaluation: PedagogicalEvaluation, metric: str) -> str:
+    key = JudgeMetricId.DIFFICULTY if metric == "difficulty" else JudgeMetricId.SUBTOPIC
+    result = evaluation.metric(key)
+    return (result.rationale or "").strip() if result is not None else ""
 
 
 def _harden_follow_up(seed: Question) -> str:

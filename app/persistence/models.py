@@ -570,6 +570,11 @@ class QuestionRow(TimestampMixin, Base):
     #: may be served to that student before the professor reviews it; to anyone else only
     #: once approved.
     live_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: A judge-failed draft kept so the professor can say whether they agree (ADR-064, m9).
+    #: Never usable unless the professor approves it.
+    audit: Mapped[bool] = mapped_column(Boolean, default=False)
+    audit_metric: Mapped[str | None] = mapped_column(String(32), default=None)
+    audit_reason: Mapped[str | None] = mapped_column(Text, default=None)
 
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
@@ -1053,9 +1058,9 @@ class MemoryEpisodeRow(TimestampMixin, Base):
     every judge said about the question at that moment. The generator retrieves episodes as
     examples (:mod:`app.retrieval.examples`); the judges will read the same rows (m11).
 
-    ``source`` says what produced the verdict: ``review`` today; audits of judge-rejected
-    drafts and borderline judge failures will add their own values (m9, m10), which is why
-    ``review_id`` may be ``NULL``. Scoped by ``subject``, the course's personal key
+    ``source`` says what produced the verdict: ``review``, ``retry``, or ``audit`` (m9);
+    borderline judge failures add their own value in m10, which is why ``review_id`` may
+    be ``NULL``. Scoped by ``subject``, the course's personal key
     (:attr:`app.subjects.SubjectProfile.personal_key`), so one professor's or subject's
     memory never reaches another's.
     """
