@@ -13,7 +13,9 @@
  * previous course's cached books; a fresh document starts from an empty cache.
  */
 
-import { Plus } from "lucide-react";
+import { LogOut, Plus } from "lucide-react";
+import type { Route } from "next";
+import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
@@ -30,7 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
-import { useCoursesOverview, useUpdateCourse } from "@/lib/api/queries";
+import { useCoursesOverview, useCurrentUser, useLogout, useUpdateCourse } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 import { coursePath } from "@/lib/course";
 import { NewCourseDialog } from "./new-course-dialog";
@@ -251,7 +253,7 @@ function RecentActivity({ events }: { events: ActivityEvent[] }) {
       ) : (
         <ul className="mt-3 space-y-4">
           {events.map((event) => (
-            <li key={`${event.kind}-${event.at}-${event.text}`} className="text-sm">
+            <li key={`${event.kind}-${event.at}-${event.text}`} className="wrap-anywhere text-sm">
               <div className="leading-5">{event.text}</div>
               <div className="mt-0.5 text-muted-foreground text-xs">
                 {event.course_name ? `${event.course_name} · ` : ""}
@@ -347,6 +349,30 @@ function CourseFormDialog({
 
 // --------------------------------------------------------------------- screen
 
+/** My courses has no sidebar, so the account and sign-out live in its header. */
+function SignOutButton() {
+  const router = useRouter();
+  const currentUser = useCurrentUser();
+  const logout = useLogout();
+
+  const signOut = async () => {
+    await logout.mutateAsync();
+    router.push("/login" as Route);
+  };
+
+  return (
+    <>
+      {currentUser.data?.email ? (
+        <span className="text-muted-foreground text-sm">{currentUser.data.email}</span>
+      ) : null}
+      <Button variant="outline" disabled={logout.isPending} onClick={() => void signOut()}>
+        <LogOut />
+        Sign out
+      </Button>
+    </>
+  );
+}
+
 export function CoursesScreen() {
   const overview = useCoursesOverview();
   // The course whose settings are open, if any.
@@ -371,6 +397,7 @@ export function CoursesScreen() {
           <Plus />
           New course
         </Button>
+        <SignOutButton />
       </header>
 
       <VerifyEmailBanner />
