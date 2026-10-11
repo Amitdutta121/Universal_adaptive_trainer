@@ -22,6 +22,7 @@ from app.evaluation.schema import (
     evaluation_from_metrics,
     failed_metric,
 )
+from app.generation.facets import FacetList
 from app.generation.schemas import TaxonomyClaim
 
 
@@ -78,13 +79,13 @@ def verdict_for(
     raise AssertionError(f"Unexpected response model: {response_model!r}")
 
 
-
 def as_live(draft: BaseModel) -> BaseModel:
     """The draft as the live structured-output library returns it: an instance of a subclass
     that instructor builds from the response model (never the model class itself)."""
     from instructor.function_calls import openai_schema
 
     return openai_schema(type(draft)).model_validate(draft.model_dump(by_alias=True))
+
 
 class MetricJudgeClient:
     """Answers whichever verdict it is asked for, configurably.
@@ -106,6 +107,7 @@ class MetricJudgeClient:
         should_have_generated: bool = True,
         draft: BaseModel | None = None,
         description: str = "fake/judge-model",
+        facets: list[str] | None = None,
     ) -> None:
         # With a draft in hand, default to agreeing with what it claimed: a
         # test about generation should not have to restate the taxonomy twice to
@@ -125,19 +127,36 @@ class MetricJudgeClient:
         self.calls = 0
         self.prompts: list[str] = []
         self.generation_calls: list[dict[str, Any]] = []
+        self.facets = facets or ["facet one", "facet two", "facet three", "facet four"]
+        self.facet_calls = 0
 
     @property
     def description(self) -> str:
         return self._description
 
     def complete_structured(
-        self, *, system: str, prompt: str, response_model: type[BaseModel], **_: Any
+        self,
+        *,
+        system: str,
+        prompt: str,
+        response_model: type[BaseModel],
+        history: Any = (),
+        **_: Any,
     ) -> BaseModel:
+        if response_model is FacetList:
+            # Counted apart, so tests counting generation and judge calls are unaffected.
+            self.facet_calls += 1
+            return FacetList(facets=list(self.facets))
         self.calls += 1
         self.prompts.append(prompt)
         if self.draft is not None and isinstance(self.draft, response_model):
             self.generation_calls.append(
-                {"system": system, "prompt": prompt, "model": response_model}
+                {
+                    "system": system,
+                    "prompt": prompt,
+                    "model": response_model,
+                    "history": list(history),
+                }
             )
             return as_live(self.draft)
         if response_model is IssuesVerdict:

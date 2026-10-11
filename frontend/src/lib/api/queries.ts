@@ -20,8 +20,8 @@ import {
 import { API_BASE_URL } from "@/lib/env";
 import { ApiError, api, COURSE_HEADER, unwrap } from "./client";
 import type {
+  GuidelineListResponse,
   QuestionStatus,
-  QuestionType,
   Schemas,
   TreeUpdate,
   TypeInstructionListResponse,
@@ -79,11 +79,15 @@ export const qk = {
   instructions: {
     all: ["instructions"] as const,
     list: () => ["instructions", "list"] as const,
+    guidelines: () => ["instructions", "guidelines"] as const,
   },
   judgePrompts: {
     all: ["judge-prompts"] as const,
     list: () => ["judge-prompts", "list"] as const,
     stats: () => ["judge-prompts", "stats"] as const,
+  },
+  judges: {
+    scorecard: () => ["judges", "scorecard"] as const,
   },
   coverage: {
     all: ["coverage"] as const,
@@ -1029,13 +1033,25 @@ export const instructionsQuery = () =>
 
 export const useInstructions = () => useQuery(instructionsQuery());
 
-export function useRefreshInstruction() {
+/**
+ * The generator guidelines learned from reviews (ADR-063): pending until two reviews
+ * support one or the professor confirms it; only active ones are sent.
+ */
+export const guidelinesQuery = () =>
+  queryOptions({
+    queryKey: qk.instructions.guidelines(),
+    queryFn: () => unwrap(api.GET("/api/guidelines")) as Promise<GuidelineListResponse>,
+  });
+
+export const useGuidelines = () => useQuery(guidelinesQuery());
+
+export function useConfirmGuideline() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (questionType: QuestionType) =>
+    mutationFn: (guidelineId: number) =>
       unwrap(
-        api.POST("/api/instructions/{question_type}/refresh", {
-          params: { path: { question_type: questionType } },
+        api.POST("/api/guidelines/{guideline_id}/confirm", {
+          params: { path: { guideline_id: guidelineId } },
         }),
       ),
     onSuccess: () => {
@@ -1045,13 +1061,13 @@ export function useRefreshInstruction() {
   });
 }
 
-export function useDeleteInstructionRule() {
+export function useDeleteGuideline() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ questionType, ruleIndex }: { questionType: QuestionType; ruleIndex: number }) =>
+    mutationFn: (guidelineId: number) =>
       unwrap(
-        api.DELETE("/api/instructions/{question_type}/rules/{rule_index}", {
-          params: { path: { question_type: questionType, rule_index: ruleIndex } },
+        api.DELETE("/api/guidelines/{guideline_id}", {
+          params: { path: { guideline_id: guidelineId } },
         }),
       ),
     onSuccess: () => {
@@ -1088,6 +1104,17 @@ export const judgeStatsQuery = () =>
   });
 
 export const useJudgeStats = () => useQuery(judgeStatsQuery());
+
+/** Per-judge scorecard: agreement, κ, Wilson 95% range, retries and drops (ADR-064, m8). */
+export const judgeScorecardQuery = () =>
+  queryOptions({
+    queryKey: qk.judges.scorecard(),
+    queryFn: () => unwrap(api.GET("/api/judges/scorecard")),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+export const useJudgeScorecard = () => useQuery(judgeScorecardQuery());
 
 type JudgeMetricId = Schemas["JudgeMetricId"];
 

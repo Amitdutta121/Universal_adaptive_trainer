@@ -284,9 +284,12 @@ def test_personalization_is_the_type_instruction(session) -> None:
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module)
 
-    from app.personalization import refresh_type_instruction
+    # Since m5 the generator learns guidelines (app.memory); the rule rewriter is retired.
+    from app.memory import distill_guidelines
 
-    assert callable(refresh_type_instruction)
+    assert callable(distill_guidelines)
+    with pytest.raises(ImportError):
+        from app.personalization import refresh_type_instruction  # noqa: F401
 
 
 def test_adaptive_engine_is_implemented(session) -> None:

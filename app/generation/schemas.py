@@ -9,6 +9,10 @@ its ``content`` object.
 
 from __future__ import annotations
 
+import hashlib
+import random
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import QuestionKind, QuestionType
@@ -64,6 +68,41 @@ class MultipleChoiceDraft(TaxonomyClaim):
             msg = "correct_option_index must refer to an option."
             raise ValueError(msg)
         return self
+
+
+#: An option letter in an explanation: "option B", "choice (C)", "answer D", or "(A)".
+_LETTER_REFERENCE = re.compile(
+    r"\b((?i:option|choice|answer)\s+\(?)([A-Z])(\)?)(?!\w)|(\()([A-Z])(\))"
+)
+
+
+def shuffle_options(draft: MultipleChoiceDraft) -> MultipleChoiceDraft:
+    """The draft with its options in an order seeded by the prompt, answer index following.
+
+    Models put the correct answer first far more often than chance (7 of 9 at A in one
+    round); the drift check only reports that. The seed is the prompt's hash, so the same
+    draft always shuffles the same way. Letter references in the explanation ("option B",
+    "(B)") are rewritten to the new letters in one pass; other text is untouched.
+    """
+    count = len(draft.options)
+    order = list(range(count))
+    seed = int(hashlib.sha256(draft.prompt.encode("utf-8")).hexdigest()[:16], 16)
+    random.Random(seed).shuffle(order)
+    new_letter = {chr(ord("A") + old): chr(ord("A") + new) for new, old in enumerate(order)}
+
+    def relabel(match: re.Match[str]) -> str:
+        prefix, letter, suffix = (
+            match.group(1, 2, 3) if match.group(2) is not None else match.group(4, 5, 6)
+        )
+        return f"{prefix}{new_letter.get(letter, letter)}{suffix}"
+
+    return draft.model_copy(
+        update={
+            "options": [draft.options[old] for old in order],
+            "correct_option_index": order.index(draft.correct_option_index),
+            "explanation": _LETTER_REFERENCE.sub(relabel, draft.explanation),
+        }
+    )
 
 
 class TrueFalseDraft(TaxonomyClaim):

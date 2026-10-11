@@ -13,14 +13,24 @@ Planning (synchronous, no model call):
   (and able to be written at that difficulty): each professor reject of a round question
   in that style and cell halves the weight, two rejects exclude it. When every style is
   excluded, the least-rejected ones are used rather than leaving the cell unreachable.
+* A cell whose subtopic's **facets** are already listed (:mod:`app.generation.facets`) gets
+  at most one target per facet its questions do not cover; with none left it is
+  **saturated**, gets no target, and the round names it.
 
-Running (background): per target, retrieve the section that best teaches the subtopic
+Running (background): first the **lesson run** (ADR-063) learns from the reviews since the
+last round, so the whole round is generated with them; a failure there is recorded on the
+round and does not stop it. Then each target is given a facet (:func:`assign_facets`, which
+lists a subtopic's facets the first time; a target whose cell turns out saturated is skipped).
+Then, per target, retrieve the section that best teaches the subtopic
 (embedding retrieval as in ``POST /coverage/generation-runs``, falling back to the
 subtopic's evidence section). A hard target asks the generatability judge once, before
 any draft: if the lesson cannot support a hard question, the target is skipped and the
 reason is stored, separate from a drop. Otherwise
 :meth:`GenerationService.generate_round_question` judges inside the retry loop and drops
-what still fails after the last attempt.
+what still fails after the last attempt -- except a duplicate of a stored question, which is
+retried and, on the last attempt, kept with a similarity flag (ADR-063 point 6). Once the
+targets are done, a deterministic **drift check** (:mod:`app.generation.drift`) compares the
+round's questions with the previous round's and stores any warning on the round.
 """
 
 from __future__ import annotations
@@ -34,7 +44,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, QuestionStatus, RoundStatus
+from app.domain.enums import Difficulty, QuestionStatus, QuestionType, RoundStatus
 from app.errors import (
     AdaptiveTrainerError,
     ConfigurationError,
@@ -46,6 +56,16 @@ from app.errors import (
 from app.evaluation import new_run_id
 from app.evaluation.custom import CustomRule
 from app.evaluation.service import PedagogicalJudge
+from app.feedback.lessons import apply_pending_lessons
+from app.generation.drift import check_round_drift
+from app.generation.facets import covered_facets, facets_for, open_facets, stored_facets
+from app.generation.prompts import (
+    RejectedExample,
+    RoundExamples,
+    ShownExample,
+)
+from app.generation.review import ConceptChecker
+from app.generation.solve import BlindSolve, BlindSolver
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
 from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
@@ -55,7 +75,7 @@ from app.persistence.models import (
     GenerationRoundRow,
     QuestionRow,
     QuestionSetupRow,
-    QuestionSubtopicRow,
+    SubtopicRow,
 )
 from app.persistence.repositories import (
     CustomJudgeRepository,
@@ -63,7 +83,9 @@ from app.persistence.repositories import (
     QuestionSetupRepository,
 )
 from app.retrieval import SectionEmbeddingStore, SectionRetriever
+from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
+from app.retrieval.examples import retrieve_for_target
 from app.styles import QuestionStyle, get_library
 from app.subjects import profile_for_version
 
@@ -76,7 +98,7 @@ DEFAULT_ROUND_SIZE = 10
 STYLE_REJECT_FACTOR = 0.5
 #: A style rejected this many times in a cell is no longer drawn there.
 STYLE_EXCLUDE_REJECTS = 2
-#: Accepted questions of a cell shown to the generator as examples.
+#: Accepted questions shown to the generator as examples (same type; ADR-063 point 3).
 MAX_EXAMPLES_PER_CELL = 2
 
 #: Same floor as ``app.web.routes.api.coverage.MIN_SECTION_SCORE`` (generation must not
@@ -177,8 +199,13 @@ def plan_targets(
     size: int,
     rng: random.Random | None = None,
     cell_deficits: dict[Cell, int] | None = None,
+    saturated: list[Cell] | None = None,
 ) -> list[dict[str, object]]:
-    """Up to ``size`` targets ``{"subtopic_id", "difficulty", "style_id"}`` for one round."""
+    """Up to ``size`` targets ``{"subtopic_id", "difficulty", "style_id"}`` for one round.
+
+    A cell whose subtopic's facets are already listed gets at most one target per facet its
+    questions do not cover; with none left it is appended to ``saturated`` and gets none.
+    """
     rng = rng or random.Random()
     version = require_approved_version(session, setup.curriculum_version_id)
     known_subtopics = {s.id for topic in version.topics for s in topic.subtopics}
@@ -186,6 +213,8 @@ def plan_targets(
     library = {style.id: style for style in get_library(profile.storage_key)}
     counts = cell_counts(session, version.id)
     rejects = style_rejects(session, version.id)
+    listed = stored_facets(session, known_subtopics)
+    covered = covered_facets(session, version.id) if listed else {}
 
     order: list[Cell] = []
     deficit: dict[Cell, int] = {}
@@ -202,6 +231,13 @@ def plan_targets(
         candidates = _cell_styles(setup, library, cell)
         if missing <= 0 or not candidates:
             continue
+        if cell[0] in listed:
+            remaining = len(open_facets(listed[cell[0]], covered.get(cell, {})))
+            if remaining == 0:
+                if saturated is not None:
+                    saturated.append(cell)
+                continue
+            missing = min(missing, remaining)
         order.append(cell)
         deficit[cell] = missing
         styles[cell] = candidates
@@ -280,12 +316,14 @@ def refill_round(
     _lock_taxonomy(session, setup.curriculum_version_id)
     if active_round(session, setup.curriculum_version_id) is not None:
         return None
+    saturated: list[Cell] = []
     targets = plan_targets(
         session,
         setup,
         size=max(0, min(size, DEFAULT_ROUND_SIZE)),
         rng=rng,
         cell_deficits=cell_deficits,
+        saturated=saturated,
     )
     if not targets:
         return None
@@ -297,21 +335,34 @@ def refill_round(
             targets=targets,
             requested=len(targets),
             status=RoundStatus.QUEUED,
+            saturated=_cell_labels(session, saturated),
         )
     )
+
+
+def _cell_labels(session: Session, cells: list[Cell]) -> str | None:
+    """``"While loops (medium); Slicing (easy)"``, or ``None`` for no cells."""
+    labels = []
+    for subtopic_id, difficulty in dict.fromkeys(cells):
+        subtopic = session.get(SubtopicRow, subtopic_id)
+        name = subtopic.name if subtopic is not None else f"subtopic {subtopic_id}"
+        labels.append(f"{name} ({difficulty.value})")
+    return "; ".join(labels) or None
 
 
 def _create_round(
     session: Session, setup: QuestionSetupRow, *, size: int, rng: random.Random | None
 ) -> GenerationRoundRow:
     rounds = GenerationRoundRepository(session)
-    targets = plan_targets(session, setup, size=size, rng=rng)
+    saturated: list[Cell] = []
+    targets = plan_targets(session, setup, size=size, rng=rng, saturated=saturated)
     row = GenerationRoundRow(
         setup_id=setup.id,
         number=rounds.next_number(setup.id),
         targets=targets,
         requested=len(targets),
         status=RoundStatus.QUEUED if targets else RoundStatus.DONE,
+        saturated=_cell_labels(session, saturated),
     )
     if not targets:
         row.finished_at = datetime.now(UTC)
@@ -415,23 +466,56 @@ def _section_for(
 
 
 def accepted_examples(
-    session: Session, curriculum_version_id: int, cell: Cell, *, limit: int = MAX_EXAMPLES_PER_CELL
-) -> list[str]:
-    """Prompts of the newest approved questions in a cell, for the generator to match."""
+    session: Session,
+    curriculum_version_id: int,
+    cell: Cell,
+    question_type: QuestionType,
+    *,
+    section_id: int | None = None,
+    embedder: Embedder | None = None,
+    limit: int = MAX_EXAMPLES_PER_CELL,
+) -> RoundExamples:
+    """Approved questions of ``question_type`` to match, the cell's questions not to repeat,
+    at most one similar question the professor rejected, with why, and the retry lessons of
+    the type and subtopic.
+
+    Examples and the rejected question come from the memory episodes of the course's subject
+    (:mod:`app.memory`), examples with the professor's comment. The order is
+    :func:`app.retrieval.examples.retrieve_for_target`'s (ADR-063 point 3): the cell, then the
+    same topic, then the rest, by similarity to the target's ``section_id`` when there is an
+    embedder; examples from outside the cell are labelled "style only".
+    """
     subtopic_id, difficulty = cell
-    stmt = (
-        select(QuestionRow.prompt)
-        .join(QuestionSubtopicRow, QuestionSubtopicRow.question_id == QuestionRow.id)
-        .where(
-            QuestionRow.curriculum_version_id == curriculum_version_id,
-            QuestionRow.status == QuestionStatus.APPROVED,
-            QuestionRow.difficulty == difficulty,
-            QuestionSubtopicRow.subtopic_id == subtopic_id,
-        )
-        .order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
-        .limit(limit)
+    section_text = (
+        SourceRetrieval(session).get_section(section_id).text if section_id is not None else ""
     )
-    return list(session.scalars(stmt))
+    found = retrieve_for_target(
+        session,
+        embedder,
+        curriculum_version_id=curriculum_version_id,
+        subject=profile_for_version(session, curriculum_version_id).personal_key,
+        question_type=question_type,
+        subtopic_id=subtopic_id,
+        difficulty=difficulty,
+        section_text=section_text,
+        limit=limit,
+    )
+    rejected = found.rejected
+    return RoundExamples(
+        accepted=[
+            ShownExample(example.text, example.comment)
+            for example in found.examples
+            if example.same_cell
+        ],
+        style_only=[
+            ShownExample(example.text, example.comment)
+            for example in found.examples
+            if not example.same_cell
+        ],
+        in_bank=[question.text for question in found.in_bank],
+        rejected=RejectedExample(rejected.text, rejected.because) if rejected else None,
+        avoid=found.avoid,
+    )
 
 
 def _skip_reason(notes: list[str]) -> str | None:
@@ -462,12 +546,62 @@ def _hard_lesson_supported(
     )
 
 
+def assign_facets(
+    session: Session,
+    version: CurriculumVersionRow,
+    targets: list[dict],
+    *,
+    client: StructuredLLMClient | None,
+) -> tuple[list[str | None], list[Cell]]:
+    """A facet per target, and the cells found saturated (their targets get ``None``).
+
+    Lists the facets of each subtopic not listed yet (one call each, committed). Each target
+    gets the first facet its cell's questions do not cover and no earlier target of the
+    cell took. A subtopic whose facets cannot be listed (any failure) leaves its targets
+    without a facet rather than costing the round.
+    """
+    named = {
+        subtopic.id: (subtopic, topic.name)
+        for topic in version.topics
+        for subtopic in topic.subtopics
+    }
+    facets: dict[int, list[str]] = {}
+    for subtopic_id in dict.fromkeys(int(target["subtopic_id"]) for target in targets):
+        if subtopic_id not in named:
+            continue
+        try:
+            facets[subtopic_id] = facets_for(session, *named[subtopic_id], client=client)
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            logger.warning("round: no facets for subtopic %s: %s", subtopic_id, exc)
+    covered = covered_facets(session, version.id) if facets else {}
+    assigned: list[str | None] = []
+    saturated: list[Cell] = []
+    taken: dict[Cell, set[str]] = defaultdict(set)
+    for target in targets:
+        cell = (int(target["subtopic_id"]), Difficulty(target["difficulty"]))
+        listed = facets.get(cell[0])
+        if not listed:
+            assigned.append(None)
+            continue
+        free = open_facets(listed, set(covered.get(cell, {})) | taken[cell])
+        if not free:
+            assigned.append(None)
+            saturated.append(cell)
+            continue
+        taken[cell].add(free[0])
+        assigned.append(free[0])
+    return assigned, saturated
+
+
 def _generate_round(
     session: Session,
     row: GenerationRoundRow,
     *,
     client: StructuredLLMClient | None,
     embedder: Embedder | None,
+    solver: BlindSolve | None = None,
 ) -> None:
     """Generate every target of a running round, committing after each one."""
     from app.generation.service import GenerationService
@@ -490,14 +624,28 @@ def _generate_round(
         if embedder is not None
         else None
     )
-    service = GenerationService(session, client=client)
+    service = GenerationService(
+        session,
+        client=client,
+        snapshot_id=row.judge_snapshot_id,
+        memory_as_of=row.started_at,
+    )
+    # Without an embedder only exact duplicates are caught (ADR-063 point 6).
+    duplicates = DuplicateChecker(session, embedder)
+    # A resembling (not duplicate) question may be the same idea reworded: one cheap call.
+    concepts = ConceptChecker(client)
     run_id = new_run_id()
     targets = list(row.targets or [])
-    produced = dropped = skipped = 0
+    produced = dropped = skipped = first_passed = 0
     skip_notes: list[str] = []
     provider_errors: list[str] = []
+    facets, saturated = assign_facets(session, version, targets, client=client)
+    if saturated:
+        labels = [row.saturated, _cell_labels(session, saturated)]
+        rounds.update(round_id, saturated="; ".join(label for label in labels if label))
+        session.commit()
 
-    for target in targets:
+    for index, target in enumerate(targets):
         # Asked to stop from the Jobs panel: the targets already done are committed.
         raise_if_cancelled(session, row)
         subtopic_id = int(target["subtopic_id"])
@@ -505,7 +653,10 @@ def _generate_round(
         style = library.get(str(target.get("style_id")))
         outcome = "dropped"
         section_id = _section_for(retriever, version, subtopic_id)
-        if style is None or section_id is None:
+        if (subtopic_id, difficulty) in saturated and facets[index] is None:
+            outcome = "skipped"
+            logger.info("round %s: cell %s/%s is saturated", round_id, subtopic_id, difficulty)
+        elif style is None or section_id is None:
             logger.warning(
                 "round %s: dropped subtopic %s/%s: %s",
                 round_id,
@@ -542,16 +693,30 @@ def _generate_round(
                         source_section_ids=[section_id],
                         target_subtopic_id=subtopic_id,
                         style_id=style.id,
+                        facet=facets[index],
                     )
                     question = service.generate_round_question(
                         spec,
                         version=version,
                         round_id=round_id,
                         rules=rules,
-                        examples=accepted_examples(session, version_id, (subtopic_id, difficulty)),
+                        examples=accepted_examples(
+                            session,
+                            version_id,
+                            (subtopic_id, difficulty),
+                            style.question_type,
+                            section_id=section_id,
+                            embedder=embedder,
+                        ),
                         run_id=run_id,
+                        duplicates=duplicates,
+                        concepts=concepts,
+                        solver=solver,
                     )
                     outcome = "produced" if question is not None else "dropped"
+                    attempts = question.generation_attempts if question is not None else []
+                    if attempts and attempts[0].usable:
+                        first_passed += 1
                 except InvalidQuestionSpecError as exc:
                     logger.warning("round %s: target refused: %s", round_id, exc.detail)
                 except (LLMRequestError, MalformedModelOutputError) as exc:
@@ -572,11 +737,52 @@ def _generate_round(
             dropped=dropped,
             skipped=skipped,
             skip_reason=_skip_reason(skip_notes),
+            first_attempt_passed=first_passed,
         )
         session.commit()
 
     if produced == 0 and provider_errors:
         raise LLMRequestError(provider_errors[-1], detail="Every target of the round failed.")
+
+
+def _apply_lessons(
+    session: Session, row: GenerationRoundRow, client: StructuredLLMClient | None
+) -> None:
+    """Learn from the pending reviews of this round's subject, and say so on the round.
+
+    Never raises: a round with stale lessons is still a round, and the error on the row is
+    what tells the professor this one was generated without them.
+    """
+    round_id = row.id
+    setup = QuestionSetupRepository(session).get(row.setup_id)
+    profile = profile_for_version(session, setup.curriculum_version_id)
+    try:
+        run = apply_pending_lessons(
+            session,
+            round_id=round_id,
+            profile=profile,
+            client=client,
+        )
+        applied, error = run.applied, run.error
+    except Exception as exc:
+        logger.exception("round %s: the lesson run failed", round_id)
+        session.rollback()
+        applied = 0
+        error = (
+            exc.message
+            if isinstance(exc, AdaptiveTrainerError)
+            else f"Lessons were not applied ({type(exc).__name__})."
+        )
+    from app.evaluation.judge_memory import latest_promoted
+
+    snapshot = latest_promoted(session, profile.personal_key)
+    GenerationRoundRepository(session).update(
+        round_id,
+        lessons_applied=applied,
+        lessons_error=error,
+        judge_snapshot_id=snapshot.id if snapshot is not None else None,
+    )
+    session.commit()
 
 
 def run_round(
@@ -585,19 +791,23 @@ def run_round(
     client: StructuredLLMClient | None = None,
     embedder: Embedder | None = None,
     session_factory: Callable[[], Session] | None = None,
+    solver: BlindSolve | None = None,
 ) -> None:
     """Background body: generate every target of a round and record progress.
 
     Opens its own session (it runs after the request's session is closed). Sets ``RUNNING``
-    and ``started_at``; per target generates -> answer check -> enabled judges -> custom judges
+    and ``started_at``; applies the pending review lessons (``lessons_applied`` /
+    ``lessons_error``); per target generates -> answer check -> enabled judges -> custom judges
     (``app.evaluation.custom.run_custom_judges``), retrying with the failure reason up to
     ``MAX_GENERATION_ATTEMPTS`` and dropping on final failure. Stored questions carry
     ``style_id``, ``round_id`` and ``target_subtopic_id``. Increments ``produced`` / ``dropped``
-    and commits after each target so polling sees progress. Ends ``DONE`` with
-    ``finished_at``, or ``FAILED`` with ``error`` -- never raises out of the task.
+    / ``first_attempt_passed`` and commits after each target so polling sees progress. Ends
+    ``DONE`` with ``finished_at``, or ``FAILED`` with ``error`` -- never raises out of the task.
 
     ``client`` / ``embedder`` / ``session_factory`` default to the live ones; tests inject
-    fakes. A round that is not ``QUEUED`` is left alone, so a repeated task is harmless.
+    fakes. ``solver`` (blind solve) defaults to the live models only when ``client`` does too,
+    so a test with a fake client never reaches the network. A round that is not ``QUEUED`` is
+    left alone, so a repeated task is harmless.
     """
     if session_factory is None:
         from app.persistence.database import get_session_factory
@@ -622,13 +832,20 @@ def run_round(
             session.rollback()
             return
         session.commit()
+        _apply_lessons(session, row, client)
         _generate_round(
             session,
             row,
             client=client,
             embedder=embedder if embedder is not None else default_embedder(),
+            solver=solver if solver is not None or client is not None else BlindSolver(),
         )
-        rounds.update(round_id, status=RoundStatus.DONE, finished_at=datetime.now(UTC))
+        rounds.update(
+            round_id,
+            status=RoundStatus.DONE,
+            finished_at=datetime.now(UTC),
+            drift_warning=check_round_drift(session, row),
+        )
         session.commit()
     except JobCancelled:
         session.rollback()

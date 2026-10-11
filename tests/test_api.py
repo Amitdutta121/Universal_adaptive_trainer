@@ -17,18 +17,20 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.domain.enums import (
     CurriculumStatus,
+    GuidelineStatus,
     JudgeMetricId,
     QuestionStatus,
     QuestionType,
     ReviewDecision,
 )
 from app.generation.prompts import base_type_instruction
+from app.persistence.models import MemoryGuidelineRow
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
-    TypeInstructionRepository,
 )
 from app.question_types import implemented_types
+from app.subjects import PYTHON_PROFILE
 
 VALID_TAXONOMY = (
     b'{"schema_version":"1","label":"Uploaded","topics":['
@@ -815,102 +817,45 @@ def test_every_type_is_listed_with_its_shipped_instruction(client: TestClient) -
     assert multiple_choice["instruction"]
 
 
-def test_refreshing_a_type_with_no_reviews_changes_nothing(client: TestClient) -> None:
-    """Nothing to learn from is not an error, and must not invent rules."""
-    response = client.post("/api/instructions/multiple_choice/refresh")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["learned"] is False
-    assert payload["rule_count"] == 0
-    assert payload["review_count"] == 0
-
-
-def test_refreshing_an_unknown_type_is_a_json_422(client: TestClient) -> None:
-    response = client.post("/api/instructions/not_a_type/refresh")
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_request"
-
-
-def test_deleting_a_learned_instruction_reverts_to_the_shipped_default(
+def test_an_active_guideline_reaches_the_listed_instruction(
     client: TestClient, session: Session
 ) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="Use shorter distractors.",
-        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
-        review_count=1,
-    )
+    """The list shows the text the generator receives: shipped + active guidelines only."""
+    for text, status in (
+        ("Keep options short.", GuidelineStatus.ACTIVE),
+        ("Waiting for a second review.", GuidelineStatus.PENDING),
+    ):
+        session.add(
+            MemoryGuidelineRow(
+                target="generator:multiple_choice",
+                subject=PYTHON_PROFILE.personal_key,
+                text=text,
+                review_ids=[1, 2] if status is GuidelineStatus.ACTIVE else [3],
+                status=status,
+                confirmed_by_professor=False,
+            )
+        )
     session.commit()
 
-    response = client.delete("/api/instructions/multiple_choice")
+    listed = client.get("/api/instructions").json()["instructions"]
+    entries = {entry["question_type"]: entry for entry in listed}
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["question_type"] == QuestionType.MULTIPLE_CHOICE.value
-    assert payload["learned"] is False
-    assert payload["rules"] == []
-    assert payload["review_count"] == 0
-    assert payload["available_reviews"] == 0
-    assert payload["instruction"] == base_type_instruction(QuestionType.MULTIPLE_CHOICE)
-    assert TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE) is None
-
-
-def test_deleting_a_missing_instruction_is_a_json_404(client: TestClient) -> None:
-    response = client.delete("/api/instructions/multiple_choice")
-
-    assert response.status_code == 404
-    payload = response.json()
-    assert payload["error"]["code"] == "not_found"
-    assert "shipped instruction" in payload["error"]["message"]
-
-
-def test_deleting_one_learned_rule_keeps_the_other_rules(
-    client: TestClient, session: Session
-) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="ignored here",
-        rules=[
-            {"rule": "Keep options short.", "review_ids": [1]},
-            {"rule": "Make exactly one option correct.", "review_ids": [2]},
-        ],
-        review_count=2,
+    multiple_choice = entries["multiple_choice"]
+    assert multiple_choice["learned"] is True
+    assert multiple_choice["rules"] == ["Keep options short."]
+    assert multiple_choice["review_count"] == 2
+    assert multiple_choice["instruction"].startswith(
+        base_type_instruction(QuestionType.MULTIPLE_CHOICE)
     )
-    session.commit()
-
-    response = client.delete("/api/instructions/multiple_choice/rules/0")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["learned"] is True
-    assert payload["review_count"] == 2
-    assert payload["rules"] == ["Make exactly one option correct."]
-    assert "Keep options short." not in payload["instruction"]
-    assert "Make exactly one option correct." in payload["instruction"]
+    assert "Waiting for a second review." not in multiple_choice["instruction"]
+    assert entries["true_false"]["learned"] is False
+    assert client.get("/api/counts").json()["learned_instructions"] == 1
 
 
-def test_deleting_the_last_learned_rule_reverts_to_the_shipped_default(
-    client: TestClient, session: Session
-) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="ignored here",
-        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
-        review_count=1,
-    )
-    session.commit()
-
-    response = client.delete("/api/instructions/multiple_choice/rules/0")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["learned"] is False
-    assert payload["rules"] == []
-    assert payload["review_count"] == 0
-    assert payload["instruction"] == base_type_instruction(QuestionType.MULTIPLE_CHOICE)
-    assert TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE) is None
+def test_the_retired_rule_endpoints_are_gone(client: TestClient) -> None:
+    """Guidelines are learned by the lesson run and edited under /api/guidelines (m5)."""
+    assert client.post("/api/instructions/multiple_choice/refresh").status_code in {404, 405}
+    assert client.delete("/api/instructions/multiple_choice").status_code in {404, 405}
 
 
 # ------------------------------------------------------------------------- schema
@@ -930,6 +875,8 @@ def test_deleting_the_last_learned_rule_reverts_to_the_shipped_default(
         "/api/reviews",
         "/api/reviews/stats",
         "/api/instructions",
+        "/api/guidelines",
+        "/api/judges/scorecard",
         "/api/calibration/results",
         "/api/calibration/pairs",
         "/api/evaluation/batch-runs",
@@ -970,9 +917,10 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/reviews",
         "/api/reviews/stats",
         "/api/instructions",
-        "/api/instructions/{question_type}",
-        "/api/instructions/{question_type}/rules/{rule_index}",
-        "/api/instructions/{question_type}/refresh",
+        "/api/guidelines",
+        "/api/guidelines/{guideline_id}",
+        "/api/guidelines/{guideline_id}/confirm",
+        "/api/judges/scorecard",
         "/api/calibration/results",
         "/api/calibration/pairs",
         "/api/evaluation/batch-runs",

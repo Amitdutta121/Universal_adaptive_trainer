@@ -29,6 +29,7 @@ from app.calibration import (
     CalibrationPair,
     CalibrationReport,
     DifficultyConfusion,
+    JudgeScorecardReport,
     MetricAgreement,
     QuadrantCell,
     QuadrantCounts,
@@ -54,6 +55,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidelineStatus,
     JudgeBatchStatus,
     JudgeMetricId,
     MasteryBand,
@@ -81,6 +83,7 @@ from app.persistence.models import (
     CustomJudgeRow,
     GenerationRoundRow,
     JudgeBatchRunRow,
+    MemoryGuidelineRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
@@ -956,6 +959,12 @@ class QuestionSummary(BaseModel):
     #: Generated on demand for a student who had nothing left to answer; that student may
     #: have seen it before the professor did.
     live_generated: bool = False
+    #: A judge-rejected draft kept so the professor can say whether they agree (m9).
+    audit: bool = False
+    audit_metric: str | None = None
+    audit_reason: str | None = None
+    #: Other models, answering without the key, disagreed with it on the last attempt.
+    solve_flag: str | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -998,6 +1007,10 @@ class QuestionSummary(BaseModel):
             target_subtopic_id=row.target_subtopic_id,
             trust_provenance=row.trust_provenance,
             live_generated=bool(row.live_generated),
+            audit=bool(row.audit),
+            audit_metric=row.audit_metric,
+            audit_reason=row.audit_reason,
+            solve_flag=row.solve_flag,
         )
 
 
@@ -1047,6 +1060,8 @@ class QuestionDetail(BaseModel):
     original_reference_solution: str | None
     original_tests: str | None
     reviews: list[ReviewOut]
+    #: Judge failures that were kept as borderline rather than retried (m10).
+    borderline_notes: list[str] = Field(default_factory=list)
 
 
 class QuestionListResponse(BaseModel):
@@ -1304,8 +1319,8 @@ class ReviewOutcomeOut(BaseModel):
     held_out: bool
     #: What the cell calls for, stated rather than left for the client to map.
     action: str
-    #: Only the confirmed-bad cell relearns the generator, and only if the model
-    #: answered.
+    #: Filled by the next round's lesson run (ADR-063), so always unset when the
+    #: review is submitted.
     instruction_refreshed: bool = False
     refresh_error: str | None = None
     refresh_rule_count: int | None = None
@@ -1338,16 +1353,16 @@ CELL_ACTIONS: dict[QuadrantCell, str] = {
     ),
     QuadrantCell.MISSED: (
         "Two things went wrong: the generator wrote a question you would not keep, and the "
-        "judge passed it. So this type's instruction relearns and the named judge relearns. "
+        "judge passed it. So this type's instruction and the named judge relearn next round. "
         "The only cell that makes auto-acceptance unsafe."
     ),
     QuadrantCell.FALSE_ALARM: (
-        "The judge flagged a question you approved, so the named judge relearns. This costs "
-        "review time, never a student."
+        "The judge flagged a question you approved, so the named judge relearns next round. "
+        "This costs review time, never a student."
     ),
     QuadrantCell.CONFIRMED_BAD: (
         "The judge was right and the question was not good enough. The generator is what "
-        "to fix, so this type's instruction is relearned from your reviews."
+        "to fix, so this type's instruction is relearned from your reviews next round."
     ),
 }
 
@@ -1563,9 +1578,6 @@ class JudgeStatsOut(BaseModel):
     observations: int
     agreements: int
     agreement_rate: float | None
-    #: Disagreements a rewrite could learn from now (held-out third excluded).
-    learnable_disagreements: int
-    disagreements_needed: int
 
 
 class JudgeStatsResponse(BaseModel):
@@ -1575,12 +1587,42 @@ class JudgeStatsResponse(BaseModel):
     held_out_pairs: int
     held_out_needed: int
     learning_enabled: bool
-    #: True while any style of this subject is trusted; automatic rewrites wait.
+    #: True while any style of this subject is trusted; the judges' round learning waits.
     learning_paused: bool
     trusted_style_count: int
     min_observations: int
     min_agreement: float
     min_acceptance: float
+
+
+class JudgeScorecardOut(BaseModel):
+    """One judge on ``GET /api/judges/scorecard`` (ADR-064, m8)."""
+
+    metric: JudgeMetricId
+    n: int
+    agreements: int
+    agreement: float | None
+    kappa: float | None
+    agreement_low: float | None
+    agreement_high: float | None
+    missed: int
+    false_alarms: int
+    flags: int
+    flag_rate: float | None
+    retries: int
+    drops: int
+
+
+class JudgeScorecardResponse(BaseModel):
+    """Per-judge agreement, κ, Wilson 95% range, and round retries/drops."""
+
+    judges: list[JudgeScorecardOut]
+
+    @classmethod
+    def from_report(cls, report: JudgeScorecardReport) -> JudgeScorecardResponse:
+        return cls(
+            judges=[JudgeScorecardOut.model_validate(row.model_dump()) for row in report.judges]
+        )
 
 
 class JudgePromptRequest(BaseModel):
@@ -1629,12 +1671,11 @@ class JudgePromptRefreshResponse(BaseModel):
 
 
 class TypeInstructionOut(BaseModel):
-    """What the generator is told for one question type (ADR-033).
+    """What the generator is told for one question type (ADR-033, ADR-063).
 
-    ``learned`` distinguishes an instruction built from reviews from the shipped
-    default, so a professor can see at a glance which types their feedback has
-    actually reached. ``available_reviews`` is how many reviews a refresh would
-    draw on now, which is what makes a stale instruction visible.
+    ``instruction`` is the shipped text plus the type's **active** guidelines, ``rules`` their
+    texts, and ``learned`` whether there is any. ``review_count`` is the distinct reviews
+    behind them; ``available_reviews`` how many reviews of the type exist.
     """
 
     question_type: QuestionType
@@ -1650,13 +1691,52 @@ class TypeInstructionListResponse(BaseModel):
     instructions: list[TypeInstructionOut]
 
 
-class TypeInstructionRefreshResponse(BaseModel):
-    question_type: QuestionType
-    #: False when the type has no reviews yet, leaving the shipped text in place.
-    learned: bool
-    rule_count: int
-    review_count: int
-    instruction: str
+class GuidelineOut(BaseModel):
+    """One learned guideline (ADR-063): pending until two reviews or a confirm, then sent."""
+
+    id: int
+    #: ``generator:<question type>`` (``judge:<metric>`` from m11).
+    target: str
+    #: The question type of a generator guideline, else ``None``.
+    question_type: QuestionType | None
+    text: str
+    status: GuidelineStatus
+    #: Distinct reviews supporting it; two make it active.
+    support_count: int
+    review_ids: list[int]
+    confirmed_by_professor: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: MemoryGuidelineRow) -> GuidelineOut:
+        kind, _, name = row.target.partition(":")
+        question_type = (
+            QuestionType(name)
+            if kind == "generator" and name in {item.value for item in QuestionType}
+            else None
+        )
+        review_ids = list(dict.fromkeys(row.review_ids or []))
+        return cls(
+            id=row.id,
+            target=row.target,
+            question_type=question_type,
+            text=row.text,
+            status=row.status,
+            support_count=len(review_ids),
+            review_ids=review_ids,
+            confirmed_by_professor=row.confirmed_by_professor,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class GuidelineListResponse(BaseModel):
+    """``GET /api/guidelines``: the course subject's pending and active guidelines."""
+
+    #: Distinct supporting reviews that make a guideline active without a confirm.
+    active_support: int
+    guidelines: list[GuidelineOut]
 
 
 # ---------------------------------------------------------------------- calibration
@@ -2614,6 +2694,16 @@ class GenerationRoundOut(BaseModel):
     dropped: int
     skipped: int = 0
     skip_reason: str | None = None
+    #: Reviews the round learned from before generating, and why some were not (ADR-063).
+    lessons_applied: int = 0
+    lessons_error: str | None = None
+    #: What the drift check saw in the round's questions, if anything looked off (ADR-063).
+    drift_warning: str | None = None
+    #: Targets whose first attempt passed, out of ``produced + dropped``; ``None`` for rounds
+    #: generated before it was counted (m6).
+    first_attempt_passed: int | None = None
+    #: Cells not generated because every facet of their subtopic is covered (m7).
+    saturated: str | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -2631,6 +2721,11 @@ class GenerationRoundOut(BaseModel):
             dropped=row.dropped,
             skipped=row.skipped,
             skip_reason=row.skip_reason,
+            lessons_applied=row.lessons_applied or 0,
+            lessons_error=row.lessons_error,
+            drift_warning=row.drift_warning,
+            first_attempt_passed=row.first_attempt_passed,
+            saturated=row.saturated,
             error=row.error,
             created_at=row.created_at,
             started_at=row.started_at,

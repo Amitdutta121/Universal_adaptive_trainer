@@ -1,7 +1,7 @@
 """Learn a judge's prompt from the questions it got wrong (ADR-039).
 
-The mirror image of :mod:`app.personalization.instructions`. That module learns
-what the *generator* is told from the professor's reviews; this one learns what a
+The mirror image of the generator's rule learner of ADR-033 (since m5, guidelines in
+:mod:`app.memory`), which learns what the *generator* is told; this one learns what a
 *judge* is told from the disagreements between that judge and the professor.
 
 The two are deliberately built the same way, for the same measured reason:

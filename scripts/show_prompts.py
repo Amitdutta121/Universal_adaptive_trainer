@@ -33,7 +33,7 @@ from app.evaluation.prompts import (  # noqa: E402
 from app.generation import prompts as generation_prompts  # noqa: E402
 from app.generation.principles import COMMON_SYSTEM  # noqa: E402
 from app.generation.spec import QuestionSpec  # noqa: E402
-from app.personalization import instructions  # noqa: E402
+from app.memory import guidelines as memory_guidelines  # noqa: E402
 
 #: The seven types shipped before phase 2 -- the golden file covers exactly these.
 PYTHON_TYPES = (
@@ -109,7 +109,7 @@ def collect_prompts() -> dict[str, str]:
         SYSTEM_PROMPT_FOR[JudgeMetricId.ISSUES],
         [judge_learning.LearnedJudgeRule(rule="Accept prints with a trailing space.")],
     )
-    out["personalization.system"] = instructions.SYSTEM
+    out["memory.guidelines.system"] = memory_guidelines.SYSTEM
     out["taxonomy_draft.system"] = DRAFT_SYSTEM_PROMPT
     out["taxonomy_draft.user"] = draft_user_prompt(
         DraftBrief(

@@ -219,7 +219,7 @@ def test_the_retry_prompt_states_the_failed_check(session: Session, settings) ->
 
     second = client.generation_calls[1]["prompt"]
     assert "--- correction ---" in second
-    assert "failed the check 'output_code_parses'" in second
+    assert "failed the output code parses check" in second
 
 
 def test_output_prediction_uses_the_run_as_the_answer(session: Session, settings) -> None:
@@ -238,6 +238,29 @@ def test_output_prediction_uses_the_run_as_the_answer(session: Session, settings
     assert rows[0].status is QuestionStatus.VALIDATION_PASSED
     assert rows[0].content["expected_output"] == "3"
     assert rows[0].reference_solution == "3"
+
+
+def test_the_retry_shows_the_rejected_draft_as_the_models_own_turn(
+    session: Session, settings
+) -> None:
+    """The correction says "the question above": the model must be able to see it."""
+    version, topic, subtopic, section_ids = _seed(session, settings)
+    broken = _draft(topic.id, [subtopic.id])
+    broken.code = "print("
+    client = MetricJudgeClient(draft=broken)
+
+    _generate(session, version, client, section_ids[:1])
+
+    first, second, third = client.generation_calls
+    assert first["history"] == []
+    (asked, request), (answered, draft) = second["history"]
+    assert (asked, request) == ("user", first["prompt"])
+    assert answered == "assistant"
+    assert '"code": "print("' in draft
+    assert '"sources"' not in draft
+    assert second["prompt"].startswith("--- correction ---")
+    assert "Your question above was rejected" in second["prompt"]
+    assert len(third["history"]) == 4
 
 
 # --- a malformed reply is retried, not fatal -------------------------------
@@ -274,6 +297,9 @@ def test_the_retry_tells_the_model_its_reply_was_not_a_question(session: Session
     assert "--- correction ---" in second
     assert "was not a question" in second
     assert "Do not repeat or describe the schema" in second
+    # Nothing readable came back, so the same request is asked again, with the note.
+    assert second.startswith(client.prompts[0])
+    assert client.generation_calls[0]["history"] == []
 
 
 def test_every_attempt_malformed_raises_rather_than_storing_nothing(

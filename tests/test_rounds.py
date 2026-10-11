@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import book_documents as docs
+import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -29,15 +30,23 @@ from app.domain.enums import (
     Difficulty,
     QuestionStatus,
     QuestionType,
+    ReviewDecision,
     RoundStatus,
 )
 from app.errors import DomainRuleError, LLMRequestError
 from app.evaluation import DifficultyVerdict, GeneratabilityVerdict
 from app.evaluation import custom as custom_module
 from app.evaluation.custom import CustomJudgeResult
+from app.feedback import submit_review
 from app.generation import rounds as rounds_module
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
-from app.generation.prompts import build_prompt
+from app.generation.prompts import (
+    RejectedExample,
+    RoundExamples,
+    ShownExample,
+    build_prompt,
+    render_round_target,
+)
 from app.generation.rounds import (
     next_round,
     plan_targets,
@@ -52,15 +61,18 @@ from app.persistence.models import (
     CurriculumVersionRow,
     CustomJudgeRow,
     GenerationRoundRow,
+    ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
     QuestionSetupRow,
+    QuestionSimilarityRow,
     SubtopicEvidenceRow,
     SubtopicRow,
     TopicRow,
 )
 from app.persistence.repositories import BookStructureRepository, GenerationRoundRepository
 from app.retrieval import SectionEmbeddingStore
+from app.retrieval.examples import EXAMPLE_PAIR_THRESHOLD
 from app.styles import QuestionStyle
 from app.web.routes.api.coverage import get_generation_client
 
@@ -186,6 +198,7 @@ def _question(
     *,
     style_id: str | None = None,
     prompt: str = "Q?",
+    question_type: QuestionType | None = None,
 ) -> QuestionRow:
     row = QuestionRow(
         curriculum_version_id=env.version.id,
@@ -194,10 +207,18 @@ def _question(
         difficulty=Difficulty(difficulty),
         status=status,
         prompt=prompt,
+        question_type=question_type,
         style_id=style_id,
         target_subtopic_id=subtopic.id if style_id else None,
     )
     session.add(row)
+    session.commit()
+    return row
+
+
+def _professor_approved(session: Session, row: QuestionRow) -> QuestionRow:
+    """Approve ``row`` through a review: examples are read from its memory episode."""
+    submit_review(session, question_id=row.id, decision=ReviewDecision.APPROVE)
     session.commit()
     return row
 
@@ -258,7 +279,13 @@ def _round(engine: Engine, round_id: int) -> GenerationRoundRow:
 
 def _round_questions(engine: Engine, round_id: int) -> list[QuestionRow]:
     with Session(engine) as fresh:
-        return list(fresh.scalars(select(QuestionRow).where(QuestionRow.round_id == round_id)))
+        return list(
+            fresh.scalars(
+                select(QuestionRow).where(
+                    QuestionRow.round_id == round_id, QuestionRow.audit.is_(False)
+                )
+            )
+        )
 
 
 def _target(env: SimpleNamespace, difficulty: str = "medium", style: str = STYLE_A.id) -> dict:
@@ -271,10 +298,10 @@ def _target(env: SimpleNamespace, difficulty: str = "medium", style: str = STYLE
 def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy")])
     client = DifficultySequenceClient(
-        difficulties=[Difficulty.HARD, Difficulty.MEDIUM],
+        difficulties=[Difficulty.HARD, Difficulty.EASY],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
     )
 
@@ -283,7 +310,7 @@ def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     assert len(client.generation_calls) == 2
     retry_prompt = client.generation_calls[1]["prompt"]
     assert "--- correction ---" in retry_prompt
-    assert "difficulty_judge" in retry_prompt and "must be medium" in retry_prompt
+    assert "difficulty check" in retry_prompt and "must be easy" in retry_prompt
     first_prompt = client.generation_calls[0]["prompt"]
     assert "--- target ---" in first_prompt
     assert f"[subtopic {env.while_loops.id}] While loops" in first_prompt
@@ -301,6 +328,27 @@ def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     assert question.pedagogical_eval["metrics"]
     done = _round(engine, row.id)
     assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 1, 0)
+    assert done.first_attempt_passed == 0
+
+
+def test_the_round_counts_targets_that_passed_on_their_first_attempt(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    from app.web.routes.api.schemas import GenerationRoundOut
+
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    row = _queue(session, setup, [_target(env)])
+    client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    _run(engine, row.id, client)
+
+    done = _round(engine, row.id)
+    assert (done.produced, done.first_attempt_passed) == (1, 1)
+    assert GenerationRoundOut.from_row(done).first_attempt_passed == 1
+    # Rounds from before the count say nothing rather than zero.
+    assert GenerationRoundOut.from_row(row).first_attempt_passed is None
 
 
 def test_a_hard_cell_hardens_a_question_that_passed_the_answer_check(
@@ -398,8 +446,8 @@ def test_a_hard_cell_still_generates_when_the_generatability_judge_cannot_answer
 def test_a_question_still_failing_after_the_last_attempt_is_dropped(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
-    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
-    row = _queue(session, setup, [_target(env)])
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 3)])
+    row = _queue(session, setup, [_target(env, "easy")])
     client = DifficultySequenceClient(
         difficulties=[Difficulty.HARD],
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
@@ -410,7 +458,9 @@ def test_a_question_still_failing_after_the_last_attempt_is_dropped(
     assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
     assert _round_questions(engine, row.id) == []
     with Session(engine) as fresh:
-        assert fresh.scalars(select(QuestionRow)).all() == []
+        audits = list(fresh.scalars(select(QuestionRow).where(QuestionRow.audit.is_(True))))
+    assert len(audits) == 1
+    assert audits[0].audit_metric == "difficulty"
     done = _round(engine, row.id)
     assert (done.status, done.produced, done.dropped) == (RoundStatus.DONE, 0, 1)
 
@@ -430,7 +480,7 @@ def test_a_topic_judge_that_names_another_subtopic_fails_the_attempt(
     _run(engine, row.id, client)
 
     assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
-    assert "topic_judge" in client.generation_calls[1]["prompt"]
+    assert "topic check" in client.generation_calls[1]["prompt"]
     assert _round(engine, row.id).dropped == 1
 
 
@@ -500,8 +550,8 @@ def test_section_only_generation_keeps_its_spec_and_prompt() -> None:
     )
     assert aimed.replace("\n\n--- target ---\nX", "") == plain
     assert "One taught step, applied directly." in plain
-    assert "Two or three taught ideas combined" in plain
-    assert "Several taught ideas composed" in plain
+    assert "Two taught ideas combined" in plain
+    assert "Three or more taught ideas composed" in plain
 
 
 # ------------------------------------------------------------------ planning
@@ -622,13 +672,17 @@ def test_run_round_reports_progress_and_examples(
     session: Session, engine: Engine, env: SimpleNamespace
 ) -> None:
     setup = _setup(session, env, [(env.while_loops.id, "medium", 4)])
-    _question(
+    _professor_approved(
         session,
-        env,
-        env.while_loops,
-        "medium",
-        QuestionStatus.APPROVED,
-        prompt="Accepted: what does a while loop do?",
+        _question(
+            session,
+            env,
+            env.while_loops,
+            "medium",
+            QuestionStatus.APPROVED,
+            prompt="Accepted: what does a while loop do?",
+            question_type=QuestionType.MULTIPLE_CHOICE,
+        ),
     )
     row = start_round(session, setup.id, size=2, rng=random.Random(1))
     session.commit()
@@ -647,7 +701,9 @@ def test_run_round_reports_progress_and_examples(
         0,
     )
     assert done.started_at is not None and done.finished_at is not None
-    assert "Accepted: what does a while loop do?" in client.generation_calls[0]["prompt"]
+    assert (
+        "Example 1: Accepted: what does a while loop do?" in (client.generation_calls[0]["prompt"])
+    )
     questions = _round_questions(engine, row.id)
     assert len(questions) == 2
     assert {q.spec["source_section_ids"][0] for q in questions} == {env.sections[0].id}
@@ -833,3 +889,686 @@ def test_round_execution_claim_is_idempotent(session, engine, env, monkeypatch):
     _run(engine, row.id, None)
     assert calls == [row.id]
     assert _round(engine, row.id).status == RoundStatus.DONE
+
+
+# ------------------------------------------------------------------ duplicates (ADR-063 point 6)
+
+
+class ScoredEmbedder(KeywordEmbedder):
+    """Places the round's draft at a chosen cosine to the stored "Existing" question.
+
+    Every other text (section retrieval) embeds as :class:`KeywordEmbedder` does. ``scores``
+    is consumed one per check; the last one repeats.
+    """
+
+    def __init__(self, scores: list[float]) -> None:
+        self.scores = scores
+        self.checks = 0
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        vectors = []
+        for text in texts:
+            if text.startswith("Existing"):
+                vectors.append([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            elif text.startswith("Which loop repeats"):
+                score = self.scores[min(self.checks, len(self.scores) - 1)]
+                self.checks += 1
+                vectors.append([score, (1 - score**2) ** 0.5, 0.0, 0.0, 0.0, 0.0])
+            else:
+                vectors.extend(super().embed([text]))
+        return vectors
+
+
+def _flags(engine: Engine, question_id: int) -> list[QuestionSimilarityRow]:
+    with Session(engine) as fresh:
+        return list(
+            fresh.scalars(
+                select(QuestionSimilarityRow).where(
+                    QuestionSimilarityRow.question_id == question_id
+                )
+            )
+        )
+
+
+def _dup_round(session: Session, env: SimpleNamespace, prompt: str) -> tuple[int, int]:
+    existing = _question(
+        session, env, env.while_loops, "medium", QuestionStatus.APPROVED, prompt=prompt
+    )
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    return existing.id, _queue(session, setup, [_target(env)]).id
+
+
+def _mcq_client(env: SimpleNamespace) -> MetricJudgeClient:
+    return MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+
+def test_an_exact_duplicate_is_retried_quoting_it_then_kept_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    """The fake draft never changes, so every attempt is a duplicate: the correction quotes
+    the stored question, and the last attempt is kept with a flag rather than dropped."""
+    draft = _mcq(env.while_loops.topic_id, env.while_loops.id)
+    existing_id, round_id = _dup_round(
+        session, env, "\n".join([draft.prompt, *draft.options]).upper()
+    )
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client)
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    retry_prompt = client.generation_calls[1]["prompt"]
+    assert "Your question failed the duplicate check (it is too similar to: WHICH LOOP" in (
+        retry_prompt
+    )
+    (question,) = _round_questions(engine, round_id)
+    assert [c.name for c in question.generation_attempts[0].failed_checks] == ["duplicate"]
+    assert question.generation_attempts[-1].usable
+    (flag,) = _flags(engine, question.id)
+    assert (flag.similar_question_id, flag.score) == (existing_id, 1.0)
+    done = _round(engine, round_id)
+    assert (done.produced, done.dropped) == (1, 0)
+
+
+def test_a_cosine_at_093_is_retried(session: Session, engine: Engine, env: SimpleNamespace) -> None:
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.93, 0.10]))
+
+    assert len(client.generation_calls) == 2
+    assert "too similar to: Existing question about loops" in client.generation_calls[1]["prompt"]
+    (question,) = _round_questions(engine, round_id)
+    assert _flags(engine, question.id) == []
+
+
+def test_a_cosine_at_080_is_kept_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80]))
+
+    assert len(client.generation_calls) == 1
+    (question,) = _round_questions(engine, round_id)
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert flag.score == pytest.approx(0.80, abs=1e-5)
+    assert flag.model == KeywordEmbedder.model
+
+
+def test_a_duplicate_on_the_last_attempt_is_stored_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.95]))
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    (question,) = _round_questions(engine, round_id)
+    assert question.status is QuestionStatus.VALIDATION_PASSED
+    assert question.pedagogical_eval["metrics"]
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert flag.score == pytest.approx(0.95, abs=1e-5)
+    assert _round(engine, round_id).dropped == 0
+
+
+def _record_routing(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """The ``hold_for_review`` of every trust routing call."""
+    import app.evaluation.trust as trust
+
+    held: list[bool] = []
+    route = trust.route_generated_question
+
+    def recording(session: Session, row: QuestionRow, custom: Any = None, **kwargs: Any) -> str:
+        held.append(kwargs.get("hold_for_review", False))
+        return route(session, row, custom, **kwargs)
+
+    monkeypatch.setattr(trust, "route_generated_question", recording)
+    return held
+
+
+def test_a_duplicate_kept_on_the_last_attempt_is_held_for_review(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Trust routing must not auto-approve it: the professor has to see the flag."""
+    held = _record_routing(monkeypatch)
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+
+    _run(engine, round_id, _mcq_client(env), ScoredEmbedder([0.95]))
+
+    assert held == [True]
+    (question,) = _round_questions(engine, round_id)
+    assert question.trust_provenance == "pending"
+
+
+class ConceptClient(MetricJudgeClient):
+    """Also answers the concept check: the same idea (``same``) or not."""
+
+    def __init__(self, *, same: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.same = same
+        self.concept_prompts: list[str] = []
+
+    def complete_structured(
+        self, *, system: str, prompt: str, response_model: type[BaseModel], **kwargs: Any
+    ) -> BaseModel:
+        from app.generation.review import SameConceptVerdict
+
+        if response_model is SameConceptVerdict:
+            self.concept_prompts.append(prompt)
+            return SameConceptVerdict(same=self.same, reason="Both ask what a while loop does.")
+        return super().complete_structured(
+            system=system, prompt=prompt, response_model=response_model, **kwargs
+        )
+
+
+def _concept_client(env: SimpleNamespace, *, same: bool) -> ConceptClient:
+    return ConceptClient(
+        same=same,
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id),
+        difficulty=Difficulty.MEDIUM,
+    )
+
+
+def test_the_same_idea_reworded_in_the_soft_band_is_retried(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _concept_client(env, same=True)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80, 0.10]))
+
+    assert len(client.concept_prompts) == 1
+    assert "Existing question about loops" in client.concept_prompts[0]
+    assert len(client.generation_calls) == 2
+    assert (
+        "failed the same idea check (it assesses the same idea as: Existing question "
+        "about loops)" in client.generation_calls[1]["prompt"]
+    )
+    (question,) = _round_questions(engine, round_id)
+    assert [c.name for c in question.generation_attempts[0].failed_checks] == ["same_concept"]
+    assert _flags(engine, question.id) == []
+
+
+def test_a_different_idea_in_the_soft_band_is_kept_with_a_flag(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _concept_client(env, same=False)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80]))
+
+    assert len(client.concept_prompts) == 1
+    assert len(client.generation_calls) == 1
+    (question,) = _round_questions(engine, round_id)
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert held == [False]
+
+
+def test_the_same_idea_on_the_last_attempt_is_kept_flagged_and_held(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    existing_id, round_id = _dup_round(session, env, "Existing question about loops")
+    client = _concept_client(env, same=True)
+
+    _run(engine, round_id, client, ScoredEmbedder([0.80]))
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    (question,) = _round_questions(engine, round_id)
+    assert question.generation_attempts[-1].usable
+    (flag,) = _flags(engine, question.id)
+    assert flag.similar_question_id == existing_id
+    assert held == [True]
+    assert question.trust_provenance == "pending"
+    assert _round(engine, round_id).dropped == 0
+
+
+def test_without_a_model_the_concept_check_is_skipped() -> None:
+    from app.domain.questions import Question
+    from app.generation.review import ConceptChecker
+
+    class NoModel:
+        description = "none"
+
+        def complete_structured(self, **_: Any) -> BaseModel:
+            raise LLMRequestError("no provider configured")
+
+    match = SimpleNamespace(question_id=1, text="x", score=0.8, model="m", duplicate=False)
+    assert ConceptChecker(NoModel())(Question(prompt="q"), match) is None  # type: ignore[arg-type]
+
+
+def test_a_question_that_only_resembles_one_is_routed_as_usual(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    _, round_id = _dup_round(session, env, "Existing question about loops")
+
+    _run(engine, round_id, _mcq_client(env), ScoredEmbedder([0.80]))
+
+    assert held == [False]
+
+
+# ------------------------------------------------------------------ blind solve
+
+
+class SequenceSolver:
+    """A blind solver that disagrees with the key on the attempts marked ``True``."""
+
+    def __init__(self, disagree: list[bool]) -> None:
+        self.disagree = disagree
+        self.calls = 0
+
+    def __call__(self, question: Any) -> list[Any]:
+        from app.generation.solve import SolveFinding, SolveVerdict
+
+        disagree = self.disagree[min(self.calls, len(self.disagree) - 1)]
+        self.calls += 1
+        if not disagree:
+            return []
+        verdict = SolveVerdict(
+            answer="NONE",
+            correct_options=[],
+            exactly_one_correct=False,
+            problems="'for loop' also repeats while a condition holds.",
+        )
+        return [SolveFinding("anthropic/claude-haiku-4.5", verdict)]
+
+
+def _solve_round(
+    session: Session, engine: Engine, env: SimpleNamespace, solver: SequenceSolver
+) -> tuple[MetricJudgeClient, int]:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    round_id = _queue(session, setup, [_target(env)]).id
+    client = _mcq_client(env)
+    run_round(
+        round_id,
+        client=client,  # type: ignore[arg-type]
+        embedder=KeywordEmbedder(),  # type: ignore[arg-type]
+        session_factory=lambda: Session(engine, expire_on_commit=False),
+        solver=solver,
+    )
+    return client, round_id
+
+
+def test_a_key_another_model_disagrees_with_is_retried_with_its_finding(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    client, round_id = _solve_round(session, engine, env, SequenceSolver([True, False]))
+
+    assert len(client.generation_calls) == 2
+    retry = client.generation_calls[1]["prompt"]
+    assert "failed the answer key check" in retry
+    # The finding names options of the draft the model now sees as its own turn.
+    role, draft = client.generation_calls[1]["history"][-1]
+    assert role == "assistant" and '"options"' in draft
+    assert "claude-haiku-4.5 answered NONE" in retry
+    assert "'for loop' also repeats while a condition holds." in retry
+    (question,) = _round_questions(engine, round_id)
+    assert [c.name for c in question.generation_attempts[0].failed_checks] == ["blind_solve"]
+    assert question.solve_flag is None
+    assert held == [False]
+
+
+def test_a_disagreement_on_the_last_attempt_is_kept_flagged_and_held(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One good key in about thirty draws a disagreement: the professor decides, not the
+    solver."""
+    held = _record_routing(monkeypatch)
+    client, round_id = _solve_round(session, engine, env, SequenceSolver([True]))
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    (question,) = _round_questions(engine, round_id)
+    assert question.generation_attempts[-1].usable
+    assert question.solve_flag is not None
+    assert "'for loop' also repeats" in question.solve_flag
+    assert held == [True]
+    assert question.trust_provenance == "pending"
+    assert _round(engine, round_id).dropped == 0
+
+
+class SolverClient:
+    """One blind-solver model: a fixed verdict, or a provider failure."""
+
+    description = "fake"
+
+    def __init__(self, verdict: Any = None) -> None:
+        self.verdict = verdict
+        self.prompts: list[str] = []
+
+    def complete_structured(self, *, system: str, prompt: str, response_model: Any) -> Any:
+        self.prompts.append(prompt)
+        if self.verdict is None:
+            raise LLMRequestError("provider down")
+        return self.verdict
+
+
+def _mcq_question(key: int = 0) -> Any:
+    from app.domain.questions import Question
+
+    return Question(
+        prompt="Which loop repeats while a condition holds?",
+        question_type=QuestionType.MULTIPLE_CHOICE,
+        content={"options": ["while", "for", "do", "none"], "correct_option_index": key},
+    )
+
+
+def test_the_blind_solver_flags_another_answer_or_two_correct_options_only() -> None:
+    from app.generation.solve import BlindSolver, SolveVerdict
+
+    agree = SolveVerdict(answer="A", correct_options=["A"], exactly_one_correct=True)
+    other = SolveVerdict(answer="B", correct_options=["B"], exactly_one_correct=True)
+    two = SolveVerdict(answer="A", correct_options=["A", "B"], exactly_one_correct=False)
+    seen = SolverClient(agree)
+    clients = {"a/agree": seen, "b/other": SolverClient(other), "c/two": SolverClient(two)}
+
+    findings = BlindSolver(clients=clients)(_mcq_question())  # type: ignore[arg-type]
+
+    assert sorted(f.model for f in findings) == ["b/other", "c/two"]
+    assert "A. while" in seen.prompts[0] and "D. none" in seen.prompts[0]
+    assert "correct_option_index" not in seen.prompts[0]
+    described = {f.model: f.describe("A") for f in findings}
+    assert described == {
+        "b/other": "other answered B (key is A)",
+        "c/two": "two finds A, B correct",
+    }
+
+
+def test_the_blind_solver_skips_failing_models_and_unsolvable_types() -> None:
+    from app.domain.questions import Question
+    from app.generation.solve import BlindSolver
+
+    failing = SolverClient()
+    assert BlindSolver(clients={"x/down": failing})(_mcq_question()) == []  # type: ignore[arg-type]
+    assert len(failing.prompts) == 1
+
+    coding = Question(prompt="Write f", question_type=QuestionType.CODING, content={})
+    unused = SolverClient()
+    assert BlindSolver(clients={"x/y": unused})(coding) == []  # type: ignore[arg-type]
+    assert unused.prompts == []
+
+
+def test_a_true_false_question_is_solved_as_two_options() -> None:
+    from app.domain.questions import Question
+    from app.generation.solve import student_view
+
+    question = Question(
+        prompt="A while loop can run zero times.",
+        question_type=QuestionType.TRUE_FALSE,
+        content={"correct_answer": True},
+    )
+    assert student_view(question) == (
+        "A while loop can run zero times.\n\nOptions:\nA. True\nB. False",
+        "A",
+    )
+
+
+def test_blind_solve_models_come_from_a_comma_separated_setting() -> None:
+    assert Settings(blind_solve_models="a/x, b/y").blind_solve_models == ["a/x", "b/y"]
+    assert Settings(blind_solve_models="").blind_solve_models == []
+
+
+# ------------------------------------------------------------------ examples (ADR-063 point 3)
+
+
+class MarkerEmbedder:
+    """Counts marker words. A target's query (section 0 + subtopic "While loops") holds only
+    "while", so a question's cosine to the target is its share of "while"."""
+
+    model = "marker-test-v1"
+    VOCAB = ("alpha", "beta", "gamma", "while")
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[float(t.lower().count(word)) for word in self.VOCAB] for t in texts]
+
+
+class FailingEmbedder:
+    model = "failing-test-v1"
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        raise LLMRequestError("embeddings are down")
+
+
+MCQ = QuestionType.MULTIPLE_CHOICE
+
+
+def _examples(session: Session, env: SimpleNamespace, embedder: object = None) -> RoundExamples:
+    return rounds_module.accepted_examples(
+        session,
+        env.version.id,
+        (env.while_loops.id, Difficulty.MEDIUM),
+        MCQ,
+        section_id=env.sections[0].id,
+        embedder=embedder,  # type: ignore[arg-type]
+    )
+
+
+def _texts(examples: Sequence[ShownExample | str]) -> list[str]:
+    return [item.text if isinstance(item, ShownExample) else item for item in examples]
+
+
+def _approved(
+    session: Session, env: SimpleNamespace, subtopic: SubtopicRow, prompt: str, **kwargs: Any
+) -> QuestionRow:
+    kwargs.setdefault("question_type", MCQ)
+    return _professor_approved(
+        session,
+        _question(
+            session, env, subtopic, "medium", QuestionStatus.APPROVED, prompt=prompt, **kwargs
+        ),
+    )
+
+
+def _pending(session: Session, env: SimpleNamespace, prompt: str, **kwargs: Any) -> QuestionRow:
+    kwargs.setdefault("status", QuestionStatus.GENERATED)
+    return _question(session, env, env.while_loops, "medium", prompt=prompt, **kwargs)
+
+
+@pytest.mark.parametrize("embedder", [None, MarkerEmbedder()], ids=["no-embedder", "embedder"])
+def test_examples_are_only_of_the_targets_question_type(
+    session: Session, env: SimpleNamespace, embedder: object
+) -> None:
+    """Regression: the cell lookup returned any type (73% of examples were another type)."""
+    _approved(session, env, env.while_loops, "Choice alpha")
+    _approved(session, env, env.while_loops, "Write code while", question_type=QuestionType.CODING)
+    _approved(session, env, env.slicing, "Slice code", question_type=QuestionType.CODING)
+
+    found = _examples(session, env, embedder)
+
+    assert _texts(found.accepted) == ["Choice alpha"]
+    assert _texts(found.style_only) == []
+    # The other-type question of the cell is still something not to repeat.
+    assert found.in_bank == ["Write code while"]
+
+
+def test_an_empty_cell_falls_back_to_same_topic_then_similarity(
+    session: Session, env: SimpleNamespace
+) -> None:
+    for_loops = SubtopicRow(topic_id=env.while_loops.topic_id, name="For loops", position=1)
+    session.add(for_loops)
+    session.commit()
+    _approved(session, env, for_loops, "Same topic beta")
+    _approved(session, env, for_loops, "Same topic while", question_type=QuestionType.CODING)
+    _approved(session, env, env.slicing, "Other topic while while")
+    _approved(session, env, env.slicing, "Other topic gamma")  # newest, but least similar
+
+    found = _examples(session, env, MarkerEmbedder())
+
+    assert _texts(found.accepted) == []
+    assert _texts(found.style_only) == ["Same topic beta", "Other topic while while"]
+    assert found.in_bank == []
+
+
+def test_no_two_examples_are_near_identical(session: Session, env: SimpleNamespace) -> None:
+    _approved(session, env, env.while_loops, "Choice beta")
+    _approved(session, env, env.while_loops, "Choice while alpha")
+    _approved(session, env, env.while_loops, "Choice while alpha again")  # cosine 1.0 to above
+
+    found = _examples(session, env, MarkerEmbedder())
+
+    assert _texts(found.accepted) == ["Choice while alpha again", "Choice beta"]
+    first, second = (
+        np.asarray(vector) / np.linalg.norm(vector)
+        for vector in MarkerEmbedder().embed(_texts(found.accepted))
+    )
+    assert float(first @ second) <= EXAMPLE_PAIR_THRESHOLD
+    # The skipped twin is in the cell, so it is shown as already in the bank.
+    assert found.in_bank == ["Choice while alpha"]
+
+
+def test_already_in_the_bank_is_the_three_nearest_of_the_cell(
+    session: Session, env: SimpleNamespace
+) -> None:
+    """Approved or awaiting review, by cosine to the target (not by age); never rejected or
+    another difficulty."""
+    _pending(session, env, "while while gamma")  # 0.89
+    _question(session, env, env.while_loops, "medium", QuestionStatus.APPROVED, prompt="while beta")
+    _pending(session, env, "while while while", status=QuestionStatus.VALIDATION_PASSED)  # 1.0
+    _pending(session, env, "gamma")  # newest, cosine 0
+    _pending(session, env, "while", status=QuestionStatus.REJECTED)
+    _question(session, env, env.while_loops, "easy", QuestionStatus.APPROVED, prompt="while")
+
+    found = _examples(session, env, MarkerEmbedder())
+
+    assert found.in_bank == ["while while while", "while while gamma", "while beta"]
+
+
+@pytest.mark.parametrize("embedder", [None, FailingEmbedder()], ids=["none", "failing"])
+def test_without_a_working_embedder_examples_and_the_bank_are_newest_first(
+    session: Session, env: SimpleNamespace, embedder: object
+) -> None:
+    _approved(session, env, env.while_loops, "Old choice")
+    _approved(session, env, env.while_loops, "New choice")
+    _approved(session, env, env.while_loops, "Newest choice")
+    _approved(session, env, env.slicing, "Elsewhere choice")
+    for prompt in ("Pending one", "Pending two", "Pending three"):
+        _pending(session, env, prompt)
+
+    found = _examples(session, env, embedder)
+
+    assert _texts(found.accepted) == ["Newest choice", "New choice"]
+    assert found.in_bank == ["Pending three", "Pending two", "Pending one"]
+
+
+def test_the_target_block_labels_style_only_examples_and_lists_the_bank() -> None:
+    """Snapshot of the round target block with every kind of example."""
+    subtopic = SubtopicRow(id=7, name="While loops", description="Using a while loop.")
+    block = render_round_target(
+        subtopic=subtopic,
+        topic_name="Loops",
+        style=STYLE_A,
+        examples=RoundExamples(
+            accepted=[ShownExample("What does a while loop do?", "  Good: one idea.  ")],
+            style_only=["  Which slice gives 'el'?  ", ""],
+            in_bank=["Which loop repeats while a condition holds?", "What ends a while loop?"],
+            rejected=RejectedExample(
+                "What is a loop?", "Too easy / trivial; asks for a definition"
+            ),
+        ),
+    )
+    assert block == "\n".join(
+        [
+            "--- target ---",
+            "The question must assess this subtopic: [subtopic 7] While loops -- Using a while "
+            "loop. (topic: Loops).",
+            "Set topic_id to its topic and include 7 in subtopic_ids.",
+            "",
+            "Write it in this question style: Pick the right concept.",
+            "What the student does: Pick the right concept: pick the one right option.",
+            "How the answer is checked: Compares the chosen option with the key",
+            "",
+            "The professor accepted these questions for the same subtopic and difficulty. "
+            "Match their level and quality; do not copy or paraphrase them.",
+            "Example 1: What does a while loop do?",
+            "  Professor's comment: Good: one idea.",
+            "",
+            "Style only: the professor accepted these questions of the same type for other "
+            "subtopics or difficulties. Match their form only, not their content or level.",
+            "Example 2 (style only): Which slice gives 'el'?",
+            "",
+            "The professor rejected a similar question because: Too easy / trivial; asks for "
+            "a definition",
+            "Do not repeat that mistake.",
+            "Rejected: What is a loop?",
+            "",
+            "Already in the bank for this subtopic and difficulty -- assess something "
+            "different from each of these:",
+            "Existing 1: Which loop repeats while a condition holds?",
+            "Existing 2: What ends a while loop?",
+            "--- end target ---",
+        ]
+    )
+    bare = render_round_target(subtopic=subtopic, topic_name="Loops", style=None)
+    assert "Example" not in bare and "Existing" not in bare and "Rejected" not in bare
+    assert "Avoid" not in bare
+
+
+def test_the_target_block_lists_retry_lessons_before_the_bank() -> None:
+    block = render_round_target(
+        subtopic=SubtopicRow(id=7, name="While loops"),
+        topic_name="Loops",
+        style=None,
+        examples=RoundExamples(
+            in_bank=["What ends a while loop?"],
+            avoid=["(medium) a reviewer rated it hard, but it must be medium"],
+        ),
+    )
+    assert (
+        "Earlier drafts for this subtopic failed these checks before a fixed version was "
+        "approved. Avoid the same mistakes:\n"
+        "Avoid 1: (medium) a reviewer rated it hard, but it must be medium\n"
+        "\nAlready in the bank"
+    ) in block
+
+
+def test_a_round_prompt_carries_examples_and_the_bank(
+    session: Session, engine: Engine, env: SimpleNamespace
+) -> None:
+    _approved(session, env, env.slicing, "Elsewhere: which slice?")
+    _pending(session, env, "Pending: while?")
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    round_id = _queue(session, setup, [_target(env)]).id
+    client = _mcq_client(env)
+
+    _run(engine, round_id, client)
+
+    prompt = client.generation_calls[0]["prompt"]
+    assert "Example 1 (style only): Elsewhere: which slice?" in prompt
+    assert "Existing 1: Pending: while?" in prompt
+
+
+def test_the_replay_script_reports_both_methods(session: Session, env: SimpleNamespace) -> None:
+    """scripts/replay_retrieval.py with a fake embedder. Approved in order: a coding question
+    of the cell, an MCQ elsewhere, an MCQ of the cell. For the last, the old lookup shows the
+    coding question; the implemented one shows the MCQ from elsewhere."""
+    from scripts.replay_retrieval import replay
+
+    for subtopic, prompt, kind in (
+        (env.while_loops, "Write a while loop", QuestionType.CODING),
+        (env.slicing, "Which slice?", MCQ),
+        (env.while_loops, "Which loop repeats while?", MCQ),
+    ):
+        row = _approved(session, env, subtopic, prompt, question_type=kind)
+        row.content = {"sources": [{"section_id": env.sections[0].id}]}
+        session.add(ProfessorReviewRow(question_id=row.id, decision=ReviewDecision.APPROVE))
+        session.commit()
+
+    report = replay(session, MarkerEmbedder())
+
+    # The first target has nothing approved before it; the second finds nothing either way.
+    assert {
+        method: (r["targets"], r["coverage"], r["same_type"]) for method, r in report.items()
+    } == {
+        "DB": (2, 0.5, 0.0),
+        "REC": (2, 0.5, 1.0),
+    }
+    assert report["REC"]["same_subtopic"] == 0.0

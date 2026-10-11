@@ -45,6 +45,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidelineStatus,
     JobKind,
     JudgeBatchStatus,
     JudgeMetricId,
@@ -569,6 +570,14 @@ class QuestionRow(TimestampMixin, Base):
     #: may be served to that student before the professor reviews it; to anyone else only
     #: once approved.
     live_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: A judge-failed draft kept so the professor can say whether they agree (ADR-064, m9).
+    #: Never usable unless the professor approves it.
+    audit: Mapped[bool] = mapped_column(Boolean, default=False)
+    audit_metric: Mapped[str | None] = mapped_column(String(32), default=None)
+    audit_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: What blind solvers said against the key of a round question kept on its last attempt
+    #: (app/generation/solve.py). Such a question waits for the professor.
+    solve_flag: Mapped[str | None] = mapped_column(Text, default=None)
 
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
@@ -650,7 +659,7 @@ class QuestionSubtopicRow(Base):
 
 class QuestionSimilarityRow(Base):
     """A flagged possible duplicate, written after a generation run (coverage
-    Generate m3).
+    Generate m3) or when a round keeps a question that resembles one (ADR-063).
 
     Directional: ``question_id`` is the freshly generated question, and
     ``similar_question_id`` the pre-existing approved/validation-passed
@@ -678,6 +687,29 @@ class QuestionSimilarityRow(Base):
     similar_question: Mapped[QuestionRow] = relationship(
         foreign_keys=[similar_question_id], lazy="selectin"
     )
+
+
+class QuestionEmbeddingRow(Base):
+    """A cached embedding of one question's duplicate-check text (ADR-063 point 6).
+
+    Derived, like ``section_embeddings``: rebuilt on demand by
+    :class:`app.retrieval.duplicates.QuestionEmbeddingStore`. ``text_hash`` is the SHA-256 of
+    the *normalised* check text (prompt + code + options), so an edited question is re-embedded
+    and an exact duplicate is found without any embedding call.
+    """
+
+    __tablename__ = "question_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    text_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class QuestionEvaluationRow(TimestampMixin, Base):
@@ -815,6 +847,11 @@ class ProfessorReviewRow(TimestampMixin, Base):
     )
 
     question: Mapped[QuestionRow] = relationship(back_populates="reviews")
+    #: The episode this review left in memory (ADR-063). Deleted with the review: SQLite
+    #: enforces no ``ondelete``, so the ORM cascade is what removes it.
+    episode: Mapped[MemoryEpisodeRow | None] = relationship(
+        back_populates="review", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class QuestionSetVersionRow(TimestampMixin, Base):
@@ -1006,9 +1043,142 @@ class ReviewOutcomeRow(TimestampMixin, Base):
     judges_refreshed: Mapped[list[JudgeMetricId]] = mapped_column(
         "judges_refreshed_json", EnumList(JudgeMetricId), default=list, nullable=True
     )
+    #: The round whose lesson run learned from this review (ADR-063). ``NULL`` means the
+    #: lesson is still pending; ``0`` marks reviews learned on submit, before lesson runs.
+    #: Not a foreign key: deleting a round must not make its reviews pending again.
+    lessons_round_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
 
     review: Mapped[ProfessorReviewRow] = relationship()
     question: Mapped[QuestionRow] = relationship()
+
+
+class MemoryEpisodeRow(TimestampMixin, Base):
+    """One reviewed question as memory keeps it: the episode (ADR-063 point 3, ADR-064).
+
+    Written when the professor's verdict lands and frozen there: the text the professor saw
+    (for an edit, their version, with the generated one kept), where the question claimed to
+    sit, the verdict with its reasons and comment, the professor's corrections, and what
+    every judge said about the question at that moment. The generator retrieves episodes as
+    examples (:mod:`app.retrieval.examples`); the judges will read the same rows (m11).
+
+    ``source`` says what produced the verdict: ``review``, ``retry``, ``audit`` (m9), or
+    ``borderline`` (m10). ``review_id`` may be ``NULL`` for audit and borderline rows.
+    Scoped by ``subject``, the course's personal key
+    (:attr:`app.subjects.SubjectProfile.personal_key`), so one professor's or subject's
+    memory never reaches another's.
+    """
+
+    __tablename__ = "memory_episodes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: One episode per review; deleting the review deletes it.
+    review_id: Mapped[int | None] = mapped_column(
+        ForeignKey("professor_reviews.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        default=None,
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(16), default="review")
+    subject: Mapped[str] = mapped_column(String(100), index=True)
+    question_type: Mapped[QuestionType | None] = mapped_column(
+        StrEnumType(QuestionType, 32), default=None, index=True
+    )
+    #: Where the question claimed to sit when it was reviewed (before any correction).
+    topic_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    subtopic_ids: Mapped[list[int]] = mapped_column(
+        "subtopic_ids_json", JsonList, default=list, nullable=True
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(StrEnumType(Difficulty, 16))
+    #: Prompt, code and options as reviewed (:func:`app.retrieval.duplicates.embed_text`);
+    #: for an edit, the professor's version.
+    text: Mapped[str] = mapped_column(Text)
+    #: For an edit, the generated text the professor rewrote; otherwise ``NULL``.
+    original_text: Mapped[str | None] = mapped_column(Text, default=None)
+    decision: Mapped[ReviewDecision] = mapped_column(StrEnumType(ReviewDecision, 16))
+    reasons: Mapped[list[RejectionReason]] = mapped_column(
+        "reasons_json", EnumList(RejectionReason), default=list, nullable=True
+    )
+    comment: Mapped[str | None] = mapped_column(Text, default=None)
+    corrected_difficulty: Mapped[Difficulty | None] = mapped_column(
+        StrEnumType(Difficulty, 16), default=None
+    )
+    corrected_subtopic_ids: Mapped[list[int] | None] = mapped_column(
+        "corrected_subtopic_ids_json", _NullableReviewIds, default=None, nullable=True
+    )
+    #: Every judge's answer at review time, keyed by metric id:
+    #: ``{"passed", "status", "rationale", "issue_codes", "proposed_difficulty",
+    #: "proposed_subtopic_ids"}``. Empty when the question was never judged.
+    judge_verdicts: Mapped[dict] = mapped_column(
+        "judge_verdicts_json", JsonObject, default=dict, nullable=True
+    )
+    rubric_version: Mapped[str | None] = mapped_column(String(50), default=None)
+
+    review: Mapped[ProfessorReviewRow | None] = relationship(back_populates="episode")
+
+    @property
+    def effective_difficulty(self) -> Difficulty:
+        """The professor's difficulty when they corrected it, else the reviewed one."""
+        return self.corrected_difficulty or self.difficulty
+
+    @property
+    def effective_subtopic_ids(self) -> list[int]:
+        """The professor's subtopics when they corrected them, else the reviewed ones."""
+        return list(self.corrected_subtopic_ids or self.subtopic_ids or [])
+
+
+class MemoryGuidelineRow(TimestampMixin, Base):
+    """One learned guideline: semantic memory (ADR-063 points 3-4, ADR-064).
+
+    A short rule distilled from reviews, owned by a ``target``: ``generator:<question type>``
+    (m5), later ``judge:<metric>`` (m11). The lesson run edits these rows with operations
+    (add, merge, support, retire) -- the list is never rewritten -- so ``review_ids`` is the
+    evidence each one has accumulated. Only ``ACTIVE`` rows are sent; a row is active with at
+    least two distinct supporting reviews or ``confirmed_by_professor``. Scoped by
+    ``subject``, the course's personal key, like episodes.
+    """
+
+    __tablename__ = "memory_guidelines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(100), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    #: The distinct reviews that support this guideline.
+    review_ids: Mapped[list[int]] = mapped_column(
+        "review_ids_json", JsonList, default=list, nullable=True
+    )
+    status: Mapped[GuidelineStatus] = mapped_column(
+        StrEnumType(GuidelineStatus, 16), default=GuidelineStatus.PENDING, index=True
+    )
+    confirmed_by_professor: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Why it was refused or retired ("merged into 12", "deleted by the professor", ...).
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The rounds whose lesson run created it and last changed it (``NULL``: migrated or
+    #: changed outside a round).
+    created_round_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_round_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class SubtopicFacetRow(TimestampMixin, Base):
+    """The facets of one subtopic: the distinct things a question about it can assess (m7).
+
+    Listed once by a model call and reused by every later round, so two targets of a cell
+    can be told to assess different things, and a cell whose facets are all covered is
+    known to be saturated without another call.
+    """
+
+    __tablename__ = "subtopic_facets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    facets: Mapped[list[str]] = mapped_column("facets_json", JsonList, default=list)
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
 
 
 class JudgePromptRow(TimestampMixin, Base):
@@ -1054,6 +1224,22 @@ class JudgePromptRow(TimestampMixin, Base):
     learned: Mapped[bool] = mapped_column(Boolean, default=False)
 
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class JudgeMemorySnapshotRow(TimestampMixin, Base):
+    """Frozen judge guidelines for one subject at one moment (ADR-064, m11).
+
+    A round uses one snapshot throughout. A candidate is promoted only if held-out
+    agreement does not drop and the known-bad pass rate does not rise.
+    """
+
+    __tablename__ = "judge_memory_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subject: Mapped[str] = mapped_column(String(50), index=True)
+    #: ``{metric: [guideline texts]}`` at freeze time.
+    guidelines: Mapped[dict] = mapped_column("guidelines_json", JsonObject, default=dict)
+    promoted: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class QuestionSetupRow(TimestampMixin, Base):
@@ -1124,10 +1310,24 @@ class GenerationRoundRow(TimestampMixin, Base):
     requested: Mapped[int] = mapped_column(Integer, default=0)
     produced: Mapped[int] = mapped_column(Integer, default=0)
     dropped: Mapped[int] = mapped_column(Integer, default=0)
-    #: Hard targets the lesson cannot support. Not stored, and not a drop.
+    #: Hard targets the lesson cannot support, and targets of a cell found saturated while
+    #: the round ran (m7). Not stored, and not a drop.
     skipped: Mapped[int] = mapped_column(Integer, default=0)
     #: Why those hard targets were skipped, in the judge's words.
     skip_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Reviews the round's lesson run learned from before it generated (ADR-063).
+    lessons_applied: Mapped[int] = mapped_column(Integer, default=0)
+    #: Why some of those lessons were not learned. The round generates regardless.
+    lessons_error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: What the drift check saw in this round's questions (answer position, option count,
+    #: stem length); ``NULL`` when nothing looked off (ADR-063 point 4).
+    drift_warning: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Stored questions whose first attempt passed every check (m6); out of ``produced`` +
+    #: ``dropped``. ``NULL`` for rounds generated before it was counted.
+    first_attempt_passed: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Cells left out because every facet of their subtopic is covered (m7), e.g.
+    #: "While loops (medium)"; ``NULL`` when none.
+    saturated: Mapped[str | None] = mapped_column(Text, default=None)
     #: Why the round failed, in the professor's terms. Never a credential.
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -1136,6 +1336,10 @@ class GenerationRoundRow(TimestampMixin, Base):
     #: target and ends the round ``FAILED``; a set value makes that failure a cancellation.
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
+    )
+    #: Judge memory this round froze (ADR-064, m11). ``NULL`` for rounds before snapshots.
+    judge_snapshot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("judge_memory_snapshots.id", ondelete="SET NULL"), default=None
     )
 
     setup: Mapped[QuestionSetupRow] = relationship(back_populates="rounds")

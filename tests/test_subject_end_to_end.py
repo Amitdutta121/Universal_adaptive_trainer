@@ -21,10 +21,17 @@ from llm_fakes import MetricJudgeClient
 from pydantic import BaseModel
 
 from app.generation.principles import COMMON_SYSTEM
-from app.generation.schemas import CodingDraft, MultipleChoiceDraft
+from app.generation.schemas import CodingDraft, MultipleChoiceDraft, shuffle_options
 from app.question_types.equation_response import EquationResponseDraft
 from app.question_types.numeric_response import NumericResponseDraft
 from app.web.routes.api.students import STUDENT_HEADER
+
+
+def _mcq_answers(draft: MultipleChoiceDraft) -> tuple[str, str]:
+    """The (right, wrong) option index the student submits, after the generator's shuffle."""
+    right = shuffle_options(draft).correct_option_index
+    return str(right), str((right + 1) % len(draft.options))
+
 
 PHYSICS_TAXONOMY = {
     "schema_version": "1",
@@ -327,6 +334,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
         ids["numeric_response"],
         ids["equation_response"],
     )
+    right_wrong = _mcq_answers(drafts["multiple_choice"])
     secrets = {
         numeric: ["9.81", "relative_tolerance", "explanation"],
         equation: ["m*g*h", "expected", "explanation"],
@@ -337,7 +345,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
         student_id,
         set_id,
         {
-            mcq: [("2", 0), ("0", 100)],
+            mcq: [(right_wrong[1], 0), (right_wrong[0], 100)],
             numeric: [("9.81 kg", 0), ("9.81 m/s^2", 100)],
             equation: [("m*g", 0), ("g*h*m", 100)],
         },
@@ -351,7 +359,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
         second_student,
         set_id,
         {
-            mcq: [("1", 0)],
+            mcq: [(right_wrong[1], 0)],
             numeric: [("12 m/s^2", 0), ("981 cm/s^2", 100)],
             equation: [("m*g", 0), ("h m g", 100)],
         },
@@ -361,7 +369,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
 
     # The served question shows each type's answer hint and no answer key.
     served = {out["question_id"]: out["served"] for out in scored}
-    assert served[mcq]["options"] == drafts["multiple_choice"].options
+    assert served[mcq]["options"] == shuffle_options(drafts["multiple_choice"]).options
     assert served[mcq]["answer_hint"] is None
     assert served[numeric]["answer_hint"] == "Give a number with its unit, e.g. in m/s^2."
     assert served[equation]["answer_hint"].startswith("Write an expression using m, g")
@@ -451,12 +459,13 @@ def test_a_python_course_runs_the_same_way(
     set_id = _approve_and_publish(client, course_id, version_id, list(ids.values()))
     student_id = _enrol(client, "Ada Python")
     mcq, coding = ids["multiple_choice"], ids["coding"]
+    right, wrong = _mcq_answers(drafts["multiple_choice"])
     scored = _run(
         client,
         student_id,
         set_id,
         {
-            mcq: [("0", 0), ("1", 100)],
+            mcq: [(wrong, 0), (right, 100)],
             coding: [("print(int(input()) + 2)", 0), ("print(int(input()) * 2)", 100)],
         },
         {coding: ["n * 2", "reference_solution", "stdout"], mcq: ["correct_option_index"]},

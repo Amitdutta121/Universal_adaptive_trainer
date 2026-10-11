@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JudgeRail } from "./components/review-feedback";
 import { ReviewScreen } from "./review-screen";
@@ -48,6 +49,7 @@ let currentSetup: {
   setup: { id: number; latest_round: { id: number; status: string } | null } | null;
 } = { setup: null };
 let roundData: unknown;
+let submitPending = false;
 
 function makeDetail(): QuestionDetail {
   return {
@@ -58,6 +60,9 @@ function makeDetail(): QuestionDetail {
       kind: "discrete",
       difficulty: "easy",
       subtopic_ids: [1],
+      audit: false,
+      audit_metric: null,
+      audit_reason: null,
     },
     reference_solution: null,
     tests: null,
@@ -65,6 +70,7 @@ function makeDetail(): QuestionDetail {
     taxonomy: { curriculum: "Python", topic: "Basics", subtopics: ["Variables"] },
     validation_passed: true,
     validation_checks: [{ name: "answer_matches", passed: true }],
+    borderline_notes: [] as string[],
     pedagogical_eval: {
       status: "completed",
       gate: "needs_review",
@@ -107,7 +113,7 @@ vi.mock("@/lib/api/queries", () => ({
     isError: false,
     error: null,
   }),
-  useSubmitReview: () => ({ mutateAsync: submitReview, isPending: false }),
+  useSubmitReview: () => ({ mutateAsync: submitReview, isPending: submitPending }),
   useCurrentSetup: () => ({ data: currentSetup, isError: false, error: null }),
   useStartNextRound: () => ({ mutateAsync: startNextRound, isPending: false }),
   useRound: (roundId: number | null) => ({
@@ -123,6 +129,8 @@ beforeEach(() => {
   invalidateQueries.mockReset();
   currentSetup = { setup: null };
   roundData = undefined;
+  submitPending = false;
+  vi.mocked(toast.error).mockReset();
   submitReview.mockReset().mockResolvedValue({ outcome: null });
   startNextRound.mockReset().mockResolvedValue({ round_id: 9 });
 });
@@ -211,6 +219,107 @@ describe("ReviewScreen verdict", () => {
     expect(submitReview.mock.calls[0][0].body).not.toHaveProperty("reasons");
   });
 
+  it("sends the reasons picked for a reject, and none once switched back to accept", async () => {
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+
+    expect(screen.queryByRole("button", { name: "Reasons" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await user.click(screen.getByRole("button", { name: "Reasons" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Too easy" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Ambiguous" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Reasons" })).toHaveTextContent("Too easy +1");
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(screen.getByRole("button", { name: /Reject and continue/ }));
+
+    expect(submitReview).toHaveBeenCalledWith({
+      questionId: 42,
+      body: {
+        decision: "reject",
+        reasons: ["too_easy", "ambiguous"],
+        corrected_difficulty: "hard",
+        corrected_subtopic_ids: [2],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+    expect(screen.queryByRole("button", { name: "Reasons" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Accept and continue/ }));
+    expect(submitReview.mock.calls[1][0].body).not.toHaveProperty("reasons");
+  });
+
+  it("keeps Skip enabled while a review saves", () => {
+    submitPending = true;
+    render(<ReviewScreen />);
+    expect(screen.getByRole("button", { name: /Saving/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Skip/ })).toBeEnabled();
+  });
+
+  it("does not claim a refresh happened when the review is saved", async () => {
+    submitReview.mockResolvedValue({
+      outcome: {
+        cell: "confirmed_bad",
+        action: "This type's instruction is relearned from your reviews next round.",
+        attributed_labels: [],
+        refresh_error: "stale error",
+      },
+    });
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(screen.getByRole("button", { name: /Reject and continue/ }));
+
+    expect(toast.error).toHaveBeenCalledWith("confirmed bad", {
+      description: "This type's instruction is relearned from your reviews next round.",
+    });
+  });
+
+  it("shows the borderline judge note on the review card", () => {
+    detail = {
+      ...makeDetail(),
+      borderline_notes: ["difficulty judge thinks this may be medium"],
+    };
+    render(<ReviewScreen />);
+    expect(screen.getByTestId("borderline-banner")).toHaveTextContent(
+      "difficulty judge thinks this may be medium",
+    );
+  });
+
+  it("marks an audit draft and records agree as a reject", async () => {
+    detail = {
+      ...makeDetail(),
+      question: {
+        ...makeDetail().question,
+        audit: true,
+        audit_metric: "difficulty",
+        audit_reason: "this is hard, not easy",
+      },
+    };
+    const user = userEvent.setup();
+    render(<ReviewScreen />);
+    expect(screen.getByTestId("audit-banner")).toHaveTextContent(
+      "A judge rejected this — do you agree?",
+    );
+    expect(screen.getByTestId("audit-banner")).toHaveTextContent("this is hard, not easy");
+    expect(screen.queryByRole("button", { name: /Skip/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit question/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
+    await user.click(screen.getByRole("button", { name: "Confirm subtopics" }));
+    await user.click(screen.getByRole("button", { name: /Agree and continue/ }));
+    expect(submitReview).toHaveBeenCalledWith({
+      questionId: 42,
+      body: {
+        decision: "reject",
+        corrected_difficulty: "hard",
+        corrected_subtopic_ids: [2],
+      },
+    });
+  });
+
   it("keeps Edit as a secondary action", async () => {
     const user = userEvent.setup();
     render(<ReviewScreen />);
@@ -259,6 +368,106 @@ describe("Generate next round", () => {
       "Generating round 2: produced 4, dropped 1 of 10",
     );
     expect(screen.getByRole("button", { name: /Generate next round/ })).toBeDisabled();
+  });
+
+  it("says how many reviews the round learned from, or why it could not", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 10,
+      produced: 0,
+      dropped: 0,
+      lessons_applied: 3,
+      lessons_error: null,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Applied lessons from 3 reviews.",
+    );
+
+    roundData = { ...(roundData as object), lessons_applied: 0, lessons_error: "provider down" };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Some lessons were not applied: provider down",
+    );
+  });
+
+  it("shows the drift warning when the watched round finishes", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 5,
+      produced: 4,
+      dropped: 0,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+
+    roundData = {
+      ...(roundData as object),
+      status: "done",
+      produced: 5,
+      drift_warning: "Possible drift: all 5 multiple-choice answers are option A.",
+    };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Possible drift: all 5 multiple-choice answers are option A.",
+    );
+  });
+
+  it("shows the first-attempt pass rate once the round is done", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 5,
+      produced: 3,
+      dropped: 0,
+      first_attempt_passed: 2,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+
+    roundData = { ...(roundData as object), status: "done", dropped: 1 };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "First-attempt pass rate: 2 of 4 (50%).",
+    );
+
+    roundData = { ...(roundData as object), first_attempt_passed: null };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).not.toHaveTextContent("First-attempt");
+  });
+
+  it("names the saturated cells once the round is done", () => {
+    currentSetup = { setup: { id: 7, latest_round: { id: 3, status: "running" } } };
+    roundData = {
+      id: 3,
+      number: 2,
+      status: "running",
+      requested: 2,
+      produced: 1,
+      dropped: 0,
+      error: null,
+    };
+    const { rerender } = render(<ReviewScreen />);
+
+    roundData = {
+      ...(roundData as object),
+      status: "done",
+      skipped: 1,
+      saturated: "While loops (medium)",
+    };
+    rerender(<ReviewScreen />);
+    expect(screen.getByTestId("round-progress")).toHaveTextContent(
+      "Saturated, every facet already covered: While loops (medium).",
+    );
   });
 });
 

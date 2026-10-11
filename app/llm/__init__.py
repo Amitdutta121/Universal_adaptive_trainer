@@ -25,12 +25,13 @@ from app.llm.batch import (
     split_into_jobs,
     submit_batch,
 )
-from app.llm.client import StructuredLLMClient, get_structured_client
+from app.llm.client import ChatTurn, StructuredLLMClient, get_structured_client
 
 __all__ = [
     "BatchJobState",
     "BatchRequestItem",
     "BatchResultLine",
+    "ChatTurn",
     "StructuredLLMClient",
     "build_custom_id",
     "describe_availability",

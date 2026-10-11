@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.domain.enums import JudgeMetricId, RejectionReason
 from app.subjects import PYTHON_PROFILE, SubjectProfile
 
-RUBRIC_VERSION = "question-metrics@1"
+RUBRIC_VERSION = "question-metrics@2"
 
 
 @dataclass(frozen=True)
@@ -77,26 +77,44 @@ def issue_codes_for(profile: SubjectProfile) -> tuple[RejectionReason, ...]:
 
 def _issue_code_guide(profile: SubjectProfile) -> str:
     recall = "tests" if profile.has_code_types else "checks"
+    if profile.has_code_types:
+        false_claim: tuple[str, ...] = (
+            "The stem, an option, the explanation, or any code shown",
+            f"states something false about {profile.name}, or code shown",
+            "would not run as the question claims.",
+        )
+        wrong_key: tuple[str, ...] = (
+            "The answer key is wrong: the keyed option, the true/false",
+            "value, the expected output, or the reference solution.",
+        )
+    else:
+        false_claim = (
+            "The stem, an option, or the explanation states something",
+            f"false about {profile.name}.",
+        )
+        wrong_key = (
+            "The answer key is wrong: the keyed option, the true/false",
+            "value, or the reference answer.",
+        )
     lines: dict[RejectionReason, tuple[str, ...]] = {
-        RejectionReason.TECHNICALLY_INCORRECT: (
-            f"The question states something false about {profile.name}.",
-        ),
-        RejectionReason.INCORRECT_ANSWER: (
-            "The reference answer is wrong for the question asked.",
-        ),
+        RejectionReason.TECHNICALLY_INCORRECT: false_claim,
+        RejectionReason.INCORRECT_ANSWER: wrong_key,
         RejectionReason.INCORRECT_TESTS: ("The tests do not test what the question asks for.",),
         RejectionReason.NOT_GROUNDED_IN_SOURCE: (
             "It assesses material the supplied section does not teach.",
         ),
         RejectionReason.POOR_DISTRACTORS: (
-            "Distractors are implausible, trivially eliminable, or",
-            "more than one is defensible as correct.",
+            "Distractors are wrong but implausible or trivially",
+            "eliminable. (A distractor that is also correct is ambiguous.)",
         ),
         RejectionReason.POOR_TESTS: (
             "Tests run but are weak: they miss the core case or",
             "pass for the wrong reason.",
         ),
-        RejectionReason.AMBIGUOUS: ("More than one answer is defensible as written.",),
+        RejectionReason.AMBIGUOUS: (
+            "More than one option or answer is defensible as correct",
+            "as written, or the stem lacks information needed to answer.",
+        ),
         RejectionReason.POOR_WORDING: ("Confusing, grammatically broken, or unclear phrasing.",),
         RejectionReason.NOT_PEDAGOGICALLY_USEFUL: (
             "Answerable without exercising the intended skill, or",
@@ -114,14 +132,19 @@ def _issue_code_guide(profile: SubjectProfile) -> str:
 def _issues_system(profile: SubjectProfile) -> str:
     if profile.has_code_types:
         checks = (
-            "The question has already passed deterministic checks: its code runs and its tests\n"
-            "execute. Do not re-check execution, syntax, or whether tests pass."
+            "For coding, code-completion, debugging and output-prediction questions, the code\n"
+            "has already been run and the tests executed: do not re-check that the code runs\n"
+            "or that the tests pass. Code shown inside a multiple-choice or true/false\n"
+            "question has NOT been run: check that it behaves exactly as the question and\n"
+            "its answer key claim -- including code meant to raise an error."
         )
         item, items, entry, each = "issue code", "codes", "code", "code"
+        parts = "stem, code, options, answer key, explanation or tests"
     else:
         checks = """The question has already passed deterministic checks: its answer key is
 well-formed. Do not re-check its format or whether an answer is present."""
         item, items, entry, each = "issue", "issues", "entry", "issue"
+        parts = "stem, options, answer key or explanation"
     return f"""You review one {profile.phrase} assessment question and report which known
 problems it has. You do not decide whether to accept it.
 
@@ -130,8 +153,9 @@ problems it has. You do not decide whether to accept it.
 Select every {item} that genuinely applies, and only from this list:
 {_issue_code_guide(profile)}
 
-Report only problems a professor would act on. An imperfect but usable question
-has no issues. Do not report an issue you cannot point to in the question text.
+Report a problem only when a professor would reject or edit the question for it;
+do not report matters of style or taste. Do not report an issue you cannot point
+to in the question -- its {parts}.
 Do not judge topic, subtopic, or difficulty -- other reviewers cover those.
 
 If you find a real, actionable problem that no {entry} above describes, leave
@@ -182,17 +206,17 @@ def difficulty_bands(profile: SubjectProfile) -> str:
     is not told only the word "hard".
     """
     if profile.has_code_types:
-        hard = """  hard    Several taught ideas composed, or careful reasoning about an edge case,
-          execution order, or a subtle behaviour -- while still using only what
-          the section teaches."""
+        hard = """  hard    Three or more taught ideas composed, or careful reasoning about an
+          edge case (an empty or boundary value, an error, execution order, a
+          subtle behaviour) -- while still using only what the section teaches."""
     else:
-        hard = """  hard    Several taught ideas composed, or careful reasoning about an edge case
-          or a subtle effect -- while still using only what the section
-          teaches."""
+        hard = """  hard    Three or more taught ideas composed, or careful reasoning about an
+          edge case or a subtle effect -- while still using only what the
+          section teaches."""
     return f"""  easy    One taught step, applied directly. The student recalls or applies a
           single idea from the section with no composition.
-  medium  Two or three taught ideas combined, or one idea applied to a case the
-          section did not walk through directly.
+  medium  Two taught ideas combined, or one idea applied to an ordinary case the
+          section did not show.
 {hard}"""
 
 
@@ -214,9 +238,9 @@ and nothing beyond it -- not relative to {expert}.
 Difficulty comes from the reasoning the question demands, not from its length,
 {surface}
 
-Return the difficulty you would assign. When the question sits near the boundary
-between two levels, return the requested one: only a clear mismatch, a full
-level away, is worth reporting.
+Return the difficulty you would assign. When the question sits on the boundary
+between the requested level and the next one, return the requested level. Return
+another level only when the question clearly belongs inside that level's band.
 
 Also return one rationale of at most two sentences. If you disagree, say what
 makes it the level you chose."""

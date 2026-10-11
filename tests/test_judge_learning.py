@@ -36,8 +36,14 @@ from app.evaluation.judge_learning import (
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
 from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
 from app.feedback import route_review_outcome, submit_review
+from app.feedback.lessons import apply_pending_lessons
 from app.persistence.models import QuestionRow
-from app.persistence.repositories import JudgePromptRepository, QuestionRepository
+from app.persistence.repositories import (
+    JudgePromptRepository,
+    QuestionRepository,
+    ReviewOutcomeRepository,
+)
+from app.subjects import PYTHON_PROFILE
 
 DIFFICULTY = JudgeMetricId.DIFFICULTY
 
@@ -346,11 +352,16 @@ def test_render_keeps_the_shipped_text_when_nothing_is_learned() -> None:
     assert render_judge_prompt("Base text.", []) == "Base text."
 
 
-# ------------------------------------------------------- firing on a submitted review
+# ------------------------------------------- firing on the next round's lesson run (ADR-063)
+
+
+def _next_round_lessons(session: Session):
+    session.expire_all()
+    return apply_pending_lessons(session, round_id=1, profile=PYTHON_PROFILE)
 
 
 def test_a_disagreeing_review_relearns_the_named_judge(
-    client: TestClient, session: Session, rewriter: Rewriter
+    client: TestClient, session: Session, rewriter: Rewriter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     question = QuestionRepository(session).add(
         QuestionRow(
@@ -375,16 +386,19 @@ def test_a_disagreeing_review_relearns_the_named_judge(
     assert response.status_code == 201
     body = response.json()
     assert body["outcome"]["cell"] == "missed"
-    assert body["outcome"]["judges_refreshed"] == [DIFFICULTY.value]
-    assert rewriter.calls == 1
-
-    row = JudgePromptRepository(session).get(DIFFICULTY)
-    assert row is not None
-    assert row.learned is True
+    assert rewriter.calls == 0
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
+    _next_round_lessons(session)
+    refreshed = ReviewOutcomeRepository(session).get_for_review(body["id"]).judges_refreshed
+    assert DIFFICULTY in refreshed
+    # A difficulty reason with the subtopics unchanged is no lesson for the subtopic judge.
+    assert JudgeMetricId.SUBTOPIC not in refreshed
+    assert rewriter.calls == 0
+    assert JudgePromptRepository(session).get(DIFFICULTY) is None
 
 
 def test_an_agreeing_review_relearns_no_judge(
-    client: TestClient, session: Session, rewriter: Rewriter
+    client: TestClient, session: Session, rewriter: Rewriter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     question = QuestionRepository(session).add(
         QuestionRow(
@@ -398,13 +412,18 @@ def test_an_agreeing_review_relearns_no_judge(
     session.commit()
 
     response = client.post(f"/api/questions/{question.id}/review", json={"decision": "approve"})
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
+    _next_round_lessons(session)
 
     assert response.json()["outcome"]["judges_refreshed"] == []
+    stored = ReviewOutcomeRepository(session).get_for_review(response.json()["id"])
+    # Every judge matched the professor: a confirmation, not a lesson.
+    assert stored.judges_refreshed == []
     assert rewriter.calls == 0
 
 
 def test_a_hand_written_judge_is_never_overwritten(
-    client: TestClient, session: Session, rewriter: Rewriter
+    client: TestClient, session: Session, rewriter: Rewriter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The professor typed it deliberately; a learned rewrite would discard it."""
     JudgePromptRepository(session).save(
@@ -427,6 +446,8 @@ def test_a_hand_written_judge_is_never_overwritten(
         f"/api/questions/{question.id}/review",
         json={"decision": "reject", "reasons": ["too_easy"]},
     )
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", lambda *_a, **_k: None)
+    _next_round_lessons(session)
 
     assert rewriter.calls == 0
     row = JudgePromptRepository(session).get(DIFFICULTY)
@@ -439,16 +460,10 @@ def test_a_failed_relearn_keeps_the_review(
 ) -> None:
     from app.errors import LLMRequestError
 
-    def boom():
-        class Failing:
-            description = "fake/rewriter"
+    def boom(*_a, **_k):
+        raise LLMRequestError("The provider is unavailable.", detail="502")
 
-            def complete_structured(self, **_kwargs):
-                raise LLMRequestError("The provider is unavailable.", detail="502")
-
-        return Failing()
-
-    monkeypatch.setattr("app.evaluation.judge_learning.get_structured_client", boom)
+    monkeypatch.setattr("app.feedback.lessons.apply_judge_lessons", boom)
     question = QuestionRepository(session).add(
         QuestionRow(
             prompt="What does this loop print?",
@@ -466,9 +481,11 @@ def test_a_failed_relearn_keeps_the_review(
     )
 
     assert response.status_code == 201
-    outcome = response.json()["outcome"]
-    assert outcome["judges_refreshed"] == []
-    assert "provider" in (outcome["refresh_error"] or "").lower()
+    run = _next_round_lessons(session)
+    assert "provider" in (run.error or "").lower()
+    outcome = ReviewOutcomeRepository(session).get_for_review(response.json()["id"])
+    assert outcome.judges_refreshed == []
+    assert "provider" in (outcome.refresh_error or "").lower()
 
 
 # --------------------------------------------------------------- the API and page

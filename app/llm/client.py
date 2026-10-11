@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, TypeVar
+import re
+from collections.abc import Sequence
+from typing import Literal, Protocol, TypeVar
 
 import instructor
 import openai
@@ -17,8 +19,29 @@ from app.llm.availability import require_llm
 logger = logging.getLogger(__name__)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+#: Reasoning models (OpenAI's gpt-5 family and o-series) reject ``max_tokens`` and a
+#: non-default ``temperature``; their hidden reasoning also spends the output budget.
+_REASONING_MODEL = re.compile(r"^(gpt-5|o\d)", re.IGNORECASE)
+#: Output budget for a reasoning model: the answer plus its reasoning tokens.
+REASONING_OUTPUT_TOKENS = 16_000
+
+
+def is_openrouter(settings: Settings) -> bool:
+    """Whether calls go to OpenRouter (the default) rather than another OpenAI-style API."""
+    return not settings.llm_base_url or "openrouter.ai" in settings.llm_base_url
+
+
+def is_reasoning_model(model: str) -> bool:
+    """``gpt-5-mini``, ``openai/o4-mini``: the deployment or route name of a reasoning model."""
+    return bool(_REASONING_MODEL.match(model.rsplit("/", 1)[-1]))
+
+
 MAX_RETRIES = 1
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+#: One earlier message of a conversation: who sent it, and its text. ``user`` is what the
+#: application asked; ``assistant`` is what the model answered (rendered back as text).
+ChatTurn = tuple[Literal["user", "assistant"], str]
 
 
 class StructuredLLMClient(Protocol):
@@ -35,8 +58,13 @@ class StructuredLLMClient(Protocol):
         system: str,
         prompt: str,
         response_model: type[ModelT],
+        history: Sequence[ChatTurn] = (),
     ) -> ModelT:
-        """Return a validated response model instance."""
+        """Return a validated response model instance.
+
+        ``history`` is the conversation before ``prompt``, oldest first: a retry sends the
+        first request and the model's rejected answer, so the correction can refer to it.
+        """
         ...
 
 
@@ -88,7 +116,13 @@ class InstructorStructuredClient:
 
     provider_label = "openrouter"
 
-    def __init__(self, settings: Settings, *, temperature: float | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        temperature: float | None = None,
+        mode: instructor.Mode = instructor.Mode.JSON,
+    ) -> None:
         self._settings = settings
         #: ``None`` leaves the provider default. Judges pass 0.0 so that a
         #: verdict is a measurement rather than a sample.
@@ -107,12 +141,31 @@ class InstructorStructuredClient:
                 "X-Title": "Adaptive Trainer",
             },
         )
-        self._client = instructor.from_openai(raw, mode=instructor.Mode.JSON)
+        #: ``MD_JSON`` for models that wrap their JSON in a code fence (Claude Haiku does).
+        self._client = instructor.from_openai(raw, mode=mode)
 
     @property
     def description(self) -> str:
-        """Return provenance for the configured OpenRouter route."""
-        return f"{self.provider_label}/{self._settings.llm_model}"
+        """Return provenance for the configured route."""
+        label = self.provider_label if is_openrouter(self._settings) else "azure"
+        return f"{label}/{self._settings.llm_model}"
+
+    def _request_options(self) -> dict[str, object]:
+        """Token limit, sampling and provider fields this route and model accept."""
+        options: dict[str, object] = {}
+        if is_reasoning_model(self._settings.llm_model):
+            # Temperature stays at the model default: these models reject anything else.
+            options["max_completion_tokens"] = max(
+                self._settings.llm_max_output_tokens, REASONING_OUTPUT_TOKENS
+            )
+            options["reasoning_effort"] = self._settings.llm_reasoning_effort
+        else:
+            options["max_tokens"] = self._settings.llm_max_output_tokens
+            if self._temperature is not None:
+                options["temperature"] = self._temperature
+        if is_openrouter(self._settings):
+            options["extra_body"] = {"provider": {"data_collection": "deny"}}
+        return options
 
     def complete_structured(
         self,
@@ -120,23 +173,20 @@ class InstructorStructuredClient:
         system: str,
         prompt: str,
         response_model: type[ModelT],
+        history: Sequence[ChatTurn] = (),
     ) -> ModelT:
         """Return an Instructor-validated structured response without repair retries."""
         try:
-            extra: dict[str, object] = {}
-            if self._temperature is not None:
-                extra["temperature"] = self._temperature
             return self._client.chat.completions.create(
                 model=self._settings.llm_model,
-                max_tokens=self._settings.llm_max_output_tokens,
-                **extra,
+                **self._request_options(),
                 messages=[
                     {"role": "system", "content": system},
+                    *({"role": role, "content": text} for role, text in history),
                     {"role": "user", "content": prompt},
                 ],
                 response_model=response_model,
                 max_retries=0,
-                extra_body={"provider": {"data_collection": "deny"}},
             )
         except openai.OpenAIError as exc:
             raise _as_request_error(exc) from exc

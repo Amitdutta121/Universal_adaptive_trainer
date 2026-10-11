@@ -17,6 +17,9 @@ import {
   DIFFICULTIES,
   DIFFICULTY_LABEL,
   type Difficulty,
+  REJECTION_REASON_GROUPS,
+  REJECTION_REASON_LABEL,
+  type RejectionReason,
   type ReviewDecision,
   type SubtopicOption,
 } from "../review-types";
@@ -127,6 +130,64 @@ function SubtopicPicker({
   );
 }
 
+/** Optional structured reasons for a reject or an edit, grouped by the judge they blame. */
+function ReasonPicker({
+  value,
+  onChange,
+}: {
+  value: readonly RejectionReason[];
+  onChange: (value: RejectionReason[]) => void;
+}) {
+  const toggle = (reason: RejectionReason, on: boolean) =>
+    onChange(on ? [...value, reason] : value.filter((each) => each !== reason));
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          aria-label="Reasons"
+          className="h-9 max-w-[16rem] justify-between font-normal"
+        >
+          <span className="truncate">
+            {value.length === 0 ? (
+              <span className="text-muted-foreground">Reasons (optional)</span>
+            ) : (
+              <>
+                {REJECTION_REASON_LABEL[value[0]]}
+                {value.length > 1 ? (
+                  <span className="text-muted-foreground"> +{value.length - 1}</span>
+                ) : null}
+              </>
+            )}
+          </span>
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-80 min-w-64 overflow-y-auto">
+        {REJECTION_REASON_GROUPS.map((group, index) => (
+          <Fragment key={group.label}>
+            {index > 0 ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuLabel className="text-muted-foreground text-xs">
+              {group.label}
+            </DropdownMenuLabel>
+            {group.reasons.map((reason) => (
+              <DropdownMenuCheckboxItem
+                key={reason}
+                checked={value.includes(reason)}
+                onCheckedChange={(on) => toggle(reason, on)}
+                onSelect={(event) => event.preventDefault()}
+              >
+                {REJECTION_REASON_LABEL[reason]}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </Fragment>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 type ReviewVerdictBarProps = {
   decision: ReviewDecision;
   effectiveDecision: ReviewDecision;
@@ -138,6 +199,8 @@ type ReviewVerdictBarProps = {
   onConfirmDifficulty: () => void;
   onConfirmSubtopics: () => void;
   comment: string;
+  reasons: RejectionReason[];
+  onReasonsChange: (value: RejectionReason[]) => void;
   isSubmitting: boolean;
   canSubmit: boolean;
   onDecisionChange: (decision: ReviewDecision) => void;
@@ -146,11 +209,14 @@ type ReviewVerdictBarProps = {
   onCommentChange: (value: string) => void;
   onSubmit: () => void;
   onSkip?: () => void;
+  /** Judge-rejected draft: Agree confirms the judge, Disagree approves the question. */
+  audit?: boolean;
 };
 
 /**
  * The professor's verdict on one question: confirm or correct its difficulty and subtopics,
- * then accept or reject it (reject takes an optional one-line comment). Editing the question
+ * then accept or reject it (reject and edit take optional reasons and a one-line comment;
+ * audit Agree is a reject, so it takes reasons too). Editing the question
  * itself stays available as a secondary action.
  */
 export function ReviewVerdictBar({
@@ -164,6 +230,8 @@ export function ReviewVerdictBar({
   onConfirmDifficulty,
   onConfirmSubtopics,
   comment,
+  reasons,
+  onReasonsChange,
   isSubmitting,
   canSubmit,
   onDecisionChange,
@@ -172,14 +240,19 @@ export function ReviewVerdictBar({
   onCommentChange,
   onSubmit,
   onSkip,
+  audit = false,
 }: ReviewVerdictBarProps) {
   const submitLabel = isSubmitting
     ? "Saving..."
-    : effectiveDecision === "reject"
-      ? "Reject and continue"
-      : effectiveDecision === "edit"
-        ? "Save edit and accept"
-        : "Accept and continue";
+    : audit
+      ? effectiveDecision === "reject"
+        ? "Agree and continue"
+        : "Disagree and continue"
+      : effectiveDecision === "reject"
+        ? "Reject and continue"
+        : effectiveDecision === "edit"
+          ? "Save edit and accept"
+          : "Accept and continue";
 
   return (
     <div className="review-sticky rounded-[1rem] border px-5 py-4">
@@ -224,44 +297,75 @@ export function ReviewVerdictBar({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant={decision === "approve" ? "default" : "outline"}
-            aria-pressed={decision === "approve"}
-            className={decision === "approve" ? "bg-[var(--review-ok)] text-white" : ""}
-            onClick={() => onDecisionChange("approve")}
-          >
-            Accept
-          </Button>
-          <Button
-            type="button"
-            variant={decision === "reject" ? "default" : "outline"}
-            aria-pressed={decision === "reject"}
-            className={decision === "reject" ? "bg-[var(--review-critical)] text-white" : ""}
-            onClick={() => onDecisionChange("reject")}
-          >
-            Reject
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={decision === "edit"}
-            className={decision === "edit" ? "text-[var(--review-accent)]" : ""}
-            onClick={() => onDecisionChange(decision === "edit" ? "approve" : "edit")}
-          >
-            <Pencil className="size-3.5" />
-            {decision === "edit" ? "Stop editing" : "Edit question"}
-          </Button>
+          {audit ? (
+            <>
+              <Button
+                type="button"
+                variant={decision === "reject" ? "default" : "outline"}
+                aria-pressed={decision === "reject"}
+                className={decision === "reject" ? "bg-[var(--review-critical)] text-white" : ""}
+                onClick={() => onDecisionChange("reject")}
+              >
+                Agree
+              </Button>
+              <Button
+                type="button"
+                variant={decision === "approve" ? "default" : "outline"}
+                aria-pressed={decision === "approve"}
+                className={decision === "approve" ? "bg-[var(--review-ok)] text-white" : ""}
+                onClick={() => onDecisionChange("approve")}
+              >
+                Disagree
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant={decision === "approve" ? "default" : "outline"}
+                aria-pressed={decision === "approve"}
+                className={decision === "approve" ? "bg-[var(--review-ok)] text-white" : ""}
+                onClick={() => onDecisionChange("approve")}
+              >
+                Accept
+              </Button>
+              <Button
+                type="button"
+                variant={decision === "reject" ? "default" : "outline"}
+                aria-pressed={decision === "reject"}
+                className={decision === "reject" ? "bg-[var(--review-critical)] text-white" : ""}
+                onClick={() => onDecisionChange("reject")}
+              >
+                Reject
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-pressed={decision === "edit"}
+                className={decision === "edit" ? "text-[var(--review-accent)]" : ""}
+                onClick={() => onDecisionChange(decision === "edit" ? "approve" : "edit")}
+              >
+                <Pencil className="size-3.5" />
+                {decision === "edit" ? "Stop editing" : "Edit question"}
+              </Button>
+            </>
+          )}
 
           {effectiveDecision === "reject" || effectiveDecision === "edit" ? (
+            <ReasonPicker value={reasons} onChange={onReasonsChange} />
+          ) : null}
+
+          {audit || effectiveDecision === "reject" || effectiveDecision === "edit" ? (
             <Input
               value={comment}
               onChange={(event) => onCommentChange(event.target.value)}
               placeholder={
-                effectiveDecision === "reject"
-                  ? "Why reject? (optional)"
-                  : "What did you change? (optional)"
+                audit
+                  ? "Optional comment"
+                  : effectiveDecision === "reject"
+                    ? "Why reject? (optional)"
+                    : "What did you change? (optional)"
               }
               aria-label="Comment"
               className="h-9 min-w-56 flex-1"
@@ -274,8 +378,10 @@ export function ReviewVerdictBar({
             {submitLabel}
             <span className="review-kbd">Enter</span>
           </Button>
-          {onSkip ? (
-            <Button variant="outline" onClick={onSkip} disabled={isSubmitting}>
+          {onSkip && !audit ? (
+            // Not disabled while a review saves: saving makes no model call, and the
+            // professor may move on before it lands.
+            <Button variant="outline" onClick={onSkip}>
               Skip
               <ChevronRight className="size-4" />
             </Button>

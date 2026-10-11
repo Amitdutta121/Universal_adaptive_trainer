@@ -315,10 +315,18 @@ def judge_trust(
 
 
 def route_generated_question(
-    session: Session, question_row: QuestionRow, custom_results: Any = None
+    session: Session,
+    question_row: QuestionRow,
+    custom_results: Any = None,
+    *,
+    hold_for_review: bool = False,
 ) -> str:
     """Persist ``auto_approved``, ``audit`` or ``pending``; every tenth eligible
     trusted question is an audit. Repeated calls return the original decision.
+
+    ``hold_for_review`` routes to ``pending`` however trusted the scope, without
+    counting toward the audit sequence: the caller knows something the judges do
+    not (a round question kept on its last attempt as a duplicate, ADR-063 point 6).
 
     The conditional question claim and atomic counter increment share the
     caller's transaction, so rollback restores both. SQLite and PostgreSQL use
@@ -341,7 +349,8 @@ def route_generated_question(
     snapshot = _snapshot(session, question_row, custom_results)
     provenance, sequence = "pending", None
     if (
-        report.trusted
+        not hold_for_review
+        and report.trusted
         and report.eligible
         and question_row.status == QuestionStatus.VALIDATION_PASSED
     ):

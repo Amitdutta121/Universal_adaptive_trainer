@@ -73,13 +73,16 @@ export type ExtractionMetadata = Schemas["DisplayExtractionMetadata"];
 export type BatchRunListResponse = Schemas["BatchRunListResponse"];
 export type TypeInstructionListResponse = Schemas["TypeInstructionListResponse"];
 export type TypeInstruction = Schemas["TypeInstructionOut"];
-export type TypeInstructionRefreshResponse = Schemas["TypeInstructionRefreshResponse"];
+export type Guideline = Schemas["GuidelineOut"];
+export type GuidelineListResponse = Schemas["GuidelineListResponse"];
 export type JudgeMetricId = Schemas["JudgeMetricId"];
 export type JudgePromptListResponse = Schemas["JudgePromptListResponse"];
 export type JudgePrompt = Schemas["JudgePromptOut"];
 export type JudgeStats = Schemas["JudgeStatsResponse"];
 export type JudgeStat = Schemas["JudgeStatsOut"];
 export type StyleTrust = Schemas["StyleTrustOut"];
+export type JudgeScorecard = Schemas["JudgeScorecardOut"];
+export type JudgeScorecardResponse = Schemas["JudgeScorecardResponse"];
 
 // Question setup, rounds and custom judges (docs/QUESTION_SETUP_PLAN.md).
 export type QuestionStyle = Schemas["QuestionStyle"];

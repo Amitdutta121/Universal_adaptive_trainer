@@ -135,8 +135,6 @@ def judge_stats(
                 observations=observations,
                 agreements=agreements,
                 agreement_rate=agreements / observations if observations else None,
-                learnable_disagreements=len(disagreements_for(session, metric, profile=profile)),
-                disagreements_needed=settings.judge_repair_min_disagreements,
             )
         )
     trusted_count = sum(item.report.trusted for item in subject_wide)
@@ -250,7 +248,7 @@ def refresh(
 ) -> JudgePromptRefreshResponse:
     """Re-learn one judge's prompt from the questions it got wrong (ADR-039).
 
-    The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
+    Manual, as the generator's retired refresh was (m5 moved it to guidelines). Reads only
     the disagreements this judge is named in, minus the held-out third, so the
     reserved questions stay available to score the result.
     """

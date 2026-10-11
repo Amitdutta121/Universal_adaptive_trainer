@@ -142,6 +142,9 @@ def test_regenerate_survives_a_correction_retry_keeping_the_feedback_block(
         source.id, feedback="Keep the bug subtle."
     )
 
-    second = client.generation_calls[1]["prompt"]
-    assert "--- instructor feedback ---" in second
+    retry = client.generation_calls[1]
+    # The feedback block stays in the request, now the conversation's first turn.
+    (_, asked), _ = retry["history"]
+    assert "--- instructor feedback ---" in asked
+    second = retry["prompt"]
     assert "--- correction ---" in second

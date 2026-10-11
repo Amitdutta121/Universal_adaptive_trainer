@@ -6,6 +6,8 @@ others are absent from the stored evaluation, not failed.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -155,7 +157,14 @@ def enabled_metrics() -> list[JudgeMetricId]:
 class PedagogicalJudge:
     """Run the enabled metric judges over one question."""
 
-    def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        client: StructuredLLMClient | None = None,
+        snapshot_id: int | None = None,
+        memory_as_of: datetime | None = None,
+    ) -> None:
         self._session = session
         # Temperature 0: a judge is an instrument, and E1 measured the provider
         # default flipping 20% of verdicts between runs (ADR-042).
@@ -163,14 +172,24 @@ class PedagogicalJudge:
         # Resolved once per judge and subject, not per metric: all four answers belong to
         # one panel, and re-reading between them could straddle a professor's edit.
         self._panels: dict[str, tuple[dict[JudgeMetricId, str], str]] = {}
+        self._snapshot_id = snapshot_id
+        self._memory_as_of = memory_as_of
 
     def _panel(self, question: Question) -> tuple[dict[JudgeMetricId, str], str]:
         """The prompts and rubric version for the subject of this question's course."""
         profile = profile_for_version(self._session, question.curriculum_version_id)
         if profile.personal_key not in self._panels:
+            snapshot_id = self._snapshot_id
+            if snapshot_id is None:
+                from app.evaluation.judge_memory import latest_promoted
+
+                current = latest_promoted(self._session, profile.personal_key)
+                snapshot_id = current.id if current is not None else None
             self._panels[profile.personal_key] = (
                 resolve_system_prompts(self._session, profile=profile),
-                effective_rubric_version(self._session, profile=profile),
+                effective_rubric_version(
+                    self._session, profile=profile, snapshot_id=snapshot_id
+                ),
             )
         return self._panels[profile.personal_key]
 
@@ -257,6 +276,7 @@ class PedagogicalJudge:
         self, metric: JudgeMetricId, context: JudgeContext, question: Question, system: str
     ) -> MetricResult:
         """One judge, retried on transport and shape failures alike."""
+        system = self._compose(metric, question, system)
         prompt = build_user_prompt(metric, context)
         last_detail = "unknown"
         for _ in range(JUDGE_MAX_ATTEMPTS):
@@ -270,6 +290,29 @@ class PedagogicalJudge:
             except (LLMRequestError, MalformedModelOutputError) as exc:
                 last_detail = humanize_judge_error_detail(str(exc.detail or exc))
         return failed_metric(metric, detail=last_detail)
+
+    def _compose(self, metric: JudgeMetricId, question: Question, system: str) -> str:
+        """Render this judge's frozen guidelines and nearest cases onto ``system``."""
+        if metric is JudgeMetricId.GENERATABILITY:
+            return system
+        from app.evaluation.judge_memory import compose_judge_system, latest_promoted
+        from app.persistence.models import JudgeMemorySnapshotRow
+
+        profile = profile_for_version(self._session, question.curriculum_version_id)
+        snapshot = None
+        if self._snapshot_id is not None:
+            snapshot = self._session.get(JudgeMemorySnapshotRow, self._snapshot_id)
+        elif self._memory_as_of is None:
+            snapshot = latest_promoted(self._session, profile.personal_key)
+        return compose_judge_system(
+            self._session,
+            metric,
+            profile,
+            question=question,
+            snapshot=snapshot,
+            base=system,
+            created_before=self._memory_as_of,
+        )
 
 
 def _source_section_ids(question: Question) -> list[int]:

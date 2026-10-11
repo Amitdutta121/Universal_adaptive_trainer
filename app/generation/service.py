@@ -9,21 +9,31 @@ learned for its type.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, EvaluationTrigger, QuestionType
+from app.domain.enums import Difficulty, EvaluationTrigger, JudgeMetricId, QuestionType
 from app.domain.questions import Question
 from app.errors import InvalidQuestionSpecError
-from app.evaluation import PedagogicalJudge, new_run_id, record_evaluation, skipped_evaluation
+from app.evaluation import (
+    PedagogicalEvaluation,
+    PedagogicalJudge,
+    new_run_id,
+    record_evaluation,
+    skipped_evaluation,
+)
 from app.evaluation.custom import CustomRule
+from app.evaluation.schema import MetricStatus
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
-from app.generation.review import RoundReview
+from app.generation.prompts import RoundExamples
+from app.generation.review import ConceptCheck, DuplicateCheck, RoundReview
+from app.generation.solve import BlindSolve
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
-from app.persistence.models import CurriculumVersionRow, QuestionRow
+from app.persistence.models import CurriculumVersionRow, QuestionRow, QuestionSimilarityRow
 from app.persistence.repositories import QuestionRepository, _source_section_ids
 
 
@@ -35,6 +45,8 @@ class GenerationService:
         session: Session,
         *,
         client: StructuredLLMClient | None = None,
+        snapshot_id: int | None = None,
+        memory_as_of: datetime | None = None,
     ) -> None:
         from app.validation import get_question_validator
 
@@ -51,7 +63,9 @@ class GenerationService:
             validator=self._validator,
         )
         self._client = client
-        self._judge = PedagogicalJudge(session, client=client)
+        self._judge = PedagogicalJudge(
+            session, client=client, snapshot_id=snapshot_id, memory_as_of=memory_as_of
+        )
         self._questions = QuestionRepository(session)
 
     def generate_for_sections(
@@ -267,8 +281,11 @@ class GenerationService:
         version: CurriculumVersionRow,
         round_id: int | None,
         rules: Sequence[CustomRule] = (),
-        examples: list[str] | None = None,
+        examples: RoundExamples | None = None,
         run_id: str | None = None,
+        duplicates: DuplicateCheck | None = None,
+        concepts: ConceptCheck | None = None,
+        solver: BlindSolve | None = None,
     ) -> QuestionRow | None:
         """Generate one round question, judged inside the retry loop; ``None`` when dropped.
 
@@ -277,6 +294,16 @@ class GenerationService:
         ``MAX_GENERATION_ATTEMPTS`` a question that still fails is **not stored**. A stored
         question carries ``style_id``, ``round_id`` and ``target_subtopic_id``, keeps the
         judge evaluation that passed it (no second judge run), and lands in the review queue.
+
+        ``duplicates`` (ADR-063 point 6) runs before the judges: a duplicate is retried with
+        "too similar to: ...", except on the last attempt, where it is judged as usual and, if
+        kept, stored with a :class:`QuestionSimilarityRow` per resembled question -- as is any
+        kept question that only resembles one. A kept duplicate always goes to the review
+        queue, never auto-approved by trust routing. ``concepts`` asks, for the nearest match
+        below the duplicate line, whether it is the same idea reworded; "yes" is treated like
+        a duplicate (retried; kept, flagged and held on the last attempt). ``solver`` answers a
+        multiple-choice or true/false question without its key; a disagreement is retried
+        with the solver's finding, and on the last attempt kept with ``solve_flag`` and held.
 
         Flushes; the caller commits.
 
@@ -289,20 +316,29 @@ class GenerationService:
                 "Round generation needs a target subtopic.",
                 detail="Use generate_for_sections for section-only specs.",
             )
-        review = RoundReview(self._judge, rules, spec=spec, client=self._client)
-        question = self._question_for_round(
-            spec, version=version, review=review, examples=examples
+        review = RoundReview(
+            self._judge,
+            rules,
+            spec=spec,
+            client=self._client,
+            duplicates=duplicates,
+            concepts=concepts,
+            solver=solver,
         )
+        question = self._question_for_round(spec, version=version, review=review, examples=examples)
         if not question.generation_attempts or not question.generation_attempts[-1].usable:
+            self._maybe_store_audit(spec, review, round_id)
             return None
         evaluation = review.last_evaluation
         if evaluation is None:
+            self._maybe_store_audit(spec, review, round_id)
             return None
 
         row = self._row_from_question(question)
         row.style_id = spec.style_id
         row.round_id = round_id
         row.target_subtopic_id = spec.target_subtopic_id
+        row.solve_flag = review.last_solve_flag
         row = self._questions.add(row)
         report = question.validation_report or self._validator.validate(question)
         row.validation_report = report
@@ -316,10 +352,28 @@ class GenerationService:
             trigger=EvaluationTrigger.GENERATION,
         )
         stored.custom_results = [result.model_dump(mode="json") for result in review.last_custom]
+        for match in review.last_similar:
+            self._session.add(
+                QuestionSimilarityRow(
+                    question_id=row.id,
+                    similar_question_id=match.question_id,
+                    score=match.score,
+                    model=match.model,
+                )
+            )
         self._session.flush()
         from app.evaluation.trust import route_generated_question
 
-        route_generated_question(self._session, row, review.last_custom)
+        # A duplicate kept on the last attempt waits for the professor, who sees its flag.
+        route_generated_question(
+            self._session,
+            row,
+            review.last_custom,
+            hold_for_review=review.last_same_concept is not None
+            or review.last_solve_flag is not None
+            or any(match.duplicate for match in review.last_similar),
+        )
+        self._maybe_store_audit(spec, review, round_id)
         return row
 
     def _question_for_round(
@@ -328,7 +382,7 @@ class GenerationService:
         *,
         version: CurriculumVersionRow,
         review: RoundReview,
-        examples: list[str] | None,
+        examples: RoundExamples | None,
     ) -> Question:
         """One round question. A hard cell is a valid medium question, then a harder one."""
         if spec.difficulty is not Difficulty.HARD:
@@ -395,6 +449,66 @@ class GenerationService:
             created_at=question.created_at,
             updated_at=question.updated_at,
         )
+
+    def _maybe_store_audit(
+        self,
+        spec: QuestionSpec,
+        review: RoundReview,
+        round_id: int | None,
+    ) -> None:
+        """Keep at most two judge-failed drafts per round for the professor to confirm."""
+        if round_id is None:
+            return
+        question = review.last_failed_question
+        evaluation = review.last_failed_evaluation
+        if question is None or evaluation is None:
+            return
+        metric = _audit_metric(evaluation)
+        if metric is None:
+            return
+        if self._questions.count_audit_for_round(round_id) >= 2:
+            return
+        row = self._row_from_question(question)
+        row.style_id = spec.style_id
+        row.round_id = round_id
+        row.target_subtopic_id = spec.target_subtopic_id
+        row.audit = True
+        row.audit_metric = metric
+        row.audit_reason = _audit_reason(evaluation, metric)
+        row = self._questions.add(row)
+        report = question.validation_report or self._validator.validate(question)
+        row.validation_report = report
+        row.status = report.resulting_status()
+        evaluation = evaluation.model_copy(update={"question_id": row.id})
+        record_evaluation(
+            self._session,
+            row.id,
+            evaluation,
+            run_id=new_run_id(),
+            trigger=EvaluationTrigger.GENERATION,
+        )
+        self._session.flush()
+
+
+def _audit_metric(evaluation: PedagogicalEvaluation) -> str | None:
+    """Which completed judge failed first; skip ERROR / skipped panels."""
+    difficulty = evaluation.metric(JudgeMetricId.DIFFICULTY)
+    if (
+        difficulty is not None
+        and difficulty.status is MetricStatus.COMPLETED
+        and difficulty.passed is False
+    ):
+        return "difficulty"
+    topic = evaluation.metric(JudgeMetricId.SUBTOPIC)
+    if topic is not None and topic.status is MetricStatus.COMPLETED and topic.passed is False:
+        return "topic"
+    return None
+
+
+def _audit_reason(evaluation: PedagogicalEvaluation, metric: str) -> str:
+    key = JudgeMetricId.DIFFICULTY if metric == "difficulty" else JudgeMetricId.SUBTOPIC
+    result = evaluation.metric(key)
+    return (result.rationale or "").strip() if result is not None else ""
 
 
 def _harden_follow_up(seed: Question) -> str:

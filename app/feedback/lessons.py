@@ -1,0 +1,256 @@
+"""The lesson run: learn from the reviews since the last round, once, before it generates.
+
+ADR-063 step 1-2. Saving a review only records it (review, outcome); the model calls that
+turn reviews into lessons happen here, in the round's background job, so the review screen
+never waits on a provider. Each affected judge and each affected question type is relearned
+**once** per run however many reviews named it -- the existing learners already read every
+review of their scope, so one call per scope sees all the new evidence.
+
+Judges learn MemAlign memory (ADR-064, m11): one
+:func:`~app.evaluation.judge_memory.apply_judge_lessons` call distils
+``judge:<metric>`` guidelines from the pending reviews and freezes a snapshot.
+The generator learns **guidelines** (ADR-063 points 3-4, m5): for each type the professor
+rejected or rewrote, one :func:`~app.memory.distill_guidelines` call turns the new reviews
+into edit operations on that type's guidelines; the failed attempts of round questions the
+professor approved become retry episodes (m6, no model call). Judges first, then the
+generator (ADR-063's order). The rewrite in :func:`refresh_judge_prompt` and its
+five-disagreement threshold are no longer part of this run.
+
+A provider failure is recorded on the outcome rows it concerns and returned, never raised:
+the round must still generate, and a silent failure would leave the professor believing a
+lesson landed that did not. Those rows stay pending, so the next round tries again.
+
+Allowed dependencies
+    Those of :mod:`app.feedback`, plus the judge learner of ``app.evaluation`` and the
+    guideline distiller of ``app.memory``.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+from app.config import get_settings
+from app.domain.enums import JudgeMetricId, QuestionType
+from app.errors import AdaptiveTrainerError
+from app.evaluation.judge_memory import apply_judge_lessons, episode_teaches
+from app.evaluation.trust_scope import trusted_scopes
+from app.feedback.outcomes import _outcome_from_row
+from app.llm import StructuredLLMClient
+from app.memory import (
+    MemoryEpisodeRepository,
+    distill_guidelines,
+    generator_target,
+    record_retry_episodes,
+)
+from app.persistence.models import ReviewOutcomeRow
+from app.persistence.repositories import ReviewOutcomeRepository
+from app.subjects import SubjectProfile
+from app.subjects.resolve import key_of_version, storage_keys_by_version
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LessonRun:
+    """What one lesson run did: how many reviews it learned from, and what failed.
+
+    ``applied`` excludes the reviews whose lesson failed; they stay pending.
+    """
+
+    applied: int = 0
+    error: str | None = None
+
+
+def apply_pending_lessons(
+    session: Session,
+    *,
+    round_id: int,
+    profile: SubjectProfile,
+    client: StructuredLLMClient | None = None,
+) -> LessonRun:
+    """Learn from every pending review of ``profile``'s subject and mark it learned.
+
+    Only reviews of questions in the same subject key as the round (ADR-059): those are the
+    reviews the learners read for this subject, so another course's reviews stay pending for
+    its own next round. Commits as it goes.
+    """
+    pending = _pending_for(session, profile)
+    if not pending:
+        return LessonRun()
+
+    settings = get_settings()
+    errors: list[str] = []
+    failed: set[int] = set()
+    if settings.judge_learning_enabled:
+        errors += _learn_judges(session, pending, profile, client, failed, round_id)
+    if settings.generator_learning_enabled:
+        _learn_retries(session, pending)
+        errors += _learn_generator(session, pending, profile, round_id, client, failed)
+
+    learned = [row for row in pending if row.id not in failed]
+    for row in learned:
+        row.lessons_round_id = round_id
+    session.commit()
+    logger.info("round %s: applied lessons from %s review(s)", round_id, len(learned))
+    return LessonRun(applied=len(learned), error="; ".join(errors) or None)
+
+
+def _pending_for(session: Session, profile: SubjectProfile) -> list[ReviewOutcomeRow]:
+    rows = ReviewOutcomeRepository(session).list_pending_lessons()
+    keys = storage_keys_by_version(
+        session,
+        {
+            row.question.curriculum_version_id
+            for row in rows
+            if row.question.curriculum_version_id is not None
+        },
+    )
+    return [
+        row
+        for row in rows
+        if key_of_version(keys, row.question.curriculum_version_id) == profile.personal_key
+    ]
+
+
+def _record_error(row: ReviewOutcomeRow, detail: str) -> None:
+    """Add one failure to the row, keeping any already recorded.
+
+    Both learners can fail on the same review (a ``missed`` one teaches both), so a
+    failure accumulates rather than overwrites.
+    """
+    row.refresh_error = f"{row.refresh_error}; {detail}" if row.refresh_error else detail
+
+
+def _learn_judges(
+    session: Session,
+    rows: list[ReviewOutcomeRow],
+    profile: SubjectProfile,
+    client: StructuredLLMClient | None,
+    failed_rows: set[int] | None = None,
+    round_id: int | None = None,
+) -> list[str]:
+    """Distil each judge the pending reviews teach, then freeze a snapshot (ADR-064).
+
+    Each judge learns only from the reviews that are evidence about it
+    (:func:`~app.evaluation.judge_memory.episode_teaches`): difficulty and subtopic when the
+    professor's value differs from the judge's or their reason was cited; issues from issue
+    reasons, unattributed reject/edit comments, and approvals it objected to. A hand-written
+    prompt is left as the base the guidelines render onto. Paused while any style of this
+    subject is trusted under the current panel: a new snapshot would rename it and send
+    trusted styles back to review.
+    """
+    trusted = trusted_scopes(session, profile)
+    if trusted:
+        logger.info(
+            "Judge learning paused: %s style(s) trusted under the current panel.", len(trusted)
+        )
+        for row in rows:
+            row.judges_refreshed = []
+        return []
+
+    try:
+        apply_judge_lessons(
+            session, rows, profile, round_id=round_id, client=client
+        )
+        session.commit()
+    except (AdaptiveTrainerError, OSError) as exc:
+        session.rollback()
+        detail = f"judges: {getattr(exc, 'message', None) or exc}"
+        logger.warning("Relearning the judges failed: %s", exc)
+        for row in rows:
+            _record_error(row, detail)
+            if failed_rows is not None:
+                failed_rows.add(row.id)
+        session.commit()
+        return [detail]
+
+    distilled = [
+        metric
+        for metric in (JudgeMetricId.ISSUES, JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC)
+        if any(
+            row.review_id and _episode_teaches(session, row.review_id, metric, profile.personal_key)
+            for row in rows
+        )
+    ]
+    for row in rows:
+        row.judges_refreshed = [
+            metric
+            for metric in distilled
+            if row.review_id
+            and _episode_teaches(session, row.review_id, metric, profile.personal_key)
+        ]
+    session.commit()
+    return []
+
+
+def _episode_teaches(
+    session: Session, review_id: int, metric: JudgeMetricId, subject: str
+) -> bool:
+    episode = MemoryEpisodeRepository(session).get_for_review(review_id)
+    return (
+        episode is not None
+        and episode.subject == subject
+        and episode_teaches(episode, metric)
+    )
+
+
+def _learn_retries(session: Session, rows: list[ReviewOutcomeRow]) -> None:
+    """Keep the failed attempts of each approved round question as retry episodes (m6).
+
+    No model call; :func:`~app.memory.record_retry_episodes` ignores rejected questions and
+    questions not generated in a round.
+    """
+    for row in rows:
+        record_retry_episodes(session, row.review)
+    session.commit()
+
+
+def _learn_generator(
+    session: Session,
+    rows: list[ReviewOutcomeRow],
+    profile: SubjectProfile,
+    round_id: int,
+    client: StructuredLLMClient | None,
+    failed_rows: set[int],
+) -> list[str]:
+    """Distil each type whose questions the professor did not accept into guidelines, once.
+
+    Both the ``confirmed_bad`` and the ``missed`` cell: what the judge thought does not
+    change the generator's lesson (ADR-037). The evidence is only this run's reviews of the
+    type; what earlier reviews taught is already in the guidelines the distiller edits.
+    """
+    by_type: dict[QuestionType, list[ReviewOutcomeRow]] = {}
+    for row in rows:
+        if row.question_type is not None and _outcome_from_row(row).calls_for_instruction_refresh:
+            by_type.setdefault(row.question_type, []).append(row)
+
+    errors: list[str] = []
+    for question_type, of_type in by_type.items():
+        try:
+            learned = distill_guidelines(
+                session,
+                target=generator_target(question_type),
+                subject=profile.personal_key,
+                question_type=question_type,
+                review_ids=[row.review_id for row in of_type],
+                round_id=round_id,
+                client=client,
+            )
+            session.commit()
+        except (AdaptiveTrainerError, OSError) as exc:
+            session.rollback()
+            detail = getattr(exc, "message", None) or str(exc)
+            for row in of_type:
+                _record_error(row, detail)
+                failed_rows.add(row.id)
+            session.commit()
+            errors.append(f"{question_type.value}: {detail}")
+            logger.warning("Relearning %s failed: %s", question_type.value, detail)
+            continue
+        for row in of_type:
+            row.instruction_refreshed = learned.changed
+        session.commit()
+    return errors

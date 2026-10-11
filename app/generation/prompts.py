@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from app.domain.enums import QuestionType
 from app.evaluation.prompts import difficulty_bands
@@ -82,14 +84,73 @@ def render_taxonomy(version: CurriculumVersionRow) -> str:
 EXAMPLE_PROMPT_CHARS = 600
 
 
+#: Characters of the professor's comment shown with an example or a rejected question.
+COMMENT_CHARS = 300
+
+
+@dataclass(frozen=True)
+class ShownExample:
+    """An example question with the professor's comment on it, if they left one."""
+
+    text: str
+    comment: str | None = None
+
+
+@dataclass(frozen=True)
+class RejectedExample:
+    """A similar question the professor rejected, and why (reasons, then comment)."""
+
+    text: str
+    because: str
+
+
+@dataclass(frozen=True)
+class RoundExamples:
+    """What a round target is shown from memory and the bank (ADR-063 point 3), as prompt text.
+
+    ``accepted``: approved questions of the same type, subtopic and difficulty -- match their
+    level. ``style_only``: approved questions of the same type from elsewhere -- match their
+    form, not their content or level. Either may carry the professor's comment. ``in_bank``:
+    the nearest existing questions of the cell, which the new question must not repeat.
+    ``rejected``: at most one similar question the professor rejected, with why. ``avoid``:
+    what failed attempts of approved questions of this type and subtopic got wrong.
+    """
+
+    accepted: Sequence[str | ShownExample] = ()
+    style_only: Sequence[str | ShownExample] = ()
+    in_bank: Sequence[str] = ()
+    rejected: RejectedExample | None = None
+    avoid: Sequence[str] = ()
+
+
+def _shown(texts: Sequence[str]) -> list[str]:
+    return [text.strip()[:EXAMPLE_PROMPT_CHARS] for text in texts if text and text.strip()]
+
+
+def _shown_examples(items: Sequence[str | ShownExample]) -> list[tuple[str, str | None]]:
+    """``(text, comment)`` per non-empty example, both trimmed to their limits."""
+    shown = []
+    for item in items:
+        example = item if isinstance(item, ShownExample) else ShownExample(item)
+        for text in _shown([example.text]):
+            comment = (example.comment or "").strip()[:COMMENT_CHARS] or None
+            shown.append((text, comment))
+    return shown
+
+
+def _with_comment(line: str, comment: str | None) -> list[str]:
+    return [line] + ([f"  Professor's comment: {comment}"] if comment else [])
+
+
 def render_round_target(
     *,
     subtopic: SubtopicRow,
     topic_name: str,
     style: QuestionStyle | None,
-    examples: list[str] | None = None,
+    examples: RoundExamples | None = None,
+    facet: str | None = None,
 ) -> str:
-    """The block a round spec adds: the subtopic to assess, the style, accepted examples.
+    """The block a round spec adds: the subtopic, the style, examples, what not to repeat.
 
     A round is aimed (docs/QUESTION_SETUP_PLAN.md): unlike section-only generation, the
     subtopic is part of the request, and the topic judge then checks the question really
@@ -103,6 +164,10 @@ def render_round_target(
         f"{description} (topic: {topic_name}).",
         f"Set topic_id to its topic and include {subtopic.id} in subtopic_ids.",
     ]
+    if facet:
+        lines.append(
+            f"Assess this facet of the subtopic: {facet}. Other questions cover its other facets."
+        )
     if style is not None:
         lines += [
             "",
@@ -110,15 +175,54 @@ def render_round_target(
             f"What the student does: {style.summary}",
             f"How the answer is checked: {style.checked_by}",
         ]
-    shown = [text.strip() for text in examples or [] if text and text.strip()]
-    if shown:
+    examples = examples or RoundExamples()
+    number = 0
+    accepted = _shown_examples(examples.accepted)
+    if accepted:
         lines += [
             "",
             "The professor accepted these questions for the same subtopic and difficulty. "
             "Match their level and quality; do not copy or paraphrase them.",
         ]
-        for number, text in enumerate(shown, start=1):
-            lines.append(f"Example {number}: {text[:EXAMPLE_PROMPT_CHARS]}")
+        for number, (text, comment) in enumerate(accepted, start=1):
+            lines += _with_comment(f"Example {number}: {text}", comment)
+    style_only = _shown_examples(examples.style_only)
+    if style_only:
+        lines += [
+            "",
+            "Style only: the professor accepted these questions of the same type for other "
+            "subtopics or difficulties. Match their form only, not their content or level.",
+        ]
+        for offset, (text, comment) in enumerate(style_only, start=1):
+            lines += _with_comment(f"Example {number + offset} (style only): {text}", comment)
+    rejected = examples.rejected
+    rejected_text = _shown([rejected.text]) if rejected else []
+    because = rejected.because.strip()[:COMMENT_CHARS] if rejected else ""
+    if rejected_text and because:
+        lines += [
+            "",
+            f"The professor rejected a similar question because: {because}",
+            "Do not repeat that mistake.",
+            f"Rejected: {rejected_text[0]}",
+        ]
+    avoid = _shown(examples.avoid)
+    if avoid:
+        lines += [
+            "",
+            "Earlier drafts for this subtopic failed these checks before a fixed version was "
+            "approved. Avoid the same mistakes:",
+        ]
+        for index, text in enumerate(avoid, start=1):
+            lines.append(f"Avoid {index}: {text}")
+    in_bank = _shown(examples.in_bank)
+    if in_bank:
+        lines += [
+            "",
+            "Already in the bank for this subtopic and difficulty -- assess something "
+            "different from each of these:",
+        ]
+        for index, text in enumerate(in_bank, start=1):
+            lines.append(f"Existing {index}: {text}")
     lines.append("--- end target ---")
     return "\n".join(lines)
 

@@ -602,6 +602,9 @@ class CurriculumRepository:
 #: stay in the bank, where the generator's failure modes are meant to be read.
 NOT_REVIEWABLE_STATUSES = (QuestionStatus.VALIDATION_FAILED,)
 
+#: Pending audit drafts wait in the review queue, not the bank (ADR-064, m9).
+_IN_BANK = or_(QuestionRow.audit.is_(False), QuestionRow.status == QuestionStatus.APPROVED)
+
 
 def _spec_sections(spec: object) -> set[int]:
     """The section ids a stored ``QuestionSpec`` names, tolerating older rows."""
@@ -620,13 +623,17 @@ class QuestionRepository:
         self._session = session
 
     def count(self, *, course_id: int | None = None) -> int:
-        stmt = select(func.count()).select_from(QuestionRow)
+        stmt = select(func.count()).select_from(QuestionRow).where(_IN_BANK)
         if course_id is not None:
             stmt = stmt.where(questions_in_course(course_id))
         return self._session.scalar(stmt) or 0
 
     def count_by_status(self, *, course_id: int | None = None) -> dict[str, int]:
-        stmt = select(QuestionRow.status, func.count()).group_by(QuestionRow.status)
+        stmt = (
+            select(QuestionRow.status, func.count())
+            .where(_IN_BANK)
+            .group_by(QuestionRow.status)
+        )
         if course_id is not None:
             stmt = stmt.where(questions_in_course(course_id))
         return {str(status): count for status, count in self._session.execute(stmt)}
@@ -729,7 +736,11 @@ class QuestionRepository:
         other filters and before ``limit`` is taken -- a section rarely produces
         more than a handful of questions, so this stays cheap in practice.
         """
-        stmt = select(QuestionRow).order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
+        stmt = (
+            select(QuestionRow)
+            .where(_IN_BANK)
+            .order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
+        )
         if statuses is not None:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
@@ -763,8 +774,10 @@ class QuestionRepository:
         A question generated before this column existed has no version to name;
         those are counted under ``"none"`` rather than dropped.
         """
-        stmt = select(QuestionRow.curriculum_version_id, func.count()).group_by(
-            QuestionRow.curriculum_version_id
+        stmt = (
+            select(QuestionRow.curriculum_version_id, func.count())
+            .where(_IN_BANK)
+            .group_by(QuestionRow.curriculum_version_id)
         )
         if course_id is not None:
             stmt = stmt.where(questions_in_course(course_id))
@@ -789,6 +802,7 @@ class QuestionRepository:
         stmt = select(QuestionRow).where(
             QuestionRow.topic_id == topic_id,
             QuestionRow.status.in_((QuestionStatus.APPROVED, QuestionStatus.VALIDATION_PASSED)),
+            _IN_BANK,
         )
         if exclude_ids:
             stmt = stmt.where(QuestionRow.id.not_in(exclude_ids))
@@ -812,6 +826,31 @@ class QuestionRepository:
         if course_id is not None:
             stmt = stmt.where(questions_in_course(course_id))
         return list(self._session.scalars(stmt))
+
+    def list_round_questions(self, *, course_id: int | None = None) -> list[QuestionRow]:
+        """Questions a setup round produced, including drafts whose last attempt failed.
+
+        The scorecard attributes retries and drops from ``generation_attempts`` on these
+        rows. Unbounded: a sample of recent rounds would under-count a judge that failed
+        early and recovered.
+        """
+        stmt = (
+            select(QuestionRow)
+            .where(QuestionRow.round_id.is_not(None), QuestionRow.audit.is_(False))
+            .order_by(QuestionRow.id)
+        )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        return list(self._session.scalars(stmt))
+
+    def count_audit_for_round(self, round_id: int) -> int:
+        """How many audit drafts this round has already kept (capped at two)."""
+        stmt = (
+            select(func.count())
+            .select_from(QuestionRow)
+            .where(QuestionRow.round_id == round_id, QuestionRow.audit.is_(True))
+        )
+        return self._session.scalar(stmt) or 0
 
     def count_reviewed(
         self, *, course_id: int | None = None, curriculum_version_id: int | None = None
@@ -867,10 +906,12 @@ class QuestionRepository:
                 ~QuestionRow.reviews.any(),
                 QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES),
             )
-            .order_by(QuestionRow.id)
+            .order_by(QuestionRow.audit.desc(), QuestionRow.id)
         )
         if after_id is not None:
-            stmt = stmt.where(QuestionRow.id > after_id)
+            # Audits stay at the front until reviewed; the cursor only advances
+            # ordinary items so skipping one cannot hide an earlier audit.
+            stmt = stmt.where(or_(QuestionRow.audit.is_(True), QuestionRow.id > after_id))
         if require_evaluation:
             stmt = stmt.where(QuestionRow.pedagogical_eval.is_not(None))
         if course_id is not None:
@@ -1121,6 +1162,15 @@ class ReviewOutcomeRepository:
                     select(QuestionRow.id).where(questions_in_course(course_id))
                 )
             )
+        return list(self._session.scalars(stmt))
+
+    def list_pending_lessons(self) -> list[ReviewOutcomeRow]:
+        """Rows no lesson run has learned from yet (ADR-063), oldest first."""
+        stmt = (
+            select(ReviewOutcomeRow)
+            .where(ReviewOutcomeRow.lessons_round_id.is_(None))
+            .order_by(ReviewOutcomeRow.created_at, ReviewOutcomeRow.id)
+        )
         return list(self._session.scalars(stmt))
 
     def list_in_cells(

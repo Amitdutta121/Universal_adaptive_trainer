@@ -155,6 +155,18 @@ def test_exact_tenth_audits_persist_and_auto_approvals_add_no_evidence(session, 
         assert len(list(reopened.scalars(select(ProfessorReviewRow)))) == 20
 
 
+def test_a_question_held_for_review_is_pending_even_in_a_trusted_scope(session, taxonomy):
+    """A round duplicate kept on its last attempt (ADR-063 point 6) waits for the professor."""
+    seed(session, taxonomy)
+    row = question(session, taxonomy)
+    assert judge_trust(session, row, []).trusted
+    assert route_generated_question(session, row, [], hold_for_review=True) == "pending"
+    assert row.status == QuestionStatus.VALIDATION_PASSED
+    assert row.trust_sequence is None
+    assert session.scalar(select(JudgeTrustCounterRow.eligible_count)) is None
+    assert route_generated_question(session, question(session, taxonomy), []) == "auto_approved"
+
+
 def test_audit_disagreement_revokes_immediately_and_agreement_recovers(session, taxonomy):
     seed(session, taxonomy)
     for _ in range(10):
@@ -480,7 +492,7 @@ def test_sqlite_0005_upgrade_preserves_rows_and_adds_only_trust_schema(engine):
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0012_job_cancel"
+            == "0021_solve_flag"
         )
         assert connection.execute(text("SELECT prompt,trust_provenance FROM questions")).one() == (
             "Old",

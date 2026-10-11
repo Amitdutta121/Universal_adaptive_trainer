@@ -33,6 +33,41 @@ const trustWindow = (observations: number, agreements: number, trusted = false) 
 
 let paused = false;
 
+const confirmGuideline = vi.fn();
+const deleteGuideline = vi.fn();
+const guideline = (id: number, text: string, status: "pending" | "active", support: number) => ({
+  id,
+  target: "generator:multiple_choice",
+  question_type: "multiple_choice",
+  text,
+  status,
+  support_count: support,
+  review_ids: Array.from({ length: support }, (_, i) => i + 1),
+  confirmed_by_professor: false,
+  created_at: "2026-10-08T00:00:00Z",
+  updated_at: null,
+});
+
+const scorecardRow = (
+  metric: "issues" | "difficulty" | "subtopic",
+  extras: Record<string, number | null> = {},
+) => ({
+  metric,
+  n: 20,
+  agreements: 18,
+  agreement: 0.9,
+  kappa: 0.6,
+  agreement_low: 0.699,
+  agreement_high: 0.972,
+  missed: 1,
+  false_alarms: 1,
+  flags: 2,
+  flag_rate: 0.1,
+  retries: 0,
+  drops: 0,
+  ...extras,
+});
+
 vi.mock("@/lib/api/queries", () => ({
   useApprovedCurriculum: () => ({ isPending: false, data: { version: { id: 5 } } }),
   useJudgePrompts: () => ({
@@ -44,6 +79,17 @@ vi.mock("@/lib/api/queries", () => ({
       shipped_rubric_version: "r",
     },
   }),
+  useJudgeScorecard: () => ({
+    isPending: false,
+    error: null,
+    data: {
+      judges: [
+        scorecardRow("issues", { false_alarms: 4, missed: 2, retries: 0, drops: 0 }),
+        scorecardRow("difficulty", { retries: 3, drops: 1 }),
+        scorecardRow("subtopic", { n: 0, agreements: 0, agreement: null, kappa: null }),
+      ],
+    },
+  }),
   useJudgeStats: () => ({
     data: {
       rubric_version: "r",
@@ -53,16 +99,12 @@ vi.mock("@/lib/api/queries", () => ({
           observations: 20,
           agreements: 18,
           agreement_rate: 0.9,
-          learnable_disagreements: 3,
-          disagreements_needed: 5,
         },
         {
           metric: "subtopic",
           observations: 0,
           agreements: 0,
           agreement_rate: null,
-          learnable_disagreements: 0,
-          disagreements_needed: 5,
         },
       ],
       styles: [
@@ -88,18 +130,49 @@ vi.mock("@/lib/api/queries", () => ({
       min_acceptance: 0.9,
     },
   }),
+  useGuidelines: () => ({
+    isPending: false,
+    error: null,
+    data: {
+      active_support: 2,
+      guidelines: [
+        guideline(11, "Put a short code block in the stem.", "active", 2),
+        guideline(12, "Ask the question directly.", "pending", 1),
+      ],
+    },
+  }),
+  useConfirmGuideline: () => ({ mutateAsync: confirmGuideline, isPending: false }),
+  useDeleteGuideline: () => ({ mutateAsync: deleteGuideline, isPending: false }),
   useRevertJudgePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSaveJudgePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+describe("Judge scorecard", () => {
+  it("shows agreement with a 95% range, kappa, false alarms, retries and drops", () => {
+    render(<JudgesScreen />);
+    expect(screen.getByText("How each judge is doing")).toBeInTheDocument();
+    const issues = screen.getByText("Issues").closest("tr");
+    const difficulty = screen.getAllByText("Difficulty")[0].closest("tr");
+    expect(issues).toHaveTextContent("18/20 (90%)");
+    expect(issues).toHaveTextContent("70%–97%");
+    expect(issues).toHaveTextContent("0.60");
+    expect(issues).toHaveTextContent("4");
+    expect(difficulty).toHaveTextContent("3");
+    expect(difficulty).toHaveTextContent("1");
+  });
+});
+
 describe("JudgesScreen stats", () => {
-  it("shows professor agreement and rewrite progress per judge", () => {
+  it("shows professor agreement and when each judge learns", () => {
     paused = false;
     render(<JudgesScreen />);
     expect(screen.getByText("90%")).toBeInTheDocument();
     expect(screen.getByText("18/20 agreed")).toBeInTheDocument();
     expect(screen.getByText("No reviewed questions under this prompt yet")).toBeInTheDocument();
-    expect(screen.getAllByText("Next rewrite: 3 of 5 disagreements")[0]).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Learns from your reviews at the start of each round")[0],
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Next rewrite/)).not.toBeInTheDocument();
   });
 
   it("keeps the prompt behind More", async () => {
@@ -120,11 +193,11 @@ describe("JudgesScreen stats", () => {
     expect(screen.getByText("Building trust: 12 of 20 reviews")).toBeInTheDocument();
   });
 
-  it("says when rewrites are paused", () => {
+  it("says when learning is paused", () => {
     paused = true;
     render(<JudgesScreen />);
     expect(
-      screen.getAllByText("Rewrites paused while 1 style skips review")[0],
+      screen.getAllByText("Learning paused while 1 style skips review")[0],
     ).toBeInTheDocument();
     expect(screen.getByText("Skips review")).toBeInTheDocument();
   });
@@ -134,5 +207,28 @@ describe("JudgesScreen stats", () => {
     render(<JudgesScreen />);
     await userEvent.click(screen.getAllByRole("button", { name: "Edit prompt" })[0]);
     expect(await screen.findByText(/Saving resets trust: 1 style goes back/)).toBeInTheDocument();
+  });
+});
+
+describe("Generator guidelines", () => {
+  it("lists pending and active guidelines with their support", () => {
+    render(<JudgesScreen />);
+    const active = screen.getByText("Put a short code block in the stem.").closest("tr");
+    const pending = screen.getByText("Ask the question directly.").closest("tr");
+    expect(active).toHaveTextContent("2/2");
+    expect(active).toHaveTextContent("active");
+    expect(pending).toHaveTextContent("1/2");
+    expect(pending).toHaveTextContent("pending");
+    // Only a pending guideline can be confirmed; both can be deleted.
+    expect(screen.getAllByRole("button", { name: "Confirm" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(2);
+  });
+
+  it("confirms and deletes by id", async () => {
+    render(<JudgesScreen />);
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(confirmGuideline).toHaveBeenCalledWith(12);
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    expect(deleteGuideline).toHaveBeenCalledWith(11);
   });
 });

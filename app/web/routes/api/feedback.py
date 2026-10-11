@@ -5,41 +5,24 @@ current fields but never touches the generated original (ADR-002), which is what
 makes the before/after pair usable as preference evidence.
 
 Each submitted review is also **routed** here (ADR-037): the judge gate is
-crossed with the professor's verdict, the resulting cell is recorded as dataset
-evidence, and the confirmed-bad cell relearns that type's instruction on the
-spot. This module is where that happens because the routing spans three
-subsystems -- feedback, calibration and personalization -- and the web layer is
-the one allowed to reach across them (ADR-027).
+crossed with the professor's verdict and the resulting cell is recorded as
+dataset evidence. Nothing here calls a model: what the review teaches the
+generator and the judges is learned at the start of the next round
+(:mod:`app.feedback.lessons`, ADR-063), so the professor never waits on it.
 """
 
 from __future__ import annotations
 
-import logging
 from collections import Counter
 
 from fastapi import APIRouter, status
 from sqlalchemy import select
 
-from app.config import get_settings
-from app.domain.enums import (
-    JudgeMetricId,
-    QuestionType,
-    RejectionReason,
-    ReviewDecision,
-)
+from app.domain.enums import RejectionReason, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
-from app.errors import AdaptiveTrainerError
-from app.evaluation.judge_learning import refresh_judge_prompt
-from app.evaluation.trust_scope import trusted_scopes
-from app.feedback import ReviewOutcome, route_review_outcome, submit_review
-from app.generation.prompts import base_type_instruction
+from app.feedback import route_review_outcome, submit_review
 from app.persistence.models import CurriculumVersionRow, ProfessorReviewRow, QuestionRow
-from app.persistence.repositories import (
-    JudgePromptRepository,
-    ProfessorReviewRepository,
-)
-from app.personalization import refresh_type_instruction
-from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_version
+from app.persistence.repositories import ProfessorReviewRepository
 from app.web.routes.api.deps import (
     SPENDS_LLM_CREDIT,
     CourseScope,
@@ -56,8 +39,6 @@ from app.web.routes.api.schemas import (
     ReviewStatsResponse,
 )
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter(tags=["feedback"])
 
 
@@ -70,7 +51,7 @@ router = APIRouter(tags=["feedback"])
 def create_review(
     session: DbSession, course: CourseScope, question_id: int, payload: ReviewRequest
 ) -> ReviewOut:
-    """Record a professor verdict, then act on the cell it lands in (ADR-037)."""
+    """Record a professor verdict and the cell it lands in (ADR-037). No model call."""
     question_in_course(session, question_id, course)
     subtopics_in_course(session, payload.corrected_subtopic_ids or [], course)
     edit_fields: dict[str, str | None] = {}
@@ -96,150 +77,12 @@ def create_review(
     except Exception:
         session.rollback()
         raise
-    # Committed before the model call below: the review and its dataset row are
-    # what the professor actually submitted, and they must survive a provider
-    # failure that has nothing to do with them.
     session.commit()
 
     result = ReviewOut.from_row(review)
-    if outcome is None:
-        return result
-    result.outcome = ReviewOutcomeOut.from_row(outcome.row)
-    # Not exclusive. A ``missed`` review says two things at once: the generator
-    # wrote a question the professor would not keep, and the judge passed it. One
-    # lesson belongs to each, and dropping either would waste half the evidence
-    # the professor just produced.
-    settings = get_settings()
-    # The lesson belongs to the reviewed question's own subject (ADR-056).
-    profile = profile_for_version(session, review.question.curriculum_version_id)
-    if outcome.calls_for_instruction_refresh and settings.generator_learning_enabled:
-        _relearn_for(session, outcome, review.question.question_type, result.outcome, profile)
-    if outcome.calls_for_judge_repair and settings.judge_learning_enabled:
-        _relearn_judges(session, outcome, result.outcome, profile)
+    if outcome is not None:
+        result.outcome = ReviewOutcomeOut.from_row(outcome.row)
     return result
-
-
-def _record_error(outcome: ReviewOutcome, reported: ReviewOutcomeOut, detail: str) -> None:
-    """Add one failure to the outcome, keeping any already recorded.
-
-    Both relearners can run on the same review, so a failure must accumulate
-    rather than overwrite: reporting only the later one would hide a generator
-    refresh that never happened behind a judge repair that did.
-    """
-    existing = outcome.row.refresh_error
-    combined = f"{existing}; {detail}" if existing else detail
-    outcome.row.refresh_error = combined
-    reported.refresh_error = combined
-
-
-def _relearn_judges(
-    session: DbSession,
-    outcome: ReviewOutcome,
-    reported: ReviewOutcomeOut,
-    profile: SubjectProfile = PYTHON_PROFILE,
-) -> None:
-    """Relearn each judge this review contradicted (ADR-039).
-
-    The judge half of the routing. Only the judges named on the outcome are
-    touched -- a judge nobody contradicted has learned nothing from this review,
-    and rewriting it would change a measured behaviour on no evidence.
-
-    This can run alongside :func:`_relearn_for` on the same review: a ``missed``
-    review teaches the generator and the judge different lessons at once.
-
-    A hand-written prompt is left alone. The professor typed it deliberately, and
-    a learned rewrite renders onto the *shipped* text, so relearning would
-    silently discard what they wrote.
-
-    Paused while any style of this subject is trusted under the current panel
-    (docs/TRUST_AND_JUDGE_STATS_PLAN.md).
-    """
-    if not outcome.attributed_metrics:
-        return
-    trusted = trusted_scopes(session, profile)
-    if trusted:
-        # A rewrite renames the panel and every trusted style would fall back to review.
-        logger.info(
-            "Judge learning paused: %s style(s) trusted under the current panel.", len(trusted)
-        )
-        outcome.row.judges_refreshed = []
-        reported.judges_refreshed = []
-        return
-
-    repository = JudgePromptRepository(session)
-    refreshed: list[JudgeMetricId] = []
-    errors: list[str] = []
-    for metric in outcome.attributed_metrics:
-        existing = repository.get(metric, subject=profile.personal_key)
-        if existing is not None and not existing.learned:
-            logger.info("Judge %s is hand-written; leaving it alone.", metric.value)
-            continue
-        try:
-            if refresh_judge_prompt(session, metric, profile=profile) is not None:
-                refreshed.append(metric)
-        except (AdaptiveTrainerError, OSError) as exc:
-            session.rollback()
-            errors.append(f"{metric.value}: {getattr(exc, 'message', None) or exc}")
-            logger.warning("Relearning the %s judge failed: %s", metric.value, exc)
-
-    outcome.row.judges_refreshed = refreshed
-    if errors:
-        _record_error(outcome, reported, "; ".join(errors))
-    session.commit()
-    reported.judges_refreshed = refreshed
-
-
-def _relearn_for(
-    session: DbSession,
-    outcome: ReviewOutcome,
-    question_type: QuestionType | None,
-    reported: ReviewOutcomeOut,
-    profile: SubjectProfile = PYTHON_PROFILE,
-) -> None:
-    """Relearn one type's instruction because the professor did not accept it.
-
-    Runs whenever the professor rejected or rewrote the question, in the
-    ``confirmed_bad`` *and* ``missed`` cells. What the judge thought does not
-    change the generator's lesson: in both cells the generator produced something
-    the professor would not keep.
-
-    Runs on the review that produced the cell, which is the point of ADR-037:
-    the lesson reaches the generator before the next question is written rather
-    than when someone remembers to press a button.
-
-    A provider failure is recorded on the outcome row and reported, never
-    raised. The review is already committed and is not in doubt; failing the
-    request would tell the professor their verdict did not land. Reporting it is
-    what stops the opposite error -- a silent failure that leaves the generator
-    ignorant of a lesson the professor believes it has learned.
-    """
-    if question_type is None:
-        return
-    try:
-        row = refresh_type_instruction(
-            session,
-            question_type,
-            base_instruction=base_type_instruction(question_type),
-            subject=profile.personal_key,
-        )
-    except (AdaptiveTrainerError, OSError) as exc:
-        session.rollback()
-        detail = getattr(exc, "message", None) or str(exc)
-        _record_error(outcome, reported, detail)
-        session.commit()
-        logger.warning(
-            "Review %s landed in %s but relearning %s failed: %s",
-            outcome.row.review_id,
-            outcome.cell.value,
-            question_type.value,
-            detail,
-        )
-        return
-
-    outcome.row.instruction_refreshed = row is not None
-    session.commit()
-    reported.instruction_refreshed = row is not None
-    reported.refresh_rule_count = len(row.rules) if row is not None else None
 
 
 @router.get("/reviews", response_model=ReviewListResponse)

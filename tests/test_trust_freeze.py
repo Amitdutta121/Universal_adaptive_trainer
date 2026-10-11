@@ -2,12 +2,12 @@
 
 from types import SimpleNamespace
 
-from app.domain.enums import JudgeMetricId
+from app.domain.enums import CalibrationLabel, JudgeMetricId, QuadrantCell
 from app.evaluation.judge_prompts import effective_rubric_version
 from app.evaluation.trust import route_generated_question
 from app.evaluation.trust_scope import trusted_scopes
+from app.feedback import lessons
 from app.subjects import profile_for_version
-from app.web.routes.api import feedback
 from tests import test_judge_trust
 from tests.test_judge_trust import question, review
 
@@ -25,10 +25,15 @@ def seed_current_panel(session, taxonomy, *, n=20, disagreements=0):
 
 
 def _outcome():
-    row = SimpleNamespace(judges_refreshed=None, refresh_error=None)
-    return (
-        SimpleNamespace(attributed_metrics=[JudgeMetricId.DIFFICULTY], row=row),
-        SimpleNamespace(judges_refreshed=None, refresh_error=None),
+    return SimpleNamespace(
+        cell=QuadrantCell.MISSED,
+        judge=CalibrationLabel.ACCEPT,
+        professor=CalibrationLabel.NEEDS_REVIEW,
+        attributed_metrics=[JudgeMetricId.DIFFICULTY],
+        held_out=False,
+        judges_refreshed=None,
+        refresh_error=None,
+        review_id=None,
     )
 
 
@@ -55,19 +60,18 @@ def test_trust_earned_under_an_old_panel_does_not_count(session, taxonomy):
 def test_review_relearning_waits_while_a_style_is_trusted(session, taxonomy, monkeypatch):
     profile = seed_current_panel(session, taxonomy)
     calls = []
-    monkeypatch.setattr(feedback, "refresh_judge_prompt", lambda *a, **k: calls.append(a))
-    outcome, reported = _outcome()
-    feedback._relearn_judges(session, outcome, reported, profile)
+    monkeypatch.setattr(lessons, "apply_judge_lessons", lambda *a, **k: calls.append(a))
+    outcome = _outcome()
+    lessons._learn_judges(session, [outcome], profile, None)
     assert calls == []
-    assert reported.judges_refreshed == []
+    assert outcome.judges_refreshed == []
 
 
 def test_review_relearning_runs_when_nothing_is_trusted(session, taxonomy, monkeypatch):
     profile = profile_for_version(session, taxonomy.id)
     calls = []
-    monkeypatch.setattr(feedback, "refresh_judge_prompt", lambda *a, **k: calls.append(a))
-    outcome, reported = _outcome()
-    feedback._relearn_judges(session, outcome, reported, profile)
+    monkeypatch.setattr(lessons, "apply_judge_lessons", lambda *a, **k: calls.append(a))
+    lessons._learn_judges(session, [_outcome()], profile, None)
     assert len(calls) == 1
 
 

@@ -32,3 +32,50 @@ export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
 
 /** One taxonomy subtopic a professor can tag a question with, grouped under its topic. */
 export type SubtopicOption = { id: number; name: string; topicName: string };
+
+export type RejectionReason = Schemas["RejectionReason"];
+
+/** Mirrors `app/domain/feedback.py::REJECTION_REASON_LABELS`. */
+export const REJECTION_REASON_LABEL: Record<RejectionReason, string> = {
+  technically_incorrect: "Technically incorrect",
+  incorrect_answer: "Incorrect answer",
+  incorrect_tests: "Incorrect tests",
+  not_grounded_in_source: "Not grounded in source",
+  wrong_topic_subtopic: "Wrong topic/subtopic",
+  too_easy: "Too easy",
+  too_difficult: "Too difficult",
+  ambiguous: "Ambiguous",
+  poor_wording: "Poor wording",
+  poor_distractors: "Poor distractors",
+  poor_tests: "Poor tests",
+  not_pedagogically_useful: "Not pedagogically useful",
+  too_similar_repetitive: "Too similar/repetitive",
+  other: "Other",
+};
+
+/**
+ * The reasons grouped by the judge they count against (`PROFESSOR_OBJECTIONS` in
+ * `app/calibration/schema.py`); the last group is held against no judge.
+ */
+export const REJECTION_REASON_GROUPS: ReadonlyArray<{
+  label: string;
+  reasons: readonly RejectionReason[];
+}> = [
+  {
+    label: "Issues judge",
+    reasons: [
+      "technically_incorrect",
+      "incorrect_answer",
+      "incorrect_tests",
+      "not_grounded_in_source",
+      "poor_distractors",
+      "poor_tests",
+      "ambiguous",
+      "poor_wording",
+      "not_pedagogically_useful",
+    ],
+  },
+  { label: "Subtopic judge", reasons: ["wrong_topic_subtopic"] },
+  { label: "Difficulty judge", reasons: ["too_easy", "too_difficult"] },
+  { label: "No judge", reasons: ["too_similar_repetitive", "other"] },
+];

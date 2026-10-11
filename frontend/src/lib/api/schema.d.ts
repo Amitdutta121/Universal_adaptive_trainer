@@ -877,7 +877,7 @@ export interface paths {
         put?: never;
         /**
          * Create Review
-         * @description Record a professor verdict, then act on the cell it lands in (ADR-037).
+         * @description Record a professor verdict and the cell it lands in (ADR-037). No model call.
          */
         post: operations["create_review_api_questions__question_id__review_post"];
         delete?: never;
@@ -935,11 +935,7 @@ export interface paths {
         };
         /**
          * List Instructions
-         * @description Every built question type, with whatever has been learned for it.
-         *
-         *     Types with nothing learned are listed too, carrying the shipped instruction
-         *     and a review count -- that is how a professor sees which types have enough
-         *     feedback to be worth refreshing.
+         * @description Every built question type, with the instruction its generator receives now.
          */
         get: operations["list_instructions_api_instructions_get"];
         put?: never;
@@ -950,61 +946,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/instructions/{question_type}": {
+    "/api/guidelines": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Guidelines
+         * @description The course subject's pending and active guidelines, oldest first.
+         */
+        get: operations["list_guidelines_api_guidelines_get"];
         put?: never;
         post?: never;
-        /**
-         * Delete Instruction
-         * @description Delete one learned row so this type falls back to its shipped instruction.
-         */
-        delete: operations["delete_instruction_api_instructions__question_type__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/instructions/{question_type}/rules/{rule_index}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Rule
-         * @description Delete one learned rule and re-render the instruction from what remains.
-         */
-        delete: operations["delete_rule_api_instructions__question_type__rules__rule_index__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/instructions/{question_type}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh
-         * @description Re-learn one type's instruction from its reviews. Requires a configured LLM.
-         */
-        post: operations["refresh_api_instructions__question_type__refresh_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{guideline_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm
+         * @description The professor vouches for a guideline: it is sent from the next generation.
+         *
+         *     An output-contract guideline stays refused even when confirmed.
+         */
+        post: operations["confirm_api_guidelines__guideline_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{guideline_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete
+         * @description Retire a guideline: never sent again, and the distiller no longer sees it.
+         */
+        delete: operations["delete_api_guidelines__guideline_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1094,11 +1092,31 @@ export interface paths {
          * Refresh
          * @description Re-learn one judge's prompt from the questions it got wrong (ADR-039).
          *
-         *     The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
+         *     Manual, as the generator's retired refresh was (m5 moved it to guidelines). Reads only
          *     the disagreements this judge is named in, minus the held-out third, so the
          *     reserved questions stay available to score the result.
          */
         post: operations["refresh_api_judge_prompts__metric__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/judges/scorecard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Judge Scorecard
+         * @description Agreement, κ, Wilson 95% range, misses, false alarms, flag rate, retries and drops.
+         */
+        get: operations["judge_scorecard_api_judges_scorecard_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3633,6 +3651,19 @@ export interface components {
             skipped: number;
             /** Skip Reason */
             skip_reason?: string | null;
+            /**
+             * Lessons Applied
+             * @default 0
+             */
+            lessons_applied: number;
+            /** Lessons Error */
+            lessons_error?: string | null;
+            /** Drift Warning */
+            drift_warning?: string | null;
+            /** First Attempt Passed */
+            first_attempt_passed?: number | null;
+            /** Saturated */
+            saturated?: string | null;
             /** Error */
             error: string | null;
             /**
@@ -3674,6 +3705,54 @@ export interface components {
          * @enum {string}
          */
         GeneratorKind: "base" | "personalized";
+        /**
+         * GuidelineListResponse
+         * @description ``GET /api/guidelines``: the course subject's pending and active guidelines.
+         */
+        GuidelineListResponse: {
+            /** Active Support */
+            active_support: number;
+            /** Guidelines */
+            guidelines: components["schemas"]["GuidelineOut"][];
+        };
+        /**
+         * GuidelineOut
+         * @description One learned guideline (ADR-063): pending until two reviews or a confirm, then sent.
+         */
+        GuidelineOut: {
+            /** Id */
+            id: number;
+            /** Target */
+            target: string;
+            question_type: components["schemas"]["QuestionType"] | null;
+            /** Text */
+            text: string;
+            status: components["schemas"]["GuidelineStatus"];
+            /** Support Count */
+            support_count: number;
+            /** Review Ids */
+            review_ids: number[];
+            /** Confirmed By Professor */
+            confirmed_by_professor: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * GuidelineStatus
+         * @description Where a learned guideline stands (ADR-063 point 4).
+         *
+         *     Only ``ACTIVE`` ones are sent: at least two distinct supporting reviews, or the
+         *     professor's confirmation. ``PENDING`` waits for that. ``RETIRED`` was dropped, merged,
+         *     or deleted by the professor; ``REFUSED`` was an output-contract rule the deterministic
+         *     filter would not store as a preference. Both are kept for the record, never sent.
+         * @enum {string}
+         */
+        GuidelineStatus: "pending" | "active" | "retired" | "refused";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -3941,6 +4020,45 @@ export interface components {
             active_run_id?: string | null;
         };
         /**
+         * JudgeScorecardOut
+         * @description One judge on ``GET /api/judges/scorecard`` (ADR-064, m8).
+         */
+        JudgeScorecardOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** N */
+            n: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement */
+            agreement: number | null;
+            /** Kappa */
+            kappa: number | null;
+            /** Agreement Low */
+            agreement_low: number | null;
+            /** Agreement High */
+            agreement_high: number | null;
+            /** Missed */
+            missed: number;
+            /** False Alarms */
+            false_alarms: number;
+            /** Flags */
+            flags: number;
+            /** Flag Rate */
+            flag_rate: number | null;
+            /** Retries */
+            retries: number;
+            /** Drops */
+            drops: number;
+        };
+        /**
+         * JudgeScorecardResponse
+         * @description Per-judge agreement, κ, Wilson 95% range, and round retries/drops.
+         */
+        JudgeScorecardResponse: {
+            /** Judges */
+            judges: components["schemas"]["JudgeScorecardOut"][];
+        };
+        /**
          * JudgeStatsOut
          * @description Step 13: how often the professor agreed with one judge, pooled over styles' windows.
          */
@@ -3952,10 +4070,6 @@ export interface components {
             agreements: number;
             /** Agreement Rate */
             agreement_rate: number | null;
-            /** Learnable Disagreements */
-            learnable_disagreements: number;
-            /** Disagreements Needed */
-            disagreements_needed: number;
         };
         /** JudgeStatsResponse */
         JudgeStatsResponse: {
@@ -4303,6 +4417,8 @@ export interface components {
             original_tests: string | null;
             /** Reviews */
             reviews: components["schemas"]["ReviewOut"][];
+            /** Borderline Notes */
+            borderline_notes?: string[];
         };
         /**
          * QuestionKind
@@ -4493,6 +4609,20 @@ export interface components {
              * @default false
              */
             live_generated: boolean;
+            /**
+             * Audit
+             * @default false
+             */
+            audit: boolean;
+            /** Audit Metric */
+            audit_metric?: string | null;
+            /** Audit Reason */
+            audit_reason?: string | null;
+            /**
+             * Solve Flag
+             * @description Other models, answering without the key, disagreed with it on the last attempt.
+             */
+            solve_flag?: string | null;
         };
         /**
          * QuestionTaxonomy
@@ -5653,12 +5783,11 @@ export interface components {
         };
         /**
          * TypeInstructionOut
-         * @description What the generator is told for one question type (ADR-033).
+         * @description What the generator is told for one question type (ADR-033, ADR-063).
          *
-         *     ``learned`` distinguishes an instruction built from reviews from the shipped
-         *     default, so a professor can see at a glance which types their feedback has
-         *     actually reached. ``available_reviews`` is how many reviews a refresh would
-         *     draw on now, which is what makes a stale instruction visible.
+         *     ``instruction`` is the shipped text plus the type's **active** guidelines, ``rules`` their
+         *     texts, and ``learned`` whether there is any. ``review_count`` is the distinct reviews
+         *     behind them; ``available_reviews`` how many reviews of the type exist.
          */
         TypeInstructionOut: {
             question_type: components["schemas"]["QuestionType"];
@@ -5674,18 +5803,6 @@ export interface components {
             available_reviews: number;
             /** Updated At */
             updated_at: string | null;
-        };
-        /** TypeInstructionRefreshResponse */
-        TypeInstructionRefreshResponse: {
-            question_type: components["schemas"]["QuestionType"];
-            /** Learned */
-            learned: boolean;
-            /** Rule Count */
-            rule_count: number;
-            /** Review Count */
-            review_count: number;
-            /** Instruction */
-            instruction: string;
         };
         /**
          * UpdateCustomJudgeRequest
@@ -7456,15 +7573,13 @@ export interface operations {
             };
         };
     };
-    delete_instruction_api_instructions__question_type__delete: {
+    list_guidelines_api_guidelines_get: {
         parameters: {
             query?: never;
             header?: {
                 "X-Course-Id"?: number | null;
             };
-            path: {
-                question_type: components["schemas"]["QuestionType"];
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -7475,7 +7590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TypeInstructionOut"];
+                    "application/json": components["schemas"]["GuidelineListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7489,15 +7604,14 @@ export interface operations {
             };
         };
     };
-    delete_rule_api_instructions__question_type__rules__rule_index__delete: {
+    confirm_api_guidelines__guideline_id__confirm_post: {
         parameters: {
             query?: never;
             header?: {
                 "X-Course-Id"?: number | null;
             };
             path: {
-                question_type: components["schemas"]["QuestionType"];
-                rule_index: number;
+                guideline_id: number;
             };
             cookie?: never;
         };
@@ -7509,7 +7623,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TypeInstructionOut"];
+                    "application/json": components["schemas"]["GuidelineOut"];
                 };
             };
             /** @description Validation Error */
@@ -7523,14 +7637,14 @@ export interface operations {
             };
         };
     };
-    refresh_api_instructions__question_type__refresh_post: {
+    delete_api_guidelines__guideline_id__delete: {
         parameters: {
             query?: never;
             header?: {
                 "X-Course-Id"?: number | null;
             };
             path: {
-                question_type: components["schemas"]["QuestionType"];
+                guideline_id: number;
             };
             cookie?: never;
         };
@@ -7542,7 +7656,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TypeInstructionRefreshResponse"];
+                    "application/json": components["schemas"]["GuidelineOut"];
                 };
             };
             /** @description Validation Error */
@@ -7708,6 +7822,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JudgePromptRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judge_scorecard_api_judges_scorecard_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeScorecardResponse"];
                 };
             };
             /** @description Validation Error */

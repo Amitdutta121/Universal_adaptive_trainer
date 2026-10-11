@@ -2535,3 +2535,149 @@ Now every long action is a job the Studio's header **Jobs** button lists
 rather than resuming it; that is the trade for no extra process. The UI polls (2 s while
 anything is active, 30 s otherwise) instead of a push channel. Cancelling takes effect after the
 question in flight, which can take a minute with judge calls.
+
+## ADR-063 — The generator learns from memory, once per round, behind safeguards
+
+**Status:** proposed; decisions 1–2 accepted and implemented (m1: a review makes no model
+call; `app/feedback/lessons.py` runs at the start of each round) and the duplicate check of
+decision 6 (m2: `app/retrieval/duplicates.py`, thresholds calibrated there; facets are m7), and the example retrieval of decision 3 (m3: `app/retrieval/examples.py`; same type required, "style only" and "already in the bank" in the target block), and the episodes of decision 3 (m4: `app/memory/`, table `memory_episodes`, one per review, written on save with every judge's verdict and back-filled by migration 0015; round examples and at most one "rejected because" are read from them, scoped by subject key), and the guidelines and safeguards of decisions 3-4 (m5: `app/memory/guidelines.py`, table `memory_guidelines`; the lesson run asks for add/merge/support/retire operations citing review ids and applies them in code; active only with two distinct reviews or the professor's confirm; comments passed as quoted evidence; output-contract guidelines refused by a deterministic filter; existing rules migrated by 0016, two-review ones active, the rest pending; `refresh_type_instruction` retired; per-round drift check in `app/generation/drift.py` shown on the round strip; guidelines listed with Confirm / Delete on the Judges page, since the instructions page no longer exists), and the retry lessons of decision 5 (m6: the lesson run turns each failed attempt of an approved round question into an episode with `source = "retry"`, shown as "Avoid N: ..." to targets of the same type and subtopic while the question stays approved, deleted with the approval; first-attempt passes counted per round, column added by 0017, on the round strip), and the facets of decision 6 (m7: `app/generation/facets.py`, table `subtopic_facets` by 0018; facets listed by one call per subtopic from the round's background job, never from a request; each target gets a facet its cell's approved or pending questions do not cover, two targets of a cell never share one, and the facet is frozen in the question's spec; a cell with every facet covered gets no target and is named on the round strip as saturated). Amends ADR-033 and ADR-037
+(lessons reach the generator before the next round, not the next question). Judge learning is ADR-064. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md` m1–m7. After the 3-round walkthrough: multiple-choice options are shuffled (seeded by the prompt's hash, option-letter references in the explanation relabelled) before any check sees the draft, so answer position is fixed at the source and the drift check of decision 4 is only a safety net (`app/generation/schemas.py::shuffle_options`). Two deterministic checks now fail an attempt inside the retry loop: a code-completion stub with no blank marker or equal (by AST) to the reference solution (`completion_stub_incomplete`), and a prompt with an unclosed ``` fence (`prompt_code_fences_closed`, only on prompts that contain a fence). Decision 6 gains a concept check: for the nearest stored question in the 0.75–0.90 band, one structured call asks whether both assess the same concept the same way; "yes" fails the attempt with "assesses the same idea as: ...", and on the last attempt the question is kept with its soft flag and held for review (`app/generation/review.py::ConceptChecker`, injected from `rounds.py`; skipped without a model).
+
+What we measured on copies of the dev database (2026-10-07/08):
+
+- A reject blocked the review screen: `create_review` ran the generator and judge relearn
+  (1 to ~35 LLM calls) before it responded.
+- One adversarial comment ("the correct answer must always be option A") became a rule from a
+  single review, and every later question obeyed it (16/16). Two other bogus comments were not
+  adopted, so the rewriter resists taste but not instructions.
+- A clear preference was learned after one round (code in the stem: 2/6 → 5/6 → 6/6).
+- `accepted_examples` found an example for 10% of targets and did not filter by question type
+  (73% of the examples it returned were another type).
+- The duplicate check ignored `content["code"]`, did not run on rounds, and at 0.85 caught 2 of
+  14 professor "too similar" rejects. With code included, 0.75 catches 9/14 and flags 17% of
+  approvals; ≥ 0.90 is near-verbatim (3% of approvals).
+- Better examples alone did not reduce retries in 24 generations; retries came from the judges.
+
+Decision — the generator's learning loop:
+
+1. **A review only records.** Saving a review writes the review, its outcome and an episode.
+   It makes no LLM call; the screen moves on at once.
+2. **Lessons run once per round,** in the round's background job, before it generates, over the
+   reviews since the last run.
+3. **Two memories, scoped by subject key and question type.**
+   - *Guidelines* (semantic): short rules, all active ones sent with every generation. The
+     lesson run asks for edit operations (add, merge, support, retire) citing review ids — never
+     a rewritten list.
+   - *Episodes* (episodic): reviewed questions with the professor's verdict, reasons and
+     comment, plus retry lessons. Retrieved per target: same question type required, then exact
+     subtopic × difficulty, then same topic, then embedding similarity; no two near-identical
+     examples; the nearest existing questions shown as "already in the bank".
+4. **Safeguards.** A guideline is active only with ≥ 2 distinct supporting reviews or the
+   professor's confirmation. Comments are quoted evidence, never instructions; guidelines about
+   the output contract (answer position, option count, fields) are refused. Each round is
+   checked for drift (answer-position spread, option count, stem length). Deleting a review
+   deletes what was learned from it.
+5. **Retry lessons.** A failed attempt and the reason it failed become an episode only when the
+   professor approves the final question.
+6. **Duplicates.** Embeddings include the code; an exact match or cosine ≥ 0.90 fails the
+   attempt with the similar question quoted; 0.75–0.90 keeps it with the soft flag; on the last
+   attempt a duplicate is kept with the flag, not dropped. Each target gets a facet of its
+   subtopic the cell has not covered; a cell with every facet covered is reported as saturated.
+
+**Consequences.** Generation outside rounds (single question, live) uses the memory as of the
+last lesson run. A rule now needs two reviews, so a genuine one-off preference waits for a
+second example or a click. Existing learned rules are migrated as pending unless two reviews
+support them. Acceptance is `scripts/simulate_review_loop.py` with adversarial reviews: the
+option-A rate stays near chance, compliance with the scripted standard is at least today's,
+and first-attempt pass rate rises across rounds.
+
+## ADR-064 — Judges learn from memory on both sides of their decisions, frozen per round
+
+**Status:** accepted. Decisions 1–5 implemented (m8: `app/calibration/scorecard.py`,
+`GET /api/judges/scorecard`; agreement, Cohen's κ and a Wilson 95% range per judge; difficulty
+and subtopic scored against the professor's confirmed values on every review; retries and drops
+attributed from `generation_attempts`; the table is on the Judges page. m9: each round keeps up
+to 2 judge-failed drafts as audit items; agree = confirmed objection, disagree = false alarm;
+episodes use `source=audit`. m10: only a clear judge failure retries — difficulty two bands
+off, no subtopic overlap, or a blocking issue code; a one-band / overlapping / advisory miss
+is kept with a note. m11: `app/evaluation/judge_memory.py`; each judge's prompt is the shipped
+text plus `judge:<metric>` guidelines plus the nearest episodes; the lesson run distils judges
+first and freezes a snapshot on the round; a snapshot is promoted only when held-out agreement
+does not drop and the known-bad pass rate does not rise; panel versioning keys on the snapshot
+id; `refresh_judge_prompt`'s rewrite is no longer part of the lesson run). Supersedes ADR-039's
+rewrite-and-gate learning; keeps its held-out check. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md`
+m8–m11. Routing fix after the 3-round walkthrough: a review is evidence for the difficulty or
+subtopic judge only when the professor's confirmed value differs from the judge's or that
+judge's reason is cited; issue reasons and unattributed reject/edit comments go to the issues
+judge; agreements are retrievable past cases, never distilled (`episode_teaches` /
+`episode_confirms`). Each judge's distillation prompt names its scope, and a difficulty or
+subtopic guideline that is not about difficulty or topic is refused like an output-contract rule.
+
+Of 222 routed reviews, judges raised 67 false alarms and 27 misses. In rounds, a draft a judge
+fails is retried or dropped and never reviewed, so the most common judge mistake is invisible
+and shows up only as retries. Learning started after 5 disagreements per judge and a ~16-call
+held-out gate; an 18-review simulation taught no judge anything.
+
+Decision:
+
+1. **Measure first.** A per-judge scorecard: agreement with a 95% range, kappa, misses, false
+   alarms, flag rate, and the retries and drops each judge causes. Difficulty and subtopic are
+   scored on every review against the professor's confirmed values.
+2. **Feedback on both sides.** Each round puts up to 2 judge-rejected drafts in the review queue
+   as an audit; the professor's agree / disagree is a feedback record for that judge.
+3. **Soft-fail when borderline.** Only a clear failure causes a retry (difficulty two bands
+   off, no subtopic overlap, a blocking issue code); a borderline one goes to the queue with
+   the judge's note.
+4. **MemAlign memory per judge.** Prompt = shipped prompt + active guidelines + the nearest
+   past cases for that judge. Guidelines are edited, need two supporting reviews, and come
+   from one distillation call per judge per round.
+5. **Order and freezing.** The lesson run updates judges before the generator; a round uses one
+   judge memory snapshot throughout; a snapshot is promoted only if held-out agreement does not
+   drop and the known-bad pass rate does not rise. Trust and calibration key on the snapshot.
+
+**Consequences.** The professor reviews up to 2 extra audit items per round. Some borderline
+questions reach the queue that a stricter gate would have dropped. Judge prompts vary per
+question within a fixed snapshot, so the panel identity is the snapshot, not the prompt text.
+
+## ADR-065 — Round questions are solved blind, and a retry sees the draft it corrects
+
+**Status:** accepted. Implemented: `app/generation/solve.py` (`BlindSolver`), the `blind_solve`
+check in `RoundReview`, `questions.solve_flag` (migration `0021_solve_flag`), the review-card
+banner; `complete_structured(..., history=...)` in `app/llm/client.py` and the multi-turn loop
+in `app/generation/attempts.py`; judge rubric `question-metrics@2`.
+
+Professor reviews of round questions found wrong keys, two correct options and missing
+information that no check caught: the answer check executes code only, and the issues judge
+does not run in rounds. On 49 labelled questions (19 flawed, 30 good), two small models solving
+each multiple-choice question without its key -- Claude Haiku 4.5 and DeepSeek, zero-shot --
+flagged about 14 of the 19 flawed and 1 of the 30 good; few-shot examples made it worse, and
+Chain-of-Verification caught no more at 6.5 calls a question. A repair that saw the flawed
+question and the solver's finding fixed 3 of 3 wrong keys and missing information, and no
+ambiguity. Retries, however, sent only the original prompt plus the correction: the generator
+never saw the question the correction was about.
+
+Decision:
+
+1. **Blind solve in the round loop.** Each multiple-choice and true/false round question is
+   answered by `BLIND_SOLVE_MODELS` (default the two above) at temperature 0, without its key
+   or explanation. A solver that picks another answer, or finds zero or several correct
+   options, fails the `blind_solve` check: the finding is the correction. On the last attempt
+   the question is kept with `solve_flag`, held for the professor and never auto-approved,
+   because about one good key in thirty draws a disagreement. An unavailable solver is skipped.
+2. **Retries are a conversation.** A retry sends the original request, the rejected draft as
+   the model's own turn (as the checks saw it: shuffled options, key, explanation), then the
+   correction. A reply that was not a question is asked again with a note.
+3. **Prompts say what they mean.** The audit of every round prompt fixed: the issues judge was
+   told code in a multiple-choice question had run; "plausible alternatives" without "the
+   others definitely wrong"; overlapping difficulty bands and "a full level away";
+   `ambiguous` overlapping `poor_distractors` (now one code, blocking); internal check names
+   in corrections; learned guidelines about what their component cannot see or control
+   (difficulty labels, citations, the bank), now refused. The judge rubric is
+   `question-metrics@2` so calibration never pools old and new verdicts.
+
+**Consequences.** Two more cheap calls per multiple-choice attempt, and roughly 1.5-2x more
+input tokens per retry. Code that does not compile inside a question (Q246, Q257) and exact
+output (Q357) are still not caught: solvers read code charitably; a compile-and-run check of
+code in stems and options is the next step. Live student generation does not blind-solve yet:
+it serves before review, so holding would change that flow. Ambiguity is flagged but rarely
+repaired; it is left to the professor.

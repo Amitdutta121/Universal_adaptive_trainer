@@ -17,6 +17,7 @@ from app.generation.attempts import (
     generate_with_retries,
 )
 from app.generation.prompts import (
+    RoundExamples,
     base_type_instruction,
     build_prompt,
     instruction_fingerprint,
@@ -24,11 +25,13 @@ from app.generation.prompts import (
     render_taxonomy,
 )
 from app.generation.schemas import (
+    MultipleChoiceDraft,
     TaxonomyClaim,
     build_content,
     prompt_fields_from_draft,
     response_model_for,
     scoring_kind_for,
+    shuffle_options,
 )
 from app.generation.spec import (
     QuestionSpec,
@@ -36,11 +39,11 @@ from app.generation.spec import (
     build_question_spec,
     require_approved_version,
 )
-from app.question_types.output_prediction import observed_expected_output
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
+from app.memory import active_guidelines, generator_target, render_with_guidelines
 from app.persistence.models import CurriculumVersionRow
-from app.persistence.repositories import TypeInstructionRepository
+from app.question_types.output_prediction import observed_expected_output
 from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_course_id
 
 if TYPE_CHECKING:
@@ -75,34 +78,40 @@ class BaseQuestionGenerator:
     def _type_instruction(
         self, question_type: QuestionType, profile: SubjectProfile = PYTHON_PROFILE
     ) -> tuple[str | None, dict[str, object]]:
-        """The instruction to send, and the stamp naming it (ADR-033, ADR-040).
+        """The instruction to send, and the stamp naming it (ADR-033, ADR-040, ADR-063).
 
-        Read per generation rather than cached, so a refresh takes effect on the
-        next question instead of the next process.
+        The shipped instruction plus this subject's **active** guidelines for the type
+        (:mod:`app.memory`); pending ones are not sent. Read per generation rather than
+        cached, so a lesson run or a professor's confirm takes effect on the next question.
 
-        Returns the learned override or ``None`` for the shipped text, plus a
-        record of which one was used. The stamp fingerprints the text that will
-        actually be sent, not the row it came from: what a question was generated
-        from is the only thing worth recording, and a question generated before a
-        refresh must not later appear to have used the newer instruction.
+        Returns the rendered text, or ``None`` for the shipped text alone, plus a record of
+        which one was used. The stamp fingerprints the text that will actually be sent and
+        names the guidelines in it: a question generated before a guideline changed must
+        not later appear to have used the newer instruction.
         """
-        row = (
-            TypeInstructionRepository(self._session).get(
-                question_type, subject=profile.personal_key
+        guidelines = (
+            active_guidelines(
+                self._session,
+                target=generator_target(question_type),
+                subject=profile.personal_key,
             )
             if self._session is not None
-            else None
+            else []
         )
-        effective = row.instruction if row is not None else base_type_instruction(question_type)
+        base = base_type_instruction(question_type)
+        effective = render_with_guidelines(base, [row.text for row in guidelines])
         stamp = {
             "type_instruction": {
-                "source": "learned" if row is not None else "shipped",
+                "source": "learned" if guidelines else "shipped",
                 "fingerprint": instruction_fingerprint(effective),
-                "rule_count": len(row.rules or []) if row is not None else 0,
-                "review_count": row.review_count if row is not None else 0,
+                "rule_count": len(guidelines),
+                "guideline_ids": [row.id for row in guidelines],
+                "review_count": len(
+                    {review for row in guidelines for review in row.review_ids or []}
+                ),
             }
         }
-        return (row.instruction if row is not None else None), stamp
+        return (effective if guidelines else None), stamp
 
     def generate(self, request: GenerationRequest) -> list[Question]:
         """Generate one unpersisted question for every requested source section.
@@ -140,7 +149,7 @@ class BaseQuestionGenerator:
         version: CurriculumVersionRow,
         instructor_feedback: str | None = None,
         review: QuestionReview | None = None,
-        examples: list[str] | None = None,
+        examples: RoundExamples | None = None,
         follow_up: str | None = None,
         max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> Question:
@@ -158,9 +167,9 @@ class BaseQuestionGenerator:
         instructor asked for a new version of an existing question.
 
         A round spec (``spec.target_subtopic_id`` set) adds the target subtopic, its style
-        and up to a few accepted ``examples`` to the prompt; ``review`` judges each clean
-        attempt inside the retry loop (:func:`generate_with_retries`). Both are unused on a
-        section-only spec.
+        and the ``examples`` retrieved for it (:class:`RoundExamples`) to the prompt;
+        ``review`` judges each clean attempt inside the retry loop
+        (:func:`generate_with_retries`). Both are unused on a section-only spec.
         """
         if self._retrieval is None:
             raise DomainRuleError(
@@ -196,6 +205,9 @@ class BaseQuestionGenerator:
         client = self._client or get_structured_client()
 
         def build(draft: TaxonomyClaim, outcome: TaxonomyClaimOutcome) -> Question:
+            if isinstance(draft, MultipleChoiceDraft):
+                # Before any check sees it: the model's own answer position is not random.
+                draft = shuffle_options(draft)
             question_prompt, reference_solution, tests = prompt_fields_from_draft(draft)
             content = build_content(
                 draft,
@@ -247,7 +259,7 @@ class BaseQuestionGenerator:
         spec: QuestionSpec,
         version: CurriculumVersionRow,
         profile: SubjectProfile,
-        examples: list[str] | None,
+        examples: RoundExamples | None,
     ) -> str:
         """The target block of a round spec: subtopic, library style, accepted examples."""
         from app.styles import get_library
@@ -276,5 +288,9 @@ class BaseQuestionGenerator:
             else None
         )
         return render_round_target(
-            subtopic=subtopic, topic_name=topic.name, style=style, examples=examples
+            subtopic=subtopic,
+            topic_name=topic.name,
+            style=style,
+            examples=examples,
+            facet=spec.facet,
         )

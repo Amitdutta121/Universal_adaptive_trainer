@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Loader2 } from "lucide-react";
+import { AlertCircle, ExternalLink, Loader2 } from "lucide-react";
 import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { toast } from "sonner";
@@ -83,6 +83,11 @@ export function ReviewScreen() {
     if (!detail || !canSubmit || submitReview.isPending) return;
     const body: Schemas["ReviewRequest"] = {
       decision: form.effectiveDecision,
+      // Reasons are optional and only mean something on a reject or an edit (the backend
+      // drops them on an approve). Audit "Agree" submits a reject, so it carries them too.
+      ...(form.effectiveDecision !== "approve" && form.reasons.length > 0
+        ? { reasons: form.reasons }
+        : {}),
       ...(form.comment.trim() ? { comment: form.comment.trim() } : {}),
       // The final values, always; the backend compares them with the judges' answers.
       corrected_difficulty: form.difficulty,
@@ -109,12 +114,12 @@ export function ReviewScreen() {
         });
       } else {
         const destructive = outcome.cell === "missed" || outcome.cell === "confirmed_bad";
+        // `action` says the lesson is learned next round; nothing was relearned yet (ADR-063).
         const description = [
           outcome.action,
           outcome.attributed_labels.length > 0
             ? `Judges named at fault: ${outcome.attributed_labels.join(", ")}.`
             : "",
-          outcome.refresh_error ?? "",
         ]
           .filter(Boolean)
           .join(" ");
@@ -126,7 +131,9 @@ export function ReviewScreen() {
         }
       }
 
-      await setAfter(detail.question.id);
+      if (!detail.question.audit) {
+        await setAfter(detail.question.id);
+      }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Failed to save review.";
       toast.error("Review not saved", { description: message });
@@ -246,6 +253,38 @@ export function ReviewScreen() {
 
       {detail ? (
         <>
+          {detail.borderline_notes?.length ? (
+            <div className="review-banner" data-tone="warn" data-testid="borderline-banner">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
+              <div>
+                <div className="review-banner-title">A judge is unsure</div>
+                <p className="review-banner-copy">{detail.borderline_notes.join(". ")}.</p>
+              </div>
+            </div>
+          ) : null}
+          {detail.question.audit ? (
+            <div className="review-banner" data-tone="warn" data-testid="audit-banner">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
+              <div>
+                <div className="review-banner-title">A judge rejected this — do you agree?</div>
+                <p className="review-banner-copy">
+                  {detail.question.audit_metric === "topic" ? "Topic" : "Difficulty"} judge
+                  {detail.question.audit_reason
+                    ? `: ${detail.question.audit_reason}`
+                    : " flagged this draft."}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {detail.question.solve_flag ? (
+            <div className="review-banner" data-tone="warn" data-testid="solve-banner">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
+              <div>
+                <div className="review-banner-title">Another model disagrees with the key</div>
+                <p className="review-banner-copy">{detail.question.solve_flag}</p>
+              </div>
+            </div>
+          ) : null}
           <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="min-w-0 space-y-4">
               <ReviewQuestionSurface
@@ -300,6 +339,8 @@ export function ReviewScreen() {
             onConfirmDifficulty={form.confirmDifficulty}
             onConfirmSubtopics={form.confirmSubtopics}
             comment={form.comment}
+            reasons={form.reasons}
+            onReasonsChange={form.setReasons}
             isSubmitting={submitReview.isPending}
             canSubmit={canSubmit}
             onDecisionChange={form.setDecision}
@@ -308,6 +349,7 @@ export function ReviewScreen() {
             onCommentChange={form.setComment}
             onSubmit={onSubmit}
             onSkip={() => void setAfter(detail.question.id)}
+            audit={detail.question.audit}
           />
         </>
       ) : null}

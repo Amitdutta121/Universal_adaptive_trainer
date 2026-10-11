@@ -10,9 +10,11 @@ from sqlalchemy import text
 from app import __version__
 from app.config import get_settings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
+from app.domain.enums import GuidelineStatus
 from app.ingestion import SCHEMA_VERSION as BOOK_SCHEMA_VERSION
 from app.ingestion import SUPPORTED_EXTENSIONS
 from app.llm import describe_availability
+from app.memory import MemoryGuidelineRepository
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
@@ -20,7 +22,6 @@ from app.persistence.repositories import (
     QuestionRepository,
     StudentRepository,
     TrainingSessionRepository,
-    TypeInstructionRepository,
 )
 from app.web.routes.api.deps import CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import ConfigResponse, CountsResponse, HealthResponse
@@ -90,8 +91,11 @@ def counts(session: DbSession, course: CourseScope, profile: CourseProfile) -> C
         curriculum_versions=CurriculumRepository(session).count(course_id=course),
         questions=QuestionRepository(session).count(course_id=course),
         reviews=ProfessorReviewRepository(session).count(course_id=course),
+        # Active guidelines: what the generator is actually told beyond the shipped text.
         learned_instructions=len(
-            TypeInstructionRepository(session).list_all(subject=profile.personal_key)
+            MemoryGuidelineRepository(session).list_for(
+                subject=profile.personal_key, statuses=[GuidelineStatus.ACTIVE]
+            )
         ),
         students=students,
     )

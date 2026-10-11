@@ -17,7 +17,9 @@ class MultipleChoice:
     kind = QuestionKind.DISCRETE
     draft_model = MultipleChoiceDraft
     instruction = (
-        "Write a multiple-choice question with plausible alternatives. "
+        "Write a multiple-choice question with exactly one correct option. Every other option "
+        "must be definitely wrong as written, yet tempting to a student who holds a specific "
+        "misconception. "
         "Set correct_option_index to the zero-based index of the one correct option."
     )
 

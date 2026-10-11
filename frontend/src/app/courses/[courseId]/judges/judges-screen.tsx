@@ -5,11 +5,15 @@
  * `GET /api/judge-prompts`. Issues and generatability still come back from that
  * list; this screen does not show them.
  *
- * Each card leads with how often the professor agreed with that judge
- * (`GET /api/judge-prompts/stats`); the prompt in force and its learned rules
- * open under "More". A built-in judge is changed by rewriting its system prompt
- * (ADR-038). Below the cards: which styles have earned trust (skip review) and
- * what each still lacks, then the taxonomy's custom rules.
+ * The scorecard (`GET /api/judges/scorecard`, ADR-064) is the measuring stick:
+ * agreement with a 95% range, κ, misses, false alarms, flag rate, and the retries
+ * and drops each judge caused in rounds. Each card then leads with how often the
+ * professor agreed with that judge (`GET /api/judge-prompts/stats`); the prompt
+ * in force and its learned rules open under "More". A built-in judge is changed
+ * by rewriting its system prompt (ADR-038). Below the cards: which styles have
+ * earned trust (skip review) and what each still lacks, the generator guidelines
+ * learned from reviews (`GET /api/guidelines`, ADR-063), then the taxonomy's
+ * custom rules.
  */
 
 import { ChevronDown, Gavel, Scale, TrendingUp, Undo2 } from "lucide-react";
@@ -34,16 +38,34 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api/client";
 import {
   useApprovedCurriculum,
+  useConfirmGuideline,
+  useDeleteGuideline,
+  useGuidelines,
   useJudgePrompts,
+  useJudgeScorecard,
   useJudgeStats,
   useRevertJudgePrompt,
   useSaveJudgePrompt,
 } from "@/lib/api/queries";
-import type { JudgePrompt, JudgeStat, JudgeStats, StyleTrust } from "@/lib/api/types";
+import type {
+  Guideline,
+  JudgePrompt,
+  JudgeScorecard,
+  JudgeStat,
+  JudgeStats,
+  StyleTrust,
+} from "@/lib/api/types";
+import { questionTypeLabel } from "@/lib/question-types/registry";
 
 const SHOWN_METRICS = ["difficulty", "subtopic"] as const;
 
 const JUDGE_LABELS: Record<(typeof SHOWN_METRICS)[number], string> = {
+  difficulty: "Difficulty",
+  subtopic: "Topic alignment",
+};
+
+const SCORECARD_LABELS: Record<string, string> = {
+  issues: "Issues",
   difficulty: "Difficulty",
   subtopic: "Topic alignment",
 };
@@ -115,6 +137,16 @@ function percent(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+function agreementRange(row: JudgeScorecard): string {
+  if (row.n === 0 || row.agreement_low == null || row.agreement_high == null) return "–";
+  return `${percent(row.agreement_low)}–${percent(row.agreement_high)}`;
+}
+
+function kappaText(row: JudgeScorecard): string {
+  if (row.n === 0 || row.kappa == null) return "–";
+  return row.kappa.toFixed(2);
+}
+
 function agreement(stat: JudgeStat | undefined): { value: string; caption: string } {
   if (!stat || stat.observations === 0 || stat.agreement_rate == null) {
     return { value: "–", caption: "No reviewed questions under this prompt yet" };
@@ -125,15 +157,16 @@ function agreement(stat: JudgeStat | undefined): { value: string; caption: strin
   };
 }
 
-function rewriteText(stat: JudgeStat | undefined, stats: JudgeStats | undefined): string | null {
-  if (!stat || !stats) return null;
-  if (!stats.learning_enabled) return "Automatic rewrites are off";
+// Judges learn from the round's reviews (memory guidelines and past cases) when the next
+// round starts (ADR-064, m11); there is no per-judge rewrite threshold any more.
+function learningText(stats: JudgeStats | undefined): string | null {
+  if (!stats) return null;
+  if (!stats.learning_enabled) return "Learning from reviews is off";
   if (stats.learning_paused) {
     const n = stats.trusted_style_count;
-    return `Rewrites paused while ${n} style${n === 1 ? "" : "s"} skip${n === 1 ? "s" : ""} review`;
+    return `Learning paused while ${n} style${n === 1 ? "" : "s"} skip${n === 1 ? "s" : ""} review`;
   }
-  const have = Math.min(stat.learnable_disagreements, stat.disagreements_needed);
-  return `Next rewrite: ${have} of ${stat.disagreements_needed} disagreements`;
+  return "Learns from your reviews at the start of each round";
 }
 
 // Every window, custom rules included, must be trusted before a style skips review,
@@ -145,6 +178,73 @@ function styleStatus(style: StyleTrust, minimum: number): string {
   const fewest = Math.min(...windows.map((metric) => metric.observations));
   if (fewest < minimum) return `Building trust: ${fewest} of ${minimum} reviews`;
   return "Below 90% agreement";
+}
+
+function ScorecardCard() {
+  const { data, error, isPending } = useJudgeScorecard();
+
+  return (
+    <Card className="review-panel">
+      <CardHeader className="gap-2">
+        <div className="review-eyebrow">Scorecard</div>
+        <CardTitle className="text-lg">How each judge is doing</CardTitle>
+        <CardDescription>
+          Agreement with you on reviewed questions, with a 95% range and Cohen&apos;s κ. Retries
+          and drops come from rounds, attributed to the judge whose check failed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error ? <QueryError error={error} /> : null}
+        {isPending ? (
+          <TableSkeleton rows={3} />
+        ) : !data ||
+          data.judges.every((row) => row.n === 0 && row.retries === 0 && row.drops === 0) ? (
+          <p className="text-muted-foreground text-sm">No reviewed questions yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 font-medium">Judge</th>
+                  <th className="font-medium">Agreement</th>
+                  <th className="font-medium">95%</th>
+                  <th className="font-medium">κ</th>
+                  <th className="font-medium">Misses</th>
+                  <th className="font-medium">False alarms</th>
+                  <th className="font-medium">Flag rate</th>
+                  <th className="font-medium">Retries</th>
+                  <th className="font-medium">Drops</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.judges.map((row) => (
+                  <tr key={row.metric} className="border-border border-t">
+                    <td className="py-2 pr-4">{SCORECARD_LABELS[row.metric] ?? row.metric}</td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {row.n === 0 || row.agreement == null
+                        ? "–"
+                        : `${row.agreements}/${row.n} (${percent(row.agreement)})`}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{agreementRange(row)}</td>
+                    <td className="py-2 pr-4 tabular-nums">{kappaText(row)}</td>
+                    <td className="py-2 pr-4 tabular-nums">{row.n === 0 ? "–" : row.missed}</td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {row.n === 0 ? "–" : row.false_alarms}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {row.n === 0 || row.flag_rate == null ? "–" : percent(row.flag_rate)}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{row.retries}</td>
+                    <td className="py-2 tabular-nums">{row.drops}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function StyleTrustCard({ stats }: { stats: JudgeStats }) {
@@ -202,6 +302,115 @@ function StyleTrustCard({ stats }: { stats: JudgeStats }) {
   );
 }
 
+function guidelineTarget(guideline: Guideline): string {
+  return guideline.question_type ? questionTypeLabel(guideline.question_type) : guideline.target;
+}
+
+/**
+ * What the generator learned from reviews (ADR-063). A guideline is sent only once it is
+ * active: two reviews support it, or the professor confirmed it here.
+ */
+export function GuidelinesCard() {
+  const { data, error, isPending } = useGuidelines();
+  const confirm = useConfirmGuideline();
+  const remove = useDeleteGuideline();
+  const busy = confirm.isPending || remove.isPending;
+  const needed = data?.active_support ?? 2;
+
+  async function run(action: "confirm" | "delete", guideline: Guideline) {
+    try {
+      if (action === "confirm") {
+        await confirm.mutateAsync(guideline.id);
+        toast.success("Guideline confirmed", {
+          description: "New questions are generated with it from now on.",
+        });
+      } else {
+        await remove.mutateAsync(guideline.id);
+        toast.success("Guideline deleted", { description: "It is no longer sent." });
+      }
+    } catch (caught) {
+      toast.error(`Could not ${action} the guideline`, { description: describeError(caught) });
+    }
+  }
+
+  return (
+    <Card className="review-panel">
+      <CardHeader className="gap-2">
+        <div className="review-eyebrow">Generator guidelines</div>
+        <CardTitle className="text-lg">What the generator learned from your reviews</CardTitle>
+        <CardDescription>
+          Learned at the start of each round. A guideline is sent once {needed} reviews support it
+          or you confirm it; pending ones are not sent.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error ? <QueryError error={error} /> : null}
+        {isPending ? (
+          <TableSkeleton rows={2} />
+        ) : !data || data.guidelines.length === 0 ? (
+          <p className="text-muted-foreground text-sm">Nothing learned yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-left text-muted-foreground">
+              <tr>
+                <th className="py-1 font-medium">Guideline</th>
+                <th className="font-medium">Type</th>
+                <th className="font-medium">Reviews</th>
+                <th className="font-medium">Status</th>
+                <th className="font-medium">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.guidelines.map((guideline) => (
+                <tr key={guideline.id} className="border-border border-t align-top">
+                  <td className="py-2 pr-4">{guideline.text}</td>
+                  <td className="py-2 pr-4">{guidelineTarget(guideline)}</td>
+                  <td className="py-2 tabular-nums">
+                    {guideline.support_count}/{needed}
+                  </td>
+                  <td className="py-2">
+                    <Badge variant={guideline.status === "active" ? "secondary" : "outline"}>
+                      {guideline.status === "active"
+                        ? guideline.confirmed_by_professor
+                          ? "active, confirmed"
+                          : "active"
+                        : "pending"}
+                    </Badge>
+                  </td>
+                  <td className="py-2">
+                    <div className="flex justify-end gap-1">
+                      {guideline.status === "pending" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => run("confirm", guideline)}
+                        >
+                          Confirm
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => run("delete", guideline)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function JudgeCard({
   prompt,
   stat,
@@ -222,7 +431,7 @@ function JudgeCard({
   const ruleKeys = occurrenceKeys(prompt.rules);
   const heldOut = parseHeldOutAgreement(prompt.note);
   const label = judgeLabel(prompt);
-  const rewrite = rewriteText(stat, stats);
+  const learning = learningText(stats);
   const agreed = agreement(stat);
 
   return (
@@ -266,7 +475,7 @@ function JudgeCard({
           </div>
           <p className="mt-1 text-muted-foreground text-sm">{agreed.caption}</p>
         </div>
-        {rewrite ? <CardDescription className="text-xs">{rewrite}</CardDescription> : null}
+        {learning ? <CardDescription className="text-xs">{learning}</CardDescription> : null}
       </CardHeader>
       <CardContent className="space-y-4">
         <Button
@@ -500,6 +709,8 @@ export function JudgesScreen() {
 
   return (
     <div className="space-y-6">
+      <ScorecardCard />
+
       {error ? <QueryError error={error} /> : null}
 
       {isPending ? (
@@ -528,6 +739,8 @@ export function JudgesScreen() {
           {stats ? <StyleTrustCard stats={stats} /> : null}
         </>
       )}
+
+      <GuidelinesCard />
 
       <TaxonomyCustomRules />
 

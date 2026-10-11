@@ -34,6 +34,7 @@ from app.config import Settings
 from app.domain.enums import (
     CurriculumStatus,
     Difficulty,
+    GuidelineStatus,
     QuestionStatus,
     QuestionType,
     ReviewDecision,
@@ -46,6 +47,7 @@ from app.persistence.models import (
     CustomJudgeRow,
     GenerationRoundRow,
     JudgeBatchRunRow,
+    MemoryGuidelineRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
@@ -59,7 +61,6 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
     TrainingSessionRow,
-    TypeInstructionRow,
     UserRow,
 )
 from app.persistence.repositories import QuestionSetRepository
@@ -182,6 +183,7 @@ PATH_IDS = {
     "round_id": "round",
     "judge_id": "custom_judge",
     "set_version_id": "qset",
+    "guideline_id": "guideline",
     # ``round-<id>``: A's question round, as the Jobs panel addresses it.
     "job_id": "job",
 }
@@ -190,6 +192,7 @@ PATH_IDS = {
 SHIPPED_LISTS = {
     ("GET", "/api/judge-prompts"): {"prompts"},
     ("GET", "/api/judge-prompts/stats"): {"judges"},  # one zeroed row per shipped judge
+    ("GET", "/api/judges/scorecard"): {"judges"},  # one zeroed row per shipped judge
     ("GET", "/api/instructions"): {"instructions"},
     ("GET", "/api/styles"): {"styles"},
     # One zeroed row per shipped judge metric.
@@ -226,6 +229,8 @@ class Seed:
     round: int
     custom_judge: int
     job: str
+    #: A's learned generator guideline (set by ``seed``; 0 for the other content sets).
+    guideline: int = 0
 
 
 # ---------------------------------------------------------------- accounts and seed
@@ -281,17 +286,20 @@ def seed(alice: TestClient, session: Session) -> Seed:
     session.flush()
     _content(session, orphan_course.id, label=f"{SECRET} orphan")
     _content(session, None, label=f"{SECRET} courseless")
-    session.add(
-        TypeInstructionRow(
-            subject=profile_for_course_id(session, course_id).personal_key,
-            question_type=QuestionType.TRUE_FALSE,
-            instruction=f"{SECRET} learned instruction",
-        )
+    guideline = MemoryGuidelineRow(
+        target="generator:true_false",
+        subject=profile_for_course_id(session, course_id).personal_key,
+        text=f"{SECRET} learned guideline",
+        review_ids=[1, 2],
+        status=GuidelineStatus.ACTIVE,
+        confirmed_by_professor=False,
     )
+    session.add(guideline)
     session.add(QuestionSetAliasRow(alias=f"taxonomy-{rows.version}", set_version_id=rows.qset))
     session.add(QuestionSetAliasRow(alias="prod", set_version_id=rows.qset))
     session.commit()
     assert owner.id is not None
+    rows.guideline = guideline.id
 
     edited = alice.put(
         "/api/judge-prompts/issues",
@@ -644,6 +652,8 @@ def test_another_account_changes_nothing_of_the_owners(
         f"/api/questions/{seed.question}",
         f"/api/custom-judges?curriculum_version_id={seed.version}",
         "/api/judge-prompts",
+        "/api/instructions",
+        "/api/guidelines",
         "/api/question-sets",
         "/api/students",
         "/api/counts",
