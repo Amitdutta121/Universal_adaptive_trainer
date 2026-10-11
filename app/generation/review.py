@@ -20,6 +20,11 @@ be the same idea reworded. For the nearest such match one cheap structured call
 (:class:`ConceptChecker`, injected as :data:`ConceptCheck`) asks whether both assess the same
 concept in the same way; "yes" is retried like a duplicate, and on the last attempt the
 question is kept, flagged and held for review. Without a model the check is skipped.
+
+A multiple-choice or true/false question is also solved blind by other models
+(:mod:`app.generation.solve`, injected as :data:`BlindSolve`). A solver that disagrees with
+the key is a correction for the next attempt; on the last attempt the question is kept,
+flagged and held for review, because one solver in about thirty disagrees with a good key.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from app.evaluation.severity import (
     subtopic_is_clear,
 )
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
+from app.generation.solve import BlindSolve, student_view
 from app.generation.spec import QuestionSpec
 from app.llm import StructuredLLMClient, get_structured_client
 
@@ -55,6 +61,7 @@ ISSUES_JUDGE_CHECK = "issues_judge"
 CUSTOM_RULE_CHECK = "custom_rule"
 DUPLICATE_CHECK = "duplicate"
 SAME_CONCEPT_CHECK = "same_concept"
+BLIND_SOLVE_CHECK = "blind_solve"
 
 #: How much of the duplicate's text the correction quotes.
 DUPLICATE_QUOTE_CHARS = 400
@@ -139,6 +146,17 @@ class ConceptChecker:
             return None
 
 
+_BAND_HINTS = {
+    "easy": "one taught step, applied directly.",
+    "medium": "two taught ideas combined, or one idea applied to an ordinary new case.",
+    "hard": "three or more taught ideas composed, or reasoning about an edge case.",
+}
+
+
+def _band_hint(difficulty: str) -> str:
+    return _BAND_HINTS.get(difficulty, "")
+
+
 def _failed(name: str, detail: str, evidence: str | None = None) -> QuestionCheck:
     return QuestionCheck(
         name=name, passed=False, deterministic=False, detail=detail, evidence=evidence
@@ -162,6 +180,7 @@ class RoundReview:
         client: StructuredLLMClient | None = None,
         duplicates: DuplicateCheck | None = None,
         concepts: ConceptCheck | None = None,
+        solver: BlindSolve | None = None,
         max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> None:
         if spec.target_subtopic_id is None:
@@ -173,6 +192,7 @@ class RoundReview:
         self._client = client
         self._duplicates = duplicates
         self._concepts = concepts
+        self._solver = solver
         self._max_attempts = max_attempts
         self.last_evaluation: PedagogicalEvaluation | None = None
         self.last_custom: list[CustomJudgeResult] = []
@@ -185,6 +205,8 @@ class RoundReview:
         self.last_failed_evaluation: PedagogicalEvaluation | None = None
         #: Borderline judge notes on a kept attempt (m10).
         self.last_notes: list[str] = []
+        #: What the blind solvers said against the key of a kept last attempt; held when set.
+        self.last_solve_flag: str | None = None
 
     def __call__(self, question: Question) -> list[QuestionCheck]:
         self.last_evaluation = None
@@ -192,6 +214,8 @@ class RoundReview:
         self.last_similar = []
         self.last_same_concept = None
         self.last_notes = []
+        self.last_solve_flag = None
+        number = question.generation_attempts[-1].number if question.generation_attempts else 1
 
         # The generator's own claim must name the target before any judge is paid for.
         if self._target not in question.subtopic_ids:
@@ -208,7 +232,6 @@ class RoundReview:
         if self._duplicates is not None:
             self.last_similar = list(self._duplicates(question))
             duplicate = next((match for match in self.last_similar if match.duplicate), None)
-            number = question.generation_attempts[-1].number if question.generation_attempts else 1
             if duplicate is not None and number < self._max_attempts:
                 return [
                     _failed(
@@ -250,8 +273,9 @@ class RoundReview:
             failed.append(
                 _failed(
                     DIFFICULTY_JUDGE_CHECK,
-                    "the difficulty check did not pass",
-                    "The difficulty judge must confirm the requested level.",
+                    "the difficulty reviewer could not confirm the requested level",
+                    f"Make the question unmistakably {self._spec.difficulty.value}: "
+                    f"{_band_hint(self._spec.difficulty.value)}",
                 )
             )
         elif (
@@ -281,8 +305,9 @@ class RoundReview:
             failed.append(
                 _failed(
                     TOPIC_JUDGE_CHECK,
-                    "the topic check did not pass",
-                    "The topic judge must confirm the target subtopic.",
+                    "the topic reviewer could not confirm the target subtopic",
+                    f"Make it unmistakable that answering requires subtopic {self._target}, "
+                    "not only incidental use of it.",
                 )
             )
         elif topic.passed is not True and subtopic_is_clear(self._target, proposed_ids):
@@ -310,6 +335,24 @@ class RoundReview:
                     issues.rationale or "Fix the incorrect answer, tests, or technical error.",
                 )
             )
+
+        if self._solver is not None:
+            findings = self._solver(question)
+            view = student_view(question) if findings else None
+            if view is not None:
+                said = "; ".join(finding.describe(view[1]) for finding in findings)
+                if number < self._max_attempts:
+                    failed.append(
+                        _failed(
+                            BLIND_SOLVE_CHECK,
+                            "another model, answering without the key, disagrees with it",
+                            f"{said} Fix it by correcting the key, making the other options "
+                            "clearly wrong, or adding the missing information. Keep the "
+                            "concept and the difficulty.",
+                        )
+                    )
+                else:
+                    self.last_solve_flag = said
 
         self.last_notes = borderline_notes(
             evaluation,

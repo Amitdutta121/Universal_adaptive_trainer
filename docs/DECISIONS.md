@@ -2638,3 +2638,46 @@ Decision:
 **Consequences.** The professor reviews up to 2 extra audit items per round. Some borderline
 questions reach the queue that a stricter gate would have dropped. Judge prompts vary per
 question within a fixed snapshot, so the panel identity is the snapshot, not the prompt text.
+
+## ADR-065 — Round questions are solved blind, and a retry sees the draft it corrects
+
+**Status:** accepted. Implemented: `app/generation/solve.py` (`BlindSolver`), the `blind_solve`
+check in `RoundReview`, `questions.solve_flag` (migration `0021_solve_flag`), the review-card
+banner; `complete_structured(..., history=...)` in `app/llm/client.py` and the multi-turn loop
+in `app/generation/attempts.py`; judge rubric `question-metrics@2`.
+
+Professor reviews of round questions found wrong keys, two correct options and missing
+information that no check caught: the answer check executes code only, and the issues judge
+does not run in rounds. On 49 labelled questions (19 flawed, 30 good), two small models solving
+each multiple-choice question without its key -- Claude Haiku 4.5 and DeepSeek, zero-shot --
+flagged about 14 of the 19 flawed and 1 of the 30 good; few-shot examples made it worse, and
+Chain-of-Verification caught no more at 6.5 calls a question. A repair that saw the flawed
+question and the solver's finding fixed 3 of 3 wrong keys and missing information, and no
+ambiguity. Retries, however, sent only the original prompt plus the correction: the generator
+never saw the question the correction was about.
+
+Decision:
+
+1. **Blind solve in the round loop.** Each multiple-choice and true/false round question is
+   answered by `BLIND_SOLVE_MODELS` (default the two above) at temperature 0, without its key
+   or explanation. A solver that picks another answer, or finds zero or several correct
+   options, fails the `blind_solve` check: the finding is the correction. On the last attempt
+   the question is kept with `solve_flag`, held for the professor and never auto-approved,
+   because about one good key in thirty draws a disagreement. An unavailable solver is skipped.
+2. **Retries are a conversation.** A retry sends the original request, the rejected draft as
+   the model's own turn (as the checks saw it: shuffled options, key, explanation), then the
+   correction. A reply that was not a question is asked again with a note.
+3. **Prompts say what they mean.** The audit of every round prompt fixed: the issues judge was
+   told code in a multiple-choice question had run; "plausible alternatives" without "the
+   others definitely wrong"; overlapping difficulty bands and "a full level away";
+   `ambiguous` overlapping `poor_distractors` (now one code, blocking); internal check names
+   in corrections; learned guidelines about what their component cannot see or control
+   (difficulty labels, citations, the bank), now refused. The judge rubric is
+   `question-metrics@2` so calibration never pools old and new verdicts.
+
+**Consequences.** Two more cheap calls per multiple-choice attempt, and roughly 1.5-2x more
+input tokens per retry. Code that does not compile inside a question (Q246, Q257) and exact
+output (Q357) are still not caught: solvers read code charitably; a compile-and-run check of
+code in stems and options is the next step. Live student generation does not blind-solve yet:
+it serves before review, so holding would change that flow. Ambiguity is flagged but rarely
+repaired; it is left to the professor.

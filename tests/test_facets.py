@@ -72,10 +72,10 @@ def test_facets_are_listed_once_per_subtopic_and_reused(
     (q1,) = _round_questions(engine, first.id)
     (q2,) = _round_questions(engine, second.id)
     assert (q1.spec["facet"], q2.spec["facet"]) == ("loop condition", "infinite loops")
-    assert (
-        "Assess this facet of the subtopic: infinite loops."
-        in (client.generation_calls[-1]["prompt"])
-    )
+    # A retry carries the original request as the conversation's first turn.
+    last = client.generation_calls[-1]
+    asked = last["history"][0][1] if last["history"] else last["prompt"]
+    assert "Assess this facet of the subtopic: infinite loops." in asked
 
 
 def test_two_targets_of_one_cell_never_share_a_facet(

@@ -65,6 +65,7 @@ from app.generation.prompts import (
     ShownExample,
 )
 from app.generation.review import ConceptChecker
+from app.generation.solve import BlindSolve, BlindSolver
 from app.generation.spec import build_question_spec, require_approved_version
 from app.ingestion.retrieval import SourceRetrieval
 from app.jobs.cancel import CANCELLED, JobCancelled, raise_if_cancelled
@@ -600,6 +601,7 @@ def _generate_round(
     *,
     client: StructuredLLMClient | None,
     embedder: Embedder | None,
+    solver: BlindSolve | None = None,
 ) -> None:
     """Generate every target of a running round, committing after each one."""
     from app.generation.service import GenerationService
@@ -709,6 +711,7 @@ def _generate_round(
                         run_id=run_id,
                         duplicates=duplicates,
                         concepts=concepts,
+                        solver=solver,
                     )
                     outcome = "produced" if question is not None else "dropped"
                     attempts = question.generation_attempts if question is not None else []
@@ -788,6 +791,7 @@ def run_round(
     client: StructuredLLMClient | None = None,
     embedder: Embedder | None = None,
     session_factory: Callable[[], Session] | None = None,
+    solver: BlindSolve | None = None,
 ) -> None:
     """Background body: generate every target of a round and record progress.
 
@@ -801,7 +805,9 @@ def run_round(
     ``DONE`` with ``finished_at``, or ``FAILED`` with ``error`` -- never raises out of the task.
 
     ``client`` / ``embedder`` / ``session_factory`` default to the live ones; tests inject
-    fakes. A round that is not ``QUEUED`` is left alone, so a repeated task is harmless.
+    fakes. ``solver`` (blind solve) defaults to the live models only when ``client`` does too,
+    so a test with a fake client never reaches the network. A round that is not ``QUEUED`` is
+    left alone, so a repeated task is harmless.
     """
     if session_factory is None:
         from app.persistence.database import get_session_factory
@@ -832,6 +838,7 @@ def run_round(
             row,
             client=client,
             embedder=embedder if embedder is not None else default_embedder(),
+            solver=solver if solver is not None or client is not None else BlindSolver(),
         )
         rounds.update(
             round_id,

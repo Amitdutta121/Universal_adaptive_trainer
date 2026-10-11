@@ -29,6 +29,7 @@ from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
 from app.generation.prompts import RoundExamples
 from app.generation.review import ConceptCheck, DuplicateCheck, RoundReview
+from app.generation.solve import BlindSolve
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
@@ -284,6 +285,7 @@ class GenerationService:
         run_id: str | None = None,
         duplicates: DuplicateCheck | None = None,
         concepts: ConceptCheck | None = None,
+        solver: BlindSolve | None = None,
     ) -> QuestionRow | None:
         """Generate one round question, judged inside the retry loop; ``None`` when dropped.
 
@@ -299,7 +301,9 @@ class GenerationService:
         kept question that only resembles one. A kept duplicate always goes to the review
         queue, never auto-approved by trust routing. ``concepts`` asks, for the nearest match
         below the duplicate line, whether it is the same idea reworded; "yes" is treated like
-        a duplicate (retried; kept, flagged and held on the last attempt).
+        a duplicate (retried; kept, flagged and held on the last attempt). ``solver`` answers a
+        multiple-choice or true/false question without its key; a disagreement is retried
+        with the solver's finding, and on the last attempt kept with ``solve_flag`` and held.
 
         Flushes; the caller commits.
 
@@ -319,6 +323,7 @@ class GenerationService:
             client=self._client,
             duplicates=duplicates,
             concepts=concepts,
+            solver=solver,
         )
         question = self._question_for_round(spec, version=version, review=review, examples=examples)
         if not question.generation_attempts or not question.generation_attempts[-1].usable:
@@ -333,6 +338,7 @@ class GenerationService:
         row.style_id = spec.style_id
         row.round_id = round_id
         row.target_subtopic_id = spec.target_subtopic_id
+        row.solve_flag = review.last_solve_flag
         row = self._questions.add(row)
         report = question.validation_report or self._validator.validate(question)
         row.validation_report = report
@@ -364,6 +370,7 @@ class GenerationService:
             row,
             review.last_custom,
             hold_for_review=review.last_same_concept is not None
+            or review.last_solve_flag is not None
             or any(match.duplicate for match in review.last_similar),
         )
         self._maybe_store_audit(spec, review, round_id)

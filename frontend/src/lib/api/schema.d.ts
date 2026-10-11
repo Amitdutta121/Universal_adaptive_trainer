@@ -4613,6 +4613,11 @@ export interface components {
             audit_metric?: string | null;
             /** Audit Reason */
             audit_reason?: string | null;
+            /**
+             * Solve Flag
+             * @description Other models, answering without the key, disagreed with it on the last attempt.
+             */
+            solve_flag?: string | null;
         };
         /**
          * QuestionTaxonomy

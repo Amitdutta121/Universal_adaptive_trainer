@@ -327,7 +327,7 @@ def test_a_failed_check_becomes_an_instruction_not_a_compliment(session: Session
 
     correction = build_correction(_check_instructions(failed), [])
 
-    assert "failed the check 'debug_reference_parses'" in correction
+    assert "failed the debug reference parses check" in correction
     assert "Test 1: stdout mismatch." in correction
 
 

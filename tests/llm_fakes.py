@@ -79,13 +79,13 @@ def verdict_for(
     raise AssertionError(f"Unexpected response model: {response_model!r}")
 
 
-
 def as_live(draft: BaseModel) -> BaseModel:
     """The draft as the live structured-output library returns it: an instance of a subclass
     that instructor builds from the response model (never the model class itself)."""
     from instructor.function_calls import openai_schema
 
     return openai_schema(type(draft)).model_validate(draft.model_dump(by_alias=True))
+
 
 class MetricJudgeClient:
     """Answers whichever verdict it is asked for, configurably.
@@ -135,7 +135,13 @@ class MetricJudgeClient:
         return self._description
 
     def complete_structured(
-        self, *, system: str, prompt: str, response_model: type[BaseModel], **_: Any
+        self,
+        *,
+        system: str,
+        prompt: str,
+        response_model: type[BaseModel],
+        history: Any = (),
+        **_: Any,
     ) -> BaseModel:
         if response_model is FacetList:
             # Counted apart, so tests counting generation and judge calls are unaffected.
@@ -145,7 +151,12 @@ class MetricJudgeClient:
         self.prompts.append(prompt)
         if self.draft is not None and isinstance(self.draft, response_model):
             self.generation_calls.append(
-                {"system": system, "prompt": prompt, "model": response_model}
+                {
+                    "system": system,
+                    "prompt": prompt,
+                    "model": response_model,
+                    "history": list(history),
+                }
             )
             return as_live(self.draft)
         if response_model is IssuesVerdict:

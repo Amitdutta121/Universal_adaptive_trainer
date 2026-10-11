@@ -575,6 +575,9 @@ class QuestionRow(TimestampMixin, Base):
     audit: Mapped[bool] = mapped_column(Boolean, default=False)
     audit_metric: Mapped[str | None] = mapped_column(String(32), default=None)
     audit_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: What blind solvers said against the key of a round question kept on its last attempt
+    #: (app/generation/solve.py). Such a question waits for the professor.
+    solve_flag: Mapped[str | None] = mapped_column(Text, default=None)
 
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE

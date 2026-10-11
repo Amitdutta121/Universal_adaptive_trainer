@@ -16,14 +16,21 @@ def common_system(profile: SubjectProfile) -> str:
 Ground the assessed skill in the supplied textbook section. You may use fresh
 variable names, literals, and examples, but do not assess an untaught {profile.code_language}
 feature or claim the section says something it does not. Keep the requested
-difficulty within the taught skill. Return only the requested structured fields;
-ensure the reference answer, explanation, and any tests agree with the question."""
+difficulty within the taught skill. The question must contain everything a student
+needs to answer it. Any code you show -- in the prompt, an option, or a snippet --
+must behave exactly as the question and its answer claim: code meant to run must
+run, and code meant to fail must fail in the way the answer says. If code reads
+input, state the exact text the user types; do not replace the input call with a
+fixed value.
+Return only the requested structured fields; ensure the reference answer,
+explanation, and any tests agree with the question."""
     return f"""You create one accurate {profile.phrase} assessment question.
 Ground the assessed skill in the supplied textbook section. You may use fresh
 names, values, and examples, but do not assess an untaught idea or claim the
 section says something it does not. Keep the requested difficulty within the
-taught skill. Return only the requested structured fields; ensure the reference
-answer and explanation agree with the question."""
+taught skill. The question must contain everything a student needs to answer it.
+Return only the requested structured fields; ensure the reference answer and
+explanation agree with the question."""
 
 
 COMMON_SYSTEM = common_system(PYTHON_PROFILE)

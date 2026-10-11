@@ -276,6 +276,15 @@ export function ReviewScreen() {
               </div>
             </div>
           ) : null}
+          {detail.question.solve_flag ? (
+            <div className="review-banner" data-tone="warn" data-testid="solve-banner">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
+              <div>
+                <div className="review-banner-title">Another model disagrees with the key</div>
+                <p className="review-banner-copy">{detail.question.solve_flag}</p>
+              </div>
+            </div>
+          ) : null}
           <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="min-w-0 space-y-4">
               <ReviewQuestionSurface

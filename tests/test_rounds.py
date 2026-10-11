@@ -310,7 +310,7 @@ def test_a_judge_failure_is_retried_with_its_reason_then_stored(
     assert len(client.generation_calls) == 2
     retry_prompt = client.generation_calls[1]["prompt"]
     assert "--- correction ---" in retry_prompt
-    assert "difficulty_judge" in retry_prompt and "must be easy" in retry_prompt
+    assert "difficulty check" in retry_prompt and "must be easy" in retry_prompt
     first_prompt = client.generation_calls[0]["prompt"]
     assert "--- target ---" in first_prompt
     assert f"[subtopic {env.while_loops.id}] While loops" in first_prompt
@@ -480,7 +480,7 @@ def test_a_topic_judge_that_names_another_subtopic_fails_the_attempt(
     _run(engine, row.id, client)
 
     assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
-    assert "topic_judge" in client.generation_calls[1]["prompt"]
+    assert "topic check" in client.generation_calls[1]["prompt"]
     assert _round(engine, row.id).dropped == 1
 
 
@@ -550,8 +550,8 @@ def test_section_only_generation_keeps_its_spec_and_prompt() -> None:
     )
     assert aimed.replace("\n\n--- target ---\nX", "") == plain
     assert "One taught step, applied directly." in plain
-    assert "Two or three taught ideas combined" in plain
-    assert "Several taught ideas composed" in plain
+    assert "Two taught ideas combined" in plain
+    assert "Three or more taught ideas composed" in plain
 
 
 # ------------------------------------------------------------------ planning
@@ -959,7 +959,7 @@ def test_an_exact_duplicate_is_retried_quoting_it_then_kept_with_a_flag(
 
     assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
     retry_prompt = client.generation_calls[1]["prompt"]
-    assert "Your question failed the check 'duplicate' (it is too similar to: WHICH LOOP" in (
+    assert "Your question failed the duplicate check (it is too similar to: WHICH LOOP" in (
         retry_prompt
     )
     (question,) = _round_questions(engine, round_id)
@@ -1087,7 +1087,7 @@ def test_the_same_idea_reworded_in_the_soft_band_is_retried(
     assert "Existing question about loops" in client.concept_prompts[0]
     assert len(client.generation_calls) == 2
     assert (
-        "failed the check 'same_concept' (it assesses the same idea as: Existing question "
+        "failed the same idea check (it assesses the same idea as: Existing question "
         "about loops)" in client.generation_calls[1]["prompt"]
     )
     (question,) = _round_questions(engine, round_id)
@@ -1154,6 +1154,167 @@ def test_a_question_that_only_resembles_one_is_routed_as_usual(
     _run(engine, round_id, _mcq_client(env), ScoredEmbedder([0.80]))
 
     assert held == [False]
+
+
+# ------------------------------------------------------------------ blind solve
+
+
+class SequenceSolver:
+    """A blind solver that disagrees with the key on the attempts marked ``True``."""
+
+    def __init__(self, disagree: list[bool]) -> None:
+        self.disagree = disagree
+        self.calls = 0
+
+    def __call__(self, question: Any) -> list[Any]:
+        from app.generation.solve import SolveFinding, SolveVerdict
+
+        disagree = self.disagree[min(self.calls, len(self.disagree) - 1)]
+        self.calls += 1
+        if not disagree:
+            return []
+        verdict = SolveVerdict(
+            answer="NONE",
+            correct_options=[],
+            exactly_one_correct=False,
+            problems="'for loop' also repeats while a condition holds.",
+        )
+        return [SolveFinding("anthropic/claude-haiku-4.5", verdict)]
+
+
+def _solve_round(
+    session: Session, engine: Engine, env: SimpleNamespace, solver: SequenceSolver
+) -> tuple[MetricJudgeClient, int]:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 3)])
+    round_id = _queue(session, setup, [_target(env)]).id
+    client = _mcq_client(env)
+    run_round(
+        round_id,
+        client=client,  # type: ignore[arg-type]
+        embedder=KeywordEmbedder(),  # type: ignore[arg-type]
+        session_factory=lambda: Session(engine, expire_on_commit=False),
+        solver=solver,
+    )
+    return client, round_id
+
+
+def test_a_key_another_model_disagrees_with_is_retried_with_its_finding(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held = _record_routing(monkeypatch)
+    client, round_id = _solve_round(session, engine, env, SequenceSolver([True, False]))
+
+    assert len(client.generation_calls) == 2
+    retry = client.generation_calls[1]["prompt"]
+    assert "failed the answer key check" in retry
+    # The finding names options of the draft the model now sees as its own turn.
+    role, draft = client.generation_calls[1]["history"][-1]
+    assert role == "assistant" and '"options"' in draft
+    assert "claude-haiku-4.5 answered NONE" in retry
+    assert "'for loop' also repeats while a condition holds." in retry
+    (question,) = _round_questions(engine, round_id)
+    assert [c.name for c in question.generation_attempts[0].failed_checks] == ["blind_solve"]
+    assert question.solve_flag is None
+    assert held == [False]
+
+
+def test_a_disagreement_on_the_last_attempt_is_kept_flagged_and_held(
+    session: Session, engine: Engine, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One good key in about thirty draws a disagreement: the professor decides, not the
+    solver."""
+    held = _record_routing(monkeypatch)
+    client, round_id = _solve_round(session, engine, env, SequenceSolver([True]))
+
+    assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
+    (question,) = _round_questions(engine, round_id)
+    assert question.generation_attempts[-1].usable
+    assert question.solve_flag is not None
+    assert "'for loop' also repeats" in question.solve_flag
+    assert held == [True]
+    assert question.trust_provenance == "pending"
+    assert _round(engine, round_id).dropped == 0
+
+
+class SolverClient:
+    """One blind-solver model: a fixed verdict, or a provider failure."""
+
+    description = "fake"
+
+    def __init__(self, verdict: Any = None) -> None:
+        self.verdict = verdict
+        self.prompts: list[str] = []
+
+    def complete_structured(self, *, system: str, prompt: str, response_model: Any) -> Any:
+        self.prompts.append(prompt)
+        if self.verdict is None:
+            raise LLMRequestError("provider down")
+        return self.verdict
+
+
+def _mcq_question(key: int = 0) -> Any:
+    from app.domain.questions import Question
+
+    return Question(
+        prompt="Which loop repeats while a condition holds?",
+        question_type=QuestionType.MULTIPLE_CHOICE,
+        content={"options": ["while", "for", "do", "none"], "correct_option_index": key},
+    )
+
+
+def test_the_blind_solver_flags_another_answer_or_two_correct_options_only() -> None:
+    from app.generation.solve import BlindSolver, SolveVerdict
+
+    agree = SolveVerdict(answer="A", correct_options=["A"], exactly_one_correct=True)
+    other = SolveVerdict(answer="B", correct_options=["B"], exactly_one_correct=True)
+    two = SolveVerdict(answer="A", correct_options=["A", "B"], exactly_one_correct=False)
+    seen = SolverClient(agree)
+    clients = {"a/agree": seen, "b/other": SolverClient(other), "c/two": SolverClient(two)}
+
+    findings = BlindSolver(clients=clients)(_mcq_question())  # type: ignore[arg-type]
+
+    assert sorted(f.model for f in findings) == ["b/other", "c/two"]
+    assert "A. while" in seen.prompts[0] and "D. none" in seen.prompts[0]
+    assert "correct_option_index" not in seen.prompts[0]
+    described = {f.model: f.describe("A") for f in findings}
+    assert described == {
+        "b/other": "other answered B (key is A)",
+        "c/two": "two finds A, B correct",
+    }
+
+
+def test_the_blind_solver_skips_failing_models_and_unsolvable_types() -> None:
+    from app.domain.questions import Question
+    from app.generation.solve import BlindSolver
+
+    failing = SolverClient()
+    assert BlindSolver(clients={"x/down": failing})(_mcq_question()) == []  # type: ignore[arg-type]
+    assert len(failing.prompts) == 1
+
+    coding = Question(prompt="Write f", question_type=QuestionType.CODING, content={})
+    unused = SolverClient()
+    assert BlindSolver(clients={"x/y": unused})(coding) == []  # type: ignore[arg-type]
+    assert unused.prompts == []
+
+
+def test_a_true_false_question_is_solved_as_two_options() -> None:
+    from app.domain.questions import Question
+    from app.generation.solve import student_view
+
+    question = Question(
+        prompt="A while loop can run zero times.",
+        question_type=QuestionType.TRUE_FALSE,
+        content={"correct_answer": True},
+    )
+    assert student_view(question) == (
+        "A while loop can run zero times.\n\nOptions:\nA. True\nB. False",
+        "A",
+    )
+
+
+def test_blind_solve_models_come_from_a_comma_separated_setting() -> None:
+    assert Settings(blind_solve_models="a/x, b/y").blind_solve_models == ["a/x", "b/y"]
+    assert Settings(blind_solve_models="").blind_solve_models == []
 
 
 # ------------------------------------------------------------------ examples (ADR-063 point 3)

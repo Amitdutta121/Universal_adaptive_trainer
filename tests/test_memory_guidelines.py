@@ -292,6 +292,29 @@ def test_content_preferences_are_not_refused(guideline: str) -> None:
     assert refusal_reason(guideline) is None
 
 
+#: Learned in the demo bank: rules about what the generator cannot see or control.
+OUT_OF_REACH = [
+    "Label questions testing a single concept with straightforward steps as 'easy'.",
+    "Ensure cited sources are relevant to the question topic and subtopic.",
+    "Ensure questions are distinct from previous submissions, avoiding near-duplicates.",
+    "Do not repeat questions already in the question bank.",
+]
+
+
+@pytest.mark.parametrize("guideline", OUT_OF_REACH)
+def test_generator_rules_it_cannot_follow_are_refused(guideline: str) -> None:
+    assert refusal_reason(guideline, target="generator:multiple_choice") == (
+        "asks for what this component cannot see or control"
+    )
+
+
+def test_a_judge_rule_about_the_rest_of_the_bank_is_refused() -> None:
+    rule = "Questions must not have highly similar content across the question bank."
+    assert refusal_reason(rule, target="judge:issues") is not None
+    kept = "Distractors must be unambiguously incorrect under any viable context."
+    assert refusal_reason(kept, target="judge:issues") is None
+
+
 def test_always_option_a_is_refused_even_with_two_reviews_and_a_confirm(
     client: TestClient, session: Session
 ) -> None:

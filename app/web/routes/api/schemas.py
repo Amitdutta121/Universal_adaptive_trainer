@@ -963,6 +963,8 @@ class QuestionSummary(BaseModel):
     audit: bool = False
     audit_metric: str | None = None
     audit_reason: str | None = None
+    #: Other models, answering without the key, disagreed with it on the last attempt.
+    solve_flag: str | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -1008,6 +1010,7 @@ class QuestionSummary(BaseModel):
             audit=bool(row.audit),
             audit_metric=row.audit_metric,
             audit_reason=row.audit_reason,
+            solve_flag=row.solve_flag,
         )
 
 

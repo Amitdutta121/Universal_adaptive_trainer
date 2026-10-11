@@ -22,7 +22,9 @@ class TrueFalse:
     kind = QuestionKind.DISCRETE
     draft_model = TrueFalseDraft
     instruction = (
-        "Write one unambiguous true-or-false statement. Set correct_answer to its truth value."
+        "Write one true-or-false statement that is definitely true or definitely false as "
+        "written, with no exception a careful reader could raise. "
+        "Set correct_answer to its truth value."
     )
 
     def columns_from_draft(self, draft: TrueFalseDraft) -> DraftColumns:

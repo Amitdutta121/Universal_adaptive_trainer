@@ -13,6 +13,8 @@ BLOCKING_ISSUE_CODES: frozenset[RejectionReason] = frozenset(
         RejectionReason.TECHNICALLY_INCORRECT,
         RejectionReason.INCORRECT_ANSWER,
         RejectionReason.INCORRECT_TESTS,
+        # Two defensible answers cannot be graded fairly (a student may pick either).
+        RejectionReason.AMBIGUOUS,
     }
 )
 
@@ -55,9 +57,7 @@ def borderline_notes(
         and difficulty.proposed_difficulty is not None
         and not difficulty_is_clear(requested_difficulty, difficulty.proposed_difficulty)
     ):
-        notes.append(
-            f"difficulty judge thinks this may be {difficulty.proposed_difficulty.value}"
-        )
+        notes.append(f"difficulty judge thinks this may be {difficulty.proposed_difficulty.value}")
     topic = evaluation.metric(JudgeMetricId.SUBTOPIC)
     proposed = list(topic.proposed_subtopic_ids) if topic is not None else []
     if (
@@ -76,5 +76,5 @@ def borderline_notes(
         and codes
         and not issues_are_clear(codes)
     ):
-        notes.append("issues judge flagged wording or ambiguity")
+        notes.append("issues judge flagged wording, distractors or usefulness")
     return notes

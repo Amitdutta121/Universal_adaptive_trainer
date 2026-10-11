@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_output_tokens: int = Field(default=4096, gt=0)
+    #: Sent only to reasoning models (gpt-5 family, o-series), which spend part of their
+    #: output budget thinking. ``low`` keeps generation and judging fast and cheap.
+    llm_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     embedding_model: str = "openai/text-embedding-3-small"
     validation_timeout_seconds: float = Field(default=2.0, gt=0)
     # Where student and generated code runs (C6, ADR-055). ``local`` is a plain subprocess and
@@ -124,6 +127,13 @@ class Settings(BaseSettings):
     #: answer. Values are ``JudgeMetricId`` values; ``JUDGE_METRICS_ENABLED=difficulty,subtopic``
     #: in a ``.env`` file. Not yet read by the judge service (Phase 1, agent C).
     judge_metrics_enabled: Annotated[list[str], NoDecode] = ["difficulty", "subtopic"]
+    #: Models that answer each round multiple-choice / true-false question without its key
+    #: (app/generation/solve.py). Any disagreement is retried, then flagged. Empty turns it
+    #: off: ``BLIND_SOLVE_MODELS=`` in a ``.env`` file.
+    blind_solve_models: Annotated[list[str], NoDecode] = [
+        "anthropic/claude-haiku-4.5",
+        "deepseek/deepseek-chat",
+    ]
 
     # -- Learning loops (ADR-042) -------------------------------------------
     # Both loops can be frozen independently. A judge cannot be measured while
@@ -234,6 +244,14 @@ class Settings(BaseSettings):
             unknown = [item for item in value if str(item) not in known]
             if unknown:
                 raise ValueError(f"unknown judge metric(s): {', '.join(map(str, unknown))}")
+        return value
+
+    @field_validator("blind_solve_models", mode="before")
+    @classmethod
+    def _split_models(cls, value: object) -> object:
+        """Accept ``BLIND_SOLVE_MODELS=a/b,c/d``; an empty value turns blind solve off."""
+        if isinstance(value, str):
+            return [model.strip() for model in value.split(",") if model.strip()]
         return value
 
     @field_validator("cors_allow_origins", mode="before")

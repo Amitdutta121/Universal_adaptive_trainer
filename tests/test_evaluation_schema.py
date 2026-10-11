@@ -35,7 +35,7 @@ def _passing(metric: JudgeMetricId, passed: bool) -> MetricResult:
 
 def test_rubric_version_locked() -> None:
     """A change here invalidates comparisons with every stored evaluation."""
-    assert RUBRIC_VERSION == "question-metrics@1"
+    assert RUBRIC_VERSION == "question-metrics@2"
 
 
 def test_all_four_metrics_are_judged() -> None:
@@ -229,3 +229,18 @@ def test_judge_issue_codes_are_professor_codes() -> None:
 )
 def test_humanized_errors_stay_readable(detail: str, expected_fragment: str) -> None:
     assert expected_fragment in humanize_judge_error_detail(detail)
+
+
+def test_two_defensible_answers_block_but_wording_does_not() -> None:
+    from app.domain.enums import RejectionReason
+    from app.evaluation.severity import issues_are_clear
+
+    assert issues_are_clear([RejectionReason.AMBIGUOUS])
+    assert not issues_are_clear([RejectionReason.POOR_WORDING])
+
+
+def test_the_issues_judge_is_told_code_in_a_choice_question_was_not_run() -> None:
+    from app.evaluation.prompts import ISSUES_SYSTEM
+
+    assert "multiple-choice or true/false\nquestion has NOT been run" in ISSUES_SYSTEM
+    assert "its code runs and its tests" not in ISSUES_SYSTEM

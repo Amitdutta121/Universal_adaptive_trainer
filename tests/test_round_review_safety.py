@@ -219,13 +219,13 @@ def test_advisory_issue_codes_are_kept_with_a_note():
         MetricResult(
             metric=JudgeMetricId.ISSUES,
             passed=False,
-            issue_codes=[RejectionReason.AMBIGUOUS],
+            issue_codes=[RejectionReason.POOR_WORDING],
             rationale="wording",
         )
     )
     review = _review(metrics)
     assert review(Question(prompt="Q", subtopic_ids=[2])) == []
-    assert review.last_notes == ["issues judge flagged wording or ambiguity"]
+    assert review.last_notes == ["issues judge flagged wording, distractors or usefulness"]
 
 
 def test_blocking_issue_codes_are_retried():
