@@ -15,12 +15,19 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.errors import DomainRuleError
+from app.ingestion import SourceRetrieval
 from app.persistence.models import BookRow
-from app.persistence.repositories import CurriculumRepository
+from app.persistence.repositories import BookRepository, CurriculumRepository
 from app.retrieval import SectionEmbeddingStore, SectionRetriever, get_embedder
+from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever, course_book_ids
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, DbSession, ensure_in_course
-from app.web.routes.api.schemas import RetrievedSectionOut
+from app.web.routes.api.schemas import (
+    ChunkListResponse,
+    ChunkOut,
+    RetrievedChunkOut,
+    RetrievedSectionOut,
+)
 
 router = APIRouter(tags=["retrieval"])
 
@@ -72,3 +79,69 @@ def retrieve_sections(
         assert query is not None
         results = retriever.search(query, top_k=top_k, book_ids=book_ids)
     return [RetrievedSectionOut.from_result(result) for result in results]
+
+
+@router.get("/chunks", response_model=ChunkListResponse)
+def list_chunks(
+    session: DbSession,
+    course: CourseScope,
+    book_id: int,
+    page: Annotated[int | None, Query(ge=1, description="Only chunks covering this page.")] = None,
+) -> ChunkListResponse:
+    """A book's current chunks in reading order, or just those covering one page."""
+    ensure_in_course(BookRepository(session).get(book_id).course_id, course, f"Book {book_id}")
+    chunks = SourceRetrieval(session).chunks_in_book(book_id, page=page)
+    return ChunkListResponse(
+        chunks=[ChunkOut.from_chunk(chunk) for chunk in chunks], total=len(chunks)
+    )
+
+
+@router.get(
+    "/chunks/search",
+    response_model=list[RetrievedChunkOut],
+    dependencies=SPENDS_LLM_CREDIT,
+)
+def search_chunks(
+    session: DbSession,
+    course: CourseScope,
+    embedder: EmbedderDep,
+    q: Annotated[str | None, Query(description="Free-text query.")] = None,
+    subtopic_id: Annotated[
+        int | None,
+        Query(description="Curriculum subtopic; its topic + name + description becomes the query."),
+    ] = None,
+    book_id: Annotated[int | None, Query(description="Search this book only.")] = None,
+    top_k: Annotated[int, Query(ge=1, le=25)] = 5,
+) -> list[RetrievedChunkOut]:
+    """Rank the course's current chunks for a query or a subtopic. Exactly one is required.
+
+    Embeds any chunk still missing a vector in the configured model first.
+    """
+    if (q is None) == (subtopic_id is None):
+        raise DomainRuleError(
+            "Provide exactly one of 'q' or 'subtopic_id'.",
+            detail="Pass free text as 'q', or a curriculum subtopic id as 'subtopic_id'.",
+        )
+    book_ids = course_book_ids(session, course)
+    if book_id is not None:
+        ensure_in_course(BookRepository(session).get(book_id).course_id, course, f"Book {book_id}")
+        book_ids = [book_id]
+    retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, embedder))
+    if subtopic_id is not None:
+        subtopic = CurriculumRepository(session).get_subtopic(subtopic_id)
+        ensure_in_course(
+            subtopic.topic.curriculum_version.course_id, course, f"Subtopic {subtopic_id}"
+        )
+        results = retriever.for_subtopic(subtopic_id, top_k=top_k, book_ids=book_ids)
+    else:
+        assert q is not None
+        results = retriever.search(q, top_k=top_k, book_ids=book_ids)
+    return [RetrievedChunkOut.from_result(result) for result in results]
+
+
+@router.get("/chunks/{chunk_id}", response_model=ChunkOut)
+def get_chunk(session: DbSession, course: CourseScope, chunk_id: str) -> ChunkOut:
+    """One chunk of any version: its text plus the citation that makes it traceable."""
+    chunk = SourceRetrieval(session).get_chunk(chunk_id)
+    ensure_in_course(BookRepository(session).get(chunk.book_id).course_id, course, "Chunk")
+    return ChunkOut.from_chunk(chunk)

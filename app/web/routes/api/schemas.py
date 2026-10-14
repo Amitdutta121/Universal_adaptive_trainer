@@ -46,6 +46,7 @@ from app.curriculum import (
 )
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
 from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
+from app.domain.chunks import Chunk
 from app.domain.enums import (
     BookStatus,
     ConceptConfidence,
@@ -98,6 +99,7 @@ from app.persistence.models import (
     TrainingSessionRow,
 )
 from app.retrieval import RetrievedSection
+from app.retrieval.chunks import RetrievedChunk
 from app.styles import CellTarget, QuestionStyle, SetupSuggestion
 
 
@@ -2601,6 +2603,56 @@ class StudentProgressOut(BaseModel):
     subtopics: list[SubtopicWeaknessOut]
     recent_attempts: list[AttemptOut]
     sessions: list[TrainingSessionOut]
+
+
+class ChunkOut(BaseModel):
+    """One chunk of a book version, with the citation that makes it traceable."""
+
+    id: str
+    book_id: int
+    book_version: int
+    ordinal: int
+    page_start: int | None
+    page_end: int | None
+    heading_path: list[str]
+    citation: str
+    text: str
+
+    @classmethod
+    def from_chunk(cls, chunk: Chunk) -> ChunkOut:
+        return cls(
+            id=chunk.id,
+            book_id=chunk.book_id,
+            book_version=chunk.book_version,
+            ordinal=chunk.ordinal,
+            page_start=chunk.page_start,
+            page_end=chunk.page_end,
+            heading_path=chunk.heading_path,
+            citation=chunk.citation(),
+            text=chunk.text,
+        )
+
+
+class ChunkListResponse(BaseModel):
+    chunks: list[ChunkOut]
+    total: int
+
+
+class RetrievedChunkOut(BaseModel):
+    """One chunk returned by semantic retrieval."""
+
+    chunk_id: str
+    book_id: int
+    book_title: str
+    heading_path: list[str]
+    page_start: int | None
+    page_end: int | None
+    score: float
+    snippet: str
+
+    @classmethod
+    def from_result(cls, result: RetrievedChunk) -> RetrievedChunkOut:
+        return cls(**result.__dict__)
 
 
 class RetrievedSectionOut(BaseModel):

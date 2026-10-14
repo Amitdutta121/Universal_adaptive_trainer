@@ -14,9 +14,16 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.domain.books import BookChapter, BookSection, SectionSource
+from app.domain.chunks import Chunk
 from app.domain.enums import StructureConfidence, StructureSource
-from app.persistence.models import BookChapterRow, BookSectionRow
-from app.persistence.repositories import BookRepository, BookStructureRepository
+from app.persistence.models import BookChapterRow, BookSectionRow, ChunkRow
+from app.persistence.repositories import BookRepository, BookStructureRepository, ChunkRepository
+
+
+def chunk_from_row(row: ChunkRow) -> Chunk:
+    """Convert a chunk row, with its book loaded, into its domain form."""
+    chunk = Chunk.model_validate(row)
+    return chunk.model_copy(update={"book_title": row.book.title})
 
 
 def section_from_row(row: BookSectionRow) -> BookSection:
@@ -62,6 +69,19 @@ class SourceRetrieval:
         self._session = session
         self._books = BookRepository(session)
         self._structure = BookStructureRepository(session)
+
+    def get_chunk(self, chunk_id: str) -> Chunk:
+        """One chunk of any version, with its book title for citation.
+
+        Raises:
+            NotFoundError: if no such chunk exists.
+        """
+        return chunk_from_row(ChunkRepository(self._session).get(chunk_id))
+
+    def chunks_in_book(self, book_id: int, *, page: int | None = None) -> list[Chunk]:
+        """The current version's chunks in reading order; with ``page``, those covering it."""
+        rows = ChunkRepository(self._session).list_for_book(book_id, page=page)
+        return [chunk_from_row(row) for row in rows]
 
     def get_section(self, section_id: int) -> BookSection:
         """One section.

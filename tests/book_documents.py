@@ -151,3 +151,39 @@ def without(document: dict[str, Any], *keys: str) -> dict[str, Any]:
     for key in keys:
         copy.pop(key, None)
     return copy
+
+
+def chunked_book(session: Any, document: dict[str, Any], *, course_id: int | None = None) -> Any:
+    """Store ``document`` as a chunked book: one chunk per section, in reading order.
+
+    The heading path is the chapter and section headings as printed (``"1 The Way of the
+    Program"``), and the pages are the section's. Returns the flushed ``BookRow``.
+    """
+    from app.persistence.models import BookRow, ChunkRow
+    from app.persistence.repositories import BookRepository, ChunkRepository
+
+    def label(unit: dict[str, Any]) -> str | None:
+        parts = [unit.get("number"), unit.get("title")]
+        return " ".join(part for part in parts if part) or None
+
+    book = BookRepository(session).add(
+        BookRow(
+            course_id=course_id,
+            title=document["title"],
+            author=document.get("author"),
+            original_filename=document.get("source_filename") or "book.pdf",
+            page_count=document.get("page_count"),
+        )
+    )
+    chunks = [
+        ChunkRow(
+            text=section["text"],
+            page_start=section.get("start_page"),
+            page_end=section.get("end_page"),
+            heading_path=[part for part in (label(chapter), label(section)) if part],
+        )
+        for chapter in document["chapters"]
+        for section in chapter["sections"]
+    ]
+    ChunkRepository(session).add_version(book, chunks)
+    return book

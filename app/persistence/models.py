@@ -255,6 +255,8 @@ class ChunkRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     book: Mapped[BookRow] = relationship(back_populates="chunks")
+    #: SQLite here does not enforce ``ON DELETE CASCADE``, so the ORM deletes them.
+    embeddings: Mapped[list[ChunkEmbeddingRow]] = relationship(cascade="all, delete-orphan")
 
 
 class BookChapterRow(Base):
@@ -343,6 +345,28 @@ class SectionEmbeddingRow(Base):
     section_id: Mapped[int] = mapped_column(
         ForeignKey("book_sections.id", ondelete="CASCADE"), unique=True, index=True
     )
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ChunkEmbeddingRow(Base):
+    """A cached embedding vector for one chunk, in one embedding model's space.
+
+    Derived, like ``section_embeddings``: rebuilt from ``chunks`` on demand. One row per
+    (chunk, model), so switching the embedding model embeds afresh and switching back
+    reuses the old vectors. ``content_hash`` is the SHA-256 of the exact text embedded
+    (heading path plus chunk text).
+    """
+
+    __tablename__ = "chunk_embeddings"
+    __table_args__ = (UniqueConstraint("chunk_id", "model"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
     model: Mapped[str] = mapped_column(String(128))
     dim: Mapped[int] = mapped_column(Integer)
     #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
