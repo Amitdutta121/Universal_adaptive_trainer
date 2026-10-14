@@ -33,6 +33,9 @@ class SourceFormat(StrEnum):
 
     BOOK_JSON = "book_json"
     BOOK_PDF = "book_pdf"
+    #: Read by Docling only (``app.ingestion.parsing``); chunks, no chapter/section tree.
+    BOOK_DOCX = "book_docx"
+    BOOK_PPTX = "book_pptx"
 
 
 class ChunkSourceKind(StrEnum):

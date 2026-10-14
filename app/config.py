@@ -163,6 +163,9 @@ class Settings(BaseSettings):
     # -- Book ingestion -----------------------------------------------------
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)
+    #: Which parser turns an upload into chunks (``app.ingestion.parsing``): ``auto`` uses
+    #: Docling when the ``parse`` extra is installed, else page-text chunks.
+    book_parser: Literal["auto", "docling", "pages"] = "auto"
 
     # -- Auth (app/auth/) -----------------------------------------------------
     #: Signs the email-verification and password-reset links (ADR-061).

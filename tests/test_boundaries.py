@@ -68,7 +68,7 @@ def test_book_ingestion_is_implemented() -> None:
     from app.domain.enums import SourceFormat
     from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename, parse_book_document
 
-    assert SUPPORTED_EXTENSIONS == (".json", ".pdf")
+    assert SUPPORTED_EXTENSIONS == (".docx", ".json", ".pdf", ".pptx")
     assert format_for_filename("book.json") is SourceFormat.BOOK_JSON
     assert format_for_filename("book.pdf") is SourceFormat.BOOK_PDF
     assert parse_book_document(docs.to_bytes(docs.minimal())).section_count == 1
@@ -79,7 +79,7 @@ def test_unsupported_uploads_are_rejected() -> None:
     from app.ingestion import format_for_filename
 
     with pytest.raises(UnsupportedFileError):
-        format_for_filename("book.docx")
+        format_for_filename("book.odt")
 
 
 def test_the_application_does_no_heuristic_extraction() -> None:
@@ -108,6 +108,8 @@ def test_the_application_does_no_heuristic_extraction() -> None:
         path
         for path in app_root.rglob("*.py")
         if path.relative_to(app_root).parts[:2] != ("ingestion", "pdf")
+        # The chunking parser (Task 5) reads the PDF's outline and page text the same way.
+        and path.relative_to(app_root).as_posix() != "ingestion/parsing.py"
     ]
     assert sources
     for forbidden in ("pypdf", "PdfReader", "fitz", "pdfplumber", "pdfminer", "pymupdf"):

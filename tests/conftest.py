@@ -31,6 +31,8 @@ from app.web.routes.api import deps
 
 TEST_ENV: dict[str, str] = {
     "ENVIRONMENT": "test",
+    # Docling is slow and downloads models; the suite parses into page-text chunks.
+    "BOOK_PARSER": "pages",
     "DEBUG": "true",
     "LOG_LEVEL": "WARNING",
     "DATABASE_ECHO": "false",

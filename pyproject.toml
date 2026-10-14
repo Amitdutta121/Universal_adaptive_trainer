@@ -42,6 +42,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Layout-aware book chunking for PDF, DOCX and PPTX (app/ingestion/parsing.py; chosen in
+# docs/PARSE_SPIKE.md: +0.08 MRR@10 over page chunks). Optional because it pulls CPU torch
+# and ~500 MB of models; without it a PDF is chunked by page text. CPU torch:
+#   uv pip install -e .[parse] --extra-index-url https://download.pytorch.org/whl/cpu
+parse = [
+    "docling>=2.0",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.7",

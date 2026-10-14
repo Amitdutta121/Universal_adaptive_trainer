@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 FORMAT_BY_EXTENSION: dict[str, SourceFormat] = {
     ".json": SourceFormat.BOOK_JSON,
     ".pdf": SourceFormat.BOOK_PDF,
+    # Chunked by Docling only; refused at the upload when it is not installed.
+    ".docx": SourceFormat.BOOK_DOCX,
+    ".pptx": SourceFormat.BOOK_PPTX,
 }
 
 SUPPORTED_EXTENSIONS = tuple(sorted(FORMAT_BY_EXTENSION))

@@ -40,7 +40,7 @@ from app.ingestion import (
     example_json,
 )
 from app.ingestion.storage import resolve_stored_path, store_upload
-from app.jobs.queue import JobQueueDep
+from app.jobs.queue import JobQueue, JobQueueDep
 from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow
 from app.persistence.repositories import BookRepository, BookStructureRepository
@@ -108,6 +108,39 @@ def import_book(
     Reading the spooled file synchronously is safe here: the route runs in a
     worker thread, so it does not block the event loop.
     """
+    return _start_import(session, course, queue, file, title=title)
+
+
+@router.post(
+    "/{book_id}/versions",
+    response_model=JobStartedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def import_book_version(
+    session: DbSession,
+    course: CourseScope,
+    queue: JobQueueDep,
+    book_id: int,
+    file: Annotated[UploadFile, File()],
+) -> JobStartedResponse:
+    """Re-import a book's file as its next chunk version, as a background job.
+
+    The same file again changes nothing. A changed one adds a version and makes it
+    current; the earlier version's chunks stay, so questions citing them still resolve.
+    """
+    _book_in_course(session, book_id, course)
+    return _start_import(session, course, queue, file, book_id=book_id)
+
+
+def _start_import(
+    session: Session,
+    course: int | None,
+    queue: JobQueue,
+    file: UploadFile,
+    *,
+    title: str = "",
+    book_id: int | None = None,
+) -> JobStartedResponse:
     data = file.file.read()
     filename = file.filename or "upload"
     try:
@@ -121,7 +154,12 @@ def import_book(
         kind=JobKind.BOOK_IMPORT,
         title=f"Import book · {filename}",
         total=1,
-        request={"stored_filename": stored_name, "filename": filename, "title": title},
+        request={
+            "stored_filename": stored_name,
+            "filename": filename,
+            "title": title,
+            "book_id": book_id,
+        },
         course_id=course,
     )
     session.commit()
@@ -143,6 +181,7 @@ def _book_import(session: Session, job: BackgroundJobRow, _progress: Progress) -
             filename=request["filename"],
             title=request.get("title") or "",
             course_id=job.course_id,
+            book_id=request.get("book_id"),
         )
         session.commit()
     except Exception:

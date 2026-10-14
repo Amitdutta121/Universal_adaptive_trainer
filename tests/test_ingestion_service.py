@@ -44,7 +44,7 @@ class TestUploadValidation:
         assert format_for_filename("book.pdf") is SourceFormat.BOOK_PDF
         assert format_for_filename("BOOK.PDF") is SourceFormat.BOOK_PDF
 
-    @pytest.mark.parametrize("filename", ["book.docx", "book.exe", "book"])
+    @pytest.mark.parametrize("filename", ["book.odt", "book.exe", "book"])
     def test_rejects_unsupported_extensions(self, filename: str) -> None:
         with pytest.raises(UnsupportedFileError):
             format_for_filename(filename)

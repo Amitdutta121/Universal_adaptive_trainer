@@ -82,7 +82,7 @@ def test_health_reports_a_real_database_probe(client: TestClient) -> None:
 def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient) -> None:
     payload = client.get("/api/config").json()
 
-    assert payload["supported_book_extensions"] == [".json", ".pdf"]
+    assert payload["supported_book_extensions"] == [".docx", ".json", ".pdf", ".pptx"]
     assert [option["value"] for option in payload["difficulties"]] == ["easy", "medium", "hard"]
     assert {option["value"] for option in payload["question_types"]} == {
         "multiple_choice",
