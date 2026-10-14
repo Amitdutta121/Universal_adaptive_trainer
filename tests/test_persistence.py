@@ -95,7 +95,7 @@ class TestMigrations:
     def test_a_fresh_database_is_upgraded_to_head(self, engine: Engine) -> None:
         with engine.connect() as connection:
             version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "0023_chunk_embeddings"
+        assert version == "0024_evidence_chunks"
 
     def test_the_migrations_build_exactly_the_models(self, engine: Engine) -> None:
         # ADR-057: Alembic is the only schema source, so a model change without a
@@ -346,35 +346,35 @@ def test_list_recent_filters_by_status(session: Session) -> None:
     assert repo.list_recent(statuses=[]) == []
 
 
-def test_count_by_source_section_reports_reuse_per_section(session: Session) -> None:
+def test_count_by_source_chunk_reports_reuse_per_chunk(session: Session) -> None:
     repo = QuestionRepository(session)
-    for section_id in (7, 7, 9):
+    for chunk_id in ("c7", "c7", "c9"):
         repo.add(
             QuestionRow(
                 prompt="Reverse a string.",
                 original_prompt="Reverse a string.",
-                spec={"source_section_ids": [section_id]},
+                spec={"source_chunk_ids": [chunk_id]},
             )
         )
     session.commit()
 
-    assert repo.count_by_source_section() == {7: 2, 9: 1}
+    assert repo.count_by_source_chunk() == {"c7": 2, "c9": 1}
 
 
-def test_count_by_source_section_falls_back_to_the_stored_sources(session: Session) -> None:
+def test_count_by_source_chunk_falls_back_to_the_stored_sources(session: Session) -> None:
     """A row with no frozen spec still reports against its recorded source."""
     repo = QuestionRepository(session)
     repo.add(
         QuestionRow(
             prompt="Sum a list.",
             original_prompt="Sum a list.",
-            content={"sources": [{"section_id": 3, "citation": "Book, Page 1"}]},
+            content={"sources": [{"chunk_id": "c3", "citation": "Book, Page 1"}]},
         )
     )
     repo.add(QuestionRow(prompt="No provenance.", original_prompt="No provenance."))
     session.commit()
 
-    assert repo.count_by_source_section() == {3: 1}
+    assert repo.count_by_source_chunk() == {"c3": 1}
 
 
 def test_submit_review_copies_the_generator_identity(session: Session) -> None:

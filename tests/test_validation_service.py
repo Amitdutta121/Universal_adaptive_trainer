@@ -14,7 +14,6 @@ from app.domain.enums import Difficulty, QuestionStatus, QuestionType
 from app.domain.questions import Question
 from app.generation.schemas import OutputPredictionDraft
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 from app.validation import DeterministicQuestionValidator
 
@@ -81,10 +80,8 @@ class FailingFakeClient:
         )
 
 
-def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+def _seed(session: Session, settings: Any) -> tuple[object, object, object, str]:
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json",
         data=(
@@ -97,7 +94,7 @@ def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]
         version,
         version.topics[0],
         version.topics[0].subtopics[0],
-        book.chapters[0].sections[0].id,
+        book.chunks[0].id,
     )
 
 
@@ -113,15 +110,15 @@ def test_validator_reports_unreadable_content_without_type_checks() -> None:
 
 
 def test_generation_persists_passing_validation_report(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
 
     rows = GenerationService(
         session, client=FakeClient(topic.id, [subtopic.id])
-    ).generate_for_sections(
+    ).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
 
     loaded = QuestionRepository(session).get(rows[0].id)
@@ -130,15 +127,15 @@ def test_generation_persists_passing_validation_report(session: Session, setting
 
 
 def test_generation_persists_failing_validation_report(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
 
     rows = GenerationService(
         session, client=FailingFakeClient(topic.id, [subtopic.id])
-    ).generate_for_sections(
+    ).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
 
     loaded = QuestionRepository(session).get(rows[0].id)

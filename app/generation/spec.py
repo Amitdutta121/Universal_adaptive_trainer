@@ -1,11 +1,11 @@
 """Validate generation requests, and validate the taxonomy the model claims.
 
-The professor chooses a section, a difficulty and a question type; the generator
-reads the section and decides which topic and subtopics the question exercises.
+The professor chooses a chunk, a difficulty and a question type; the generator
+reads the chunk and decides which topic and subtopics the question exercises.
 So this module has two halves, and they run either side of the model call:
 
 * :func:`build_question_spec` resolves the professor's request before any LLM
-  call, so an unapproved curriculum or a missing section fails without spending
+  call, so an unapproved curriculum or a missing chunk fails without spending
   a request.
 * :func:`check_claimed_taxonomy` checks what the model came back with. Those
   ids are now model output, not professor input, and nothing downstream may
@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.domain.enums import ClaimViolation, CurriculumStatus, Difficulty, QuestionType
 from app.errors import InvalidQuestionSpecError, NotFoundError
 from app.persistence.models import CurriculumVersionRow
-from app.persistence.repositories import BookStructureRepository, CurriculumRepository
+from app.persistence.repositories import ChunkRepository, CurriculumRepository
 
 #: Ceiling on how many subtopics one question may claim. A question that says it
 #: exercises half the taxonomy has classified nothing, and every claimed subtopic
@@ -45,11 +45,11 @@ class QuestionSpec(BaseModel):
     curriculum_version_id: int
     question_type: QuestionType
     difficulty: Difficulty
-    source_section_ids: list[int] = Field(min_length=1, max_length=1)
+    source_chunk_ids: list[str] = Field(min_length=1, max_length=1)
     seed: str | None = None
     #: Question setup rounds only (docs/QUESTION_SETUP_PLAN.md): the subtopic the question is
     #: *asked* to assess, and the library style it must be written in. ``None`` on every
-    #: section-only request, which is generated exactly as before. A spec with a target is a
+    #: chunk-only request, which is generated exactly as before. A spec with a target is a
     #: *round spec*: the generator states the target, and the round pipeline judges it inside
     #: the retry loop and drops it on final failure instead of storing it.
     target_subtopic_id: int | None = None
@@ -65,7 +65,7 @@ class QuestionSpec(BaseModel):
     def stored(self) -> dict[str, object]:
         """The spec as frozen on the question.
 
-        A section-only spec omits the round fields, and a spec without a facet omits it, so
+        A chunk-only spec omits the round fields, and a spec without a facet omits it, so
         questions keep exactly the ``spec_json`` they had before rounds and facets existed.
         """
         exclude = set() if self.is_round_spec else {"target_subtopic_id", "style_id"}
@@ -134,7 +134,7 @@ def build_question_spec(
     curriculum_version_id: int,
     question_type: QuestionType,
     difficulty: Difficulty,
-    source_section_ids: list[int],
+    source_chunk_ids: list[str],
     seed: str | None = None,
     target_subtopic_id: int | None = None,
     style_id: str | None = None,
@@ -147,7 +147,7 @@ def build_question_spec(
 
     Raises:
         InvalidQuestionSpecError: the curriculum is not approved, a source
-            section is missing, the target subtopic is not in the version, or the
+            chunk is missing, the target subtopic is not in the version, or the
             question type is not built yet.
     """
     from app.question_types import implemented_types
@@ -167,15 +167,15 @@ def build_question_spec(
             "The target subtopic is not part of this taxonomy.",
             detail=f"Subtopic {target_subtopic_id} is not in version {curriculum_version_id}.",
         )
-    structure = BookStructureRepository(session)
+    chunks = ChunkRepository(session)
 
-    for section_id in source_section_ids:
+    for chunk_id in source_chunk_ids:
         try:
-            structure.get_section(section_id)
+            chunks.get(chunk_id)
         except NotFoundError:
             raise InvalidQuestionSpecError(
-                "Every source section must exist.",
-                detail=f"Section {section_id} does not exist.",
+                "Every source chunk must exist.",
+                detail=f"Chunk {chunk_id} does not exist.",
             ) from None
 
     try:
@@ -183,7 +183,7 @@ def build_question_spec(
             curriculum_version_id=curriculum_version_id,
             question_type=question_type,
             difficulty=difficulty,
-            source_section_ids=source_section_ids,
+            source_chunk_ids=source_chunk_ids,
             seed=seed,
             target_subtopic_id=target_subtopic_id,
             style_id=style_id,
@@ -191,7 +191,7 @@ def build_question_spec(
         )
     except ValidationError as exc:
         raise InvalidQuestionSpecError(
-            "A cold-start question spec needs exactly one source section.",
+            "A cold-start question spec needs exactly one source chunk.",
             detail=str(exc.errors()),
         ) from None
 

@@ -63,7 +63,7 @@ _SECTION = "A for loop runs its body once per item:\n\nfor x in [1, 2]:\n    pri
 _CITATION = "Sample Book, ch. 3, p. 41"
 _JUDGE_CONTEXT = JudgeContext(
     question_artifact={"prompt": "What does the loop print?", "expected_output": "1\n2"},
-    source_sections=[{"section_id": 5, "text": _SECTION}],
+    source_sections=[{"chunk_id": "c5", "text": _SECTION}],
     taxonomy=[{"topic_id": 1, "name": "Loops", "subtopics": [{"id": 11, "name": "for loops"}]}],
     claimed_taxonomy={"topic_id": 1, "subtopic_ids": [11]},
     requested_difficulty="easy",
@@ -88,7 +88,7 @@ def collect_prompts() -> dict[str, str]:
             curriculum_version_id=1,
             question_type=question_type,
             difficulty=Difficulty.MEDIUM,
-            source_section_ids=[5],
+            source_chunk_ids=["c5"],
         )
         for label, feedback in (("plain", None), ("feedback", "Make the loop count down.")):
             system, user = generation_prompts.build_prompt(

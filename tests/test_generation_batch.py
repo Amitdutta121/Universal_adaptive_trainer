@@ -22,7 +22,6 @@ from app.generation.batch import (
 )
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 
 TAXONOMY = (
@@ -31,10 +30,8 @@ TAXONOMY = (
 )
 
 
-def _seed(session: Session, settings) -> tuple[object, object, list[int]]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.think_python())
-    )
+def _seed(session: Session, settings) -> tuple[object, object, list[str]]:
+    book = docs.chunked_book(session, docs.think_python())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
@@ -42,7 +39,7 @@ def _seed(session: Session, settings) -> tuple[object, object, list[int]]:
     return (
         version,
         version.topics[0],
-        [section.id for chapter in book.chapters for section in chapter.sections],
+        [chunk.id for chunk in book.chunks],
     )
 
 
@@ -60,7 +57,7 @@ def _draft(topic_id: int, subtopic_ids: list[int]) -> DebuggingDraft:
 
 
 def _chunk(
-    section_id: int,
+    chunk_id: str,
     *,
     easy: int = 0,
     medium: int = 0,
@@ -68,7 +65,7 @@ def _chunk(
     types: list[QuestionType] | None = None,
 ) -> ChunkQuestionRequest:
     return ChunkQuestionRequest(
-        section_id=section_id,
+        chunk_id=chunk_id,
         counts={Difficulty.EASY: easy, Difficulty.MEDIUM: medium, Difficulty.HARD: hard},
         question_types=tuple([QuestionType.DEBUGGING] if types is None else types),
     )
@@ -78,18 +75,18 @@ def _chunk(
 
 
 def test_counts_expand_into_one_planned_question_each() -> None:
-    planned = compile_chunk_requests([_chunk(1, easy=2, hard=1)])
+    planned = compile_chunk_requests([_chunk("c1", easy=2, hard=1)])
 
     assert [question.difficulty for question in planned] == [
         Difficulty.EASY,
         Difficulty.EASY,
         Difficulty.HARD,
     ]
-    assert all(question.section_id == 1 for question in planned)
+    assert all(question.chunk_id == "c1" for question in planned)
 
 
 def test_difficulties_are_walked_in_a_fixed_order() -> None:
-    planned = compile_chunk_requests([_chunk(1, hard=1, easy=1, medium=1)])
+    planned = compile_chunk_requests([_chunk("c1", hard=1, easy=1, medium=1)])
 
     assert [question.difficulty for question in planned] == [
         Difficulty.EASY,
@@ -101,7 +98,7 @@ def test_difficulties_are_walked_in_a_fixed_order() -> None:
 def test_every_count_is_made_in_every_chosen_format() -> None:
     """One easy and one medium with two formats is four questions, not two."""
     planned = compile_chunk_requests(
-        [_chunk(1, easy=1, medium=1, types=[QuestionType.CODING, QuestionType.DEBUGGING])]
+        [_chunk("c1", easy=1, medium=1, types=[QuestionType.CODING, QuestionType.DEBUGGING])]
     )
 
     assert [(question.difficulty, question.question_type) for question in planned] == [
@@ -116,7 +113,7 @@ def test_choosing_three_formats_triples_the_count() -> None:
     planned = compile_chunk_requests(
         [
             _chunk(
-                1,
+                "c1",
                 medium=2,
                 types=[QuestionType.CODING, QuestionType.DEBUGGING, QuestionType.PARSONS],
             )
@@ -132,7 +129,7 @@ def test_one_of_each_difficulty_in_two_formats_is_six_questions() -> None:
     planned = compile_chunk_requests(
         [
             _chunk(
-                1,
+                "c1",
                 easy=1,
                 medium=1,
                 hard=1,
@@ -147,15 +144,15 @@ def test_one_of_each_difficulty_in_two_formats_is_six_questions() -> None:
 
 
 def test_chunks_keep_their_submitted_order() -> None:
-    planned = compile_chunk_requests([_chunk(7, easy=1), _chunk(3, easy=1)])
+    planned = compile_chunk_requests([_chunk("c7", easy=1), _chunk("c3", easy=1)])
 
-    assert [question.section_id for question in planned] == [7, 3]
+    assert [question.chunk_id for question in planned] == ["c7", "c3"]
 
 
 def test_a_chunk_asking_for_nothing_is_skipped_not_refused() -> None:
-    planned = compile_chunk_requests([_chunk(1, easy=1), _chunk(2)])
+    planned = compile_chunk_requests([_chunk("c1", easy=1), _chunk("c2")])
 
-    assert [question.section_id for question in planned] == [1]
+    assert [question.chunk_id for question in planned] == ["c1"]
 
 
 def test_an_empty_sheet_is_refused() -> None:
@@ -165,16 +162,16 @@ def test_an_empty_sheet_is_refused() -> None:
 
 def test_a_sheet_of_zeroes_is_refused() -> None:
     with pytest.raises(InvalidQuestionSpecError):
-        compile_chunk_requests([_chunk(1), _chunk(2)])
+        compile_chunk_requests([_chunk("c1"), _chunk("c2")])
 
 
 def test_counts_without_a_format_are_refused() -> None:
     with pytest.raises(InvalidQuestionSpecError):
-        compile_chunk_requests([_chunk(1, easy=1, types=[])])
+        compile_chunk_requests([_chunk("c1", easy=1, types=[])])
 
 
 def test_repeats_are_counted_not_refused() -> None:
-    planned = compile_chunk_requests([_chunk(1, medium=3, types=[QuestionType.CODING])])
+    planned = compile_chunk_requests([_chunk("c1", medium=3, types=[QuestionType.CODING])])
 
     assert len(planned) == 3
     # Three identical requests: the first is the question, two repeat it.
@@ -184,7 +181,7 @@ def test_repeats_are_counted_not_refused() -> None:
 def test_a_second_format_does_not_reduce_the_repeats() -> None:
     """A repeat now comes only from a count above one, never from the format list."""
     planned = compile_chunk_requests(
-        [_chunk(1, medium=2, types=[QuestionType.CODING, QuestionType.DEBUGGING])]
+        [_chunk("c1", medium=2, types=[QuestionType.CODING, QuestionType.DEBUGGING])]
     )
 
     # Two coding and two debugging: one repeat within each format.
@@ -196,14 +193,14 @@ def test_a_second_format_does_not_reduce_the_repeats() -> None:
 
 
 def test_service_generates_every_planned_question(session, settings) -> None:
-    version, topic, section_ids = _seed(session, settings)
+    version, topic, chunk_ids = _seed(session, settings)
     client = MetricJudgeClient(draft=_draft(topic.id, [topic.subtopics[0].id]))
 
     rows = GenerationService(session, client=client).generate_batch(
         curriculum_version_id=version.id,
         chunks=[
-            _chunk(section_ids[0], easy=1, medium=1),
-            _chunk(section_ids[1], hard=2),
+            _chunk(chunk_ids[0], easy=1, medium=1),
+            _chunk(chunk_ids[1], hard=2),
         ],
     )
 
@@ -216,22 +213,22 @@ def test_service_generates_every_planned_question(session, settings) -> None:
         Difficulty.HARD,
         Difficulty.HARD,
     ]
-    assert [row.spec["source_section_ids"] for row in rows] == [
-        [section_ids[0]],
-        [section_ids[0]],
-        [section_ids[1]],
-        [section_ids[1]],
+    assert [row.spec["source_chunk_ids"] for row in rows] == [
+        [chunk_ids[0]],
+        [chunk_ids[0]],
+        [chunk_ids[1]],
+        [chunk_ids[1]],
     ]
     assert len(client.generation_calls) == 4
 
 
 def test_service_refuses_a_sheet_that_asks_for_nothing(session, settings) -> None:
-    version, topic, section_ids = _seed(session, settings)
+    version, topic, chunk_ids = _seed(session, settings)
     client = MetricJudgeClient(draft=_draft(topic.id, [topic.subtopics[0].id]))
 
     with pytest.raises(InvalidQuestionSpecError):
         GenerationService(session, client=client).generate_batch(
-            curriculum_version_id=version.id, chunks=[_chunk(section_ids[0])]
+            curriculum_version_id=version.id, chunks=[_chunk(chunk_ids[0])]
         )
 
     assert QuestionRepository(session).count() == 0
@@ -247,7 +244,7 @@ def test_batch_plan_prices_a_sheet_without_generating(client) -> None:
         json={
             "chunks": [
                 {
-                    "section_id": 1,
+                    "chunk_id": "c1",
                     "easy": 1,
                     "hard": 2,
                     "question_types": ["coding", "debugging"],
@@ -274,7 +271,7 @@ def test_batch_plan_prices_a_sheet_without_generating(client) -> None:
 def test_batch_plan_reports_identical_repeats(client) -> None:
     response = client.post(
         "/api/questions/batch-plan",
-        json={"chunks": [{"section_id": 1, "medium": 3, "question_types": ["coding"]}]},
+        json={"chunks": [{"chunk_id": "c1", "medium": 3, "question_types": ["coding"]}]},
     )
 
     assert response.json()["totals"]["identical_repeats"] == 2
@@ -291,7 +288,7 @@ def test_batch_plan_refuses_a_sheet_with_no_chunks(client) -> None:
 def test_batch_plan_refuses_counts_without_a_format(client) -> None:
     response = client.post(
         "/api/questions/batch-plan",
-        json={"chunks": [{"section_id": 1, "easy": 1, "question_types": []}]},
+        json={"chunks": [{"chunk_id": "c1", "easy": 1, "question_types": []}]},
     )
 
     assert response.status_code == 422

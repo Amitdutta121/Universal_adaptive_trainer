@@ -516,6 +516,10 @@ class BookDetail(BaseModel):
     book: BookSummary
     section_count: int
     chapters: list[ChapterOut]
+    #: Chunks in the current version; ``current_version`` is ``None`` for a book imported
+    #: before chunks existed (re-import it to chunk it).
+    chunk_count: int = 0
+    current_version: int | None = None
     warnings: list[ExtractionWarning]
     #: Questions generated from this book's sections. Deleting the book would
     #: strand their grounding citation, so the count is shown before it happens.
@@ -709,7 +713,9 @@ class SubtopicEvidenceOut(BaseModel):
 
     id: int
     book_id: int
-    section_id: int
+    #: Set on evidence written since chunks; ``section_id`` on older evidence.
+    chunk_id: str | None
+    section_id: int | None
     candidate_label: str
     definition: str | None
     citation: str
@@ -720,6 +726,7 @@ class SubtopicEvidenceOut(BaseModel):
         return cls(
             id=row.id,
             book_id=row.book_id,
+            chunk_id=row.chunk_id,
             section_id=row.section_id,
             candidate_label=row.candidate_label,
             definition=row.definition,
@@ -1108,10 +1115,10 @@ class ReviewQueueResponse(BaseModel):
 class GenerateQuestionsRequest(BaseModel):
     """A generation request.
 
-    Exactly one source selection is required: either ``section_ids`` or
-    ``all_sections_of_book``. One question is generated per resolved section.
+    Exactly one source selection is required: either ``chunk_ids`` or
+    ``all_chunks_of_book``. One question is generated per resolved chunk.
 
-    No topic or subtopic: the generator reads the section and classifies its own
+    No topic or subtopic: the generator reads the chunk and classifies its own
     question against the approved taxonomy (ADR-031).
     """
 
@@ -1119,8 +1126,8 @@ class GenerateQuestionsRequest(BaseModel):
     question_type: QuestionType
     difficulty: Difficulty
     book_id: int | None = None
-    section_ids: list[int] | None = None
-    all_sections_of_book: bool = False
+    chunk_ids: list[str] | None = None
+    all_chunks_of_book: bool = False
     seed: str | None = None
 
 
@@ -1158,7 +1165,7 @@ class ChunkGenerationSpec(BaseModel):
     still two questions.
     """
 
-    section_id: int
+    chunk_id: str
     easy: int = Field(default=0, ge=0, le=20)
     medium: int = Field(default=0, ge=0, le=20)
     hard: int = Field(default=0, ge=0, le=20)
@@ -1166,7 +1173,7 @@ class ChunkGenerationSpec(BaseModel):
 
     def to_request(self) -> ChunkQuestionRequest:
         return ChunkQuestionRequest(
-            section_id=self.section_id,
+            chunk_id=self.chunk_id,
             counts={
                 Difficulty.EASY: self.easy,
                 Difficulty.MEDIUM: self.medium,
@@ -1187,14 +1194,14 @@ class GenerateBatchRequest(BaseModel):
 class PlannedQuestionOut(BaseModel):
     """One question a compiled run will ask for, in the order it will be asked."""
 
-    section_id: int
+    chunk_id: str
     difficulty: Difficulty
     question_type: QuestionType
 
     @classmethod
     def from_planned(cls, planned: PlannedQuestion) -> PlannedQuestionOut:
         return cls(
-            section_id=planned.section_id,
+            chunk_id=planned.chunk_id,
             difficulty=planned.difficulty,
             question_type=planned.question_type,
         )
@@ -1238,50 +1245,48 @@ class GenerateBatchResponse(BaseModel):
     planned: list[PlannedQuestionOut]
 
 
-class GenerationPlanSection(BaseModel):
-    """One candidate source section, and what generating from it would mean."""
+class GenerationPlanChunk(BaseModel):
+    """One candidate source chunk, and what generating from it would mean."""
 
-    section: SectionSummary
-    #: How many questions this section has already produced. Re-generating is
+    chunk: ChunkSummary
+    #: How many questions this chunk has already produced. Re-generating is
     #: allowed; the count is here so it is a decision rather than an accident.
     existing_question_count: int
     selected: bool
-    #: False for a section with no text: the generator would receive nothing, so
-    #: the UI disables it rather than letting the run fail one call in.
-    selectable: bool
 
 
 class GenerationPlanChapter(BaseModel):
-    """One chapter, and the candidate sections beneath it."""
+    """The chunks under one top-level heading, in reading order.
+
+    ``label`` is the first entry of the chunks' heading path; chunks under no heading
+    are grouped under the book's title.
+    """
 
     id: int
     label: str
     location_label: str | None
-    sections: list[GenerationPlanSection]
+    chunks: list[GenerationPlanChunk]
 
 
 class GenerationPlanTotals(BaseModel):
     """What the selected run costs, before any model call is made."""
 
-    sections_available: int
-    sections_selected: int
+    chunks_available: int
+    chunks_selected: int
     questions_to_create: int
     generation_calls: int
-    #: ``sections_selected`` times the number of advisory metrics, because the
+    #: ``chunks_selected`` times the number of advisory metrics, because the
     #: judge makes one call per metric per question (ADR-031).
     judge_calls: int
     source_chars: int
 
 
 class GenerationPlanResponse(BaseModel):
-    """The chunk plan: every candidate section, and the cost of the selection."""
+    """The chunk plan: every chunk of the book's current version, and the cost."""
 
     book: BookSummary
     chapters: list[GenerationPlanChapter]
     totals: GenerationPlanTotals
-    #: Selected sections that cannot be generated from, named so the professor
-    #: can deselect them rather than discovering the problem mid-run.
-    blockers: list[str]
 
 
 # ------------------------------------------------------------------------- feedback
@@ -2116,7 +2121,7 @@ class GeneratedRunQuestion(BaseModel):
     """One question a generation run produced, and how its aim landed.
 
     ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
-    what the generator classified the question as after reading the section
+    what the generator classified the question as after reading the chunk
     (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
     never used to filter, so a drift is visible in the review queue instead.
     """
@@ -2126,7 +2131,7 @@ class GeneratedRunQuestion(BaseModel):
     requested_difficulty: Difficulty
     claimed_topic_id: int | None
     claimed_subtopic_ids: list[int]
-    section_id: int
+    chunk_id: str
     status: QuestionStatus
     aim_matched: bool
 
@@ -2142,14 +2147,14 @@ class SkippedRunTarget(BaseModel):
 class FailedRunTarget(BaseModel):
     """A gap target whose generation call reached the provider and failed.
 
-    The section was retrieved and the request was well formed; the model call
+    The chunk was retrieved and the request was well formed; the model call
     itself did not return a usable question. What the run already produced is
     kept (ADR-032), so this is reported beside ``generated`` rather than raised.
     """
 
     subtopic_id: int
     difficulty: Difficulty
-    section_id: int
+    chunk_id: str
     error: str
 
 
@@ -2603,6 +2608,34 @@ class StudentProgressOut(BaseModel):
     subtopics: list[SubtopicWeaknessOut]
     recent_attempts: list[AttemptOut]
     sessions: list[TrainingSessionOut]
+
+
+class ChunkSummary(BaseModel):
+    """One chunk's identity and location, without its text."""
+
+    id: str
+    book_id: int
+    ordinal: int
+    page_start: int | None
+    page_end: int | None
+    heading_path: list[str]
+    label: str
+    location_label: str | None
+    char_count: int
+
+    @classmethod
+    def from_chunk(cls, chunk: Chunk) -> ChunkSummary:
+        return cls(
+            id=chunk.id,
+            book_id=chunk.book_id,
+            ordinal=chunk.ordinal,
+            page_start=chunk.page_start,
+            page_end=chunk.page_end,
+            heading_path=chunk.heading_path,
+            label=chunk.label,
+            location_label=chunk.location_label,
+            char_count=len(chunk.text),
+        )
 
 
 class ChunkOut(BaseModel):

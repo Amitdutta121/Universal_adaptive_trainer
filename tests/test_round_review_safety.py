@@ -34,7 +34,7 @@ def _review(metrics, rules=()):
             curriculum_version_id=1,
             question_type=QuestionType.MULTIPLE_CHOICE,
             difficulty=Difficulty.MEDIUM,
-            source_section_ids=[1],
+            source_chunk_ids=["c1"],
             target_subtopic_id=2,
         ),
     )
@@ -110,7 +110,7 @@ def _dup_review(matches, judged):
             curriculum_version_id=1,
             question_type=QuestionType.MULTIPLE_CHOICE,
             difficulty=Difficulty.MEDIUM,
-            source_section_ids=[1],
+            source_chunk_ids=["c1"],
             target_subtopic_id=2,
         ),
         duplicates=lambda question: matches,
@@ -187,7 +187,7 @@ def test_difficulty_off_by_two_bands_is_retried():
             curriculum_version_id=1,
             question_type=QuestionType.MULTIPLE_CHOICE,
             difficulty=Difficulty.EASY,
-            source_section_ids=[1],
+            source_chunk_ids=["c1"],
             target_subtopic_id=2,
         ),
     )

@@ -22,7 +22,7 @@ from app.auth.backend import current_active_user
 from app.config import Settings
 from app.persistence.models import (
     BookRow,
-    BookSectionRow,
+    ChunkRow,
     CourseRow,
     CurriculumVersionRow,
     QuestionRow,
@@ -33,6 +33,7 @@ from app.persistence.models import (
     TrainingSessionRow,
     UserRow,
 )
+from app.persistence.repositories import ChunkRepository
 from app.web.routes.api.coverage import get_generation_client
 from app.web.routes.api.retrieval import get_query_embedder
 
@@ -234,19 +235,18 @@ def test_cohort_figures_leave_out_another_courses_students(
 
 
 @pytest.fixture
-def alice_section(http: TestClient, session: Session, alice: AliceCourse) -> int:
-    from app.domain.enums import StructureConfidence, StructureSource
-
-    section = BookSectionRow(
-        book_id=alice.book,
-        title="While loops",
+def alice_chunk(http: TestClient, session: Session, alice: AliceCourse) -> str:
+    book = session.get(BookRow, alice.book)
+    assert book is not None
+    chunk = ChunkRow(
         text="A while loop repeats while its condition holds.",
-        structure_source=next(iter(StructureSource)),
-        structure_confidence=next(iter(StructureConfidence)),
+        page_start=1,
+        page_end=1,
+        heading_path=["While loops"],
     )
-    session.add(section)
+    ChunkRepository(session).add_version(book, [chunk])
     session.commit()
-    return section.id
+    return chunk.id
 
 
 @pytest.fixture
@@ -274,7 +274,7 @@ def alice_set(session: Session, alice: AliceCourse) -> int:
                 "curriculum_version_id": "{version}",
                 "question_type": "multiple_choice",
                 "difficulty": "easy",
-                "section_ids": ["{section}"],
+                "chunk_ids": ["{chunk}"],
             },
         ),
         (
@@ -284,15 +284,15 @@ def alice_set(session: Session, alice: AliceCourse) -> int:
                 "question_type": "multiple_choice",
                 "difficulty": "easy",
                 "book_id": "{book}",
-                "all_sections_of_book": True,
+                "all_chunks_of_book": True,
             },
         ),
         (
             "post",
             "/api/questions/generate-batch",
-            {"chunks": [{"section_id": "{section}", "easy": 1}]},
+            {"chunks": [{"chunk_id": "{chunk}", "easy": 1}]},
         ),
-        ("get", "/api/questions/generation-plan?book_id={book}&section_ids={section}", None),
+        ("get", "/api/questions/generation-plan?book_id={book}&chunk_ids={chunk}", None),
         ("get", "/api/retrieval/sections?subtopic_id={subtopic}", None),
         ("get", "/api/setup?curriculum_version_id={version}", None),
         ("get", "/api/custom-judges?curriculum_version_id={version}", None),
@@ -303,7 +303,7 @@ def test_another_courses_id_inside_a_body_or_query_is_not_found(
     http: TestClient,
     as_user: dict[str, UserRow],
     alice: AliceCourse,
-    alice_section: int,
+    alice_chunk: str,
     alice_set: int,
     bob_course: int,
     method: str,
@@ -311,7 +311,7 @@ def test_another_courses_id_inside_a_body_or_query_is_not_found(
     body: dict | None,
 ) -> None:
     """Bob works inside his own course but names Alice's rows in the request itself."""
-    ids = {**vars(alice), "section": alice_section, "set": alice_set}
+    ids = {**vars(alice), "chunk": alice_chunk, "set": alice_set}
     as_user["user"] = BOB
 
     def fill(value):

@@ -40,7 +40,7 @@ from app.jobs.runner import Progress, create_job, execute
 from app.llm import StructuredLLMClient
 from app.persistence.models import BackgroundJobRow, CurriculumVersionRow
 from app.persistence.repositories import CurriculumRepository, QuestionSetRepository
-from app.retrieval import SectionEmbeddingStore, SectionRetriever
+from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.dedup import flag_possible_duplicates
 from app.web.routes.api.deps import (
@@ -79,7 +79,7 @@ router = APIRouter(tags=["coverage"])
 #: the taxonomy benchmark a genuinely on-topic section scores ~0.6 and an
 #: unrelated one well under 0.2 (coverage Generate m1). Uncalibrated: revisit
 #: once real runs show where the honest hits fall.
-MIN_SECTION_SCORE = 0.25
+MIN_CHUNK_SCORE = 0.25
 
 
 def active_generation_topic_ids(session: Session, course: int | None) -> list[int]:
@@ -282,7 +282,7 @@ def run_generation_for_gaps(
         (target, curriculum.get_subtopic(target.subtopic_id).topic_id) for target in targets
     ]
 
-    retriever = SectionRetriever(session, SectionEmbeddingStore(session, embedder))
+    retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, embedder))
     service = GenerationService(session, client=client)
     run_id = run_id or new_run_id()
 
@@ -293,21 +293,21 @@ def run_generation_for_gaps(
 
     for target, requested_topic_id in resolved:
         hits = retriever.for_subtopic(target.subtopic_id, top_k=1)
-        if not hits or hits[0].score < MIN_SECTION_SCORE:
+        if not hits or hits[0].score < MIN_CHUNK_SCORE:
             skipped.append(
                 SkippedRunTarget(
                     subtopic_id=target.subtopic_id,
                     difficulty=target.difficulty,
-                    reason="no confident section",
+                    reason="no confident chunk",
                 )
             )
             if on_target is not None:
                 on_target()
             continue
 
-        section_id = hits[0].section_id
+        chunk_id = hits[0].chunk_id
         chunk = ChunkQuestionRequest(
-            section_id=section_id,
+            chunk_id=chunk_id,
             counts={target.difficulty: 1},
             question_types=(QuestionType.MULTIPLE_CHOICE,),
         )
@@ -331,7 +331,7 @@ def run_generation_for_gaps(
                 FailedRunTarget(
                     subtopic_id=target.subtopic_id,
                     difficulty=target.difficulty,
-                    section_id=section_id,
+                    chunk_id=chunk_id,
                     error=exc.message,
                 )
             )
@@ -347,7 +347,7 @@ def run_generation_for_gaps(
                 requested_difficulty=target.difficulty,
                 claimed_topic_id=row.topic_id,
                 claimed_subtopic_ids=list(row.subtopic_ids),
-                section_id=section_id,
+                chunk_id=chunk_id,
                 status=row.status,
                 aim_matched=row.topic_id == requested_topic_id,
             )

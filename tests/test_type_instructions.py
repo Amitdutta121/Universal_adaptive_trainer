@@ -15,7 +15,6 @@ from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, QuestionType
 from app.generation.prompts import base_type_instruction, build_prompt, render_taxonomy
 from app.generation.spec import build_question_spec, require_approved_version
-from app.ingestion import BookImportService
 from app.memory import render_with_guidelines
 from app.persistence.repositories import CurriculumRepository
 from app.question_types import implemented_types
@@ -26,19 +25,18 @@ TAXONOMY = (
 )
 
 
-def _seed(session: Session, settings) -> None:
-    BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+def _seed(session: Session, settings) -> str:
+    book = docs.chunked_book(session, docs.minimal())
     TaxonomyImportService(session, settings).import_upload(filename="tax.json", data=TAXONOMY)
     session.commit()
+    return book.chunks[0].id
 
 
 def test_the_learned_instruction_replaces_the_shipped_one_in_the_prompt(
     session: Session, settings
 ) -> None:
     """It occupies the type slot; it is not appended after the prompt."""
-    _seed(session, settings)
+    chunk_id = _seed(session, settings)
     approved = CurriculumRepository(session).get_approved()
     assert approved is not None
     version = require_approved_version(session, approved.id)
@@ -47,7 +45,7 @@ def test_the_learned_instruction_replaces_the_shipped_one_in_the_prompt(
         curriculum_version_id=version.id,
         question_type=QuestionType.MULTIPLE_CHOICE,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[1],
+        source_chunk_ids=[chunk_id],
     )
 
     _system, prompt = build_prompt(

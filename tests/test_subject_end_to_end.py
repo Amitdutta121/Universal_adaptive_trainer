@@ -115,15 +115,15 @@ def _course(client: TestClient, name: str, subject: str, types: list[str]) -> in
 
 def _material(
     client: TestClient, course_id: int, book: dict[str, Any], taxonomy: dict[str, Any]
-) -> tuple[int, int, int, list[int]]:
-    """Import the book and the taxonomy into the course: (version, section, topic, subtopics)."""
+) -> tuple[int, str, int, list[int]]:
+    """Import the book and the taxonomy into the course: (version, chunk, topic, subtopics)."""
     uploaded = upload_book(
         client,
         headers=_in(course_id),
-        files={"file": ("book.json", docs.to_bytes(book), "application/json")},
+        files={"file": ("book.pdf", docs.to_pdf(book), "application/pdf")},
     )
-    sections = client.get(f"/api/books/{uploaded['id']}/sections", headers=_in(course_id))
-    assert sections.status_code == 200, sections.text
+    chunks = client.get("/api/chunks", params={"book_id": uploaded["id"]}, headers=_in(course_id))
+    assert chunks.status_code == 200, chunks.text
 
     imported = client.post(
         "/api/curriculum/versions",
@@ -138,7 +138,7 @@ def _material(
     topic = version["topics"][0]
     return (
         version["version"]["id"],
-        sections.json()["sections"][0]["id"],
+        chunks.json()["chunks"][0]["id"],
         topic["id"],
         [subtopic["id"] for subtopic in topic["subtopics"]],
     )
@@ -148,7 +148,7 @@ def _generate(
     client: TestClient,
     fake: SwitchableRecorder,
     course_id: int,
-    section_id: int,
+    chunk_id: str,
     question_type: str,
     draft: BaseModel,
 ) -> dict[str, Any]:
@@ -157,7 +157,7 @@ def _generate(
     generated = client.post(
         "/api/questions/generate",
         headers=_in(course_id),
-        json={"question_type": question_type, "difficulty": "easy", "section_ids": [section_id]},
+        json={"question_type": question_type, "difficulty": "easy", "chunk_ids": [chunk_id]},
     )
     assert generated.status_code == 201, generated.text
     (question_id,) = generated.json()["question_ids"]
@@ -272,7 +272,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
         "physics",
         ["multiple_choice", "numeric_response", "equation_response"],
     )
-    version_id, section_id, topic_id, (free_fall, energy) = _material(
+    version_id, chunk_id, topic_id, (free_fall, energy) = _material(
         client, course_id, _physics_book(), PHYSICS_TAXONOMY
     )
 
@@ -305,7 +305,7 @@ def test_a_physics_course_runs_end_to_end(client: TestClient, fake_llm: Switchab
         ),
     }
     details = {
-        question_type: _generate(client, fake_llm, course_id, section_id, question_type, draft)
+        question_type: _generate(client, fake_llm, course_id, chunk_id, question_type, draft)
         for question_type, draft in drafts.items()
     }
 
@@ -422,7 +422,7 @@ def test_a_python_course_runs_the_same_way(
     client: TestClient, fake_llm: SwitchableRecorder
 ) -> None:
     course_id = _course(client, "CS 1", "intro_python", ["multiple_choice", "coding"])
-    version_id, section_id, topic_id, (values, variables) = _material(
+    version_id, chunk_id, topic_id, (values, variables) = _material(
         client, course_id, docs.think_python(), PYTHON_TAXONOMY
     )
     drafts = {
@@ -444,7 +444,7 @@ def test_a_python_course_runs_the_same_way(
         ),
     }
     details = {
-        question_type: _generate(client, fake_llm, course_id, section_id, question_type, draft)
+        question_type: _generate(client, fake_llm, course_id, chunk_id, question_type, draft)
         for question_type, draft in drafts.items()
     }
 

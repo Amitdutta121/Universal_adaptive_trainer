@@ -22,7 +22,7 @@ from app.domain.enums import CurriculumStatus, Difficulty
 from app.errors import DomainRuleError, FeatureNotAvailableError
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import (
-    BookSectionRow,
+    ChunkRow,
     CurriculumVersionRow,
     SubtopicEvidenceRow,
     SubtopicRow,
@@ -184,12 +184,12 @@ def _validated(
 
 
 def _lesson_excerpts(session: Session, subtopic_ids: list[int]) -> dict[int, str]:
-    """The first evidence section's text for each subtopic, when one is linked."""
+    """The first evidence chunk's text for each subtopic, when one is linked."""
     if not subtopic_ids:
         return {}
     rows = session.execute(
-        select(SubtopicEvidenceRow.subtopic_id, BookSectionRow.text)
-        .join(BookSectionRow, BookSectionRow.id == SubtopicEvidenceRow.section_id)
+        select(SubtopicEvidenceRow.subtopic_id, ChunkRow.text)
+        .join(ChunkRow, ChunkRow.id == SubtopicEvidenceRow.chunk_id)
         .where(SubtopicEvidenceRow.subtopic_id.in_(subtopic_ids))
         .order_by(SubtopicEvidenceRow.id)
     ).all()

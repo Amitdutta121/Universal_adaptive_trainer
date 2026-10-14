@@ -47,6 +47,16 @@ def _import_book(client: TestClient) -> dict:
     )
 
 
+def _import_chunked_book(client: TestClient) -> tuple[dict, list[dict]]:
+    """Think Python uploaded as a PDF, and its chunks: one per section, in reading order."""
+    book = upload_book(
+        client,
+        files={"file": ("think_python.pdf", docs.to_pdf(docs.think_python()), "application/pdf")},
+    )
+    chunks = client.get("/api/chunks", params={"book_id": book["id"]}).json()["chunks"]
+    return book, chunks
+
+
 def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
     """A tiny, real PDF, for exercising the PDF import and source-file routes."""
     doc = pymupdf.open()
@@ -291,7 +301,7 @@ def test_single_generation_uses_the_active_curriculum_version(
         def __init__(self, request_session) -> None:
             self._session = request_session
 
-        def generate_for_sections(self, **kwargs: object) -> list[object]:
+        def generate_for_chunks(self, **kwargs: object) -> list[object]:
             seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
             return []
 
@@ -302,7 +312,7 @@ def test_single_generation_uses_the_active_curriculum_version(
         json={
             "question_type": "debugging",
             "difficulty": "medium",
-            "section_ids": [1],
+            "chunk_ids": ["a" * 32],
         },
     )
 
@@ -337,7 +347,7 @@ def test_batch_generation_uses_the_active_curriculum_version(
         json={
             "chunks": [
                 {
-                    "section_id": 1,
+                    "chunk_id": "a" * 32,
                     "easy": 1,
                     "question_types": ["debugging"],
                 }
@@ -534,26 +544,26 @@ def test_question_list_filters_by_any_of_several_topics_across_the_whole_bank(
     assert payload["total"] == 6
 
 
-def test_question_list_filters_by_section_across_the_whole_bank(
+def test_question_list_filters_by_chunk_across_the_whole_bank(
     client: TestClient, session: Session
 ) -> None:
-    """``section_id`` narrows to questions grounded in that one section.
+    """``chunk_id`` narrows to questions grounded in that one chunk.
 
     Grounding is read from the frozen spec (ADR-044), not a foreign key, so this
-    exercises the same scan :meth:`count_grounded_in_sections` already relies on.
+    exercises the same scan :meth:`count_grounded_in_chunks` already relies on.
     """
     from app.persistence.models import QuestionRow
 
     wanted = QuestionRow(
-        prompt="From section 7.",
-        spec={"source_section_ids": [7]},
+        prompt="From chunk 7.",
+        spec={"source_chunk_ids": ["7" * 32]},
     )
     session.add(wanted)
-    session.add(QuestionRow(prompt="From section 9.", spec={"source_section_ids": [9]}))
+    session.add(QuestionRow(prompt="From chunk 9.", spec={"source_chunk_ids": ["9" * 32]}))
     session.add(QuestionRow(prompt="No spec at all."))
     session.commit()
 
-    response = client.get("/api/questions", params={"section_id": 7})
+    response = client.get("/api/questions", params={"chunk_id": "7" * 32})
 
     assert response.status_code == 200
     payload = response.json()
@@ -562,8 +572,7 @@ def test_question_list_filters_by_section_across_the_whole_bank(
 
 
 def test_generation_without_an_approved_curriculum_is_refused(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
+    book, chunks = _import_chunked_book(client)
 
     response = client.post(
         "/api/questions/generate",
@@ -572,8 +581,8 @@ def test_generation_without_an_approved_curriculum_is_refused(client: TestClient
             "subtopic_id": 1,
             "question_type": "debugging",
             "difficulty": "medium",
-            "book_id": book_id,
-            "section_ids": [section_id],
+            "book_id": book["id"],
+            "chunk_ids": [chunks[0]["id"]],
         },
     )
 
@@ -595,7 +604,7 @@ def test_generation_requires_a_source_selection(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
-    assert "section" in response.json()["error"]["message"].lower()
+    assert "chunk" in response.json()["error"]["message"].lower()
 
 
 def test_generation_rejects_an_unknown_question_type(client: TestClient) -> None:
@@ -606,7 +615,7 @@ def test_generation_rejects_an_unknown_question_type(client: TestClient) -> None
             "subtopic_id": 1,
             "question_type": "essay",
             "difficulty": "medium",
-            "section_ids": [1],
+            "chunk_ids": ["a" * 32],
         },
     )
 
@@ -622,39 +631,37 @@ def test_unknown_question_is_a_json_404(client: TestClient) -> None:
 
 
 def test_generation_plan_prices_a_selection_without_running_it(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    sections = client.get(f"/api/books/{book_id}/sections").json()["sections"]
-    chosen = [sections[0]["id"], sections[1]["id"]]
+    book, chunks = _import_chunked_book(client)
+    chosen = [chunks[0]["id"], chunks[1]["id"]]
 
     response = client.get(
         "/api/questions/generation-plan",
-        params={"book_id": book_id, "section_ids": chosen},
+        params={"book_id": book["id"], "chunk_ids": chosen},
     )
 
     assert response.status_code == 200
     plan = response.json()
     totals = plan["totals"]
-    assert totals["sections_available"] == len(sections)
-    assert totals["sections_selected"] == 2
+    assert totals["chunks_available"] == len(chunks)
+    assert totals["chunks_selected"] == 2
     assert totals["questions_to_create"] == 2
     assert totals["generation_calls"] == 2
     # One judge call per advisory metric per question (ADR-031).
     assert totals["judge_calls"] == 2 * len(JudgeMetricId)
-    assert totals["source_chars"] == sections[0]["char_count"] + sections[1]["char_count"]
-    assert plan["blockers"] == []
+    assert totals["source_chars"] == len(chunks[0]["text"]) + len(chunks[1]["text"])
     # Pricing a run must not create one.
     assert client.get("/api/questions").json()["total"] == 0
 
 
-def test_generation_plan_groups_sections_by_chapter_and_marks_the_selection(
+def test_generation_plan_groups_chunks_by_chapter_and_marks_the_selection(
     client: TestClient,
 ) -> None:
-    book_id = _import_book(client)["id"]
-    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
+    book, chunks = _import_chunked_book(client)
+    chunk_id = chunks[0]["id"]
 
     plan = client.get(
         "/api/questions/generation-plan",
-        params={"book_id": book_id, "section_ids": [section_id]},
+        params={"book_id": book["id"], "chunk_ids": [chunk_id]},
     ).json()
 
     assert [chapter["label"] for chapter in plan["chapters"]] == [
@@ -662,25 +669,23 @@ def test_generation_plan_groups_sections_by_chapter_and_marks_the_selection(
         "2 Variables, Expressions and Statements",
     ]
     entries = {
-        item["section"]["id"]: item for chapter in plan["chapters"] for item in chapter["sections"]
+        item["chunk"]["id"]: item for chapter in plan["chapters"] for item in chapter["chunks"]
     }
-    assert entries[section_id]["selected"] is True
-    assert entries[section_id]["selectable"] is True
-    assert entries[section_id]["existing_question_count"] == 0
+    assert entries[chunk_id]["selected"] is True
+    assert entries[chunk_id]["existing_question_count"] == 0
     assert sum(1 for item in entries.values() if item["selected"]) == 1
 
 
-def test_generation_plan_for_a_whole_book_selects_every_section(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    section_count = len(client.get(f"/api/books/{book_id}/sections").json()["sections"])
+def test_generation_plan_for_a_whole_book_selects_every_chunk(client: TestClient) -> None:
+    book, chunks = _import_chunked_book(client)
 
     plan = client.get(
         "/api/questions/generation-plan",
-        params={"book_id": book_id, "all_sections": True},
+        params={"book_id": book["id"], "all_chunks": True},
     ).json()
 
-    assert plan["totals"]["sections_selected"] == section_count
-    assert plan["totals"]["judge_calls"] == section_count * len(JudgeMetricId)
+    assert plan["totals"]["chunks_selected"] == len(chunks)
+    assert plan["totals"]["judge_calls"] == len(chunks) * len(JudgeMetricId)
 
 
 def test_generation_plan_for_an_unknown_book_is_a_json_404(client: TestClient) -> None:

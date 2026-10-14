@@ -15,7 +15,7 @@ from app.errors import DomainRuleError, NotFoundError
 from app.persistence.database import get_session
 from app.persistence.models import (
     BookRow,
-    BookSectionRow,
+    ChunkRow,
     CurriculumVersionRow,
     QuestionRow,
     SubtopicRow,
@@ -154,21 +154,21 @@ def subtopics_in_course(session: Session, subtopic_ids: Iterable[int], scope: in
         raise NotFoundError(f"Subtopic {', '.join(map(str, missing))} does not exist.")
 
 
-def sections_in_course(session: Session, section_ids: Iterable[int], scope: int | None) -> None:
-    """404 unless every book section id belongs to a book of the request's course."""
-    ids = set(section_ids)
+def chunks_in_course(session: Session, chunk_ids: Iterable[str], scope: int | None) -> None:
+    """404 unless every chunk id belongs to a book of the request's course."""
+    ids = set(chunk_ids)
     if scope is None or not ids:
         return
     found = set(
         session.scalars(
-            select(BookSectionRow.id)
-            .join(BookRow, BookRow.id == BookSectionRow.book_id)
-            .where(BookSectionRow.id.in_(ids), BookRow.course_id == scope)
+            select(ChunkRow.id)
+            .join(BookRow, BookRow.id == ChunkRow.book_id)
+            .where(ChunkRow.id.in_(ids), BookRow.course_id == scope)
         )
     )
     if missing := sorted(ids - found):
-        listed = ", ".join(map(str, missing))
-        raise NotFoundError(f"Section {listed} does not exist.")
+        listed = ", ".join(missing)
+        raise NotFoundError(f"Chunk {listed} does not exist.")
 
 
 def book_in_course(session: Session, book_id: int, scope: int | None) -> None:

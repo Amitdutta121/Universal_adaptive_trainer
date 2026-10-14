@@ -34,7 +34,7 @@ from app.web.routes.api import questions as api_questions
 from tests.conftest import TEST_PROFESSOR_ID
 from tests.test_api import _import_taxonomy
 
-BATCH = {"chunks": [{"section_id": 1, "easy": 2, "question_types": ["debugging"]}]}
+BATCH = {"chunks": [{"chunk_id": "a" * 32, "easy": 2, "question_types": ["debugging"]}]}
 
 
 def _fake_service(*, fail_after: int | None = None) -> type:
@@ -438,7 +438,9 @@ def test_a_coverage_retry_targets_what_the_run_did_not_finish() -> None:
         done=3,
         request={"targets": targets},
         result={
-            "failed": [{"subtopic_id": 2, "difficulty": "medium", "section_id": 9, "error": "x"}]
+            "failed": [
+                {"subtopic_id": 2, "difficulty": "medium", "chunk_id": "9" * 32, "error": "x"}
+            ]
         },
     )
 

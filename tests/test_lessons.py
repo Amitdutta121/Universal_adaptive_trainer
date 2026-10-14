@@ -226,9 +226,7 @@ def test_each_judge_relearns_once_however_many_reviews_named_it(
 
     assert judge_calls == [2]
     assert run.applied == 2
-    assert all(
-        JudgeMetricId.DIFFICULTY in o.judges_refreshed for o in _all_outcomes(session)
-    )
+    assert all(JudgeMetricId.DIFFICULTY in o.judges_refreshed for o in _all_outcomes(session))
 
 
 def _all_outcomes(session: Session) -> list[ReviewOutcomeRow]:
@@ -375,7 +373,7 @@ def test_the_simulation_logs_first_attempt_passes_per_round(
         session,
         version_id=env.version.id,
         style=test_rounds.STYLE_A.id,
-        sections={env.while_loops.id: env.sections[0].id},
+        chunks={env.while_loops.id: env.chunks[0].id},
         rounds=2,
         client=client,
     )

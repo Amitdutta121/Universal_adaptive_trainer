@@ -17,7 +17,6 @@ from app.evaluation.schema import PedagogicalEvalStatus, PedagogicalEvaluation
 from app.evaluation.service import JUDGE_MAX_ATTEMPTS
 from app.generation.schemas import OutputPredictionDraft
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 
 
@@ -72,10 +71,8 @@ class JudgeFailingClient(RecordingClient):
         )
 
 
-def _seed(session: Session, settings: Any) -> tuple[Any, Any, Any, int]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+def _seed(session: Session, settings: Any) -> tuple[Any, Any, Any, str]:
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json",
         data=(
@@ -88,24 +85,24 @@ def _seed(session: Session, settings: Any) -> tuple[Any, Any, Any, int]:
         version,
         version.topics[0],
         version.topics[0].subtopics[0],
-        book.chapters[0].sections[0].id,
+        book.chunks[0].id,
     )
 
 
-def _generate(session: Session, version: Any, section_id: int, client: RecordingClient):
-    return GenerationService(session, client=client).generate_for_sections(
+def _generate(session: Session, version: Any, chunk_id: str, client: RecordingClient):
+    return GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )[0]
 
 
 def test_pass_runs_every_judge_and_stores_completed(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
     client = RecordingClient(topic.id, [subtopic.id])
 
-    row = _generate(session, version, section_id, client)
+    row = _generate(session, version, chunk_id, client)
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.status is QuestionStatus.VALIDATION_PASSED
@@ -116,10 +113,10 @@ def test_pass_runs_every_judge_and_stores_completed(session: Session, settings: 
 
 
 def test_fail_skips_the_judges_and_stores_skipped(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
     client = FailingDeterministicClient(topic.id, [subtopic.id])
 
-    row = _generate(session, version, section_id, client)
+    row = _generate(session, version, chunk_id, client)
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.status is QuestionStatus.VALIDATION_FAILED
@@ -131,10 +128,10 @@ def test_fail_skips_the_judges_and_stores_skipped(session: Session, settings: An
 
 def test_judge_failure_preserves_the_question(session: Session, settings: Any) -> None:
     """The question still passes validation and still reaches review."""
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
     client = JudgeFailingClient(topic.id, [subtopic.id])
 
-    row = _generate(session, version, section_id, client)
+    row = _generate(session, version, chunk_id, client)
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.status is QuestionStatus.VALIDATION_PASSED
@@ -145,10 +142,10 @@ def test_judge_failure_preserves_the_question(session: Session, settings: Any) -
 
 
 def test_generated_question_stores_its_claimed_subtopics(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
     client = RecordingClient(topic.id, [subtopic.id])
 
-    row = _generate(session, version, section_id, client)
+    row = _generate(session, version, chunk_id, client)
 
     loaded = QuestionRepository(session).get(row.id)
     assert loaded.topic_id == topic.id

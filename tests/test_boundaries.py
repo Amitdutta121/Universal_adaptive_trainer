@@ -210,7 +210,7 @@ def test_question_generator_is_base_and_requires_llm_configuration(
         curriculum_version_id=1,
         subtopic_id=2,
         question_type=QuestionType.DEBUGGING,
-        source_section_ids=[3],
+        source_chunk_ids=["a" * 32],
         difficulty=Difficulty.EASY,
         count=3,
     )
@@ -228,14 +228,14 @@ def test_generation_request_requires_curriculum_grounding() -> None:
     with pytest.raises(ValueError):
         GenerationRequest(  # type: ignore[call-arg]
             question_type=QuestionType.DEBUGGING,
-            source_section_ids=[3],
+            source_chunk_ids=["a" * 32],
             difficulty=Difficulty.EASY,
         )
     with pytest.raises(ValueError):
         GenerationRequest(  # type: ignore[call-arg]
             curriculum_version_id=1,
             question_type=QuestionType.DEBUGGING,
-            source_section_ids=[],
+            source_chunk_ids=[],
             difficulty=Difficulty.EASY,
         )
 

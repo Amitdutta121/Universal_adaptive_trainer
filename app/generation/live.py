@@ -44,8 +44,8 @@ from app.evaluation import new_run_id
 from app.evaluation.custom import CustomRule
 from app.generation.rounds import (
     _cell_styles,
+    _chunk_for,
     _hard_lesson_supported,
-    _section_for,
     accepted_examples,
     default_embedder,
     style_rejects,
@@ -60,7 +60,7 @@ from app.persistence.repositories import (
     QuestionSetRepository,
     QuestionSetupRepository,
 )
-from app.retrieval import SectionEmbeddingStore, SectionRetriever
+from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
 from app.styles import get_library
 from app.subjects import profile_for_version
@@ -330,12 +330,12 @@ def _generate(
     if style is None:
         return "The question style chosen for you is no longer available."
     retriever = (
-        SectionRetriever(session, SectionEmbeddingStore(session, embedder))
+        ChunkRetriever(session, ChunkEmbeddingStore(session, embedder))
         if embedder is not None
         else None
     )
-    section_id = _section_for(retriever, version, job.subtopic_id)
-    if section_id is None:
+    chunk_id = _chunk_for(retriever, version, job.subtopic_id)
+    if chunk_id is None:
         return "No part of the book teaches this subtopic yet."
 
     difficulty = Difficulty(job.difficulty)
@@ -345,14 +345,14 @@ def _generate(
             client,
             version_id=version.id,
             question_type=style.question_type.value,
-            section_id=section_id,
+            chunk_id=chunk_id,
         )
         if supported is False and Difficulty.MEDIUM in style.difficulty_range:
             logger.info("live job %s: hard unsupported (%s); generating medium", job.id, reason)
             difficulty = Difficulty.MEDIUM
             job.difficulty = difficulty
         elif supported is False:
-            return "The book section for this subtopic cannot support a harder question."
+            return "The book passage for this subtopic cannot support a harder question."
 
     rules = [
         CustomRule.from_row(rule)
@@ -363,7 +363,7 @@ def _generate(
         curriculum_version_id=version.id,
         question_type=style.question_type,
         difficulty=difficulty,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
         target_subtopic_id=job.subtopic_id,
         style_id=style.id,
     )
@@ -377,7 +377,7 @@ def _generate(
             version.id,
             (job.subtopic_id, difficulty),
             style.question_type,
-            section_id=section_id,
+            chunk_id=chunk_id,
             embedder=embedder,
         ),
         run_id=new_run_id(),

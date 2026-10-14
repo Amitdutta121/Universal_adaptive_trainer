@@ -43,7 +43,7 @@ from app.ingestion.storage import resolve_stored_path, store_upload
 from app.jobs.queue import JobQueue, JobQueueDep
 from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow
-from app.persistence.repositories import BookRepository, BookStructureRepository
+from app.persistence.repositories import BookRepository, BookStructureRepository, ChunkRepository
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookDeletion,
@@ -227,6 +227,8 @@ def get_book(session: DbSession, course: CourseScope, book_id: int) -> BookDetai
         book=BookSummary.from_row(book),
         section_count=BookStructureRepository(session).section_count(book_id),
         chapters=[ChapterOut.from_chapter(chapter) for chapter in chapters],
+        chunk_count=ChunkRepository(session).count(book_id),
+        current_version=book.current_version,
         warnings=list(book.warnings or []),
         grounded_question_count=BookLibraryService(session).grounded_question_count(book_id),
     )

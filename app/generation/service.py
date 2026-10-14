@@ -1,4 +1,4 @@
-"""Section-first orchestration for question generation and persistence.
+"""Chunk-first orchestration for question generation and persistence.
 
 One generator, not two. Personalization is the per-type instruction the
 generator already reads (ADR-033), so there is no longer a "personalized"
@@ -34,11 +34,11 @@ from app.generation.spec import QuestionSpec, build_question_spec, require_appro
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
 from app.persistence.models import CurriculumVersionRow, QuestionRow, QuestionSimilarityRow
-from app.persistence.repositories import QuestionRepository, _source_section_ids
+from app.persistence.repositories import QuestionRepository, source_chunk_ids
 
 
 class GenerationService:
-    """Validate a section set, generate one question per section, and store it."""
+    """Validate a chunk set, generate one question per chunk, and store it."""
 
     def __init__(
         self,
@@ -68,28 +68,28 @@ class GenerationService:
         )
         self._questions = QuestionRepository(session)
 
-    def generate_for_sections(
+    def generate_for_chunks(
         self,
         *,
         curriculum_version_id: int,
         question_type: QuestionType,
         difficulty: Difficulty,
-        source_section_ids: list[int] | None = None,
+        source_chunk_ids: list[str] | None = None,
         book_id: int | None = None,
         seed: str | None = None,
     ) -> list[QuestionRow]:
-        """Generate and persist one question for each explicit or book section.
+        """Generate and persist one question for each explicit chunk, or each of a book's.
 
         All specs are validated before the first model call, so a bad id later in
         the selection costs nothing rather than being discovered mid-run. The
         topic and subtopics each question carries come back from the generator,
         not from this call.
 
-        Each section commits on its own. A partly finished batch is therefore a
-        real outcome: if the provider fails on the fourth of six sections, three
+        Each chunk commits on its own. A partly finished batch is therefore a
+        real outcome: if the provider fails on the fourth of six chunks, three
         questions are kept and the caller sees the error (ADR-032).
         """
-        section_ids = self._resolve_section_ids(source_section_ids, book_id)
+        chunk_ids = self._resolve_chunk_ids(source_chunk_ids, book_id)
         version = require_approved_version(self._session, curriculum_version_id)
         specs = [
             build_question_spec(
@@ -97,10 +97,10 @@ class GenerationService:
                 curriculum_version_id=curriculum_version_id,
                 question_type=question_type,
                 difficulty=difficulty,
-                source_section_ids=[section_id],
+                source_chunk_ids=[chunk_id],
                 seed=seed,
             )
-            for section_id in section_ids
+            for chunk_id in chunk_ids
         ]
         return self._generate_specs(specs, version=version)
 
@@ -116,7 +116,7 @@ class GenerationService:
     ) -> list[QuestionRow]:
         """Generate the questions a per-chunk spec sheet asks for (ADR-044).
 
-        Unlike :meth:`generate_for_sections`, one chunk may produce several
+        Unlike :meth:`generate_for_chunks`, one chunk may produce several
         questions, at several difficulties, in several formats. The compiler
         decides which format each question gets; this method only turns the
         compiled plan into specs and runs it.
@@ -144,7 +144,7 @@ class GenerationService:
                 curriculum_version_id=curriculum_version_id,
                 question_type=question.question_type,
                 difficulty=question.difficulty,
-                source_section_ids=[question.section_id],
+                source_chunk_ids=[question.chunk_id],
                 seed=seed,
             )
             for question in planned
@@ -186,10 +186,9 @@ class GenerationService:
     def _spec_from_row(self, row: QuestionRow) -> QuestionSpec:
         """Rebuild the generation spec for an existing question.
 
-        Prefers the frozen ``spec_json``; falls back to the section ids recorded
-        in ``content["sources"]`` for rows written before specs were stored. The
-        rebuilt spec is re-validated through :func:`build_question_spec` so a
-        since-deleted section or a curriculum that is no longer approved is
+        Prefers the frozen ``spec_json``; falls back to the chunk ids recorded
+        in ``content["sources"]``. The rebuilt spec is re-validated through
+        :func:`build_question_spec` so a since-deleted chunk or a curriculum that is no longer approved is
         reported before any model call.
         """
         if row.question_type is None:
@@ -202,11 +201,11 @@ class GenerationService:
                 "This question is not grounded in a curriculum version.",
                 detail="Generate a fresh question instead of regenerating this one.",
             )
-        section_ids = _source_section_ids(row)
-        if len(section_ids) != 1:
+        chunk_ids = source_chunk_ids(row)
+        if len(chunk_ids) != 1:
             raise InvalidQuestionSpecError(
-                "Cannot recover a single source section for this question.",
-                detail=f"Recovered section ids: {section_ids or 'none'}.",
+                "Cannot recover a single source chunk for this question.",
+                detail=f"Recovered chunk ids: {chunk_ids or 'none'}.",
             )
         seed = (row.spec or {}).get("seed")
         return build_question_spec(
@@ -214,7 +213,7 @@ class GenerationService:
             curriculum_version_id=row.curriculum_version_id,
             question_type=row.question_type,
             difficulty=row.difficulty,
-            source_section_ids=section_ids,
+            source_chunk_ids=chunk_ids,
             seed=seed if isinstance(seed, str) else None,
         )
 
@@ -235,7 +234,7 @@ class GenerationService:
         grouped; otherwise a fresh one is minted here.
 
         ``instructor_feedback`` is set only by :meth:`regenerate_from_question`
-        and is forwarded verbatim to the generator; the section-first callers
+        and is forwarded verbatim to the generator; the chunk-first callers
         leave it ``None``.
         """
         run_id = run_id or new_run_id()
@@ -264,9 +263,9 @@ class GenerationService:
                 run_id=run_id,
                 trigger=EvaluationTrigger.GENERATION,
             )
-            # Committed per section, not once at the end: a transport error on a
-            # later section must not discard the questions already paid for
-            # (ADR-032). The caller's rollback then only loses the section in
+            # Committed per chunk, not once at the end: a transport error on a
+            # later chunk must not discard the questions already paid for
+            # (ADR-032). The caller's rollback then only loses the chunk in
             # flight.
             self._session.commit()
             rows.append(row)
@@ -314,7 +313,7 @@ class GenerationService:
         if not spec.is_round_spec:
             raise InvalidQuestionSpecError(
                 "Round generation needs a target subtopic.",
-                detail="Use generate_for_sections for section-only specs.",
+                detail="Use generate_for_chunks for chunk-only specs.",
             )
         review = RoundReview(
             self._judge,
@@ -404,16 +403,16 @@ class GenerationService:
             follow_up=_harden_follow_up(seed),
         )
 
-    def _resolve_section_ids(
-        self, source_section_ids: list[int] | None, book_id: int | None
-    ) -> list[int]:
-        if source_section_ids:
-            return source_section_ids
+    def _resolve_chunk_ids(
+        self, source_chunk_ids: list[str] | None, book_id: int | None
+    ) -> list[str]:
+        if source_chunk_ids:
+            return source_chunk_ids
         if book_id is not None:
-            return [section.id for section in self._retrieval.sections_in_book(book_id)]
+            return [chunk.id for chunk in self._retrieval.chunks_in_book(book_id)]
         raise InvalidQuestionSpecError(
-            "Select at least one source section or a book.",
-            detail="Question generation needs one or more source sections.",
+            "Select at least one source chunk or a book.",
+            detail="Question generation needs one or more source chunks.",
         )
 
     @staticmethod

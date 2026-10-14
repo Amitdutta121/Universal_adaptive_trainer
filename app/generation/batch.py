@@ -3,7 +3,7 @@
 Pure: no session, no IO, no model call. The professor's spec sheet says *how many*
 questions a chunk should produce at each difficulty and *in which formats*. This
 module multiplies the two out into the ordered list of
-(section, difficulty, format) triples the generator is then asked for, one model
+(chunk, difficulty, format) triples the generator is then asked for, one model
 call each.
 
 It lives apart from :mod:`app.generation.service` for two reasons: the rule that
@@ -36,7 +36,7 @@ class ChunkQuestionRequest:
     two multiple choice, two Parsons, two coding.
     """
 
-    section_id: int
+    chunk_id: str
     counts: Mapping[Difficulty, int] = field(default_factory=dict)
     question_types: Sequence[QuestionType] = ()
 
@@ -55,7 +55,7 @@ class ChunkQuestionRequest:
 class PlannedQuestion:
     """One question a compiled run will ask the generator for."""
 
-    section_id: int
+    chunk_id: str
     difficulty: Difficulty
     question_type: QuestionType
 
@@ -71,7 +71,7 @@ def _reject_negative_counts(chunk: ChunkQuestionRequest) -> None:
         if count < 0:
             raise InvalidQuestionSpecError(
                 "A question count cannot be negative.",
-                detail=f"Section {chunk.section_id} asks for {count} {difficulty.value} questions.",
+                detail=f"Chunk {chunk.chunk_id} asks for {count} {difficulty.value} questions.",
             )
 
 
@@ -108,7 +108,7 @@ def compile_chunk_requests(chunks: Sequence[ChunkQuestionRequest]) -> list[Plann
         if not chunk.question_types:
             raise InvalidQuestionSpecError(
                 "Every chunk that asks for questions must name at least one format.",
-                detail=f"Section {chunk.section_id} has a question count but no question type.",
+                detail=f"Chunk {chunk.chunk_id} has a question count but no question type.",
             )
 
         for difficulty in DIFFICULTY_ORDER:
@@ -116,7 +116,7 @@ def compile_chunk_requests(chunks: Sequence[ChunkQuestionRequest]) -> list[Plann
                 for question_type in chunk.question_types:
                     planned.append(
                         PlannedQuestion(
-                            section_id=chunk.section_id,
+                            chunk_id=chunk.chunk_id,
                             difficulty=difficulty,
                             question_type=question_type,
                         )
@@ -131,7 +131,7 @@ def compile_chunk_requests(chunks: Sequence[ChunkQuestionRequest]) -> list[Plann
 
 
 def count_identical_requests(planned: Sequence[PlannedQuestion]) -> int:
-    """How many planned questions repeat a (section, difficulty, format) already planned.
+    """How many planned questions repeat a (chunk, difficulty, format) already planned.
 
     A count above one at a single difficulty produces exactly this: two medium
     questions in one format are two identical requests. It is not refused — a
@@ -142,6 +142,6 @@ def count_identical_requests(planned: Sequence[PlannedQuestion]) -> int:
     a surprise.
     """
     seen = Counter(
-        (question.section_id, question.difficulty, question.question_type) for question in planned
+        (question.chunk_id, question.difficulty, question.question_type) for question in planned
     )
     return sum(count - 1 for count in seen.values() if count > 1)

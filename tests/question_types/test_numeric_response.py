@@ -20,7 +20,6 @@ from app.domain.questions import Question
 from app.generation.prompts import base_type_instruction
 from app.generation.schemas import build_content, response_model_for, scoring_kind_for
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 from app.question_types import get_type, implemented_types
 from app.question_types.numeric_response import TYPE, NumericResponseDraft
@@ -119,23 +118,21 @@ def test_columns_carry_the_answer_as_reference() -> None:
 
 
 def test_a_generated_draft_is_stored_and_passes_validation(session: Session, settings) -> None:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.think_python())
-    )
+    book = docs.chunked_book(session, docs.think_python())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
     session.commit()
     topic = version.topics[0]
     subtopic = topic.subtopics[0]
-    section_id = book.chapters[0].sections[0].id
+    chunk_id = book.chunks[0].id
     client = MetricJudgeClient(draft=_draft(topic.id, [subtopic.id]))
 
-    rows = GenerationService(session, client=client).generate_for_sections(
+    rows = GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.NUMERIC_RESPONSE,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
 
     (row,) = rows

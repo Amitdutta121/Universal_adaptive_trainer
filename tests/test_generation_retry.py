@@ -23,7 +23,6 @@ from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.schemas import OutputPredictionDraft
 from app.generation.service import GenerationService
 from app.generation.spec import MAX_CLAIMED_SUBTOPICS
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 from app.validation import get_question_validator
 
@@ -36,9 +35,7 @@ TAXONOMY = (
 
 
 def _seed(session: Session, settings):
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.think_python())
-    )
+    book = docs.chunked_book(session, docs.think_python())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
@@ -47,7 +44,7 @@ def _seed(session: Session, settings):
         version,
         version.topics[0],
         version.topics[0].subtopics[0],
-        [section.id for chapter in book.chapters for section in chapter.sections],
+        [chunk.id for chunk in book.chunks],
     )
 
 
@@ -67,12 +64,12 @@ def _draft(topic_id: int, subtopic_ids: list[int]) -> OutputPredictionDraft:
     )
 
 
-def _generate(session: Session, version, client, section_ids: list[int]):
-    return GenerationService(session, client=client).generate_for_sections(
+def _generate(session: Session, version, client, chunk_ids: list[str]):
+    return GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=section_ids,
+        source_chunk_ids=chunk_ids,
     )
 
 
@@ -83,11 +80,11 @@ def test_a_question_with_a_refused_claim_is_stored_and_marked_failed(
     session: Session, settings
 ) -> None:
     """The whole point: the run continues and the defective question survives."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     foreign = version.topics[1].subtopics[0].id
     client = MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign]))
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert len(rows) == 1
     assert QuestionRepository(session).count() == 1
@@ -98,11 +95,11 @@ def test_a_question_with_a_refused_claim_is_stored_and_marked_failed(
 
 def test_the_refused_claim_survives_a_reload(session: Session, settings) -> None:
     """The attempts are a column, not a value the service kept in memory."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     foreign = version.topics[1].subtopics[0].id
     client = MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign]))
 
-    question_id = _generate(session, version, client, section_ids[:1])[0].id
+    question_id = _generate(session, version, client, chunk_ids[:1])[0].id
     session.expunge_all()
 
     reloaded = QuestionRepository(session).get(question_id)
@@ -112,13 +109,13 @@ def test_the_refused_claim_survives_a_reload(session: Session, settings) -> None
 
 
 def test_a_corrected_claim_costs_one_extra_call_and_passes(session: Session, settings) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     foreign = version.topics[1].subtopics[0].id
     client = SequencedDraftClient(
         drafts=[_draft(topic.id, [subtopic.id, foreign]), _draft(topic.id, [subtopic.id])]
     )
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert rows[0].status is QuestionStatus.VALIDATION_PASSED
     assert len(rows[0].generation_attempts) == 2
@@ -130,10 +127,10 @@ def test_an_unknown_topic_id_is_stored_as_null_with_the_claim_kept(
     session: Session, settings
 ) -> None:
     """A foreign key cannot hold an invented id, so the claim lives in evidence."""
-    version, _topic, subtopic, section_ids = _seed(session, settings)
+    version, _topic, subtopic, chunk_ids = _seed(session, settings)
     client = MetricJudgeClient(draft=_draft(999999, [subtopic.id]))
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert rows[0].topic_id is None
     assert rows[0].status is QuestionStatus.VALIDATION_FAILED
@@ -148,11 +145,11 @@ def test_too_many_subtopics_is_refused_even_though_every_id_is_real(
     session: Session, settings
 ) -> None:
     """Nothing about the stored columns would show the cap was broken."""
-    version, topic, _subtopic, section_ids = _seed(session, settings)
+    version, topic, _subtopic, chunk_ids = _seed(session, settings)
     too_many = [subtopic.id for subtopic in topic.subtopics][: MAX_CLAIMED_SUBTOPICS + 1]
     client = MetricJudgeClient(draft=_draft(topic.id, too_many))
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert list(rows[0].subtopic_ids) == too_many
     assert rows[0].status is QuestionStatus.VALIDATION_FAILED
@@ -175,12 +172,12 @@ def test_a_failed_check_triggers_a_retry(session: Session, settings) -> None:
     returned, so five of six failed questions in the bank were stored broken
     after a single call.
     """
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
     broken.code = "print("
     client = MetricJudgeClient(draft=broken)
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert len(client.generation_calls) == MAX_GENERATION_ATTEMPTS
     assert rows[0].status is QuestionStatus.VALIDATION_FAILED
@@ -195,12 +192,12 @@ def test_a_failed_check_triggers_a_retry(session: Session, settings) -> None:
 
 
 def test_a_repaired_check_stops_the_retries(session: Session, settings) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
     broken.code = "print("
     client = SequencedDraftClient(drafts=[broken, _draft(topic.id, [subtopic.id])])
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert rows[0].status is QuestionStatus.VALIDATION_PASSED
     attempts = rows[0].generation_attempts
@@ -210,12 +207,12 @@ def test_a_repaired_check_stops_the_retries(session: Session, settings) -> None:
 
 
 def test_the_retry_prompt_states_the_failed_check(session: Session, settings) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
     broken.code = "print("
     client = MetricJudgeClient(draft=broken)
 
-    _generate(session, version, client, section_ids[:1])
+    _generate(session, version, client, chunk_ids[:1])
 
     second = client.generation_calls[1]["prompt"]
     assert "--- correction ---" in second
@@ -227,12 +224,12 @@ def test_output_prediction_uses_the_run_as_the_answer(session: Session, settings
 
     The answer check used to drop the question when those two texts differed.
     """
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     draft = _draft(topic.id, [subtopic.id])
     draft.expected_output = "this is not what print(3) writes"
     client = MetricJudgeClient(draft=draft)
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert len(client.generation_calls) == 1
     assert rows[0].status is QuestionStatus.VALIDATION_PASSED
@@ -244,12 +241,12 @@ def test_the_retry_shows_the_rejected_draft_as_the_models_own_turn(
     session: Session, settings
 ) -> None:
     """The correction says "the question above": the model must be able to see it."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     broken = _draft(topic.id, [subtopic.id])
     broken.code = "print("
     client = MetricJudgeClient(draft=broken)
 
-    _generate(session, version, client, section_ids[:1])
+    _generate(session, version, client, chunk_ids[:1])
 
     first, second, third = client.generation_calls
     assert first["history"] == []
@@ -272,10 +269,10 @@ def test_a_malformed_reply_costs_an_attempt_and_is_retried(session: Session, set
     Observed in production: the model returned the JSON schema of the draft
     instead of an instance, and the whole generation died on the first call.
     """
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = MalformedThenGoodClient(malformed_replies=1, draft=_draft(topic.id, [subtopic.id]))
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert rows[0].status is QuestionStatus.VALIDATION_PASSED
     attempts = rows[0].generation_attempts
@@ -288,10 +285,10 @@ def test_a_malformed_reply_costs_an_attempt_and_is_retried(session: Session, set
 
 
 def test_the_retry_tells_the_model_its_reply_was_not_a_question(session: Session, settings) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = MalformedThenGoodClient(malformed_replies=1, draft=_draft(topic.id, [subtopic.id]))
 
-    _generate(session, version, client, section_ids[:1])
+    _generate(session, version, client, chunk_ids[:1])
 
     second = client.prompts[1]
     assert "--- correction ---" in second
@@ -306,13 +303,13 @@ def test_every_attempt_malformed_raises_rather_than_storing_nothing(
     session: Session, settings
 ) -> None:
     """With no readable draft there is no question, so the real error stands."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = MalformedThenGoodClient(
         malformed_replies=MAX_GENERATION_ATTEMPTS, draft=_draft(topic.id, [subtopic.id])
     )
 
     with pytest.raises(MalformedModelOutputError):
-        _generate(session, version, client, section_ids[:1])
+        _generate(session, version, client, chunk_ids[:1])
 
     assert client.malformed_seen == MAX_GENERATION_ATTEMPTS
     session.rollback()
@@ -324,11 +321,11 @@ def test_every_attempt_malformed_raises_rather_than_storing_nothing(
 
 def test_a_refused_claim_spends_no_judge_calls(session: Session, settings) -> None:
     """ADR-024's existing skip rule, reached without a new rule for claims."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     foreign = version.topics[1].subtopics[0].id
     client = MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign]))
 
-    rows = _generate(session, version, client, section_ids[:1])
+    rows = _generate(session, version, client, chunk_ids[:1])
 
     assert rows[0].pedagogical_eval is not None
     assert rows[0].pedagogical_eval["status"] == PedagogicalEvalStatus.SKIPPED.value
@@ -344,7 +341,7 @@ def test_a_question_with_no_recorded_attempts_gains_no_claim_check(
     session: Session, settings
 ) -> None:
     """Questions stored before ADR-032 must validate exactly as they did."""
-    version, topic, subtopic, _section_ids = _seed(session, settings)
+    version, topic, subtopic, _chunk_ids = _seed(session, settings)
     question = Question(
         curriculum_version_id=version.id,
         topic_id=topic.id,
@@ -360,7 +357,7 @@ def test_a_question_with_no_recorded_attempts_gains_no_claim_check(
 
 def test_the_claim_check_reads_the_last_attempt(session: Session, settings) -> None:
     """A corrected claim is not held against the question that corrected it."""
-    version, topic, subtopic, _section_ids = _seed(session, settings)
+    version, topic, subtopic, _chunk_ids = _seed(session, settings)
     question = Question(
         curriculum_version_id=version.id,
         topic_id=topic.id,
@@ -397,13 +394,13 @@ def test_the_claim_check_reads_the_last_attempt(session: Session, settings) -> N
 def test_a_failed_question_is_never_offered_for_review(
     client: TestClient, session: Session, settings
 ) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     foreign = version.topics[1].subtopics[0].id
     _generate(
         session,
         version,
         MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign])),
-        section_ids[:1],
+        chunk_ids[:1],
     )
 
     for mode in ("all", "scoreable"):
@@ -417,13 +414,13 @@ def test_a_failed_question_is_never_offered_for_review(
 def test_a_failed_question_is_listed_only_when_asked_for(
     client: TestClient, session: Session, settings
 ) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     foreign = version.topics[1].subtopics[0].id
     _generate(
         session,
         version,
         MetricJudgeClient(draft=_draft(topic.id, [subtopic.id, foreign])),
-        section_ids[:1],
+        chunk_ids[:1],
     )
 
     unfiltered = client.get("/api/questions").json()
@@ -462,15 +459,13 @@ class FailAfterNDrafts(MetricJudgeClient):
         )
 
 
-def test_a_provider_failure_keeps_the_sections_already_generated(
-    session: Session, settings
-) -> None:
-    """Per-section commits: work already paid for is not rolled back."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+def test_a_provider_failure_keeps_the_chunks_already_generated(session: Session, settings) -> None:
+    """Per-chunk commits: work already paid for is not rolled back."""
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = FailAfterNDrafts(drafts_before_failure=1, draft=_draft(topic.id, [subtopic.id]))
 
     with pytest.raises(LLMRequestError):
-        _generate(session, version, client, section_ids[:2])
+        _generate(session, version, client, chunk_ids[:2])
 
     session.rollback()
     assert QuestionRepository(session).count() == 1

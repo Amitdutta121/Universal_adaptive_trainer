@@ -42,6 +42,7 @@ from app.domain.enums import (
 from app.persistence.models import (
     BookRow,
     BookSectionRow,
+    ChunkRow,
     CourseRow,
     CurriculumVersionRow,
     CustomJudgeRow,
@@ -63,7 +64,7 @@ from app.persistence.models import (
     TrainingSessionRow,
     UserRow,
 )
-from app.persistence.repositories import QuestionSetRepository
+from app.persistence.repositories import ChunkRepository, QuestionSetRepository
 from app.subjects import profile_for_course_id
 from app.web.routes.api.coverage import get_generation_client
 from app.web.routes.api.curriculum import get_draft_client
@@ -118,11 +119,15 @@ ALLOWLIST: dict[tuple[str, str], str] = {
 #: Path parameters that are not row ids: any value works, and the course header decides.
 NON_ID_PARAMS = {"metric": "issues", "question_type": "true_false", "rule_index": "0"}
 
+#: Stands for a file upload: the probe sends a multipart file instead of this JSON.
+UPLOAD = {"file": "book.pdf"}
+
 #: Bodies that pass validation, so a request reaches the handler's own ownership check.
 #: ``"{name}"`` is replaced by A's id of that name.
 BODIES: dict[tuple[str, str], Any] = {
     ("PATCH", "/api/courses/{course_id}"): {"name": "Taken"},
     ("PATCH", "/api/books/{book_id}"): {"title": "Taken"},
+    ("POST", "/api/books/{book_id}/versions"): UPLOAD,
     ("PATCH", "/api/curriculum/versions/{version_id}"): {"label": "Taken"},
     ("PUT", "/api/curriculum/versions/{version_id}/tree"): {"label": "Taken", "topics": []},
     ("PATCH", "/api/curriculum/topics/{topic_id}"): {"name": "Taken"},
@@ -136,9 +141,9 @@ BODIES: dict[tuple[str, str], Any] = {
         "curriculum_version_id": "{version}",
         "question_type": "true_false",
         "difficulty": "easy",
-        "section_ids": ["{section}"],
+        "chunk_ids": ["{chunk}"],
     },
-    ("POST", "/api/questions/generate-batch"): {"chunks": [{"section_id": "{section}", "easy": 1}]},
+    ("POST", "/api/questions/generate-batch"): {"chunks": [{"chunk_id": "{chunk}", "easy": 1}]},
     ("POST", "/api/coverage/generation-runs"): {
         "targets": [{"subtopic_id": "{subtopic}", "difficulty": "easy"}]
     },
@@ -164,6 +169,14 @@ QUERY_IDS = {
     "student_id": "student",
     "section_ids": "section",
     "section_id": "section",
+    "chunk_ids": "chunk",
+    "chunk_id": "chunk",
+}
+
+#: Other query parameters a probe of one id needs to get past the route's own validation.
+QUERY_COMPANIONS: dict[tuple[str, str, str], dict[str, str]] = {
+    # The search needs exactly one of ``q`` and ``subtopic_id``; ``book_id`` narrows a ``q``.
+    ("GET", "/api/chunks/search", "book_id"): {"q": "x"},
 }
 
 #: Path parameter -> which of A's ids goes in it.
@@ -171,6 +184,7 @@ PATH_IDS = {
     "course_id": "course",
     "book_id": "book",
     "section_id": "section",
+    "chunk_id": "chunk",
     "version_id": "version",
     "curriculum_version_id": "version",
     "topic_id": "topic",
@@ -208,6 +222,9 @@ NOT_LISTS = {
     "/api/retrieval/sections": (
         "a search: needs query or subtopic_id; subtopic_id is probed by the 404 sweep"
     ),
+    "/api/chunks/search": (
+        "a search: needs q or subtopic_id; subtopic_id is probed by the 404 sweep"
+    ),
 }
 
 
@@ -216,6 +233,7 @@ class Seed:
     course: int
     book: int
     section: int
+    chunk: str
     version: int
     topic: int
     subtopic: int
@@ -346,6 +364,10 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
     )
     session.add_all([section, question])
     session.flush()
+    ChunkRepository(session).add_version(
+        book,
+        [ChunkRow(text=f"{label} chunk text", page_start=1, page_end=1, heading_path=[f"{label}"])],
+    )
     session.add(QuestionSubtopicRow(question_id=question.id, subtopic_id=subtopic.id))
     session.add(
         QuestionEvaluationRow(question_id=question.id, run_id=f"{label}-eval", evaluation={})
@@ -396,6 +418,7 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
         course=course_id or 0,
         book=book.id,
         section=section.id,
+        chunk=book.chunks[0].id,
         version=version.id,
         topic=topic.id,
         subtopic=subtopic.id,
@@ -512,6 +535,13 @@ def _required_query(route: APIRoute) -> list[str]:
     return [param.alias for param in route.dependant.query_params if param.field_info.is_required()]
 
 
+def _send(client: TestClient, method: str, url: str, headers: dict, body: Any, query: dict) -> Any:
+    if body == UPLOAD:
+        files = {"file": ("book.pdf", b"%PDF-1.7", "application/pdf")}
+        return client.request(method, url, headers=headers, files=files, params=query)
+    return client.request(method, url, headers=headers, json=body, params=query)
+
+
 def _assert_private(response: Any, what: str) -> None:
     assert SECRET not in response.text, f"{what} leaked A's data: {response.text[:400]}"
     assert ALICE_EMAIL not in response.text, f"{what} leaked A's email"
@@ -544,7 +574,8 @@ def _probes(app: FastAPI, seed: Seed, own_course: int):
         if _path_ids(path):
             yield (f"{method} {path} with A's path id", method, _url(path, ids), own, body, {})
         for name in _query_ids(route):
-            query = {**default_query, name: ids[QUERY_IDS[name]]}
+            companions = QUERY_COMPANIONS.get((method, path, name), {})
+            query = {**default_query, **companions, name: ids[QUERY_IDS[name]]}
             yield (f"{method} {path}?{name}= A's id", method, _url(path, ids), own, body, query)
         if re.search(r'"\{\w+\}"', json.dumps(BODIES.get((method, path)))):
             yield (f"{method} {path} with A's ids in the body", method, path, own, body, {})
@@ -576,7 +607,7 @@ def test_a_new_account_gets_404_for_every_id_of_another_account(
     unverified = not client.get("/api/auth/me").json()["is_verified"]
     failures = []
     for what, method, url, headers, body, query in _probes(app, seed, own_course):
-        response = client.request(method, url, headers=headers, json=body, params=query)
+        response = _send(client, method, url, headers, body, query)
         method_path = what.split(" with ")[0].split("?")[0]
         if unverified and _needs_verified_email(app, *method_path.split(" ", 1)):
             if response.status_code != 403:
@@ -661,7 +692,7 @@ def test_another_account_changes_nothing_of_the_owners(
     before = [alice.get(url, headers=headers).json() for url in reads]
 
     for _, method, url, probe_headers, body, query in _probes(app, seed, own_course):
-        client.request(method, url, headers=probe_headers, json=body, params=query)
+        _send(client, method, url, probe_headers, body, query)
 
     after = [alice.get(url, headers=headers).json() for url in reads]
     assert after == before

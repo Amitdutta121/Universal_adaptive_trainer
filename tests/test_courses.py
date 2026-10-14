@@ -334,7 +334,7 @@ def test_generation_refuses_a_type_the_course_did_not_choose(client: TestClient)
     response = client.post(
         "/api/questions/generate",
         headers=_in(course_id),
-        json={"section_ids": [1], "question_type": "coding", "difficulty": "easy"},
+        json={"chunk_ids": ["a" * 32], "question_type": "coding", "difficulty": "easy"},
     )
     assert response.status_code == 422, response.text
     assert response.json()["error"]["message"] == "This course does not use these question types."
@@ -343,7 +343,7 @@ def test_generation_refuses_a_type_the_course_did_not_choose(client: TestClient)
     batch = client.post(
         "/api/questions/generate-batch",
         headers=_in(course_id),
-        json={"chunks": [{"section_id": 1, "easy": 1, "question_types": ["parsons"]}]},
+        json={"chunks": [{"chunk_id": "a" * 32, "easy": 1, "question_types": ["parsons"]}]},
     )
     assert batch.status_code == 422, batch.text
 

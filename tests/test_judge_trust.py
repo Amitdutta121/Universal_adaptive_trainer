@@ -107,9 +107,7 @@ def test_null_corrections_are_not_implicit_confirmations(session, taxonomy):
     report = judge_trust(session, question(session, taxonomy), [])
     assert not report.trusted
     assert all(
-        metric.observations == 0
-        for name, metric in report.metrics.items()
-        if name != "acceptance"
+        metric.observations == 0 for name, metric in report.metrics.items() if name != "acceptance"
     )
     assert report.metrics["acceptance"].observations == 20
 
@@ -492,7 +490,7 @@ def test_sqlite_0005_upgrade_preserves_rows_and_adds_only_trust_schema(engine):
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0021_solve_flag"
+            == "0024_evidence_chunks"
         )
         assert connection.execute(text("SELECT prompt,trust_provenance FROM questions")).one() == (
             "Old",

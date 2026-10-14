@@ -187,3 +187,35 @@ def chunked_book(session: Any, document: dict[str, Any], *, course_id: int | Non
     ]
     ChunkRepository(session).add_version(book, chunks)
     return book
+
+
+def to_pdf(document: dict[str, Any]) -> bytes:
+    """Render ``document`` as a PDF: one page per section, the headings as its outline.
+
+    The page-text parser (``BOOK_PARSER=pages`` in the suite) turns it into one chunk per
+    section whose heading path is the chapter and section headings, in reading order.
+    """
+    import pymupdf
+
+    def label(unit: dict[str, Any]) -> str | None:
+        parts = [unit.get("number"), unit.get("title")]
+        return " ".join(part for part in parts if part) or None
+
+    pdf = pymupdf.open()
+    toc: list[list[Any]] = []
+    for chapter in document["chapters"]:
+        chapter_label = label(chapter)
+        for index, section in enumerate(chapter["sections"]):
+            page = pdf.new_page()
+            if chapter_label and index == 0:
+                toc.append([1, chapter_label, pdf.page_count])
+            section_label = label(section)
+            if section_label:
+                toc.append([2 if chapter_label else 1, section_label, pdf.page_count])
+            page.insert_textbox(pymupdf.Rect(40, 40, 560, 800), section["text"], fontsize=9)
+    if toc:
+        pdf.set_toc(toc)
+    pdf.set_metadata({"title": document.get("title") or "", "author": document.get("author") or ""})
+    data = pdf.tobytes()
+    pdf.close()
+    return data

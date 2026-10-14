@@ -9,7 +9,7 @@ writes the copy's embedding cache, so a second run costs only the per-target que
     python -m scripts.replay_retrieval /tmp/replay.db
 
 For every professor-approved question q, in approval order, its target (taxonomy version,
-subtopic, difficulty, type, source section) is retrieved for as if it were about to be
+subtopic, difficulty, type, source chunk) is retrieved for as if it were about to be
 generated, with only the questions approved before q was created in the bank. Two methods:
 
 * ``DB``: the pre-m3 lookup -- the two newest approved questions of the same subtopic and
@@ -37,7 +37,7 @@ from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QuestionStatus, ReviewDecision
-from app.persistence.models import BookSectionRow, ProfessorReviewRow, QuestionRow
+from app.persistence.models import ChunkRow, ProfessorReviewRow, QuestionRow
 from app.retrieval.duplicates import QuestionEmbeddingStore
 from app.retrieval.embedder import Embedder
 from app.retrieval.examples import EXAMPLE_PAIR_THRESHOLD, MAX_EXAMPLES, retrieve_for_target
@@ -73,11 +73,12 @@ def _subtopic(row: QuestionRow) -> int | None:
     return row.subtopic_ids[0] if row.subtopic_ids else None
 
 
-def _section_text(session: Session, row: QuestionRow) -> str:
+def _source_text(session: Session, row: QuestionRow) -> str:
+    """The text of the chunk the question was grounded in; empty for a pre-chunk question."""
     sources = (row.content or {}).get("sources") or [{}]
-    section_id = sources[0].get("section_id")
-    section = session.get(BookSectionRow, section_id) if section_id is not None else None
-    return section.text if section is not None else ""
+    chunk_id = sources[0].get("chunk_id")
+    chunk = session.get(ChunkRow, chunk_id) if chunk_id is not None else None
+    return chunk.text if chunk is not None else ""
 
 
 def _db_examples(
@@ -141,7 +142,7 @@ def replay(session: Session, embedder: Embedder) -> dict[str, dict[str, Any]]:
             question_type=target.question_type,
             subtopic_id=subtopic_id,
             difficulty=target.difficulty,
-            section_text=_section_text(session, target),
+            section_text=_source_text(session, target),
             exclude_ids=every_approved - {row.id for row in pool},
         )
         picks = {

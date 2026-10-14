@@ -10,7 +10,6 @@ from app.config import Settings
 from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, QuestionType
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.llm import get_structured_client
 from app.persistence.database import create_db_engine, init_db
 
@@ -28,9 +27,7 @@ def test_real_generation_smoke(tmp_path) -> None:
     init_db(engine)
     try:
         with Session(engine, expire_on_commit=False) as session:
-            book = BookImportService(session, settings).import_upload(
-                filename="book.json", data=docs.to_bytes(docs.minimal())
-            )
+            book = docs.chunked_book(session, docs.minimal())
             version = TaxonomyImportService(session, settings).import_upload(
                 filename="taxonomy.json",
                 data=(
@@ -42,13 +39,13 @@ def test_real_generation_smoke(tmp_path) -> None:
 
             row = GenerationService(
                 session, client=get_structured_client(settings)
-            ).generate_for_sections(
+            ).generate_for_chunks(
                 curriculum_version_id=version.id,
                 topic_id=version.topics[0].id,
                 subtopic_id=version.topics[0].subtopics[0].id,
                 question_type=QuestionType.MULTIPLE_CHOICE,
                 difficulty=Difficulty.EASY,
-                source_section_ids=[book.chapters[0].sections[0].id],
+                source_chunk_ids=[book.chunks[0].id],
             )[0]
 
             assert row.prompt

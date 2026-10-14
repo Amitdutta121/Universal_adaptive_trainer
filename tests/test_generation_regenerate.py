@@ -1,6 +1,6 @@
 """Regenerating an existing question with instructor feedback.
 
-A regeneration is a NEW question grounded in the same section, type and
+A regeneration is a NEW question grounded in the same chunk, type and
 difficulty as the source, with the instructor's feedback threaded into the
 generation prompt. The source row is never touched, no review is written, and no
 instruction relearn is triggered.
@@ -23,25 +23,25 @@ from app.persistence.repositories import (
 
 
 def _generate_source(session, settings, client):
-    version, topic, subtopic, section_ids = _seed(session, settings)
-    rows = GenerationService(session, client=client).generate_for_sections(
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
+    rows = GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
-    return version, topic, subtopic, section_ids, rows[0]
+    return version, topic, subtopic, chunk_ids, rows[0]
 
 
 def test_regenerate_creates_new_row_and_leaves_source_untouched(session, settings) -> None:
     client = MetricJudgeClient(draft=_debugging_draft(1, [1]))
-    _version, _topic, _subtopic, _sections, source = _generate_source(session, settings, client)
+    _version, _topic, _subtopic, _chunks, source = _generate_source(session, settings, client)
 
     source_id = source.id
     source_prompt = source.prompt
     source_status = source.status
     source_original_prompt = source.original_prompt
-    source_sections = source.spec["source_section_ids"]
+    source_chunks = source.spec["source_chunk_ids"]
 
     new_row = GenerationService(session, client=client).regenerate_from_question(
         source_id, feedback="Focus on list slicing, not indexing."
@@ -52,7 +52,7 @@ def test_regenerate_creates_new_row_and_leaves_source_untouched(session, setting
     assert new_row.regeneration_feedback == "Focus on list slicing, not indexing."
     assert new_row.question_type is QuestionType.DEBUGGING
     assert new_row.difficulty is Difficulty.MEDIUM
-    assert new_row.spec["source_section_ids"] == source_sections
+    assert new_row.spec["source_chunk_ids"] == source_chunks
 
     session.refresh(source)
     assert source.prompt == source_prompt
@@ -64,7 +64,7 @@ def test_regenerate_creates_new_row_and_leaves_source_untouched(session, setting
 
 def test_regenerate_prompt_carries_the_feedback_block(session, settings) -> None:
     client = MetricJudgeClient(draft=_debugging_draft(1, [1]))
-    _version, topic, subtopic, _sections, source = _generate_source(session, settings, client)
+    _version, topic, subtopic, _chunks, source = _generate_source(session, settings, client)
 
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
     GenerationService(session, client=client).regenerate_from_question(
@@ -78,7 +78,7 @@ def test_regenerate_prompt_carries_the_feedback_block(session, settings) -> None
 
 def test_regenerate_writes_no_review_and_no_instruction_relearn(session, settings) -> None:
     client = MetricJudgeClient(draft=_debugging_draft(1, [1]))
-    _version, topic, subtopic, _sections, source = _generate_source(session, settings, client)
+    _version, topic, subtopic, _chunks, source = _generate_source(session, settings, client)
 
     reviews_before = ProfessorReviewRepository(session).count()
     instruction_before = TypeInstructionRepository(session).get(QuestionType.DEBUGGING)
@@ -94,7 +94,7 @@ def test_regenerate_writes_no_review_and_no_instruction_relearn(session, setting
 
 def test_regenerate_is_refused_when_the_source_curriculum_is_superseded(session, settings) -> None:
     client = MetricJudgeClient(draft=_debugging_draft(1, [1]))
-    _version, _topic, _subtopic, _sections, source = _generate_source(session, settings, client)
+    _version, _topic, _subtopic, _chunks, source = _generate_source(session, settings, client)
 
     # The source question's curriculum is no longer the approved one.
     version_row = session.get(CurriculumVersionRow, source.curriculum_version_id)
@@ -107,11 +107,9 @@ def test_regenerate_is_refused_when_the_source_curriculum_is_superseded(session,
         )
 
 
-def test_regenerate_recovers_the_section_from_content_when_spec_is_missing(
-    session, settings
-) -> None:
+def test_regenerate_recovers_the_chunk_from_content_when_spec_is_missing(session, settings) -> None:
     client = MetricJudgeClient(draft=_debugging_draft(1, [1]))
-    _version, topic, subtopic, _sections, source = _generate_source(session, settings, client)
+    _version, topic, subtopic, _chunks, source = _generate_source(session, settings, client)
 
     # Simulate a row written before specs were stored: keep content["sources"].
     source.spec = None
@@ -122,14 +120,14 @@ def test_regenerate_recovers_the_section_from_content_when_spec_is_missing(
         source.id, feedback="Ground it more tightly in the section."
     )
 
-    assert new_row.spec["source_section_ids"] == [source.content["sources"][0]["section_id"]]
+    assert new_row.spec["source_chunk_ids"] == [source.content["sources"][0]["chunk_id"]]
 
 
 def test_regenerate_survives_a_correction_retry_keeping_the_feedback_block(
     session, settings
 ) -> None:
     client = MetricJudgeClient(draft=_debugging_draft(1, [1]))
-    version, topic, subtopic, _sections, source = _generate_source(session, settings, client)
+    version, topic, subtopic, _chunks, source = _generate_source(session, settings, client)
 
     other_topic_subtopic = version.topics[1].subtopics[0].id
     client = SequencedDraftClient(

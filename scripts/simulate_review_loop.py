@@ -21,8 +21,8 @@ Each round of ``--rounds``:
 1. **Lesson run** -- :func:`app.feedback.lessons.apply_pending_lessons`, exactly as
    ``run_round`` calls it before generating: judges first, then one guideline distillation
    per question type with pending reviews.
-2. **Generation** -- one multiple-choice question per cell (``--sections`` maps subtopic id to
-   the section the live retriever chose), through
+2. **Generation** -- one multiple-choice question per cell, grounded in the chunk the live
+   retriever picks for its subtopic (as a round does), through
    :meth:`GenerationService.generate_round_question` (retry loop with the judges) with the
    same examples a round would retrieve.
 3. **Drift check** -- :func:`app.generation.drift.drift_warning` against the previous round.
@@ -63,7 +63,7 @@ from app.domain.enums import ReviewDecision as D
 from app.feedback import route_review_outcome, submit_review
 from app.feedback.lessons import apply_pending_lessons
 from app.generation.drift import drift_warning
-from app.generation.rounds import accepted_examples, assign_facets, default_embedder
+from app.generation.rounds import _chunk_for, accepted_examples, assign_facets, default_embedder
 from app.generation.service import GenerationService
 from app.generation.spec import build_question_spec, require_approved_version
 from app.llm import StructuredLLMClient
@@ -74,14 +74,14 @@ from app.persistence.models import (
     QuestionRow,
     QuestionSimilarityRow,
 )
+from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
 from app.subjects import profile_for_version
 
-#: The dev database's Python taxonomy, style, and the sections the live round-1 retriever
-#: chose for its subtopics (so no embedder is needed).
+#: The dev database's Python taxonomy and style, and its subtopics the loop generates for.
 VERSION, STYLE, ROUNDS = 8, "py.concept_check", 6
-SECTIONS = {270: 7, 271: 785, 272: 1601, 273: 1601, 274: 1601, 276: 547}
+SUBTOPICS = (270, 271, 272, 273, 274, 276)
 
 #: Learning state cleared from the copy; questions, books and taxonomy are kept.
 CLEARED = (
@@ -238,15 +238,25 @@ def simulate(
     *,
     version_id: int = VERSION,
     style: str = STYLE,
-    sections: dict[int, int] = SECTIONS,
+    chunks: dict[int, str] | None = None,
     rounds: int = ROUNDS,
     client: StructuredLLMClient | None = None,
     embedder: Embedder | None = None,
     use_facets: bool = True,
     out: Path | None = None,
 ) -> dict[str, Any]:
-    """Run the loop; returns (and, with ``out``, writes after every round) the log."""
+    """Run the loop; returns (and, with ``out``, writes after every round) the log.
+
+    ``chunks`` maps subtopic id to the chunk to ground it in; left out, each of
+    :data:`SUBTOPICS` gets the chunk retrieval picks (a subtopic nothing teaches is skipped).
+    """
     version = require_approved_version(session, version_id)
+    if chunks is None:
+        retriever = (
+            ChunkRetriever(session, ChunkEmbeddingStore(session, embedder)) if embedder else None
+        )
+        picked = {sid: _chunk_for(retriever, version, sid) for sid in SUBTOPICS}
+        chunks = {sid: chunk_id for sid, chunk_id in picked.items() if chunk_id is not None}
     profile = profile_for_version(session, version_id)
     service = GenerationService(session, client=client)
     duplicates = DuplicateChecker(session, embedder)
@@ -258,7 +268,7 @@ def simulate(
         lessons = apply_pending_lessons(session, round_id=rnd, profile=profile, client=client)
         targets = [
             {"subtopic_id": subtopic_id, "difficulty": Difficulty.EASY.value}
-            for subtopic_id in sections
+            for subtopic_id in chunks
         ]
         facets = (
             assign_facets(session, version, targets, client=client)[0]
@@ -267,13 +277,13 @@ def simulate(
         )
         questions: list[dict[str, Any]] = []
         rows: list[QuestionRow] = []
-        for slot, (subtopic_id, section_id) in enumerate(sections.items()):
+        for slot, (subtopic_id, chunk_id) in enumerate(chunks.items()):
             spec = build_question_spec(
                 session,
                 curriculum_version_id=version_id,
                 question_type=QuestionType.MULTIPLE_CHOICE,
                 difficulty=Difficulty.EASY,
-                source_section_ids=[section_id],
+                source_chunk_ids=[chunk_id],
                 target_subtopic_id=subtopic_id,
                 style_id=style,
                 facet=facets[slot],
@@ -283,7 +293,7 @@ def simulate(
                 version_id,
                 (subtopic_id, Difficulty.EASY),
                 QuestionType.MULTIPLE_CHOICE,
-                section_id=section_id,
+                chunk_id=chunk_id,
             )
             try:
                 row = service.generate_round_question(

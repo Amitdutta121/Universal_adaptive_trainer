@@ -13,7 +13,7 @@ from app.generation.base import DESCRIPTOR, BaseQuestionGenerator
 from app.generation.schemas import DebuggingDraft
 from app.generation.service import GenerationService
 from app.generation.spec import build_question_spec
-from app.ingestion import BookImportService, SourceRetrieval
+from app.ingestion import SourceRetrieval
 from app.persistence.repositories import QuestionRepository
 
 TAXONOMY = (
@@ -23,10 +23,8 @@ TAXONOMY = (
 )
 
 
-def _seed(session: Session, settings) -> tuple[object, object, object, list[int]]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.think_python())
-    )
+def _seed(session: Session, settings) -> tuple[object, object, object, list[str]]:
+    book = docs.chunked_book(session, docs.think_python())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
@@ -35,7 +33,7 @@ def _seed(session: Session, settings) -> tuple[object, object, object, list[int]
         version,
         version.topics[0],
         version.topics[0].subtopics[0],
-        [section.id for chapter in book.chapters for section in chapter.sections],
+        [chunk.id for chunk in book.chunks],
     )
 
 
@@ -63,13 +61,13 @@ def test_base_descriptor_unchanged() -> None:
 
 
 def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
 
@@ -82,7 +80,7 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
     assert question.generator_name == "base"
     assert question.generator_version == "1"
     assert question.content is not None
-    assert question.content["sources"][0]["section_id"] == section_ids[0]
+    assert question.content["sources"][0]["chunk_id"] == chunk_ids[0]
     assert question.tests and "assert fixed('ab') == 'cb'" in question.tests
     call = client.generation_calls[0]
     assert call["model"] is DebuggingDraft
@@ -91,13 +89,13 @@ def test_base_generator_attaches_source_and_scoring_kind(session, settings) -> N
 
 def test_generation_prompt_carries_the_whole_taxonomy(session, settings) -> None:
     """The generator classifies its own question, so it needs every option."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
 
@@ -112,14 +110,14 @@ def test_generation_prompt_carries_the_whole_taxonomy(session, settings) -> None
 
 
 def test_generator_claim_becomes_the_questions_taxonomy(session, settings) -> None:
-    version, topic, _, section_ids = _seed(session, settings)
+    version, topic, _, chunk_ids = _seed(session, settings)
     both = [subtopic.id for subtopic in topic.subtopics]
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, both))
 
@@ -138,14 +136,14 @@ def test_a_subtopic_outside_the_claimed_topic_is_retried_then_kept(session, sett
     back to the model, and after the cap the question is returned with its refused
     claim recorded -- the run continues and the miss stays visible.
     """
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     other_topic_subtopic = version.topics[1].subtopics[0].id
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
     client = MetricJudgeClient(
         draft=_debugging_draft(topic.id, [subtopic.id, other_topic_subtopic])
@@ -172,14 +170,14 @@ def test_the_second_attempt_is_told_which_id_to_change(session, settings) -> Non
     offers the other resolution, since a model that keeps naming a subtopic may
     be right about it and wrong about the topic.
     """
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     other_topic_subtopic = version.topics[1].subtopics[0].id
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
     client = MetricJudgeClient(
         draft=_debugging_draft(topic.id, [subtopic.id, other_topic_subtopic])
@@ -200,14 +198,14 @@ def test_the_second_attempt_is_told_which_id_to_change(session, settings) -> Non
 
 def test_a_refused_claim_is_accepted_once_corrected(session, settings) -> None:
     """The retry is what makes a recoverable miss cost one extra call, not a run."""
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     other_topic_subtopic = version.topics[1].subtopics[0].id
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.MEDIUM,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
     client = SequencedDraftClient(
         drafts=[
@@ -225,19 +223,19 @@ def test_a_refused_claim_is_accepted_once_corrected(session, settings) -> None:
     assert question.subtopic_ids == [subtopic.id]
 
 
-def test_base_generator_generates_one_unpersisted_question_per_section(
+def test_base_generator_generates_one_unpersisted_question_per_chunk(
     session: Session, settings
 ) -> None:
     from app.generation import GenerationRequest
 
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
 
     questions = BaseQuestionGenerator(session=session, client=client).generate(
         GenerationRequest(
             curriculum_version_id=version.id,
             question_type=QuestionType.DEBUGGING,
-            source_section_ids=section_ids[:2],
+            source_chunk_ids=chunk_ids[:2],
             difficulty=Difficulty.MEDIUM,
             count=1,
         )
@@ -250,16 +248,16 @@ def test_base_generator_generates_one_unpersisted_question_per_section(
     assert len(client.generation_calls) == 2
 
 
-def test_service_persists_one_question_per_selected_section(session, settings) -> None:
-    version, topic, subtopic, section_ids = _seed(session, settings)
+def test_service_persists_one_question_per_selected_chunk(session, settings) -> None:
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
     service = GenerationService(session, client=client)
 
-    rows = service.generate_for_sections(
+    rows = service.generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
-        source_section_ids=section_ids[:2],
+        source_chunk_ids=chunk_ids[:2],
     )
 
     assert len(rows) == 2
@@ -267,5 +265,5 @@ def test_service_persists_one_question_per_selected_section(session, settings) -
     assert [row.topic_id for row in rows] == [topic.id, topic.id]
     assert [list(row.subtopic_ids) for row in rows] == [[subtopic.id], [subtopic.id]]
     assert all(row.question_type is QuestionType.DEBUGGING for row in rows)
-    assert all(row.spec and row.spec["source_section_ids"] for row in rows)
+    assert all(row.spec and row.spec["source_chunk_ids"] for row in rows)
     assert len(client.generation_calls) == 2

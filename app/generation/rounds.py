@@ -21,9 +21,9 @@ Running (background): first the **lesson run** (ADR-063) learns from the reviews
 last round, so the whole round is generated with them; a failure there is recorded on the
 round and does not stop it. Then each target is given a facet (:func:`assign_facets`, which
 lists a subtopic's facets the first time; a target whose cell turns out saturated is skipped).
-Then, per target, retrieve the section that best teaches the subtopic
+Then, per target, retrieve the chunk that best teaches the subtopic
 (embedding retrieval as in ``POST /coverage/generation-runs``, falling back to the
-subtopic's evidence section). A hard target asks the generatability judge once, before
+subtopic's evidence chunk). A hard target asks the generatability judge once, before
 any draft: if the lesson cannot support a hard question, the target is skipped and the
 reason is stored, separate from a drop. Otherwise
 :meth:`GenerationService.generate_round_question` judges inside the retry loop and drops
@@ -82,7 +82,7 @@ from app.persistence.repositories import (
     GenerationRoundRepository,
     QuestionSetupRepository,
 )
-from app.retrieval import SectionEmbeddingStore, SectionRetriever
+from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
 from app.retrieval.examples import retrieve_for_target
@@ -101,9 +101,9 @@ STYLE_EXCLUDE_REJECTS = 2
 #: Accepted questions shown to the generator as examples (same type; ADR-063 point 3).
 MAX_EXAMPLES_PER_CELL = 2
 
-#: Same floor as ``app.web.routes.api.coverage.MIN_SECTION_SCORE`` (generation must not
-#: import ``app.web``): below it a retrieved section is not trusted to teach the subtopic.
-MIN_SECTION_SCORE = 0.25
+#: Same floor as ``app.web.routes.api.coverage.MIN_CHUNK_SCORE`` (generation must not
+#: import ``app.web``): below it a retrieved chunk is not trusted to teach the subtopic.
+MIN_CHUNK_SCORE = 0.25
 
 #: Statuses that count toward a cell: approved, or still waiting for the professor.
 #: ``VALIDATION_FAILED`` is not offered for review, and a reject is not coverage.
@@ -433,9 +433,9 @@ def next_round(
 
 
 def default_embedder() -> Embedder | None:
-    """The live embedder for section retrieval, or ``None`` when none is configured.
+    """The live embedder for chunk retrieval, or ``None`` when none is configured.
 
-    Without one, a target falls back to its subtopic's evidence section.
+    Without one, a target falls back to its subtopic's evidence chunk.
     """
     from app.config import get_settings
     from app.retrieval import get_embedder
@@ -446,22 +446,24 @@ def default_embedder() -> Embedder | None:
         return None
 
 
-def _section_for(
-    retriever: SectionRetriever | None, version: CurriculumVersionRow, subtopic_id: int
-) -> int | None:
-    """The book section to ground a target in: best retrieval hit, else evidence."""
+def _chunk_for(
+    retriever: ChunkRetriever | None, version: CurriculumVersionRow, subtopic_id: int
+) -> str | None:
+    """The chunk to ground a target in: best retrieval hit, else the subtopic's evidence."""
     if retriever is not None:
         try:
             hits = retriever.for_subtopic(subtopic_id, top_k=1)
         except AdaptiveTrainerError as exc:
             logger.warning("round: retrieval failed for subtopic %s: %s", subtopic_id, exc)
             hits = []
-        if hits and hits[0].score >= MIN_SECTION_SCORE:
-            return hits[0].section_id
+        if hits and hits[0].score >= MIN_CHUNK_SCORE:
+            return hits[0].chunk_id
     for topic in version.topics:
         for subtopic in topic.subtopics:
-            if subtopic.id == subtopic_id and subtopic.evidence:
-                return subtopic.evidence[0].section_id
+            if subtopic.id == subtopic_id:
+                for evidence in subtopic.evidence:
+                    if evidence.chunk_id is not None:
+                        return evidence.chunk_id
     return None
 
 
@@ -471,7 +473,7 @@ def accepted_examples(
     cell: Cell,
     question_type: QuestionType,
     *,
-    section_id: int | None = None,
+    chunk_id: str | None = None,
     embedder: Embedder | None = None,
     limit: int = MAX_EXAMPLES_PER_CELL,
 ) -> RoundExamples:
@@ -482,13 +484,11 @@ def accepted_examples(
     Examples and the rejected question come from the memory episodes of the course's subject
     (:mod:`app.memory`), examples with the professor's comment. The order is
     :func:`app.retrieval.examples.retrieve_for_target`'s (ADR-063 point 3): the cell, then the
-    same topic, then the rest, by similarity to the target's ``section_id`` when there is an
+    same topic, then the rest, by similarity to the target's ``chunk_id`` when there is an
     embedder; examples from outside the cell are labelled "style only".
     """
     subtopic_id, difficulty = cell
-    section_text = (
-        SourceRetrieval(session).get_section(section_id).text if section_id is not None else ""
-    )
+    section_text = SourceRetrieval(session).get_chunk(chunk_id).text if chunk_id is not None else ""
     found = retrieve_for_target(
         session,
         embedder,
@@ -530,19 +530,17 @@ def _hard_lesson_supported(
     *,
     version_id: int,
     question_type: str,
-    section_id: int,
+    chunk_id: str,
 ) -> tuple[bool | None, str]:
     """One generatability call. False means skip this hard target and write no drafts."""
-    retrieval = SourceRetrieval(session)
-    section = retrieval.get_section(section_id)
-    citation = retrieval.section_source(section_id).citation()
+    chunk = SourceRetrieval(session).get_chunk(chunk_id)
     judge = PedagogicalJudge(session, client=client)
     return judge.section_supports(
         curriculum_version_id=version_id,
         difficulty=Difficulty.HARD.value,
         question_type=question_type,
-        section_text=section.text,
-        citation=citation,
+        section_text=chunk.text,
+        citation=chunk.citation(),
     )
 
 
@@ -620,7 +618,7 @@ def _generate_round(
         for style in get_library(profile_for_version(session, version_id).storage_key)
     }
     retriever = (
-        SectionRetriever(session, SectionEmbeddingStore(session, embedder))
+        ChunkRetriever(session, ChunkEmbeddingStore(session, embedder))
         if embedder is not None
         else None
     )
@@ -652,17 +650,17 @@ def _generate_round(
         difficulty = Difficulty(target["difficulty"])
         style = library.get(str(target.get("style_id")))
         outcome = "dropped"
-        section_id = _section_for(retriever, version, subtopic_id)
+        chunk_id = _chunk_for(retriever, version, subtopic_id)
         if (subtopic_id, difficulty) in saturated and facets[index] is None:
             outcome = "skipped"
             logger.info("round %s: cell %s/%s is saturated", round_id, subtopic_id, difficulty)
-        elif style is None or section_id is None:
+        elif style is None or chunk_id is None:
             logger.warning(
                 "round %s: dropped subtopic %s/%s: %s",
                 round_id,
                 subtopic_id,
                 difficulty.value,
-                "unknown style" if style is None else "no section teaches it",
+                "unknown style" if style is None else "no chunk teaches it",
             )
         else:
             if difficulty is Difficulty.HARD:
@@ -671,7 +669,7 @@ def _generate_round(
                     client,
                     version_id=version_id,
                     question_type=style.question_type.value,
-                    section_id=section_id,
+                    chunk_id=chunk_id,
                 )
                 if supported is False:
                     outcome = "skipped"
@@ -690,7 +688,7 @@ def _generate_round(
                         curriculum_version_id=version_id,
                         question_type=style.question_type,
                         difficulty=difficulty,
-                        source_section_ids=[section_id],
+                        source_chunk_ids=[chunk_id],
                         target_subtopic_id=subtopic_id,
                         style_id=style.id,
                         facet=facets[index],
@@ -705,7 +703,7 @@ def _generate_round(
                             version_id,
                             (subtopic_id, difficulty),
                             style.question_type,
-                            section_id=section_id,
+                            chunk_id=chunk_id,
                             embedder=embedder,
                         ),
                         run_id=run_id,

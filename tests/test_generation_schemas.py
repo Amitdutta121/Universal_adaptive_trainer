@@ -199,11 +199,11 @@ def test_build_content_includes_draft_and_metadata() -> None:
     )
     content = build_content(
         draft,
-        sources=[{"section_id": 7, "citation": "Book, ch.1, sec.2"}],
+        sources=[{"chunk_id": "c7", "citation": "Book, ch.1, sec.2"}],
         model="fake/test-model",
     )
     assert content["expected_output"] == "3"
-    assert content["sources"][0]["section_id"] == 7
+    assert content["sources"][0]["chunk_id"] == "c7"
     assert content["model"] == "fake/test-model"
 
 

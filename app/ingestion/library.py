@@ -11,10 +11,10 @@ What may be edited
     what its retained document says.
 
 What deleting costs
-    A question records the sections it was generated from inside its frozen
+    A question records the chunks it was generated from inside its frozen
     ``QuestionSpec``, not as a foreign key (ADR-036). Deleting a book therefore
     cannot cascade to its questions, and nothing repairs their citation: it simply
-    points at sections that no longer exist. So deletion refuses by default while
+    points at chunks that no longer exist. So deletion refuses by default while
     any question cites the book, names the count, and proceeds only when the
     professor repeats the request with ``force``.
 """
@@ -44,12 +44,12 @@ class BookLibraryService:
         self._questions = QuestionRepository(session)
 
     def grounded_question_count(self, book_id: int) -> int:
-        """How many questions were generated from this book's sections.
+        """How many questions were generated from any version of this book's chunks.
 
         Zero for a book nothing has been generated from yet, which is the common
         case and the one where deleting is free.
         """
-        return self._questions.count_grounded_in_sections(self._books.section_ids(book_id))
+        return self._questions.count_grounded_in_chunks(self._books.chunk_ids(book_id))
 
     def update_metadata(
         self,
@@ -90,7 +90,7 @@ class BookLibraryService:
         return book
 
     def delete(self, book_id: int, *, force: bool = False) -> int:
-        """Delete a book, its chapters and sections, and its retained document.
+        """Delete a book, its chapters, sections and chunks, and its retained document.
 
         Args:
             book_id: the book to remove.
@@ -98,7 +98,7 @@ class BookLibraryService:
                 are stranded, deliberately and with the count already reported.
 
         Returns:
-            How many questions were left citing sections that no longer exist.
+            How many questions were left citing chunks that no longer exist.
             Zero unless ``force`` overrode a refusal.
 
         Raises:
@@ -113,7 +113,7 @@ class BookLibraryService:
                 f"{grounded} question{'' if grounded == 1 else 's'} were generated from this book.",
                 detail=(
                     "Deleting it does not delete them; it leaves their source citation "
-                    "pointing at sections that no longer exist. Repeat the request with "
+                    "pointing at chunks that no longer exist. Repeat the request with "
                     "force=true to delete the book anyway."
                 ),
             )

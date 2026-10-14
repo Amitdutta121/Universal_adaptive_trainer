@@ -31,7 +31,6 @@ from app.coverage import (
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionStatus
 from app.errors import DomainRuleError, NotFoundError
 from app.generation.schemas import MultipleChoiceDraft
-from app.ingestion import BookImportService
 from app.persistence.models import (
     CurriculumVersionRow,
     QuestionRow,
@@ -39,8 +38,7 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
-from app.persistence.repositories import BookStructureRepository, QuestionSetRepository
-from app.retrieval import SectionEmbeddingStore
+from app.persistence.repositories import QuestionSetRepository
 from app.web.routes.api.coverage import active_generation_topic_ids, get_generation_client
 from app.web.routes.api.retrieval import get_query_embedder
 
@@ -273,7 +271,9 @@ def test_syncing_prod_again_moves_the_alias_not_the_old_snapshot(session: Sessio
     version, (subtopic_id,) = _taxonomy(session)
     first = _question(session, version=version, subtopic_id=subtopic_id)
     original = sync_prod_question_set(session)
-    second = _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.HARD)
+    second = _question(
+        session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.HARD
+    )
 
     moved = sync_prod_question_set(session)
     original_again = QuestionSetRepository(session).get(original.id)
@@ -544,7 +544,7 @@ class KeywordEmbedder:
     """Deterministic bag-of-words embedder over a fixed vocabulary.
 
     Cosine ordering is then a function of shared keywords, so a "while loop"
-    query ranks the while-loop section first and a query with none of the
+    query ranks the while-loop chunk first and a query with none of the
     vocabulary embeds to a zero vector -- the retriever's "nothing" case.
     """
 
@@ -555,7 +555,7 @@ class KeywordEmbedder:
         return [[float(t.lower().count(word)) for word in self.VOCAB] for t in texts]
 
 
-def _gen_book(session: Session, settings: Settings):
+def _gen_book(session: Session):
     sections = [
         "A while loop repeats while a condition holds. Use a while loop to loop again.",
         "A string can be sliced. Take a slice of a string. string slice string.",
@@ -566,9 +566,7 @@ def _gen_book(session: Session, settings: Settings):
         "title": "Gen Book",
         "chapters": [{"sections": [{"text": text} for text in sections]}],
     }
-    book = BookImportService(session, settings).import_upload(
-        filename="gen_book.json", data=docs.to_bytes(doc)
-    )
+    book = docs.chunked_book(session, doc)
     session.commit()
     return book
 
@@ -624,13 +622,11 @@ def _mcq(topic_id: int, subtopic_id: int) -> MultipleChoiceDraft:
 
 
 @pytest.fixture
-def gen_env(session: Session, settings: Settings) -> SimpleNamespace:
-    book = _gen_book(session, settings)
+def gen_env(session: Session) -> SimpleNamespace:
+    book = _gen_book(session)
     env = _gen_taxonomy(session, book.id)
-    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
-    session.commit()
     env.book = book
-    env.sections = BookStructureRepository(session).sections_in_book(book.id)
+    env.chunks = book.chunks
     return env
 
 
@@ -684,7 +680,7 @@ def test_a_run_generates_a_grounded_question_into_the_review_queue(
     assert produced["requested_difficulty"] == "medium"
     assert produced["claimed_topic_id"] == gen_env.while_loops.topic_id
     assert produced["aim_matched"] is True
-    assert produced["section_id"] == gen_env.sections[0].id
+    assert produced["chunk_id"] == gen_env.chunks[0].id
     assert produced["status"] == "validation_passed"
 
     with TestClient(configured_app) as http:
@@ -712,7 +708,7 @@ def test_a_run_surfaces_an_aim_mismatch_without_filtering_it(
     assert produced["aim_matched"] is False
 
 
-def test_a_target_with_no_confident_section_is_skipped_and_the_run_continues(
+def test_a_target_with_no_confident_chunk_is_skipped_and_the_run_continues(
     configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
 ) -> None:
     client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
@@ -732,19 +728,19 @@ def test_a_target_with_no_confident_section_is_skipped_and_the_run_continues(
         {
             "subtopic_id": gen_env.recursion.id,
             "difficulty": "easy",
-            "reason": "no confident section",
+            "reason": "no confident chunk",
         }
     ]
     assert [q["requested_subtopic_id"] for q in body["generated"]] == [gen_env.while_loops.id]
 
 
-def test_a_below_floor_section_is_skipped(
+def test_a_below_floor_chunk_is_skipped(
     configured_app: FastAPI,
     session: Session,
     gen_env: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.web.routes.api.coverage.MIN_SECTION_SCORE", 0.999)
+    monkeypatch.setattr("app.web.routes.api.coverage.MIN_CHUNK_SCORE", 0.999)
     client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
 
     response = _run(
@@ -756,7 +752,7 @@ def test_a_below_floor_section_is_skipped(
     assert response.status_code == 202, response.text
     body = response.json()
     assert body["generated"] == []
-    assert body["skipped"][0]["reason"] == "no confident section"
+    assert body["skipped"][0]["reason"] == "no confident chunk"
 
 
 def test_an_unknown_subtopic_is_a_404_before_anything_is_generated(
@@ -793,7 +789,7 @@ def test_a_provider_failure_on_one_target_keeps_the_others(
     body = response.json()
     (failed,) = body["failed"]
     assert failed["subtopic_id"] == gen_env.slicing.id
-    assert failed["section_id"] == gen_env.sections[1].id
+    assert failed["chunk_id"] == gen_env.chunks[1].id
     assert failed["error"]
     assert [q["requested_subtopic_id"] for q in body["generated"]] == [gen_env.while_loops.id]
 

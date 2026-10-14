@@ -53,7 +53,7 @@ DESCRIPTOR = GeneratorDescriptor(kind=GeneratorKind.BASE, name="base", version="
 
 
 class BaseQuestionGenerator:
-    """Generate unpersisted textbook-grounded questions from one section each."""
+    """Generate unpersisted textbook-grounded questions from one chunk each."""
 
     def __init__(
         self,
@@ -114,11 +114,11 @@ class BaseQuestionGenerator:
         return (effective if guidelines else None), stamp
 
     def generate(self, request: GenerationRequest) -> list[Question]:
-        """Generate one unpersisted question for every requested source section.
+        """Generate one unpersisted question for every requested source chunk.
 
         ``request.count`` remains part of the selection boundary, but the
-        section-first base generator deliberately emits exactly one question per
-        source section. Persisting results remains :class:`GenerationService`'s
+        chunk-first base generator deliberately emits exactly one question per
+        source chunk. Persisting results remains :class:`GenerationService`'s
         responsibility.
         """
         client = self._client or get_structured_client()
@@ -136,9 +136,9 @@ class BaseQuestionGenerator:
                 curriculum_version_id=request.curriculum_version_id,
                 question_type=request.question_type,
                 difficulty=request.difficulty,
-                source_section_ids=[section_id],
+                source_chunk_ids=[chunk_id],
             )
-            for section_id in request.source_section_ids
+            for chunk_id in request.source_chunk_ids
         ]
         return [self.generate_one(spec, version=version) for spec in specs]
 
@@ -153,7 +153,7 @@ class BaseQuestionGenerator:
         follow_up: str | None = None,
         max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> Question:
-        """Generate a typed question grounded in the spec's sole source section.
+        """Generate a typed question grounded in the spec's sole source chunk.
 
         A classification the approved tree refuses is retried with the violation
         stated, and the question is returned either way (ADR-032). It carries the
@@ -169,7 +169,7 @@ class BaseQuestionGenerator:
         A round spec (``spec.target_subtopic_id`` set) adds the target subtopic, its style
         and the ``examples`` retrieved for it (:class:`RoundExamples`) to the prompt;
         ``review`` judges each clean attempt inside the retry loop
-        (:func:`generate_with_retries`). Both are unused on a section-only spec.
+        (:func:`generate_with_retries`). Both are unused on a chunk-only spec.
         """
         if self._retrieval is None:
             raise DomainRuleError(
@@ -177,10 +177,9 @@ class BaseQuestionGenerator:
                 detail="Construct it with session=... or retrieval=....",
             )
 
-        section_id = spec.source_section_ids[0]
-        section = self._retrieval.get_section(section_id)
-        source = self._retrieval.section_source(section_id)
-        citation = source.citation()
+        chunk_id = spec.source_chunk_ids[0]
+        chunk = self._retrieval.get_chunk(chunk_id)
+        citation = chunk.citation()
         # The course's subject decides the system text and whose learned instruction applies.
         profile = (
             profile_for_course_id(self._session, version.course_id)
@@ -193,7 +192,7 @@ class BaseQuestionGenerator:
         )
         system, prompt = build_prompt(
             spec,
-            section_text=section.text,
+            section_text=chunk.text,
             citation=citation,
             taxonomy=render_taxonomy(version),
             type_instruction=type_instruction,
@@ -211,7 +210,7 @@ class BaseQuestionGenerator:
             question_prompt, reference_solution, tests = prompt_fields_from_draft(draft)
             content = build_content(
                 draft,
-                sources=[{"section_id": section_id, "citation": citation}],
+                sources=[{"chunk_id": chunk_id, "citation": citation}],
                 model=client.description,
             )
             if spec.question_type is QuestionType.OUTPUT_PREDICTION:

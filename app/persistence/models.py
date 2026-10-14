@@ -511,11 +511,13 @@ class SubtopicRow(Base):
 
 
 class SubtopicEvidenceRow(Base):
-    """One section that supports a proposed subtopic, with what it showed.
+    """One chunk that supports a proposed subtopic, with what it showed.
 
     This is the traceability record for curriculum proposal: every subtopic the
-    system invents must point back at real sections of real books. Without it a
+    system invents must point back at real text of real books. Without it a
     proposed subtopic is an assertion the professor cannot check.
+
+    ``section_id`` is legacy: evidence written before chunks names a section and no chunk.
     """
 
     __tablename__ = "subtopic_evidence"
@@ -525,15 +527,18 @@ class SubtopicEvidenceRow(Base):
         ForeignKey("subtopics.id", ondelete="CASCADE"), index=True
     )
     book_id: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
-    section_id: Mapped[int] = mapped_column(
-        ForeignKey("book_sections.id", ondelete="CASCADE"), index=True
+    section_id: Mapped[int | None] = mapped_column(
+        ForeignKey("book_sections.id", ondelete="CASCADE"), default=None, index=True
+    )
+    chunk_id: Mapped[str | None] = mapped_column(
+        ForeignKey("chunks.id", ondelete="CASCADE"), default=None, index=True
     )
 
-    #: The label this section's own analysis used, before normalisation.
+    #: The label this chunk's own analysis used, before normalisation.
     candidate_label: Mapped[str] = mapped_column(String(300))
-    #: What the section actually teaches, in the analysis's words.
+    #: What the chunk actually teaches, in the analysis's words.
     definition: Mapped[str | None] = mapped_column(Text, default=None)
-    #: Short representative excerpts drawn from the section.
+    #: Short representative excerpts drawn from the chunk.
     quotes: Mapped[list[str]] = mapped_column("quotes_json", JsonList, default=list, nullable=True)
     #: Denormalised one-line citation, so listing evidence needs no extra joins.
     citation: Mapped[str] = mapped_column(String(1000), default="")
@@ -541,7 +546,7 @@ class SubtopicEvidenceRow(Base):
 
     subtopic: Mapped[SubtopicRow] = relationship(back_populates="evidence")
     book: Mapped[BookRow] = relationship()
-    section: Mapped[BookSectionRow] = relationship()
+    chunk: Mapped[ChunkRow | None] = relationship()
 
 
 class QuestionRow(TimestampMixin, Base):

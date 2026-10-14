@@ -20,7 +20,6 @@ from app.domain.enums import Difficulty, QuestionKind, QuestionStatus, QuestionT
 from app.domain.questions import Question
 from app.generation.schemas import build_content, prompt_fields_from_draft, response_model_for
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 from app.question_types import get_type, implemented_types
 from app.question_types.equation_response import EquationResponseDraft
@@ -151,10 +150,8 @@ def test_a_lone_symbol_answer_is_not_counted_as_given_away() -> None:
 # --- generation (fake LLM) -----------------------------------------------------------------------
 
 
-def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+def _seed(session: Session, settings: Any) -> tuple[object, object, object, str]:
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json",
         data=(
@@ -167,19 +164,19 @@ def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]
         version,
         version.topics[0],
         version.topics[0].subtopics[0],
-        book.chapters[0].sections[0].id,
+        book.chunks[0].id,
     )
 
 
 def test_a_fake_llm_draft_is_generated_stored_and_validated(session: Session, settings) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
     client = MetricJudgeClient(draft=_draft(topic_id=topic.id, subtopic_ids=[subtopic.id]))
 
-    (row,) = GenerationService(session, client=client).generate_for_sections(
+    (row,) = GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.EQUATION_RESPONSE,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
 
     stored = QuestionRepository(session).get(row.id)

@@ -215,9 +215,9 @@ class BookRepository:
         self._session.delete(book)
         self._session.flush()
 
-    def section_ids(self, book_id: int) -> list[int]:
-        """Every section id belonging to one book, for reference counting."""
-        stmt = select(BookSectionRow.id).where(BookSectionRow.book_id == book_id)
+    def chunk_ids(self, book_id: int) -> list[str]:
+        """Every chunk id of every version of one book, for reference counting."""
+        stmt = select(ChunkRow.id).where(ChunkRow.book_id == book_id)
         return list(self._session.scalars(stmt))
 
 
@@ -399,7 +399,7 @@ class ChunkRepository:
             chunk.ordinal = ordinal
             chunk.id = make_chunk_id(book.id, version, ordinal, chunk.text)
             chunk.content_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
-        self._session.add_all(chunks)
+        book.chunks.extend(chunks)
         book.current_version = version
         self._session.flush()
         return version
@@ -503,7 +503,7 @@ class CurriculumRepository:
             .options(
                 joinedload(SubtopicRow.topic),
                 selectinload(SubtopicRow.evidence).joinedload(SubtopicEvidenceRow.book),
-                selectinload(SubtopicRow.evidence).joinedload(SubtopicEvidenceRow.section),
+                selectinload(SubtopicRow.evidence).joinedload(SubtopicEvidenceRow.chunk),
             )
             .where(SubtopicRow.id == subtopic_id)
         )
@@ -714,14 +714,14 @@ NOT_REVIEWABLE_STATUSES = (QuestionStatus.VALIDATION_FAILED,)
 _IN_BANK = or_(QuestionRow.audit.is_(False), QuestionRow.status == QuestionStatus.APPROVED)
 
 
-def _spec_sections(spec: object) -> set[int]:
-    """The section ids a stored ``QuestionSpec`` names, tolerating older rows."""
+def _spec_chunks(spec: object) -> set[str]:
+    """The chunk ids a stored ``QuestionSpec`` names; none for a pre-chunk question."""
     if not isinstance(spec, dict):
         return set()
-    section_ids = spec.get("source_section_ids")
-    if not isinstance(section_ids, list):
+    chunk_ids = spec.get("source_chunk_ids")
+    if not isinstance(chunk_ids, list):
         return set()
-    return {item for item in section_ids if isinstance(item, int)}
+    return {item for item in chunk_ids if isinstance(item, str)}
 
 
 class QuestionRepository:
@@ -767,25 +767,25 @@ class QuestionRepository:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return self._session.scalar(stmt) or 0
 
-    def count_grounded_in_sections(self, section_ids: Collection[int]) -> int:
-        """How many questions were generated from any of these sections.
+    def count_grounded_in_chunks(self, chunk_ids: Collection[str]) -> int:
+        """How many questions were generated from any of these chunks.
 
         A question records its grounding inside the frozen ``QuestionSpec`` it was
         generated from, not as a foreign key, so this reads specs rather than
-        joining. Deleting those sections therefore would not delete the questions:
+        joining. Deleting those chunks therefore would not delete the questions:
         it would leave their citation pointing at nothing, which is exactly what
         the caller needs to warn about before it happens.
         """
-        wanted = set(section_ids)
+        wanted = set(chunk_ids)
         if not wanted:
             return 0
         stmt = select(QuestionRow.spec).where(QuestionRow.spec.is_not(None))
-        return sum(1 for spec in self._session.scalars(stmt) if wanted & _spec_sections(spec))
+        return sum(1 for spec in self._session.scalars(stmt) if wanted & _spec_chunks(spec))
 
     def count_for_curriculum_version(self, version_id: int) -> int:
         """Questions whose grounding names this curriculum version.
 
-        A plain column read, unlike :meth:`count_grounded_in_sections`: a
+        A plain column read, unlike :meth:`count_grounded_in_chunks`: a
         question's curriculum version *is* a column, even though nothing enforces
         it. Deleting the version leaves this integer pointing at nothing.
         """
@@ -820,7 +820,7 @@ class QuestionRepository:
         statuses: Collection[QuestionStatus] | None = None,
         curriculum_version_id: int | None = None,
         topic_ids: Collection[int] | None = None,
-        section_id: int | None = None,
+        chunk_id: str | None = None,
         run_id: str | None = None,
         course_id: int | None = None,
     ) -> list[QuestionRow]:
@@ -838,10 +838,10 @@ class QuestionRepository:
         through :class:`QuestionEvaluationRow`, the only place a run id is
         stored, rather than a direct column on the question.
 
-        ``section_id`` narrows to questions grounded in that one section. Like
-        :meth:`count_grounded_in_sections`, this reads the frozen spec rather than
+        ``chunk_id`` narrows to questions grounded in that one chunk. Like
+        :meth:`count_grounded_in_chunks`, this reads the frozen spec rather than
         a foreign key, so it is applied by scanning candidates in Python after the
-        other filters and before ``limit`` is taken -- a section rarely produces
+        other filters and before ``limit`` is taken -- a chunk rarely produces
         more than a handful of questions, so this stays cheap in practice.
         """
         stmt = (
@@ -865,10 +865,10 @@ class QuestionRepository:
                     )
                 )
             )
-        if section_id is not None:
+        if chunk_id is not None:
             rows = []
             for row in self._session.scalars(stmt):
-                if section_id not in _spec_sections(row.spec):
+                if chunk_id not in _spec_chunks(row.spec):
                     continue
                 rows.append(row)
                 if len(rows) >= limit:
@@ -1066,19 +1066,18 @@ class QuestionRepository:
         )
         return list(self._session.scalars(stmt))
 
-    def count_by_source_section(self) -> dict[int, int]:
-        """How many questions each source section has already produced.
+    def count_by_source_chunk(self) -> dict[str, int]:
+        """How many questions each source chunk has already produced.
 
-        Read in Python rather than in SQL because the section ids live inside a
+        Read in Python rather than in SQL because the chunk ids live inside a
         JSON column, and SQLite's JSON support is not worth depending on for a
         count this small. The frozen spec is authoritative; ``content`` is the
-        fallback for a row stored before a spec was persisted, so an early
-        question still reports against the section it actually came from.
+        fallback for a row stored without one.
         """
-        counts: dict[int, int] = {}
+        counts: dict[str, int] = {}
         for row in self._session.scalars(select(QuestionRow)):
-            for section_id in _source_section_ids(row):
-                counts[section_id] = counts.get(section_id, 0) + 1
+            for chunk_id in source_chunk_ids(row):
+                counts[chunk_id] = counts.get(chunk_id, 0) + 1
         return counts
 
     def add(self, question: QuestionRow) -> QuestionRow:
@@ -1087,19 +1086,22 @@ class QuestionRepository:
         return question
 
 
-def _source_section_ids(row: QuestionRow) -> list[int]:
-    """The section ids one question was generated from, or an empty list."""
+def source_chunk_ids(row: QuestionRow) -> list[str]:
+    """The chunk ids one question was generated from, or an empty list.
+
+    Empty for a question generated from a section, before chunks existed (Task 7).
+    """
     spec = row.spec or {}
-    ids = spec.get("source_section_ids")
+    ids = spec.get("source_chunk_ids")
     if isinstance(ids, list):
-        return [section_id for section_id in ids if isinstance(section_id, int)]
+        return [chunk_id for chunk_id in ids if isinstance(chunk_id, str)]
     sources = (row.content or {}).get("sources")
     if not isinstance(sources, list):
         return []
     return [
-        source["section_id"]
+        source["chunk_id"]
         for source in sources
-        if isinstance(source, dict) and isinstance(source.get("section_id"), int)
+        if isinstance(source, dict) and isinstance(source.get("chunk_id"), str)
     ]
 
 

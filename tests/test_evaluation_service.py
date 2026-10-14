@@ -22,7 +22,6 @@ from app.errors import LLMRequestError, MalformedModelOutputError
 from app.evaluation.prompts import build_user_prompt
 from app.evaluation.schema import MetricStatus, PedagogicalEvalStatus
 from app.evaluation.service import JUDGE_MAX_ATTEMPTS, PedagogicalJudge, build_judge_context
-from app.ingestion import BookImportService
 
 TAXONOMY = (
     b'{"schema_version":"1","label":"Python","topics":['
@@ -34,14 +33,12 @@ TAXONOMY = (
 
 
 def _seed_question(session: Session, settings: Any) -> Question:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
     session.commit()
-    section = book.chapters[0].sections[0]
+    chunk = book.chunks[0]
     topic = version.topics[0]
     return Question(
         id=1,
@@ -56,13 +53,13 @@ def _seed_question(session: Session, settings: Any) -> Question:
             "prompt": "What is printed?",
             "code": "print(3)",
             "expected_output": "3",
-            "sources": [{"section_id": section.id, "citation": "x"}],
+            "sources": [{"chunk_id": chunk.id, "citation": "x"}],
         },
         spec={
             "curriculum_version_id": version.id,
             "question_type": "output_prediction",
             "difficulty": "easy",
-            "source_section_ids": [section.id],
+            "source_chunk_ids": [chunk.id],
         },
     )
 

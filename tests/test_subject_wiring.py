@@ -24,7 +24,6 @@ from app.generation.base import BaseQuestionGenerator
 from app.generation.principles import COMMON_SYSTEM, common_system
 from app.generation.schemas import MultipleChoiceDraft
 from app.generation.spec import build_question_spec
-from app.ingestion import BookImportService
 from app.persistence.models import CourseRow, MemoryGuidelineRow
 from app.persistence.repositories import JudgePromptRepository
 from app.subjects import PYTHON_PROFILE, profile_for, profile_for_course_id
@@ -67,21 +66,19 @@ def _course(session: Session, subject: str | None, types: list[str] | None) -> i
 
 
 def _generate(session: Session, settings, course_id: int | None) -> tuple[Recorder, Question]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.think_python()), course_id=course_id
-    )
+    book = docs.chunked_book(session, docs.think_python(), course_id=course_id)
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY, course_id=course_id
     )
     session.commit()
     topic = version.topics[0]
-    section_id = book.chapters[0].sections[0].id
+    chunk_id = book.chunks[0].id
     spec = build_question_spec(
         session,
         curriculum_version_id=version.id,
         question_type=QuestionType.MULTIPLE_CHOICE,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
     client = Recorder(
         draft=MultipleChoiceDraft(

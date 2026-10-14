@@ -7,25 +7,25 @@ from sqlalchemy.orm import Session
 from app.domain.enums import CurriculumStatus
 from app.domain.questions import Question, QuestionCheck
 from app.errors import NotFoundError
-from app.persistence.repositories import BookStructureRepository, CurriculumRepository
+from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.validation.report import make_check
 
 
-def _source_section_ids(question: Question) -> set[int]:
-    """Collect integer section ids from the frozen request and generated content."""
-    section_ids: set[int] = set()
+def _source_chunk_ids(question: Question) -> set[str]:
+    """Collect chunk ids from the frozen request and generated content."""
+    chunk_ids: set[str] = set()
     if question.spec is not None:
-        source_section_ids = question.spec.get("source_section_ids")
-        if isinstance(source_section_ids, list):
-            section_ids.update(value for value in source_section_ids if type(value) is int)
+        source_chunk_ids = question.spec.get("source_chunk_ids")
+        if isinstance(source_chunk_ids, list):
+            chunk_ids.update(value for value in source_chunk_ids if isinstance(value, str))
 
     if question.content is not None:
         sources = question.content.get("sources")
         if isinstance(sources, list):
             for source in sources:
-                if isinstance(source, dict) and type(source.get("section_id")) is int:
-                    section_ids.add(source["section_id"])
-    return section_ids
+                if isinstance(source, dict) and isinstance(source.get("chunk_id"), str):
+                    chunk_ids.add(source["chunk_id"])
+    return chunk_ids
 
 
 def _has_approved_taxonomy_ids(question: Question, session: Session | None) -> bool:
@@ -54,18 +54,15 @@ def _has_approved_taxonomy_ids(question: Question, session: Session | None) -> b
     return all(subtopic_id in owned for subtopic_id in question.subtopic_ids)
 
 
-def _has_existing_source_sections(question: Question, session: Session | None) -> bool:
-    """Return whether every declared source section exists."""
-    section_ids = _source_section_ids(question)
-    if session is None or not section_ids:
+def _has_existing_source_chunks(question: Question, session: Session | None) -> bool:
+    """Return whether every declared source chunk exists, in any book version.
+
+    A question generated from a section, before chunks existed, names none and fails.
+    """
+    chunk_ids = _source_chunk_ids(question)
+    if session is None or not chunk_ids:
         return False
-    repository = BookStructureRepository(session)
-    try:
-        for section_id in section_ids:
-            repository.get_section(section_id)
-    except NotFoundError:
-        return False
-    return True
+    return len(ChunkRepository(session).get_many(chunk_ids)) == len(chunk_ids)
 
 
 def _claim_check(question: Question) -> QuestionCheck | None:
@@ -106,7 +103,7 @@ def _claim_check(question: Question) -> QuestionCheck | None:
 def check_shared(question: Question, session: Session | None) -> list[QuestionCheck]:
     """Check required curriculum, source, type, and difficulty grounding."""
     taxonomy_ids_valid = _has_approved_taxonomy_ids(question, session)
-    source_sections_valid = _has_existing_source_sections(question, session)
+    source_chunks_valid = _has_existing_source_chunks(question, session)
     question_type_valid = question.question_type is not None
 
     checks = [
@@ -120,12 +117,12 @@ def check_shared(question: Question, session: Session | None) -> list[QuestionCh
             ),
         ),
         make_check(
-            "source_section_ids",
-            source_sections_valid,
+            "source_chunk_ids",
+            source_chunks_valid,
             (
-                "Source section IDs exist"
-                if source_sections_valid
-                else "Source section IDs are missing or do not exist."
+                "Source chunks exist"
+                if source_chunks_valid
+                else "Source chunk IDs are missing or do not exist."
             ),
         ),
         make_check(

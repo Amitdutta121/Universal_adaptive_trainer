@@ -34,7 +34,6 @@ from app.evaluation.schema import MetricResult, evaluation_from_metrics
 from app.feedback import submit_review
 from app.generation import rounds as rounds_module
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
-from app.ingestion import BookImportService
 from app.memory import SOURCE_AUDIT
 from app.persistence.models import (
     CurriculumVersionRow,
@@ -43,8 +42,8 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
-from app.persistence.repositories import BookStructureRepository, QuestionRepository
-from app.retrieval import SectionEmbeddingStore
+from app.persistence.repositories import QuestionRepository
+from app.retrieval.chunks import ChunkEmbeddingStore
 
 
 @pytest.fixture(autouse=True)
@@ -65,9 +64,7 @@ def _book(session: Session, settings: Settings):
         "title": "Audit Book",
         "chapters": [{"sections": [{"text": text} for text in sections]}],
     }
-    book = BookImportService(session, settings).import_upload(
-        filename="audit_book.json", data=docs.to_bytes(doc)
-    )
+    book = docs.chunked_book(session, doc)
     session.commit()
     return book
 
@@ -95,14 +92,13 @@ def env(session: Session, settings: Settings) -> SimpleNamespace:
     )
     session.add_all([while_loops, slicing])
     session.commit()
-    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
+    ChunkEmbeddingStore(session, KeywordEmbedder()).backfill()
     session.commit()
-    sections = BookStructureRepository(session).sections_in_book(book.id)
     return SimpleNamespace(
         version=version,
         while_loops=while_loops,
         slicing=slicing,
-        sections=sections,
+        chunks=list(book.chunks),
         book=book,
     )
 

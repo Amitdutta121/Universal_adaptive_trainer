@@ -56,7 +56,6 @@ from app.generation.rounds import (
 )
 from app.generation.schemas import MultipleChoiceDraft
 from app.generation.spec import QuestionSpec
-from app.ingestion import BookImportService
 from app.persistence.models import (
     CurriculumVersionRow,
     CustomJudgeRow,
@@ -70,8 +69,8 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
-from app.persistence.repositories import BookStructureRepository, GenerationRoundRepository
-from app.retrieval import SectionEmbeddingStore
+from app.persistence.repositories import GenerationRoundRepository
+from app.retrieval.chunks import ChunkEmbeddingStore
 from app.retrieval.examples import EXAMPLE_PAIR_THRESHOLD
 from app.styles import QuestionStyle
 from app.web.routes.api.coverage import get_generation_client
@@ -127,9 +126,7 @@ def _book(session: Session, settings: Settings):
         "title": "Round Book",
         "chapters": [{"sections": [{"text": text} for text in sections]}],
     }
-    book = BookImportService(session, settings).import_upload(
-        filename="round_book.json", data=docs.to_bytes(doc)
-    )
+    book = docs.chunked_book(session, doc)
     session.commit()
     return book
 
@@ -157,14 +154,13 @@ def env(session: Session, settings: Settings) -> SimpleNamespace:
     )
     session.add_all([while_loops, slicing])
     session.commit()
-    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
+    ChunkEmbeddingStore(session, KeywordEmbedder()).backfill()
     session.commit()
-    sections = BookStructureRepository(session).sections_in_book(book.id)
     return SimpleNamespace(
         version=version,
         while_loops=while_loops,
         slicing=slicing,
-        sections=sections,
+        chunks=list(book.chunks),
         book=book,
     )
 
@@ -534,13 +530,13 @@ def test_section_only_generation_keeps_its_spec_and_prompt() -> None:
         curriculum_version_id=1,
         question_type=QuestionType.MULTIPLE_CHOICE,
         difficulty=Difficulty.EASY,
-        source_section_ids=[3],
+        source_chunk_ids=["c3"],
     )
     assert spec.stored() == {
         "curriculum_version_id": 1,
         "question_type": "multiple_choice",
         "difficulty": "easy",
-        "source_section_ids": [3],
+        "source_chunk_ids": ["c3"],
         "seed": None,
     }
     _, plain = build_prompt(spec, section_text="text", citation="c", taxonomy="t")
@@ -706,7 +702,7 @@ def test_run_round_reports_progress_and_examples(
     )
     questions = _round_questions(engine, row.id)
     assert len(questions) == 2
-    assert {q.spec["source_section_ids"][0] for q in questions} == {env.sections[0].id}
+    assert {q.spec["source_chunk_ids"][0] for q in questions} == {env.chunks[0].id}
 
     # A second run of the same round is a no-op.
     _run(engine, row.id, client)
@@ -720,7 +716,7 @@ def test_without_an_embedder_a_target_is_grounded_in_its_evidence(
         SubtopicEvidenceRow(
             subtopic_id=env.while_loops.id,
             book_id=env.book.id,
-            section_id=env.sections[1].id,
+            chunk_id=env.chunks[1].id,
             candidate_label="while",
         )
     )
@@ -739,7 +735,7 @@ def test_without_an_embedder_a_target_is_grounded_in_its_evidence(
     )
 
     (question,) = _round_questions(engine, row.id)
-    assert question.spec["source_section_ids"] == [env.sections[1].id]
+    assert question.spec["source_chunk_ids"] == [env.chunks[1].id]
 
 
 def test_a_round_that_cannot_reach_a_model_ends_failed_with_a_reason(
@@ -1347,7 +1343,7 @@ def _examples(session: Session, env: SimpleNamespace, embedder: object = None) -
         env.version.id,
         (env.while_loops.id, Difficulty.MEDIUM),
         MCQ,
-        section_id=env.sections[0].id,
+        chunk_id=env.chunks[0].id,
         embedder=embedder,  # type: ignore[arg-type]
     )
 
@@ -1558,7 +1554,7 @@ def test_the_replay_script_reports_both_methods(session: Session, env: SimpleNam
         (env.while_loops, "Which loop repeats while?", MCQ),
     ):
         row = _approved(session, env, subtopic, prompt, question_type=kind)
-        row.content = {"sources": [{"section_id": env.sections[0].id}]}
+        row.content = {"sources": [{"chunk_id": env.chunks[0].id}]}
         session.add(ProfessorReviewRow(question_id=row.id, decision=ReviewDecision.APPROVE))
         session.commit()
 

@@ -39,7 +39,6 @@ from app.evaluation.batch_service import (
 )
 from app.evaluation.prompts import RUBRIC_VERSION
 from app.evaluation.schema import RESPONSE_MODEL_FOR, PedagogicalEvalStatus
-from app.ingestion import BookImportService
 from app.llm import batch as batch_transport
 from app.llm.batch import BatchJobState, build_custom_id, parse_custom_id
 from app.persistence.models import QuestionRow
@@ -210,14 +209,12 @@ def _seed_bank(
     unvalidated: int = 1,
 ) -> dict[str, list[int]]:
     """Create a question bank spanning every validation outcome."""
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
     session.commit()
-    section = book.chapters[0].sections[0]
+    chunk = book.chunks[0]
     topic = version.topics[0]
     subtopic = topic.subtopics[0]
 
@@ -246,13 +243,13 @@ def _seed_bank(
                 "prompt": "What is printed?",
                 "code": "print(3)",
                 "expected_output": "3",
-                "sources": [{"section_id": section.id, "citation": "x"}],
+                "sources": [{"chunk_id": chunk.id, "citation": "x"}],
             },
             spec={
                 "curriculum_version_id": version.id,
                 "question_type": "output_prediction",
                 "difficulty": "easy",
-                "source_section_ids": [section.id],
+                "source_chunk_ids": [chunk.id],
             },
         )
         session.add(row)
@@ -743,14 +740,14 @@ def test_generation_records_its_evaluation_into_history(session: Session, settin
     from app.generation.service import GenerationService
     from tests.test_generation_base import _debugging_draft, _seed
 
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
 
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
-    rows = GenerationService(session, client=client).generate_for_sections(
+    rows = GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
 
     history = QuestionEvaluationRepository(session).list_for_question(rows[0].id)
@@ -766,13 +763,13 @@ def test_generated_questions_need_no_backfill(session: Session, settings: Any) -
     from app.generation.service import GenerationService
     from tests.test_generation_base import _debugging_draft, _seed
 
-    version, topic, subtopic, section_ids = _seed(session, settings)
+    version, topic, subtopic, chunk_ids = _seed(session, settings)
     client = MetricJudgeClient(draft=_debugging_draft(topic.id, [subtopic.id]))
-    GenerationService(session, client=client).generate_for_sections(
+    GenerationService(session, client=client).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.DEBUGGING,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_ids[0]],
+        source_chunk_ids=[chunk_ids[0]],
     )
 
     assert backfill_generation_history(session) == 0

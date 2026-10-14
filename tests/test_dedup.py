@@ -12,10 +12,11 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+import book_documents as docs
 from llm_fakes import MetricJudgeClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_coverage import KeywordEmbedder, SubtopicRow, _gen_book, _gen_taxonomy, _mcq
+from test_coverage import KeywordEmbedder, SubtopicRow, _gen_taxonomy, _mcq
 
 from app.config import Settings
 from app.domain.enums import Difficulty, QuestionStatus, RejectionReason, ReviewDecision
@@ -26,7 +27,7 @@ from app.persistence.models import (
     QuestionRow,
     QuestionSimilarityRow,
 )
-from app.retrieval import SectionEmbeddingStore
+from app.retrieval.chunks import ChunkEmbeddingStore
 from app.retrieval.duplicates import (
     DUPLICATE_THRESHOLD,
     EXACT_MATCH_MODEL,
@@ -155,9 +156,19 @@ class _FlaggingRaisesEmbedder(KeywordEmbedder):
 def test_a_flagging_failure_never_fails_the_generation_run(
     session: Session, settings: Settings
 ) -> None:
-    book = _gen_book(session, settings)
+    sections = [
+        "A while loop repeats while a condition holds. Use a while loop to loop again.",
+        "A string can be sliced. Take a slice of a string. string slice string.",
+        "A variable is a name that refers to a value. variable variable.",
+    ]
+    book = docs.chunked_book(
+        session,
+        {"title": "Gen Book", "chapters": [{"sections": [{"text": t} for t in sections]}]},
+    )
+    session.commit()
     env = _gen_taxonomy(session, book.id)
-    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
+    # The flagging embedder fails on any batch, so the chunks are embedded up front.
+    ChunkEmbeddingStore(session, KeywordEmbedder()).backfill()
     session.commit()
 
     topic_id = session.get(SubtopicRow, env.while_loops.id).topic_id

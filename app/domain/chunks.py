@@ -66,6 +66,13 @@ class Chunk(BaseModel):
     def location_label(self) -> str | None:
         return page_range_label(self.page_start, self.page_end)
 
+    @property
+    def label(self) -> str:
+        """A short name for lists: the nearest heading, else the pages, else the position."""
+        if self.heading_path:
+            return self.heading_path[-1]
+        return self.location_label or f"Chunk {self.ordinal + 1}"
+
     def citation(self) -> str:
         """``Book, 4. Repetitions > 4.4. Nested Loops (Page 33)``.
 

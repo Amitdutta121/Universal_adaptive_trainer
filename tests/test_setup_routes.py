@@ -120,9 +120,7 @@ def test_suggest_errors_map_to_api_errors(
     assert "error" in failed.json()
 
 
-def test_suggest_without_a_configured_model_says_so(
-    http: TestClient, session: Session
-) -> None:
+def test_suggest_without_a_configured_model_says_so(http: TestClient, session: Session) -> None:
     version, _ = make_taxonomy(session)
     response = http.post("/api/setup/suggest", json={"curriculum_version_id": version.id})
     assert response.status_code == 500, response.text

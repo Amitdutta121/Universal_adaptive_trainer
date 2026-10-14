@@ -17,7 +17,6 @@ from app.config import Settings
 from app.coverage.schema import MIN_QUESTIONS_PER_CELL
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionType
 from app.errors import DomainRuleError, FeatureNotAvailableError, NotFoundError
-from app.ingestion import BookImportService
 from app.persistence.models import (
     CourseRow,
     CurriculumVersionRow,
@@ -25,7 +24,6 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
-from app.persistence.repositories import BookStructureRepository
 from app.styles import MAX_CELL_TARGET, MIN_CELL_TARGET, get_library, suggest_setup
 from app.styles.python import PYTHON_STYLES
 
@@ -313,16 +311,13 @@ def test_the_suggester_sees_the_lesson_and_keeps_hard_at_zero(
             {"sections": [{"text": "A name holds one value. Assigning again replaces that value."}]}
         ],
     }
-    book = BookImportService(session, settings).import_upload(
-        filename="one_idea.json", data=docs.to_bytes(doc)
-    )
+    book = docs.chunked_book(session, doc)
     session.commit()
-    section = BookStructureRepository(session).sections_in_book(book.id)[0]
     session.add(
         SubtopicEvidenceRow(
             subtopic_id=while_loops.id,
             book_id=book.id,
-            section_id=section.id,
+            chunk_id=book.chunks[0].id,
             candidate_label="assignment",
         )
     )

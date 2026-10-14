@@ -1,4 +1,4 @@
-"""Question endpoints: generate section-grounded questions and read them back.
+"""Question endpoints: generate chunk-grounded questions and read them back.
 
 Generation always names an approved curriculum version; there is no path that
 lets a caller invent taxonomy ids (ADR-001). Which generator ran is explicit and
@@ -21,7 +21,7 @@ from fastapi import APIRouter, Query, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.domain.books import BookSection
+from app.domain.chunks import Chunk, page_range_label
 from app.domain.enums import Difficulty, JobKind, JudgeMetricId, QuestionStatus
 from app.errors import DomainRuleError, InvalidQuestionSpecError, NotFoundError
 from app.evaluation import (
@@ -48,23 +48,24 @@ from app.web.routes.api.deps import (
     CourseScope,
     DbSession,
     book_in_course,
+    chunks_in_course,
     ensure_in_course,
     ensure_question_types_allowed,
     question_in_course,
-    sections_in_course,
     version_in_course,
 )
 from app.web.routes.api.schemas import (
     BatchPlanResponse,
     BatchPlanTotals,
     BookSummary,
+    ChunkSummary,
     GenerateBatchRequest,
     GenerateBatchResponse,
     GenerateQuestionsRequest,
     GenerateQuestionsResponse,
     GenerationPlanChapter,
+    GenerationPlanChunk,
     GenerationPlanResponse,
-    GenerationPlanSection,
     GenerationPlanTotals,
     JobStartedResponse,
     PersonalizationEvidence,
@@ -78,7 +79,6 @@ from app.web.routes.api.schemas import (
     ReviewOut,
     ReviewQueueMode,
     ReviewQueueResponse,
-    SectionSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,13 +94,13 @@ def list_questions(
     status: Annotated[list[QuestionStatus] | None, Query()] = None,
     curriculum_version_id: int | None = None,
     topic_id: Annotated[list[int] | None, Query()] = None,
-    section_id: int | None = None,
+    chunk_id: str | None = None,
     run_id: str | None = None,
 ) -> QuestionListResponse:
     """The question bank, newest first, with counts by lifecycle status.
 
     ``status`` and ``topic_id`` (each repeatable: ``?status=a&status=b`` keeps
-    either), ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
+    either), ``curriculum_version_id``, ``chunk_id`` and ``run_id`` narrow the
     listing; without them nothing is hidden. The API does not filter by
     default even though the page does, because a caller reading the bank over
     JSON has no way to discover rows an unrequested default removed.
@@ -108,18 +108,18 @@ def list_questions(
     describe the whole bank, so a filtered listing still says how much it is
     showing of what.
     """
-    # Another course's taxonomy or section is a 404, not an empty page (ADR-060).
+    # Another course's taxonomy or chunk is a 404, not an empty page (ADR-060).
     if curriculum_version_id is not None and course is not None:
         version_in_course(session, curriculum_version_id, course)
-    if section_id is not None:
-        sections_in_course(session, [section_id], course)
+    if chunk_id is not None:
+        chunks_in_course(session, [chunk_id], course)
     repo = QuestionRepository(session)
     rows = repo.list_recent(
         limit=limit,
         statuses=status or None,
         curriculum_version_id=curriculum_version_id,
         topic_ids=topic_id or None,
-        section_id=section_id,
+        chunk_id=chunk_id,
         run_id=run_id,
         course_id=course,
     )
@@ -144,38 +144,38 @@ def list_questions(
 def generate_questions(
     session: DbSession, course: CourseScope, payload: GenerateQuestionsRequest
 ) -> GenerateQuestionsResponse:
-    """Generate and persist one question per selected source section.
+    """Generate and persist one question per selected source chunk.
 
     Every spec is validated before the first model call, so an invalid id later
     in the list cannot leave a partially generated batch behind.
     """
-    if payload.all_sections_of_book and payload.book_id is None:
+    if payload.all_chunks_of_book and payload.book_id is None:
         raise InvalidQuestionSpecError(
             "Generating from a whole book needs a book id.",
-            detail="Set book_id, or list section_ids instead.",
+            detail="Set book_id, or list chunk_ids instead.",
         )
-    if not payload.all_sections_of_book and not payload.section_ids:
+    if not payload.all_chunks_of_book and not payload.chunk_ids:
         raise InvalidQuestionSpecError(
-            "No source sections were selected.",
-            detail="Provide section_ids, or set all_sections_of_book with a book_id.",
+            "No source chunks were selected.",
+            detail="Provide chunk_ids, or set all_chunks_of_book with a book_id.",
         )
     ensure_question_types_allowed(session, course, [payload.question_type.value])
     if payload.curriculum_version_id is not None:
         version_in_course(session, payload.curriculum_version_id, course)
     if payload.book_id is not None:
         book_in_course(session, payload.book_id, course)
-    sections_in_course(session, payload.section_ids or [], course)
+    chunks_in_course(session, payload.chunk_ids or [], course)
     # Resolved before the service is built so that a missing curriculum reports
     # the fixable problem rather than an LLM-configuration error raised first.
     curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
 
     try:
-        generated = GenerationService(session).generate_for_sections(
+        generated = GenerationService(session).generate_for_chunks(
             curriculum_version_id=curriculum_version_id,
             question_type=payload.question_type,
             difficulty=payload.difficulty,
-            source_section_ids=None if payload.all_sections_of_book else payload.section_ids,
-            book_id=payload.book_id if payload.all_sections_of_book else None,
+            source_chunk_ids=None if payload.all_chunks_of_book else payload.chunk_ids,
+            book_id=payload.book_id if payload.all_chunks_of_book else None,
             seed=payload.seed,
         )
     except Exception:
@@ -237,7 +237,7 @@ def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
     return BatchPlanResponse(
         planned=[PlannedQuestionOut.from_planned(question) for question in planned],
         totals=BatchPlanTotals(
-            chunks_specified=len({question.section_id for question in planned}),
+            chunks_specified=len({question.chunk_id for question in planned}),
             questions_to_create=len(planned),
             generation_calls=len(planned),
             judge_calls=len(planned) * len(JudgeMetricId),
@@ -262,7 +262,7 @@ def generate_batch(
 
     One chunk may produce several questions, at several difficulties, in several
     formats — which is what separates this from ``/generate``, where a run carries
-    one difficulty and one format for every section in it.
+    one difficulty and one format for every chunk in it.
 
     Each question costs one generation call plus one judge call per metric, made in
     sequence, so a sheet can take minutes. Everything that can be refused is checked
@@ -275,7 +275,7 @@ def generate_batch(
     )
     if payload.curriculum_version_id is not None:
         version_in_course(session, payload.curriculum_version_id, course)
-    sections_in_course(session, [chunk.section_id for chunk in chunks], course)
+    chunks_in_course(session, [chunk.chunk_id for chunk in chunks], course)
     # Compiled before the job is queued so an unusable sheet reports the fixable
     # problem now, not as a failed job later.
     planned = compile_chunk_requests(chunks)
@@ -385,63 +385,57 @@ def generation_plan(
     session: DbSession,
     course: CourseScope,
     book_id: int,
-    section_ids: Annotated[list[int] | None, Query()] = None,
-    all_sections: bool = False,
+    chunk_ids: Annotated[list[str] | None, Query()] = None,
+    all_chunks: bool = False,
 ) -> GenerationPlanResponse:
     """What generating from this selection would produce, before it runs.
 
-    Read-only and free: it makes no model call, so a professor can price a run
-    and revise it as often as they like. The arithmetic lives here rather than in
-    the template because the page is only one client of it (ADR-027).
+    Every chunk of the book's current version, grouped by its top-level heading. Read-only
+    and free: it makes no model call, so a professor can price a run and revise it as often
+    as they like. The arithmetic lives here rather than in the template because the page is
+    only one client of it (ADR-027).
     """
     book = BookRepository(session).get(book_id)
     ensure_in_course(book.course_id, course, f"Book {book_id}")
-    chapters = SourceRetrieval(session).chapters_in_book(book_id)
-    already_generated = QuestionRepository(session).count_by_source_section()
-    chosen = set(section_ids or [])
+    chunks = SourceRetrieval(session).chunks_in_book(book_id)
+    already_generated = QuestionRepository(session).count_by_source_chunk()
+    chosen = set(chunk_ids or [])
 
-    plan_chapters: list[GenerationPlanChapter] = []
-    selected_sections: list[BookSection] = []
-    for chapter in chapters:
-        entries = []
-        for section in chapter.sections:
-            selected = all_sections or (section.id in chosen)
-            if selected:
-                selected_sections.append(section)
-            entries.append(
-                GenerationPlanSection(
-                    section=SectionSummary.from_section(section),
-                    existing_question_count=already_generated.get(section.id or 0, 0),
-                    selected=selected,
-                    selectable=not section.is_empty,
-                )
-            )
-        plan_chapters.append(
-            GenerationPlanChapter(
-                id=chapter.id or 0,
-                label=chapter.display_title(),
-                location_label=chapter.location_label,
-                sections=entries,
-            )
+    groups: dict[str, list[Chunk]] = {}
+    for chunk in chunks:
+        groups.setdefault(chunk.heading_path[0] if chunk.heading_path else book.title, []).append(
+            chunk
         )
+    selected_chunks = [chunk for chunk in chunks if all_chunks or chunk.id in chosen]
+    plan_chapters = [
+        GenerationPlanChapter(
+            id=index,
+            label=label,
+            location_label=page_range_label(members[0].page_start, members[-1].page_end),
+            chunks=[
+                GenerationPlanChunk(
+                    chunk=ChunkSummary.from_chunk(chunk),
+                    existing_question_count=already_generated.get(chunk.id, 0),
+                    selected=all_chunks or chunk.id in chosen,
+                )
+                for chunk in members
+            ],
+        )
+        for index, (label, members) in enumerate(groups.items())
+    ]
 
-    count = len(selected_sections)
+    count = len(selected_chunks)
     return GenerationPlanResponse(
         book=BookSummary.from_row(book),
         chapters=plan_chapters,
         totals=GenerationPlanTotals(
-            sections_available=sum(len(chapter.sections) for chapter in chapters),
-            sections_selected=count,
+            chunks_available=len(chunks),
+            chunks_selected=count,
             questions_to_create=count,
             generation_calls=count,
             judge_calls=count * len(JudgeMetricId),
-            source_chars=sum(section.char_count for section in selected_sections),
+            source_chars=sum(len(chunk.text) for chunk in selected_chunks),
         ),
-        blockers=[
-            f"{section.display_title()} has no text to generate from."
-            for section in selected_sections
-            if section.is_empty
-        ],
     )
 
 
@@ -614,9 +608,7 @@ def personalization_evidence(question: QuestionRow) -> PersonalizationEvidence |
     )
 
 
-def _borderline_notes(
-    question: QuestionRow, evaluation: PedagogicalEvaluation | None
-) -> list[str]:
+def _borderline_notes(question: QuestionRow, evaluation: PedagogicalEvaluation | None) -> list[str]:
     spec = question.spec if isinstance(question.spec, dict) else {}
     try:
         requested = Difficulty(spec.get("difficulty") or question.difficulty)
@@ -625,6 +617,4 @@ def _borderline_notes(
     target = question.target_subtopic_id
     if target is None:
         return []
-    return borderline_notes(
-        evaluation, requested_difficulty=requested, target_subtopic_id=target
-    )
+    return borderline_notes(evaluation, requested_difficulty=requested, target_subtopic_id=target)

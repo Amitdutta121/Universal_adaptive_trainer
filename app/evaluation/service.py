@@ -46,7 +46,7 @@ JUDGE_MAX_ATTEMPTS = 3
 
 
 def build_judge_context(session: Session, question: Question) -> JudgeContext:
-    """Gather the question, its cited sections and the approved taxonomy.
+    """Gather the question, its cited chunks and the approved taxonomy.
 
     Shared by the synchronous judges below and by the bulk re-run in
     :mod:`app.evaluation.batch_service` (ADR-030). The batch path builds its own
@@ -69,15 +69,9 @@ def build_judge_context(session: Session, question: Question) -> JudgeContext:
         "content": content,
     }
     sources = []
-    for section_id in _source_section_ids(question):
-        section = retrieval.get_section(section_id)
-        sources.append(
-            {
-                "section_id": section_id,
-                "citation": retrieval.section_source(section_id).citation(),
-                "text": section.text,
-            }
-        )
+    for chunk_id in _source_chunk_ids(question):
+        chunk = retrieval.get_chunk(chunk_id)
+        sources.append({"chunk_id": chunk_id, "citation": chunk.citation(), "text": chunk.text})
 
     version = CurriculumRepository(session).get_with_tree(question.curriculum_version_id)
     taxonomy = [
@@ -187,9 +181,7 @@ class PedagogicalJudge:
                 snapshot_id = current.id if current is not None else None
             self._panels[profile.personal_key] = (
                 resolve_system_prompts(self._session, profile=profile),
-                effective_rubric_version(
-                    self._session, profile=profile, snapshot_id=snapshot_id
-                ),
+                effective_rubric_version(self._session, profile=profile, snapshot_id=snapshot_id),
             )
         return self._panels[profile.personal_key]
 
@@ -216,9 +208,7 @@ class PedagogicalJudge:
                 expected=panel,
             )
 
-        metrics = [
-            self._run_metric(metric, context, question, prompts[metric]) for metric in panel
-        ]
+        metrics = [self._run_metric(metric, context, question, prompts[metric]) for metric in panel]
         return evaluation_from_metrics(
             metrics,
             question_id=question.id,
@@ -315,21 +305,21 @@ class PedagogicalJudge:
         )
 
 
-def _source_section_ids(question: Question) -> list[int]:
-    """Collect unique source ids in frozen-request order, then content order."""
-    section_ids: list[int] = []
+def _source_chunk_ids(question: Question) -> list[str]:
+    """Collect unique source chunk ids in frozen-request order, then content order."""
+    chunk_ids: list[str] = []
     for payload, key in (
-        (question.spec or {}, "source_section_ids"),
+        (question.spec or {}, "source_chunk_ids"),
         (question.content or {}, "sources"),
     ):
         values = payload.get(key)
         if key == "sources" and isinstance(values, list):
-            values = [source.get("section_id") for source in values if isinstance(source, dict)]
+            values = [source.get("chunk_id") for source in values if isinstance(source, dict)]
         if isinstance(values, list):
             for value in values:
-                if type(value) is int and value not in section_ids:
-                    section_ids.append(value)
-    return section_ids
+                if isinstance(value, str) and value not in chunk_ids:
+                    chunk_ids.append(value)
+    return chunk_ids
 
 
 def _error_detail(exc: Exception) -> str:
