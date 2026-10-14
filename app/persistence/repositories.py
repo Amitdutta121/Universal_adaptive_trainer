@@ -7,6 +7,7 @@ here rather than in routes or services.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections import Counter
 from collections.abc import Collection
@@ -17,6 +18,7 @@ from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.assessment.catalog import LEGACY_SUBJECT
+from app.domain.chunks import make_chunk_id
 from app.domain.enums import (
     BookStatus,
     CurriculumItemStatus,
@@ -34,6 +36,7 @@ from app.persistence.models import (
     BookChapterRow,
     BookRow,
     BookSectionRow,
+    ChunkRow,
     CourseRow,
     CurriculumVersionRow,
     CustomJudgeRow,
@@ -295,6 +298,111 @@ class BookStructureRepository:
         book.chapters.extend(chapters)
         book.sections.extend(sections)
         self._session.flush()
+
+
+class ChunkRepository:
+    """A book's chunks (:mod:`app.domain.chunks`).
+
+    Listing reads the book's ``current_version`` unless a version is named; getting by id
+    reads any version, so an id stored on a question or frozen set always resolves.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, chunk_id: str) -> ChunkRow:
+        """One chunk, with its book loaded for citation.
+
+        Raises:
+            NotFoundError: if no such chunk exists.
+        """
+        stmt = select(ChunkRow).options(joinedload(ChunkRow.book)).where(ChunkRow.id == chunk_id)
+        row = self._session.scalars(stmt).first()
+        if row is None:
+            raise NotFoundError(f"Chunk {chunk_id} does not exist.")
+        return row
+
+    def get_many(self, chunk_ids: Collection[str]) -> dict[str, ChunkRow]:
+        """The chunks among ``chunk_ids`` that exist, by id."""
+        if not chunk_ids:
+            return {}
+        stmt = (
+            select(ChunkRow)
+            .options(joinedload(ChunkRow.book))
+            .where(ChunkRow.id.in_(list(chunk_ids)))
+        )
+        return {row.id: row for row in self._session.scalars(stmt)}
+
+    def list_for_book(
+        self, book_id: int, *, version: int | None = None, page: int | None = None
+    ) -> list[ChunkRow]:
+        """A book version's chunks in reading order; with ``page``, only those covering it.
+
+        ``version`` defaults to the book's current one. A book with no chunks yet (imported
+        before chunks existed) lists nothing.
+        """
+        if version is None:
+            version = self._session.scalar(
+                select(BookRow.current_version).where(BookRow.id == book_id)
+            )
+            if version is None:
+                return []
+        stmt = (
+            select(ChunkRow)
+            .options(joinedload(ChunkRow.book))
+            .where(ChunkRow.book_id == book_id, ChunkRow.book_version == version)
+            .order_by(ChunkRow.ordinal)
+        )
+        if page is not None:
+            stmt = stmt.where(
+                ChunkRow.page_start <= page,
+                func.coalesce(ChunkRow.page_end, ChunkRow.page_start) >= page,
+            )
+        return list(self._session.scalars(stmt))
+
+    def current_ids(self, book_ids: Collection[int] | None = None) -> Select[tuple[str]]:
+        """A select of the ids of every current-version chunk, optionally in some books."""
+        stmt = select(ChunkRow.id).join(
+            BookRow,
+            (BookRow.id == ChunkRow.book_id) & (BookRow.current_version == ChunkRow.book_version),
+        )
+        if book_ids is not None:
+            stmt = stmt.where(ChunkRow.book_id.in_(list(book_ids)))
+        return stmt
+
+    def count(self, book_id: int) -> int:
+        """How many chunks the book's current version has."""
+        stmt = (
+            select(func.count())
+            .select_from(ChunkRow)
+            .join(BookRow, BookRow.id == ChunkRow.book_id)
+            .where(ChunkRow.book_id == book_id, ChunkRow.book_version == BookRow.current_version)
+        )
+        return self._session.scalar(stmt) or 0
+
+    def add_version(self, book: BookRow, chunks: list[ChunkRow]) -> int:
+        """Write ``chunks`` (in reading order) as the book's next version and make it current.
+
+        Fills in each chunk's book, version, ordinal, id and content hash; the caller sets
+        only the text, pages and heading path.
+
+        Returns:
+            The new version number.
+        """
+        latest = self._session.scalar(
+            select(func.max(ChunkRow.book_version)).where(ChunkRow.book_id == book.id)
+        )
+        version = (latest or 0) + 1
+        for ordinal, chunk in enumerate(chunks):
+            chunk.book_id = book.id
+            chunk.book_version = version
+            chunk.ordinal = ordinal
+            chunk.id = make_chunk_id(book.id, version, ordinal, chunk.text)
+            chunk.content_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+        self._session.add_all(chunks)
+        book.current_version = version
+        self._session.flush()
+        return version
 
 
 def _visible(*rows: type[TopicRow] | type[SubtopicRow]) -> list[ColumnElement[bool]]:

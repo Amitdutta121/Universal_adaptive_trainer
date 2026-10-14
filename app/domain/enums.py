@@ -35,6 +35,13 @@ class SourceFormat(StrEnum):
     BOOK_PDF = "book_pdf"
 
 
+class ChunkSourceKind(StrEnum):
+    """Where a chunk's text came from: a book page range, or a timed stretch of video."""
+
+    BOOK = "book"
+    VIDEO = "video"
+
+
 class StructureSource(StrEnum):
     """How a chapter or section boundary was determined.
 

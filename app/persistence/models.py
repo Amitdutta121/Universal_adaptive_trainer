@@ -38,6 +38,7 @@ from app.domain.books import ExtractionWarning
 from app.domain.enums import (
     BookStatus,
     CalibrationLabel,
+    ChunkSourceKind,
     ConceptConfidence,
     CurriculumItemStatus,
     CurriculumStatus,
@@ -199,6 +200,10 @@ class BookRow(TimestampMixin, Base):
         "warnings_json", PydanticList(ExtractionWarning), default=list, nullable=True
     )
     imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: The chunk version retrieval and listings read. ``None`` for a book imported before
+    #: chunks existed, which has sections only. Older versions' chunks are kept, never
+    #: rewritten, so ids stored on questions and frozen sets keep resolving.
+    current_version: Mapped[int | None] = mapped_column(Integer, default=None)
 
     chapters: Mapped[list[BookChapterRow]] = relationship(
         back_populates="book",
@@ -212,6 +217,44 @@ class BookRow(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="BookSectionRow.position",
     )
+    chunks: Mapped[list[ChunkRow]] = relationship(
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="(ChunkRow.book_version, ChunkRow.ordinal)",
+    )
+
+
+class ChunkRow(Base):
+    """One chunk of a book version: the unit retrieval, generation and citations use.
+
+    Immutable once written (see :mod:`app.domain.chunks`). ``id`` is
+    :func:`~app.domain.chunks.make_chunk_id`; ``content_hash`` is the SHA-256 of ``text``.
+    Page numbers are nullable because a DOCX has none.
+    """
+
+    __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("book_id", "book_version", "ordinal"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    book_version: Mapped[int] = mapped_column(Integer)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    page_start: Mapped[int | None] = mapped_column(Integer, default=None)
+    page_end: Mapped[int | None] = mapped_column(Integer, default=None)
+    heading_path: Mapped[list[str]] = mapped_column(
+        "heading_path_json", JsonList, default=list, nullable=True
+    )
+    text: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    source_kind: Mapped[ChunkSourceKind] = mapped_column(
+        StrEnumType(ChunkSourceKind, 16), default=ChunkSourceKind.BOOK
+    )
+    #: Set for a video chunk only (Phase 7).
+    start_seconds: Mapped[float | None] = mapped_column(Float, default=None)
+    end_seconds: Mapped[float | None] = mapped_column(Float, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    book: Mapped[BookRow] = relationship(back_populates="chunks")
 
 
 class BookChapterRow(Base):
