@@ -56,8 +56,11 @@ export const qk = {
     list: () => ["books", "list"] as const,
     detail: (bookId: number) => ["books", "detail", bookId] as const,
     guide: () => ["books", "document-guide"] as const,
-    section: (bookId: number, sectionId: number) =>
-      ["books", "section", bookId, sectionId] as const,
+  },
+  chunks: {
+    all: ["chunks"] as const,
+    detail: (chunkId: string) => ["chunks", "detail", chunkId] as const,
+    book: (bookId: number, page: number | null) => ["chunks", "book", bookId, page] as const,
   },
   curriculum: {
     all: ["curriculum"] as const,
@@ -361,7 +364,7 @@ type QuestionListParams = {
   curriculum_version_id?: number;
   /** Any of these topics, repeated like `status`. */
   topic_id?: number[];
-  section_id?: number;
+  chunk_id?: string;
   run_id?: string;
 };
 
@@ -374,10 +377,10 @@ export const questionsQuery = (params: QuestionListParams) =>
 export const useQuestions = (params: QuestionListParams) => useQuery(questionsQuery(params));
 
 /** Every question already generated from one chunk, newest first. */
-export const useQuestionsForSection = (sectionId: number | null) =>
+export const useQuestionsForChunk = (chunkId: string | null) =>
   useQuery({
-    ...questionsQuery({ section_id: sectionId ?? 0, limit: 50 }),
-    enabled: sectionId !== null,
+    ...questionsQuery({ chunk_id: chunkId ?? "", limit: 50 }),
+    enabled: chunkId !== null,
   });
 
 export const useQuestion = (id: number | null, { enabled = true } = {}) =>
@@ -472,18 +475,33 @@ export function useGenerationPlans(bookIds: readonly number[]) {
 }
 
 /** One chunk's full text and its citation, fetched only when it is being read. */
-export const useSection = (
-  bookId: number | null,
-  sectionId: number | null,
-  { enabled = true } = {},
-) =>
+export const useChunk = (chunkId: string | null, { enabled = true } = {}) =>
   useQuery({
-    queryKey: qk.books.section(bookId ?? 0, sectionId ?? 0),
-    enabled: enabled && bookId !== null && sectionId !== null,
+    queryKey: qk.chunks.detail(chunkId ?? ""),
+    enabled: enabled && chunkId !== null,
     queryFn: () =>
       unwrap(
-        api.GET("/api/books/{book_id}/sections/{section_id}", {
-          params: { path: { book_id: bookId as number, section_id: sectionId as number } },
+        api.GET("/api/chunks/{chunk_id}", {
+          params: { path: { chunk_id: chunkId as string } },
+        }),
+      ),
+  });
+
+/**
+ * A book's current chunks, in reading order; with `page`, only the chunks covering that page.
+ *
+ * The page form is what follows the PDF as it scrolls, so the previous page's chunks stay on
+ * screen while the next page's load.
+ */
+export const useBookChunks = (bookId: number | null, page: number | null = null) =>
+  useQuery({
+    queryKey: qk.chunks.book(bookId ?? 0, page),
+    enabled: bookId !== null,
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/chunks", {
+          params: { query: { book_id: bookId as number, page: page ?? undefined } },
         }),
       ),
   });

@@ -93,7 +93,7 @@ export function SheetToolbar({
           <Select
             value={filters.chapterId === null ? "all" : String(filters.chapterId)}
             onValueChange={(value) =>
-              onFilterChange({ chapterId: value === "all" ? null : Number(value) })
+              onFilterChange({ chapterId: value === "all" ? null : value })
             }
           >
             <SelectTrigger className="h-9 w-full border-border/80 bg-background/85" size="sm">

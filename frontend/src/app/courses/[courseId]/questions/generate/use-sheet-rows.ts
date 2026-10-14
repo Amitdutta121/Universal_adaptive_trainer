@@ -15,14 +15,14 @@ import type { BookSummary, SheetRow } from "./spec-sheet-types";
 
 export interface SheetFilters {
   bookId: number | null;
-  chapterId: number | null;
+  chapterId: string | null;
   /** "any" | "none" — chunks that have produced no question yet. */
   produced: "any" | "none";
   search: string;
 }
 
 export interface SheetChapter {
-  id: number;
+  id: string;
   label: string;
   bookTitle: string;
 }
@@ -59,20 +59,20 @@ export function useSheetRows(filters: SheetFilters): SheetRowsApi {
     () =>
       plans.plans.flatMap((plan) =>
         plan.chapters.flatMap((chapter) =>
-          chapter.sections.map((entry) => ({
-            sectionId: entry.section.id,
+          chapter.chunks.map((entry) => ({
+            chunkId: entry.chunk.id,
             bookId: plan.book.id,
             bookTitle: plan.book.title,
-            chapterId: chapter.id,
+            chapterId: `${plan.book.id}:${chapter.id}`,
             chapterLabel: chapter.label,
-            title: entry.section.display_title,
-            locationLabel: entry.section.location_label,
-            charCount: entry.section.char_count,
-            startPage: entry.section.start_page,
-            endPage: entry.section.end_page,
+            title: entry.chunk.label,
+            locationLabel: entry.chunk.location_label,
+            charCount: entry.chunk.char_count,
+            startPage: entry.chunk.page_start,
+            endPage: entry.chunk.page_end,
             existingQuestionCount: entry.existing_question_count,
-            selectable: entry.selectable,
-            isUnlabelled: entry.section.is_unlabelled,
+            selectable: entry.chunk.char_count > 0,
+            isUnlabelled: entry.chunk.heading_path.length === 0,
           })),
         ),
       ),
@@ -80,7 +80,7 @@ export function useSheetRows(filters: SheetFilters): SheetRowsApi {
   );
 
   const chapters = useMemo<SheetChapter[]>(() => {
-    const seen = new Map<number, SheetChapter>();
+    const seen = new Map<string, SheetChapter>();
     for (const row of allRows) {
       if (!seen.has(row.chapterId)) {
         seen.set(row.chapterId, {

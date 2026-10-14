@@ -40,7 +40,7 @@ const INITIAL_DEFAULT_FORMATS: QuestionType[] = ["multiple_choice"];
 
 export function GenerateScreen() {
   const [bookId, setBookId] = useQueryState("book", parseAsInteger);
-  const [chapterId, setChapterId] = useQueryState("chapter", parseAsInteger);
+  const [chapterId, setChapterId] = useQueryState("chapter", parseAsString);
   const [produced, setProduced] = useQueryState(
     "produced",
     parseAsStringLiteral(PRODUCED_FILTERS).withDefault("any"),
@@ -210,11 +210,11 @@ export function GenerateScreen() {
               specFor={specs.specFor}
               defaultFormats={defaultFormats}
               selectedIds={specs.selectedIds}
-              readingSectionId={reading?.sectionId ?? null}
+              readingChunkId={reading?.chunkId ?? null}
               onToggleSelected={specs.toggleSelected}
               onSelectAllVisible={(selected) =>
                 specs.selectMany(
-                  sheet.rows.map((row) => row.sectionId),
+                  sheet.rows.map((row) => row.chunkId),
                   selected,
                 )
               }

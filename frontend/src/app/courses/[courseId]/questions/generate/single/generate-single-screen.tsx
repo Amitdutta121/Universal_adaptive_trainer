@@ -11,7 +11,7 @@
  * are the outline tree, the PDF pane and the type/difficulty picker.
  */
 
-import { parseAsInteger, parseAsStringLiteral, useQueryState } from "nuqs";
+import { parseAsInteger, parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
@@ -29,19 +29,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useApprovedCurriculum, useGenerateQuestions, useSection } from "@/lib/api/queries";
+import { useApprovedCurriculum, useGenerateQuestions } from "@/lib/api/queries";
 import { DIFFICULTIES, QUESTION_TYPES } from "../spec-sheet-types";
 import { useCourseQuestionTypes } from "../use-course-question-types";
 import { type SheetFilters, useSheetRows } from "../use-sheet-rows";
 import { GenerateControls } from "./components/generate-controls";
 import { OutlinePanel } from "./components/outline-panel";
+import { PageChunks } from "./components/page-chunks";
 import { PdfPageViewer } from "./components/pdf-page-viewer";
 import { QuestionReview } from "./components/question-review";
 import { QuestionsForChunk } from "./components/questions-for-chunk";
 
 export function GenerateSingleScreen() {
   const [bookId, setBookId] = useQueryState("book", parseAsInteger);
-  const [sectionId, setSectionId] = useQueryState("section", parseAsInteger);
+  const [chunkId, setChunkId] = useQueryState("chunk", parseAsString);
+  // The PDF page in view; `null` until the reader scrolls (or for a book with no PDF).
+  const [visiblePage, setVisiblePage] = useState<number | null>(null);
   const [type, setType] = useQueryState(
     "type",
     parseAsStringLiteral(QUESTION_TYPES).withDefault("multiple_choice"),
@@ -112,25 +115,23 @@ export function GenerateSingleScreen() {
   }, [bookId, sheet.books, setBookId]);
 
   const selectedRow = useMemo(
-    () => sheet.allRows.find((row) => row.sectionId === sectionId) ?? null,
-    [sheet.allRows, sectionId],
+    () => sheet.allRows.find((row) => row.chunkId === chunkId) ?? null,
+    [sheet.allRows, chunkId],
   );
 
-  // A stale section id (wrong book, filtered out) points at nothing — drop it.
+  // A stale chunk id (wrong book, an older version, filtered out) points at nothing — drop it.
   useEffect(() => {
-    if (!sheet.isPending && sectionId !== null && !selectedRow) {
-      void setSectionId(null);
+    if (!sheet.isPending && chunkId !== null && !selectedRow) {
+      void setChunkId(null);
     }
-  }, [sheet.isPending, sectionId, selectedRow, setSectionId]);
-
-  const sectionDetail = useSection(bookId, sectionId, { enabled: selectedRow !== null });
+  }, [sheet.isPending, chunkId, selectedRow, setChunkId]);
 
   // The one path that changes which chunk is "current", whether it was a click
   // on the outline or the PDF pane scrolling a new chunk into view — either way
   // a question open from the previous chunk no longer applies.
-  const selectSection = (id: number) => {
+  const selectChunk = (id: string) => {
     setQuestionId(null);
-    void setSectionId(id);
+    void setChunkId(id);
   };
 
   const runGenerate = () => {
@@ -141,8 +142,8 @@ export function GenerateSingleScreen() {
         curriculum_version_id: approvedCurriculum.data?.version.id ?? null,
         question_type: type,
         difficulty,
-        section_ids: [selectedRow.sectionId],
-        all_sections_of_book: false,
+        chunk_ids: [selectedRow.chunkId],
+        all_chunks_of_book: false,
       },
       {
         onSuccess: (response) => {
@@ -157,13 +158,14 @@ export function GenerateSingleScreen() {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <PageHeader
         title="Generate questions"
-        summary="One chunk, one question at a time — pick a section, choose a type and difficulty, review, and give feedback right here."
+        summary="One chunk, one question at a time — scroll to a page or pick a chunk, choose a type and difficulty, review, and give feedback right here."
         actions={
           <Select
             value={bookId === null ? "" : String(bookId)}
             onValueChange={(value) => {
               void setBookId(value ? Number(value) : null);
-              void setSectionId(null);
+              void setChunkId(null);
+              setVisiblePage(null);
               setQuestionId(null);
             }}
           >
@@ -194,8 +196,8 @@ export function GenerateSingleScreen() {
             <OutlinePanel
               chapters={sheet.chapters}
               rows={sheet.rows}
-              selectedSectionId={sectionId}
-              onSelect={selectSection}
+              selectedChunkId={chunkId}
+              onSelect={selectChunk}
               search={search}
               onSearchChange={setSearch}
               produced={produced}
@@ -212,8 +214,9 @@ export function GenerateSingleScreen() {
               <PdfPageViewer
                 bookId={bookId}
                 rows={sheet.allRows}
-                selectedSectionId={sectionId}
-                onVisibleSectionChange={selectSection}
+                selectedChunkId={chunkId}
+                onVisibleChunkChange={selectChunk}
+                onVisiblePageChange={setVisiblePage}
               />
             </div>
             {/* biome-ignore lint/a11y/useSemanticElements: an interactive splitter, not a static <hr> divider */}
@@ -249,19 +252,15 @@ export function GenerateSingleScreen() {
             >
               <div className="h-1 w-12 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
             </div>
-            {selectedRow && sectionDetail.data ? (
-              <details className="shrink-0 rounded-[1rem] border p-3">
-                <summary className="cursor-pointer font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
-                  Source text — {selectedRow.title}
-                </summary>
-                <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-6">
-                  {sectionDetail.data.text}
-                </p>
-              </details>
-            ) : null}
+            <PageChunks
+              bookId={bookId}
+              page={visiblePage}
+              selectedChunkId={chunkId}
+              onSelect={selectChunk}
+            />
             <div className="h-64 shrink-0">
               <QuestionsForChunk
-                sectionId={sectionId}
+                chunkId={chunkId}
                 openQuestionId={questionId}
                 onOpen={setQuestionId}
               />
@@ -287,7 +286,7 @@ export function GenerateSingleScreen() {
             ) : (
               <EmptyState
                 title="Pick a chunk"
-                hint="Scroll the PDF or select a section from the outline to generate from."
+                hint="Scroll the PDF or pick a chunk from the outline to generate from."
               />
             )}
 

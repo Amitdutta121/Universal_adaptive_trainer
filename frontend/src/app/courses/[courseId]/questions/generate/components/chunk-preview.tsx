@@ -3,7 +3,7 @@
 /**
  * The chunk being read, under the sheet.
  *
- * Section text is stored verbatim and may open with an indented code listing, so
+ * Chunk text is stored as parsed and may open with an indented code listing, so
  * it is rendered in a pre-wrapped block: collapsing that whitespace would destroy
  * the listing. Nothing here is editable — this is the evidence for the decision
  * being made one row above.
@@ -14,14 +14,11 @@ import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSection } from "@/lib/api/queries";
+import { useChunk } from "@/lib/api/queries";
 import type { SheetRow } from "../spec-sheet-types";
 
 export function ChunkPreview({ row, onClose }: { row: SheetRow | null; onClose: () => void }) {
-  const { data, isPending, isError, error } = useSection(
-    row?.bookId ?? null,
-    row?.sectionId ?? null,
-  );
+  const { data, isPending, isError, error } = useChunk(row?.chunkId ?? null);
 
   if (!row) {
     return (

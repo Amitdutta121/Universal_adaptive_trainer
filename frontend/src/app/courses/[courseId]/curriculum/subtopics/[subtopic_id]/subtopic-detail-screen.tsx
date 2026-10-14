@@ -8,7 +8,7 @@
  *
  * The ADR-021 gate applies more sharply here than anywhere else, and this screen
  * departs from the Jinja page deliberately. `curriculum_subtopic.html` keeps a
- * "Supporting sections" panel for an uploaded taxonomy and fills it with
+ * "Supporting passages" panel for an uploaded taxonomy and fills it with
  * "Uploaded taxonomies do not include textbook evidence". A heading naming a
  * property, above a body denying it, still frames the subtopic as a thing that
  * could have had evidence. So for an upload those cards are absent, and the
@@ -184,19 +184,24 @@ export function SubtopicDetailScreen({ subtopicId }: { subtopicId: number }) {
       {!fromUpload ? (
         <Card>
           <CardHeader>
-            <CardTitle>Supporting sections</CardTitle>
+            <CardTitle>Supporting passages</CardTitle>
           </CardHeader>
           <CardContent>
             {evidence.length > 0 ? (
               <ol className="space-y-4">
                 {evidence.map((item) => (
                   <li key={item.id} className="rounded-lg border p-3">
-                    <CourseLink
-                      href={`/books/${item.book_id}/sections/${item.section_id}`}
-                      className="font-medium text-sm hover:underline"
-                    >
-                      {item.citation}
-                    </CourseLink>
+                    {item.chunk_id ? (
+                      <CourseLink
+                        href={`/books/${item.book_id}/chunks/${item.chunk_id}`}
+                        className="font-medium text-sm hover:underline"
+                      >
+                        {item.citation}
+                      </CourseLink>
+                    ) : (
+                      // Evidence from before chunks names a section, which has no page any more.
+                      <span className="font-medium text-sm">{item.citation}</span>
+                    )}
                     <p className="mt-1 text-sm">
                       <span className="text-muted-foreground">Called here: </span>
                       {item.candidate_label}
@@ -219,7 +224,7 @@ export function SubtopicDetailScreen({ subtopicId }: { subtopicId: number }) {
               </ol>
             ) : (
               <p className="text-muted-foreground text-sm">
-                No supporting sections were recorded for this subtopic.
+                No supporting passages were recorded for this subtopic.
               </p>
             )}
           </CardContent>

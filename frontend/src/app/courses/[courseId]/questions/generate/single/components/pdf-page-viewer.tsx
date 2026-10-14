@@ -15,7 +15,7 @@
  * reports it upward so the outline can auto-follow the scroll. Selecting a
  * row from the outline is the same relationship in reverse: this component
  * jumps its scroll position to that row's first page whenever
- * `selectedSectionId` changes to a value it didn't already imply.
+ * `selectedChunkId` changes to a value it didn't already imply.
  */
 
 import { Maximize2, Minimize2 } from "lucide-react";
@@ -52,7 +52,7 @@ function clampZoom(value: number): number {
 }
 
 interface PageAnchor {
-  sectionId: number;
+  chunkId: string;
   startPage: number;
 }
 
@@ -60,7 +60,7 @@ interface PageAnchor {
 function buildAnchors(rows: readonly SheetRow[]): PageAnchor[] {
   return rows
     .filter((row): row is SheetRow & { startPage: number } => row.startPage !== null)
-    .map((row) => ({ sectionId: row.sectionId, startPage: row.startPage }))
+    .map((row) => ({ chunkId: row.chunkId, startPage: row.startPage }))
     .sort((a, b) => a.startPage - b.startPage);
 }
 
@@ -74,29 +74,32 @@ function buildAnchors(rows: readonly SheetRow[]): PageAnchor[] {
  * startPage `<= page` picks the chunk whose heading actually opens the page,
  * not whichever happened to sort last.
  */
-function sectionForPage(anchors: readonly PageAnchor[], page: number): number | null {
-  let found: number | null = null;
+function chunkForPage(anchors: readonly PageAnchor[], page: number): string | null {
+  let found: string | null = null;
   let bestStartPage = Number.NEGATIVE_INFINITY;
   for (const anchor of anchors) {
     if (anchor.startPage > page) break;
     if (anchor.startPage > bestStartPage) {
       bestStartPage = anchor.startPage;
-      found = anchor.sectionId;
+      found = anchor.chunkId;
     }
   }
-  return found ?? anchors[0]?.sectionId ?? null;
+  return found ?? anchors[0]?.chunkId ?? null;
 }
 
 export function PdfPageViewer({
   bookId,
   rows,
-  selectedSectionId,
-  onVisibleSectionChange,
+  selectedChunkId,
+  onVisibleChunkChange,
+  onVisiblePageChange,
 }: {
   bookId: number;
   rows: readonly SheetRow[];
-  selectedSectionId: number | null;
-  onVisibleSectionChange: (sectionId: number) => void;
+  selectedChunkId: string | null;
+  onVisibleChunkChange: (chunkId: string) => void;
+  /** The page the reader scrolled to, for the chunks-on-this-page panel. */
+  onVisiblePageChange: (page: number) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -129,8 +132,8 @@ export function PdfPageViewer({
   const sourceUrl = useMemo(() => `${API_BASE_URL}/api/books/${bookId}/source`, [bookId]);
   const anchors = useMemo(() => buildAnchors(rows), [rows]);
   const selectedRow = useMemo(
-    () => rows.find((row) => row.sectionId === selectedSectionId) ?? null,
-    [rows, selectedSectionId],
+    () => rows.find((row) => row.chunkId === selectedChunkId) ?? null,
+    [rows, selectedChunkId],
   );
 
   // Native fullscreen on the viewer's own root — no route change, and the
@@ -203,7 +206,7 @@ export function PdfPageViewer({
   }, [numPages]);
 
   // The page in view implies a section; tell the outline, but only on change.
-  // selectedSectionId and onVisibleSectionChange are read, not watched — this
+  // selectedChunkId and onVisibleChunkChange are read, not watched — this
   // fires on scroll, and should not also fire when the outline's own selection
   // changes (that would loop).
   // Only a page the reader actually reached counts: with no document loaded (a JSON book has no
@@ -215,8 +218,9 @@ export function PdfPageViewer({
   useEffect(() => {
     if (numPages === null || reportedPage.current === currentPage) return;
     reportedPage.current = currentPage;
-    const implied = sectionForPage(anchors, currentPage);
-    if (implied !== null && implied !== selectedSectionId) onVisibleSectionChange(implied);
+    onVisiblePageChange(currentPage);
+    const implied = chunkForPage(anchors, currentPage);
+    if (implied !== null && implied !== selectedChunkId) onVisibleChunkChange(implied);
   }, [currentPage, anchors, numPages]);
 
   const scrollToPage = (page: number, behavior: ScrollBehavior = "smooth") => {
@@ -226,7 +230,7 @@ export function PdfPageViewer({
   // A row picked from the outline jumps the scroll here, instantly (a smooth
   // scroll across dozens of pages would fire the observer for every page it
   // passes, fighting this same effect). selectedRow is derived from
-  // selectedSectionId — re-running because selectedRow's identity changed (e.g.
+  // selectedChunkId — re-running because selectedRow's identity changed (e.g.
   // rows reloaded) would re-jump the scroll with nothing the user did.
   // `numPages` is a real dependency, not an incidental one: this effect runs on
   // mount before the document has loaded, when no slot refs exist yet and the
@@ -234,7 +238,7 @@ export function PdfPageViewer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
     if (selectedRow?.startPage) scrollToPage(selectedRow.startPage, "auto");
-  }, [selectedSectionId, numPages]);
+  }, [selectedChunkId, numPages]);
 
   const slots = numPages ? Array.from({ length: numPages }, (_, index) => index + 1) : [];
   const estimatedHeight = pageWidth * (pageAspect ?? FALLBACK_ASPECT);

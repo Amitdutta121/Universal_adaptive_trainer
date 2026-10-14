@@ -34,60 +34,60 @@ export interface FillPattern {
 
 export interface ChunkSpecsApi {
   specs: ChunkSpecMap;
-  selectedIds: ReadonlySet<number>;
+  selectedIds: ReadonlySet<string>;
   /** Rows that ask for at least one question. */
   specifiedCount: number;
-  specFor: (sectionId: number) => ChunkSpec;
-  setCount: (sectionId: number, difficulty: Difficulty, value: number) => void;
-  setFormats: (sectionId: number, formats: QuestionType[] | null) => void;
-  toggleSelected: (sectionId: number) => void;
-  selectMany: (sectionIds: readonly number[], selected: boolean) => void;
+  specFor: (chunkId: string) => ChunkSpec;
+  setCount: (chunkId: string, difficulty: Difficulty, value: number) => void;
+  setFormats: (chunkId: string, formats: QuestionType[] | null) => void;
+  toggleSelected: (chunkId: string) => void;
+  selectMany: (chunkIds: readonly string[], selected: boolean) => void;
   fillSelected: (pattern: FillPattern) => void;
   clearAll: () => void;
 }
 
 export function useChunkSpecs(): ChunkSpecsApi {
   const [specs, setSpecs] = useState<ChunkSpecMap>({});
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
 
   const specFor = useCallback(
-    (sectionId: number): ChunkSpec => specs[sectionId] ?? EMPTY_SPEC,
+    (chunkId: string): ChunkSpec => specs[chunkId] ?? EMPTY_SPEC,
     [specs],
   );
 
-  const setCount = useCallback((sectionId: number, difficulty: Difficulty, value: number) => {
+  const setCount = useCallback((chunkId: string, difficulty: Difficulty, value: number) => {
     setSpecs((current) => {
-      const spec = current[sectionId] ?? EMPTY_SPEC;
-      return { ...current, [sectionId]: { ...spec, [difficulty]: Math.max(0, value) } };
+      const spec = current[chunkId] ?? EMPTY_SPEC;
+      return { ...current, [chunkId]: { ...spec, [difficulty]: Math.max(0, value) } };
     });
   }, []);
 
-  const setFormats = useCallback((sectionId: number, formats: QuestionType[] | null) => {
+  const setFormats = useCallback((chunkId: string, formats: QuestionType[] | null) => {
     setSpecs((current) => {
-      const spec = current[sectionId] ?? EMPTY_SPEC;
+      const spec = current[chunkId] ?? EMPTY_SPEC;
       // An empty override is meaningless — a chunk with no format cannot be
       // generated from — so clearing every format falls back to inheriting.
       return {
         ...current,
-        [sectionId]: { ...spec, formats: formats && formats.length > 0 ? formats : null },
+        [chunkId]: { ...spec, formats: formats && formats.length > 0 ? formats : null },
       };
     });
   }, []);
 
-  const toggleSelected = useCallback((sectionId: number) => {
+  const toggleSelected = useCallback((chunkId: string) => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (!next.delete(sectionId)) next.add(sectionId);
+      if (!next.delete(chunkId)) next.add(chunkId);
       return next;
     });
   }, []);
 
-  const selectMany = useCallback((sectionIds: readonly number[], selected: boolean) => {
+  const selectMany = useCallback((chunkIds: readonly string[], selected: boolean) => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      for (const sectionId of sectionIds) {
-        if (selected) next.add(sectionId);
-        else next.delete(sectionId);
+      for (const chunkId of chunkIds) {
+        if (selected) next.add(chunkId);
+        else next.delete(chunkId);
       }
       return next;
     });
@@ -97,8 +97,8 @@ export function useChunkSpecs(): ChunkSpecsApi {
     (pattern: FillPattern) => {
       setSpecs((current) => {
         const next = { ...current };
-        for (const sectionId of selectedIds) {
-          next[sectionId] = { ...(next[sectionId] ?? EMPTY_SPEC), ...pattern };
+        for (const chunkId of selectedIds) {
+          next[chunkId] = { ...(next[chunkId] ?? EMPTY_SPEC), ...pattern };
         }
         return next;
       });

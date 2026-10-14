@@ -325,6 +325,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Book Version
+         * @description Re-import a book's file as its next chunk version, as a background job.
+         *
+         *     The same file again changes nothing. A changed one adds a version and makes it
+         *     current; the earlier version's chunks stay, so questions citing them still resolve.
+         */
+        post: operations["import_book_version_api_books__book_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/document-guide": {
         parameters: {
             query?: never;
@@ -675,7 +698,7 @@ export interface paths {
          * @description The question bank, newest first, with counts by lifecycle status.
          *
          *     ``status`` and ``topic_id`` (each repeatable: ``?status=a&status=b`` keeps
-         *     either), ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow the
+         *     either), ``curriculum_version_id``, ``chunk_id`` and ``run_id`` narrow the
          *     listing; without them nothing is hidden. The API does not filter by
          *     default even though the page does, because a caller reading the bank over
          *     JSON has no way to discover rows an unrequested default removed.
@@ -703,7 +726,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Questions
-         * @description Generate and persist one question per selected source section.
+         * @description Generate and persist one question per selected source chunk.
          *
          *     Every spec is validated before the first model call, so an invalid id later
          *     in the list cannot leave a partially generated batch behind.
@@ -780,7 +803,7 @@ export interface paths {
          *
          *     One chunk may produce several questions, at several difficulties, in several
          *     formats — which is what separates this from ``/generate``, where a run carries
-         *     one difficulty and one format for every section in it.
+         *     one difficulty and one format for every chunk in it.
          *
          *     Each question costs one generation call plus one judge call per metric, made in
          *     sequence, so a sheet can take minutes. Everything that can be refused is checked
@@ -805,9 +828,10 @@ export interface paths {
          * Generation Plan
          * @description What generating from this selection would produce, before it runs.
          *
-         *     Read-only and free: it makes no model call, so a professor can price a run
-         *     and revise it as often as they like. The arithmetic lives here rather than in
-         *     the template because the page is only one client of it (ADR-027).
+         *     Every chunk of the book's current version, grouped by its top-level heading. Read-only
+         *     and free: it makes no model call, so a professor can price a run and revise it as often
+         *     as they like. The arithmetic lives here rather than in the template because the page is
+         *     only one client of it (ADR-027).
          */
         get: operations["generation_plan_api_questions_generation_plan_get"];
         put?: never;
@@ -1359,6 +1383,68 @@ export interface paths {
          * @description Rank the course's sections for a query or a subtopic. Exactly one is required.
          */
         get: operations["retrieve_sections_api_retrieval_sections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Chunks
+         * @description A book's current chunks in reading order, or just those covering one page.
+         */
+        get: operations["list_chunks_api_chunks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunks/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Chunks
+         * @description Rank the course's current chunks for a query or a subtopic. Exactly one is required.
+         *
+         *     Embeds any chunk still missing a vector in the configured model first.
+         */
+        get: operations["search_chunks_api_chunks_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunks/{chunk_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Chunk
+         * @description One chunk of any version: its text plus the citation that makes it traceable.
+         */
+        get: operations["get_chunk_api_chunks__chunk_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2283,6 +2369,11 @@ export interface components {
              */
             title: string;
         };
+        /** Body_import_book_version_api_books__book_id__versions_post */
+        Body_import_book_version_api_books__book_id__versions_post: {
+            /** File */
+            file: string;
+        };
         /** Body_import_taxonomy_api_curriculum_versions_post */
         Body_import_taxonomy_api_curriculum_versions_post: {
             /** File */
@@ -2336,6 +2427,13 @@ export interface components {
             section_count: number;
             /** Chapters */
             chapters: components["schemas"]["ChapterOut"][];
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /** Current Version */
+            current_version?: number | null;
             /** Warnings */
             warnings: components["schemas"]["ExtractionWarning"][];
             /**
@@ -2599,8 +2697,8 @@ export interface components {
          *     still two questions.
          */
         ChunkGenerationSpec: {
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             /**
              * Easy
              * @default 0
@@ -2618,6 +2716,61 @@ export interface components {
             hard: number;
             /** Question Types */
             question_types?: components["schemas"]["QuestionType"][];
+        };
+        /** ChunkListResponse */
+        ChunkListResponse: {
+            /** Chunks */
+            chunks: components["schemas"]["ChunkOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ChunkOut
+         * @description One chunk of a book version, with the citation that makes it traceable.
+         */
+        ChunkOut: {
+            /** Id */
+            id: string;
+            /** Book Id */
+            book_id: number;
+            /** Book Version */
+            book_version: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Page Start */
+            page_start: number | null;
+            /** Page End */
+            page_end: number | null;
+            /** Heading Path */
+            heading_path: string[];
+            /** Citation */
+            citation: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ChunkSummary
+         * @description One chunk's identity and location, without its text.
+         */
+        ChunkSummary: {
+            /** Id */
+            id: string;
+            /** Book Id */
+            book_id: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Page Start */
+            page_start: number | null;
+            /** Page End */
+            page_end: number | null;
+            /** Heading Path */
+            heading_path: string[];
+            /** Label */
+            label: string;
+            /** Location Label */
+            location_label: string | null;
+            /** Char Count */
+            char_count: number;
         };
         /**
          * ClaimViolation
@@ -3396,7 +3549,7 @@ export interface components {
          * FailedRunTarget
          * @description A gap target whose generation call reached the provider and failed.
          *
-         *     The section was retrieved and the request was well formed; the model call
+         *     The chunk was retrieved and the request was well formed; the model call
          *     itself did not return a usable question. What the run already produced is
          *     kept (ADR-032), so this is reported beside ``generated`` rather than raised.
          */
@@ -3404,8 +3557,8 @@ export interface components {
             /** Subtopic Id */
             subtopic_id: number;
             difficulty: components["schemas"]["Difficulty"];
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             /** Error */
             error: string;
         };
@@ -3475,10 +3628,10 @@ export interface components {
          * GenerateQuestionsRequest
          * @description A generation request.
          *
-         *     Exactly one source selection is required: either ``section_ids`` or
-         *     ``all_sections_of_book``. One question is generated per resolved section.
+         *     Exactly one source selection is required: either ``chunk_ids`` or
+         *     ``all_chunks_of_book``. One question is generated per resolved chunk.
          *
-         *     No topic or subtopic: the generator reads the section and classifies its own
+         *     No topic or subtopic: the generator reads the chunk and classifies its own
          *     question against the approved taxonomy (ADR-031).
          */
         GenerateQuestionsRequest: {
@@ -3488,13 +3641,13 @@ export interface components {
             difficulty: components["schemas"]["Difficulty"];
             /** Book Id */
             book_id?: number | null;
-            /** Section Ids */
-            section_ids?: number[] | null;
+            /** Chunk Ids */
+            chunk_ids?: string[] | null;
             /**
-             * All Sections Of Book
+             * All Chunks Of Book
              * @default false
              */
-            all_sections_of_book: boolean;
+            all_chunks_of_book: boolean;
             /** Seed */
             seed?: string | null;
         };
@@ -3512,7 +3665,7 @@ export interface components {
          * @description One question a generation run produced, and how its aim landed.
          *
          *     ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
-         *     what the generator classified the question as after reading the section
+         *     what the generator classified the question as after reading the chunk
          *     (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
          *     never used to filter, so a drift is visible in the review queue instead.
          */
@@ -3526,8 +3679,8 @@ export interface components {
             claimed_topic_id: number | null;
             /** Claimed Subtopic Ids */
             claimed_subtopic_ids: number[];
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             status: components["schemas"]["QuestionStatus"];
             /** Aim Matched */
             aim_matched: boolean;
@@ -3571,7 +3724,10 @@ export interface components {
         };
         /**
          * GenerationPlanChapter
-         * @description One chapter, and the candidate sections beneath it.
+         * @description The chunks under one top-level heading, in reading order.
+         *
+         *     ``label`` is the first entry of the chunks' heading path; chunks under no heading
+         *     are grouped under the book's title.
          */
         GenerationPlanChapter: {
             /** Id */
@@ -3580,43 +3736,39 @@ export interface components {
             label: string;
             /** Location Label */
             location_label: string | null;
-            /** Sections */
-            sections: components["schemas"]["GenerationPlanSection"][];
+            /** Chunks */
+            chunks: components["schemas"]["GenerationPlanChunk"][];
+        };
+        /**
+         * GenerationPlanChunk
+         * @description One candidate source chunk, and what generating from it would mean.
+         */
+        GenerationPlanChunk: {
+            chunk: components["schemas"]["ChunkSummary"];
+            /** Existing Question Count */
+            existing_question_count: number;
+            /** Selected */
+            selected: boolean;
         };
         /**
          * GenerationPlanResponse
-         * @description The chunk plan: every candidate section, and the cost of the selection.
+         * @description The chunk plan: every chunk of the book's current version, and the cost.
          */
         GenerationPlanResponse: {
             book: components["schemas"]["BookSummary"];
             /** Chapters */
             chapters: components["schemas"]["GenerationPlanChapter"][];
             totals: components["schemas"]["GenerationPlanTotals"];
-            /** Blockers */
-            blockers: string[];
-        };
-        /**
-         * GenerationPlanSection
-         * @description One candidate source section, and what generating from it would mean.
-         */
-        GenerationPlanSection: {
-            section: components["schemas"]["SectionSummary"];
-            /** Existing Question Count */
-            existing_question_count: number;
-            /** Selected */
-            selected: boolean;
-            /** Selectable */
-            selectable: boolean;
         };
         /**
          * GenerationPlanTotals
          * @description What the selected run costs, before any model call is made.
          */
         GenerationPlanTotals: {
-            /** Sections Available */
-            sections_available: number;
-            /** Sections Selected */
-            sections_selected: number;
+            /** Chunks Available */
+            chunks_available: number;
+            /** Chunks Selected */
+            chunks_selected: number;
             /** Questions To Create */
             questions_to_create: number;
             /** Generation Calls */
@@ -4244,7 +4396,7 @@ export interface components {
             judge_model?: string | null;
             /**
              * Rubric Version
-             * @default question-metrics@1
+             * @default question-metrics@2
              */
             rubric_version: string;
             /**
@@ -4270,8 +4422,8 @@ export interface components {
          * @description One question a compiled run will ask for, in the order it will be asked.
          */
         PlannedQuestionOut: {
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             difficulty: components["schemas"]["Difficulty"];
             question_type: components["schemas"]["QuestionType"];
         };
@@ -4618,10 +4770,7 @@ export interface components {
             audit_metric?: string | null;
             /** Audit Reason */
             audit_reason?: string | null;
-            /**
-             * Solve Flag
-             * @description Other models, answering without the key, disagreed with it on the last attempt.
-             */
+            /** Solve Flag */
             solve_flag?: string | null;
         };
         /**
@@ -4714,6 +4863,28 @@ export interface components {
             resume_token: string;
             /** Set Version Id */
             set_version_id: number;
+        };
+        /**
+         * RetrievedChunkOut
+         * @description One chunk returned by semantic retrieval.
+         */
+        RetrievedChunkOut: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Book Id */
+            book_id: number;
+            /** Book Title */
+            book_title: string;
+            /** Heading Path */
+            heading_path: string[];
+            /** Page Start */
+            page_start: number | null;
+            /** Page End */
+            page_end: number | null;
+            /** Score */
+            score: number;
+            /** Snippet */
+            snippet: string;
         };
         /**
          * RetrievedSectionOut
@@ -5095,7 +5266,7 @@ export interface components {
          *     embedded outline stands in for a hand-authored declaration (ADR-048).
          * @enum {string}
          */
-        SourceFormat: "book_json" | "book_pdf";
+        SourceFormat: "book_json" | "book_pdf" | "book_docx" | "book_pptx";
         /**
          * StartRoundRequest
          * @description ``POST /api/rounds``: generate the next round of a setup.
@@ -5398,8 +5569,10 @@ export interface components {
             id: number;
             /** Book Id */
             book_id: number;
+            /** Chunk Id */
+            chunk_id: string | null;
             /** Section Id */
-            section_id: number;
+            section_id: number | null;
             /** Candidate Label */
             candidate_label: string;
             /** Definition */
@@ -6501,6 +6674,43 @@ export interface operations {
             };
         };
     };
+    import_book_version_api_books__book_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_book_version_api_books__book_id__versions_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStartedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     document_guide_api_books_document_guide_get: {
         parameters: {
             query?: never;
@@ -7167,7 +7377,7 @@ export interface operations {
                 status?: components["schemas"]["QuestionStatus"][] | null;
                 curriculum_version_id?: number | null;
                 topic_id?: number[] | null;
-                section_id?: number | null;
+                chunk_id?: string | null;
                 run_id?: string | null;
             };
             header?: {
@@ -7342,8 +7552,8 @@ export interface operations {
         parameters: {
             query: {
                 book_id: number;
-                section_ids?: number[] | null;
-                all_sections?: boolean;
+                chunk_ids?: string[] | null;
+                all_chunks?: boolean;
             };
             header?: {
                 "X-Course-Id"?: number | null;
@@ -8245,6 +8455,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievedSectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_chunks_api_chunks_get: {
+        parameters: {
+            query: {
+                book_id: number;
+                /** @description Only chunks covering this page. */
+                page?: number | null;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_chunks_api_chunks_search_get: {
+        parameters: {
+            query?: {
+                /** @description Free-text query. */
+                q?: string | null;
+                /** @description Curriculum subtopic; its topic + name + description becomes the query. */
+                subtopic_id?: number | null;
+                /** @description Search this book only. */
+                book_id?: number | null;
+                top_k?: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievedChunkOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_chunk_api_chunks__chunk_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                chunk_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkOut"];
                 };
             };
             /** @description Validation Error */

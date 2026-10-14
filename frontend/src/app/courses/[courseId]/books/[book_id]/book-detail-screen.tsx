@@ -5,7 +5,7 @@
  *
  * A `partial` import is explained rather than badged and left: the document
  * validated, and something in it was incomplete or guessed at. The professor needs
- * to know that before generating questions from these sections.
+ * to know that before generating questions from it.
  */
 
 import { ArrowLeft, BookOpen, Pencil, Trash2 } from "lucide-react";
@@ -26,8 +26,8 @@ import { useCoursePath } from "@/lib/use-course";
 import { authorLabel, BOOK_STATUS_LABEL, BOOK_STATUS_VARIANT, defects } from "../book-display";
 import { BookDeleteDialog } from "../components/book-delete-dialog";
 import { BookEditDialog } from "../components/book-edit-dialog";
+import { BookChunks } from "./components/book-chunks";
 import { BookProvenance } from "./components/book-provenance";
-import { BookStructure } from "./components/book-structure";
 import { WarningList } from "./components/warning-list";
 
 export function BookDetailScreen({ bookId }: { bookId: number }) {
@@ -60,7 +60,7 @@ export function BookDetailScreen({ bookId }: { bookId: number }) {
     );
   }
 
-  const { book, chapters, warnings, section_count, grounded_question_count } = data;
+  const { book, warnings, chunk_count, current_version, grounded_question_count } = data;
   const declaredDefects = defects(warnings);
 
   return (
@@ -69,7 +69,7 @@ export function BookDetailScreen({ bookId }: { bookId: number }) {
         title={book.title}
         summary={[
           authorLabel(book) === "—" ? null : authorLabel(book),
-          pluralise(section_count, "section"),
+          pluralise(chunk_count, "chunk"),
           book.page_count ? `${book.page_count} pages` : null,
           grounded_question_count > 0
             ? `${pluralise(grounded_question_count, "question")} generated from it`
@@ -109,7 +109,7 @@ export function BookDetailScreen({ bookId }: { bookId: number }) {
           <AlertDescription>
             The document validated, but it declares caveats: something was incomplete, or its
             producer guessed at a boundary. Read the warnings below before generating questions from
-            these sections.
+            this book.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -143,15 +143,15 @@ export function BookDetailScreen({ bookId }: { bookId: number }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Structure</CardTitle>
+          <CardTitle>Chunks</CardTitle>
           <CardDescription>
-            Declared by the document. {pluralise(chapters.length, "chapter")},{" "}
-            {pluralise(section_count, "section")} — the section is the unit questions are generated
-            from.
+            {current_version === null
+              ? "Not chunked yet."
+              : `Version ${current_version}: ${pluralise(chunk_count, "chunk")}, each with its pages and the headings above it. The chunk is the unit questions are generated from and cite.`}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <BookStructure bookId={book.id} chapters={chapters} />
+          <BookChunks bookId={book.id} pageCount={book.page_count ?? null} />
         </CardContent>
       </Card>
 

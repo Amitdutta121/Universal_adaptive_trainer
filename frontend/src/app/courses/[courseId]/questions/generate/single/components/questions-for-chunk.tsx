@@ -14,7 +14,7 @@
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useQuestionsForSection } from "@/lib/api/queries";
+import { useQuestionsForChunk } from "@/lib/api/queries";
 import { QUESTION_TYPE_SHORT } from "../../spec-sheet-types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -26,15 +26,15 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function QuestionsForChunk({
-  sectionId,
+  chunkId,
   openQuestionId,
   onOpen,
 }: {
-  sectionId: number | null;
+  chunkId: string | null;
   openQuestionId: number | null;
   onOpen: (questionId: number) => void;
 }) {
-  const { data, isPending, isError, error } = useQuestionsForSection(sectionId);
+  const { data, isPending, isError, error } = useQuestionsForChunk(chunkId);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1rem] border">
@@ -50,7 +50,7 @@ export function QuestionsForChunk({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {sectionId === null ? (
+        {chunkId === null ? (
           <p className="p-3 text-muted-foreground text-sm">
             Scroll or pick a chunk to see what it has already produced.
           </p>

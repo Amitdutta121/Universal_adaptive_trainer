@@ -40,7 +40,7 @@ export function SpecSheet({
   specFor,
   defaultFormats,
   selectedIds,
-  readingSectionId,
+  readingChunkId,
   onToggleSelected,
   onSelectAllVisible,
   onRead,
@@ -48,25 +48,25 @@ export function SpecSheet({
   onFormatsChange,
 }: {
   rows: readonly SheetRow[];
-  specFor: (sectionId: number) => ChunkSpec;
+  specFor: (chunkId: string) => ChunkSpec;
   defaultFormats: readonly QuestionType[];
-  selectedIds: ReadonlySet<number>;
-  readingSectionId: number | null;
-  onToggleSelected: (sectionId: number) => void;
+  selectedIds: ReadonlySet<string>;
+  readingChunkId: string | null;
+  onToggleSelected: (chunkId: string) => void;
   onSelectAllVisible: (selected: boolean) => void;
   onRead: (row: SheetRow) => void;
-  onCountChange: (sectionId: number, difficulty: Difficulty, value: number) => void;
-  onFormatsChange: (sectionId: number, formats: QuestionType[] | null) => void;
+  onCountChange: (chunkId: string, difficulty: Difficulty, value: number) => void;
+  onFormatsChange: (chunkId: string, formats: QuestionType[] | null) => void;
 }) {
-  const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedIds.has(row.sectionId));
+  const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedIds.has(row.chunkId));
 
   const columnTotal = (difficulty: Difficulty) =>
     rows.reduce((sum, row) => {
-      const spec = specFor(row.sectionId);
+      const spec = specFor(row.chunkId);
       return sum + spec[difficulty] * effectiveFormats(spec, defaultFormats).length;
     }, 0);
   const sheetTotal = rows.reduce(
-    (sum, row) => sum + specTotal(specFor(row.sectionId), defaultFormats),
+    (sum, row) => sum + specTotal(specFor(row.chunkId), defaultFormats),
     0,
   );
 
@@ -104,16 +104,16 @@ export function SpecSheet({
         <TableBody>
           {rows.map((row) => (
             <SpecSheetRow
-              key={row.sectionId}
+              key={row.chunkId}
               row={row}
-              spec={specFor(row.sectionId)}
+              spec={specFor(row.chunkId)}
               defaultFormats={defaultFormats}
-              isSelected={selectedIds.has(row.sectionId)}
-              isReading={readingSectionId === row.sectionId}
-              onToggleSelected={() => onToggleSelected(row.sectionId)}
+              isSelected={selectedIds.has(row.chunkId)}
+              isReading={readingChunkId === row.chunkId}
+              onToggleSelected={() => onToggleSelected(row.chunkId)}
               onRead={() => onRead(row)}
-              onCountChange={(difficulty, value) => onCountChange(row.sectionId, difficulty, value)}
-              onFormatsChange={(formats) => onFormatsChange(row.sectionId, formats)}
+              onCountChange={(difficulty, value) => onCountChange(row.chunkId, difficulty, value)}
+              onFormatsChange={(formats) => onFormatsChange(row.chunkId, formats)}
             />
           ))}
         </TableBody>

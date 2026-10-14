@@ -19,14 +19,14 @@ import {
 
 const DEFAULTS = ["multiple_choice"] as const;
 
-function row(sectionId: number, overrides: Partial<SheetRow> = {}): SheetRow {
+function row(chunkId: string, overrides: Partial<SheetRow> = {}): SheetRow {
   return {
-    sectionId,
+    chunkId,
     bookId: 1,
     bookTitle: "Think Python",
-    chapterId: 10,
+    chapterId: "1:0",
     chapterLabel: "Chapter 4",
-    title: `Section ${sectionId}`,
+    title: `Chunk ${chunkId}`,
     locationLabel: "pp. 88-91",
     charCount: 3104,
     startPage: 88,
@@ -84,17 +84,17 @@ describe("effectiveFormats", () => {
 
 describe("toRequestChunks", () => {
   it("sends a chunk's counts with the formats it inherits", () => {
-    const chunks = toRequestChunks([row(7)], { 7: spec({ medium: 2 }) }, DEFAULTS);
+    const chunks = toRequestChunks([row("c7")], { c7: spec({ medium: 2 }) }, DEFAULTS);
 
     expect(chunks).toEqual([
-      { section_id: 7, easy: 0, medium: 2, hard: 0, question_types: ["multiple_choice"] },
+      { chunk_id: "c7", easy: 0, medium: 2, hard: 0, question_types: ["multiple_choice"] },
     ]);
   });
 
   it("sends a chunk's own formats in place of the default", () => {
     const chunks = toRequestChunks(
-      [row(7)],
-      { 7: spec({ hard: 1, formats: ["coding", "debugging"] }) },
+      [row("c7")],
+      { c7: spec({ hard: 1, formats: ["coding", "debugging"] }) },
       DEFAULTS,
     );
 
@@ -102,15 +102,15 @@ describe("toRequestChunks", () => {
   });
 
   it("leaves out rows that ask for nothing", () => {
-    const chunks = toRequestChunks([row(7), row(8)], { 7: spec({ easy: 1 }) }, DEFAULTS);
+    const chunks = toRequestChunks([row("c7"), row("c8")], { c7: spec({ easy: 1 }) }, DEFAULTS);
 
-    expect(chunks.map((chunk) => chunk.section_id)).toEqual([7]);
+    expect(chunks.map((chunk) => chunk.chunk_id)).toEqual(["c7"]);
   });
 
   it("leaves out a chunk with no text, even when it was given counts", () => {
     const chunks = toRequestChunks(
-      [row(7, { selectable: false })],
-      { 7: spec({ easy: 3 }) },
+      [row("c7", { selectable: false })],
+      { c7: spec({ easy: 3 }) },
       DEFAULTS,
     );
 
@@ -119,11 +119,11 @@ describe("toRequestChunks", () => {
 
   it("keeps the row order, so the run is generated in the order it is read", () => {
     const chunks = toRequestChunks(
-      [row(9), row(4)],
-      { 9: spec({ easy: 1 }), 4: spec({ easy: 1 }) },
+      [row("c9"), row("c4")],
+      { c9: spec({ easy: 1 }), c4: spec({ easy: 1 }) },
       DEFAULTS,
     );
 
-    expect(chunks.map((chunk) => chunk.section_id)).toEqual([9, 4]);
+    expect(chunks.map((chunk) => chunk.chunk_id)).toEqual(["c9", "c4"]);
   });
 });

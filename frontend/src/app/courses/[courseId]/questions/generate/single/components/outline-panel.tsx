@@ -27,7 +27,7 @@ function FieldLabel({ children }: { children: string }) {
 export function OutlinePanel({
   chapters,
   rows,
-  selectedSectionId,
+  selectedChunkId,
   onSelect,
   search,
   onSearchChange,
@@ -36,8 +36,8 @@ export function OutlinePanel({
 }: {
   chapters: readonly SheetChapter[];
   rows: readonly SheetRow[];
-  selectedSectionId: number | null;
-  onSelect: (sectionId: number) => void;
+  selectedChunkId: string | null;
+  onSelect: (chunkId: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
   produced: SheetFilters["produced"];
@@ -45,11 +45,11 @@ export function OutlinePanel({
 }) {
   // Single-open accordion: the outline starts fully collapsed, and only one
   // chapter — the one holding the current chunk — is ever open at a time.
-  const [expandedChapters, setExpandedChapters] = useState<ReadonlySet<number>>(new Set());
-  const rowRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const [expandedChapters, setExpandedChapters] = useState<ReadonlySet<string>>(new Set());
+  const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const rowsByChapter = useMemo(() => {
-    const map = new Map<number, SheetRow[]>();
+    const map = new Map<string, SheetRow[]>();
     for (const row of rows) {
       const bucket = map.get(row.chapterId);
       if (bucket) bucket.push(row);
@@ -58,7 +58,7 @@ export function OutlinePanel({
     return map;
   }, [rows]);
 
-  const toggleChapter = (chapterId: number) => {
+  const toggleChapter = (chapterId: string) => {
     setExpandedChapters((prev) => (prev.has(chapterId) ? new Set() : new Set([chapterId])));
   };
 
@@ -71,24 +71,24 @@ export function OutlinePanel({
   // hand.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
-    if (selectedSectionId === null) return;
-    const row = rows.find((candidate) => candidate.sectionId === selectedSectionId);
+    if (selectedChunkId === null) return;
+    const row = rows.find((candidate) => candidate.chunkId === selectedChunkId);
     if (!row) return;
     setExpandedChapters((prev) =>
       prev.size === 1 && prev.has(row.chapterId) ? prev : new Set([row.chapterId]),
     );
-  }, [selectedSectionId]);
+  }, [selectedChunkId]);
 
   // Keep the highlighted row in view, however it became selected. Re-checked
   // after `expandedChapters` changes too, even though it's not read here: an
   // auto-expand from the effect above mounts the row a render later than this.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
-    if (selectedSectionId === null) return;
+    if (selectedChunkId === null) return;
     rowRefs.current
-      .get(selectedSectionId)
+      .get(selectedChunkId)
       ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [selectedSectionId, expandedChapters]);
+  }, [selectedChunkId, expandedChapters]);
 
   return (
     <div className="flex h-full min-h-[420px] flex-col overflow-hidden rounded-[1rem] border">
@@ -158,17 +158,17 @@ export function OutlinePanel({
                 </button>
                 {expanded
                   ? sections.map((row) => {
-                      const selected = row.sectionId === selectedSectionId;
+                      const selected = row.chunkId === selectedChunkId;
                       return (
                         <button
-                          key={row.sectionId}
+                          key={row.chunkId}
                           ref={(el) => {
-                            if (el) rowRefs.current.set(row.sectionId, el);
-                            else rowRefs.current.delete(row.sectionId);
+                            if (el) rowRefs.current.set(row.chunkId, el);
+                            else rowRefs.current.delete(row.chunkId);
                           }}
                           type="button"
                           disabled={!row.selectable}
-                          onClick={() => onSelect(row.sectionId)}
+                          onClick={() => onSelect(row.chunkId)}
                           className={`flex w-full items-center gap-2 border-t py-2 pr-3 pl-8 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
                             selected
                               ? "border-l-[3px] border-l-primary bg-primary/10"

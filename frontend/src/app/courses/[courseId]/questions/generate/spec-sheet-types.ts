@@ -57,15 +57,16 @@ export interface ChunkSpec {
 
 export const EMPTY_SPEC: ChunkSpec = { easy: 0, medium: 0, hard: 0, formats: null };
 
-/** Specs by section id. A section with no entry asks for nothing. */
-export type ChunkSpecMap = Readonly<Record<number, ChunkSpec>>;
+/** Specs by chunk id. A chunk with no entry asks for nothing. */
+export type ChunkSpecMap = Readonly<Record<string, ChunkSpec>>;
 
 /** One chunk, flattened out of its book and chapter for the table. */
 export interface SheetRow {
-  sectionId: number;
+  chunkId: string;
   bookId: number;
   bookTitle: string;
-  chapterId: number;
+  /** Unique across books: the plan's group index is per book. */
+  chapterId: string;
   chapterLabel: string;
   title: string;
   locationLabel: string | null;
@@ -75,7 +76,7 @@ export interface SheetRow {
   existingQuestionCount: number;
   /** False for a chunk with no text: the generator would receive nothing. */
   selectable: boolean;
-  /** No heading was declared in the source; the label is its printed location. */
+  /** The chunk sits under no heading; the label is its page location. */
   isUnlabelled: boolean;
 }
 
@@ -112,11 +113,11 @@ export function toRequestChunks(
   sheetDefault: readonly QuestionType[],
 ): ChunkGenerationSpec[] {
   return rows.flatMap((row) => {
-    const spec = specs[row.sectionId];
+    const spec = specs[row.chunkId];
     if (!spec || specPerFormatTotal(spec) === 0 || !row.selectable) return [];
     return [
       {
-        section_id: row.sectionId,
+        chunk_id: row.chunkId,
         easy: spec.easy,
         medium: spec.medium,
         hard: spec.hard,
