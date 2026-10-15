@@ -23,6 +23,19 @@ examples:
                 return -1
   answer: Move return -1 after the loop; it currently gives up after the first item
   tests: 6
+  solution: |-
+    def find_index(t, target):
+        for i in range(len(t)):
+            if t[i] == target:
+                return i
+        return -1
+  test_cases:
+  - assert: 'assert find_index([1, 2, 3], 1) == 0'
+  - assert: 'assert find_index([1, 2, 3], 3) == 2'
+  - assert: 'assert find_index([1, 2, 3], 4) == -1'
+  - assert: 'assert find_index([], 1) == -1'
+  - assert: 'assert find_index([5, 5], 5) == 0'
+  - assert: 'assert find_index([4, 8, 6], 8) == 1'
   grounding: Searching
 - prompt: fact(n) should return n! for every n >= 0, but it crashes for one valid input. Fix it.
   code: |-
@@ -32,4 +45,15 @@ examples:
         return n * fact(n - 1)
   answer: 'The base case should be n == 0: fact(0) recurses until it overflows the stack'
   tests: 5
+  solution: |-
+    def fact(n):
+        if n == 0:
+            return 1
+        return n * fact(n - 1)
+  test_cases:
+  - assert: 'assert fact(0) == 1'
+  - assert: 'assert fact(1) == 1'
+  - assert: 'assert fact(3) == 6'
+  - assert: 'assert fact(5) == 120'
+  - assert: 'assert fact(10) == 3628800'
   grounding: More recursion

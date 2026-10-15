@@ -25,10 +25,12 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.styles import MAX_CELL_TARGET, MIN_CELL_TARGET, get_library, suggest_setup
-from app.styles.loader import StyleFileError, load_subject
+from app.styles.checks import check_example, check_ids, check_lock, read_lock
+from app.styles.loader import STYLES_DIR, StyleFileError, load_libraries, load_subject
 
 PYTHON = "intro_python"
 PYTHON_STYLES = get_library(PYTHON)
+ALL_STYLES = [style for styles in load_libraries().values() for style in styles]
 
 
 class FakeSuggester:
@@ -142,6 +144,65 @@ def test_order_file_sets_display_order_and_unlisted_styles_follow(tmp_path: Any)
     _write(subject, "order.txt", "py.gone\n")
     with pytest.raises(StyleFileError, match=r"py.gone"):
         load_subject(subject)
+
+
+# ------------------------------------------------------------------ CI checks (Task 17)
+
+
+@pytest.mark.parametrize(
+    ("style", "index"),
+    [pytest.param(style, n, id=f"{style.id}-{n + 1}") for style in ALL_STYLES for n in (0, 1)],
+)
+def test_every_example_passes_its_type_checks_and_grader(style: Any, index: int) -> None:
+    assert check_example(style, index) == []
+
+
+def test_ids_are_namespaced_unique_and_locked() -> None:
+    libraries = load_libraries()
+    assert check_ids(libraries) == []
+    assert check_lock(libraries, read_lock(STYLES_DIR / "ids.lock")) == []
+
+
+def test_a_removed_or_renamed_id_fails_the_lock() -> None:
+    libraries = load_libraries()
+    locked = read_lock(STYLES_DIR / "ids.lock")
+    without = {PYTHON: [s for s in libraries[PYTHON] if s.id != "py.fix_one_bug"]}
+    (problem,) = check_lock(without, locked)
+    assert problem.startswith("intro_python/py.fix_one_bug: in styles/ids.lock but its style")
+    renamed = {PYTHON: [*without[PYTHON], _style("py.fix_a_bug")]}
+    assert any("new style id not in styles/ids.lock" in p for p in check_lock(renamed, locked))
+
+
+def test_a_duplicate_or_unnamespaced_id_fails() -> None:
+    style = _style("py.concept_check")
+    problems = check_ids({PYTHON: [style], "other": [style, _style("Bad Id")]})
+    assert "py.concept_check: duplicate id, in intro_python and other" in problems
+    assert "other/Bad Id: id must look like '<prefix>.<snake_case_name>'" in problems
+    assert "other: prefix 'py' already belongs to intro_python" in problems
+
+
+def test_a_broken_example_fails_with_the_check_named() -> None:
+    (predict,) = [s for s in PYTHON_STYLES if s.id == "py.predict_output"]
+    wrong = predict.examples[0].model_copy(update={"answer": "banana"})
+    broken = predict.model_copy(update={"examples": (wrong, predict.examples[1])})
+    problems = check_example(broken, 0)
+    assert any(
+        p.startswith("py.predict_output example 1: fails 'expected_output_verified'")
+        for p in problems
+    )
+
+    (fix,) = [s for s in PYTHON_STYLES if s.id == "py.fix_one_bug"]
+    no_bug = fix.examples[0].model_copy(update={"code": fix.examples[0].solution})
+    problems = check_example(fix.model_copy(update={"examples": (no_bug, fix.examples[1])}), 0)
+    assert any("fails 'debug_broken_exhibits_issue'" in p for p in problems)
+    untested = fix.examples[0].model_copy(update={"test_cases": []})
+    assert check_example(fix.model_copy(update={"examples": (untested, fix.examples[1])}), 0) == [
+        "py.fix_one_bug example 1: a debugging example needs a solution and test_cases"
+    ]
+
+
+def _style(style_id: str) -> Any:
+    return PYTHON_STYLES[0].model_copy(update={"id": style_id})
 
 
 def test_unknown_subject_has_no_library() -> None:

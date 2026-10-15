@@ -22,6 +22,19 @@ examples:
         return best
   answer: 'if x > best: best = x'
   tests: 5
+  solution: |-
+    def largest(t):
+        best = t[0]
+        for x in t:
+            if x > best:
+                best = x
+        return best
+  test_cases:
+  - assert: 'assert largest([3, 9, 2]) == 9'
+  - assert: 'assert largest([7]) == 7'
+  - assert: 'assert largest([-5, -2, -9]) == -2'
+  - assert: 'assert largest([1, 2, 3, 4]) == 4'
+  - assert: 'assert largest([4, 4, 1]) == 4'
   grounding: Map, filter and reduce
 - prompt: Complete power(b, n) so it returns b to the power n for n >= 0.
   code: |-
@@ -31,4 +44,15 @@ examples:
         ________
   answer: return b * power(b, n - 1)
   tests: 5
+  solution: |-
+    def power(b, n):
+        if n == 0:
+            return 1
+        return b * power(b, n - 1)
+  test_cases:
+  - assert: 'assert power(2, 0) == 1'
+  - assert: 'assert power(2, 3) == 8'
+  - assert: 'assert power(5, 1) == 5'
+  - assert: 'assert power(3, 4) == 81'
+  - assert: 'assert power(1, 10) == 1'
   grounding: More recursion

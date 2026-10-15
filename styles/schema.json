@@ -86,6 +86,25 @@
           "default": null,
           "title": "Tests"
         },
+        "solution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Solution"
+        },
+        "test_cases": {
+          "items": {
+            "$ref": "#/$defs/ExampleTestCase"
+          },
+          "title": "Test Cases",
+          "type": "array"
+        },
         "grounding": {
           "default": "",
           "title": "Grounding",
@@ -96,6 +115,42 @@
         "prompt"
       ],
       "title": "ExampleQuestion",
+      "type": "object"
+    },
+    "ExampleTestCase": {
+      "description": "One hidden test of a code example. Same shape as a generated question's test case\n(``app.generation.schemas.ExecutableTestCase``), which this pure module cannot import.",
+      "properties": {
+        "stdin": {
+          "default": "",
+          "title": "Stdin",
+          "type": "string"
+        },
+        "stdout": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stdout"
+        },
+        "assert": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assert"
+        }
+      },
+      "title": "ExampleTestCase",
       "type": "object"
     },
     "QuestionType": {

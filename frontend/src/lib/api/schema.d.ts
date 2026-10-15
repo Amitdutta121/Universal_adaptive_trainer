@@ -3329,11 +3329,31 @@ export interface components {
             answer?: string | null;
             /** Tests */
             tests?: number | null;
+            /** Solution */
+            solution?: string | null;
+            /** Test Cases */
+            test_cases?: components["schemas"]["ExampleTestCase"][];
             /**
              * Grounding
              * @default
              */
             grounding: string;
+        };
+        /**
+         * ExampleTestCase
+         * @description One hidden test of a code example. Same shape as a generated question's test case
+         *     (``app.generation.schemas.ExecutableTestCase``), which this pure module cannot import.
+         */
+        ExampleTestCase: {
+            /**
+             * Stdin
+             * @default
+             */
+            stdin: string;
+            /** Stdout */
+            stdout?: string | null;
+            /** Assert */
+            assert?: string | null;
         };
         /**
          * ExtractionWarning

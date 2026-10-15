@@ -30,6 +30,23 @@ class ExampleOption(BaseModel):
     correct: bool = False
 
 
+class ExampleTestCase(BaseModel):
+    """One hidden test of a code example. Same shape as a generated question's test case
+    (``app.generation.schemas.ExecutableTestCase``), which this pure module cannot import."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    stdin: str = ""
+    stdout: str | None = None
+    assert_code: str | None = Field(default=None, alias="assert")
+
+    @model_validator(mode="after")
+    def needs_stdout_or_assert(self) -> ExampleTestCase:
+        if self.stdout is None and self.assert_code is None:
+            raise ValueError("each test needs stdout or assert")
+        return self
+
+
 class ExampleQuestion(BaseModel):
     """One worked example shown on a style card, answer key included.
 
@@ -49,6 +66,10 @@ class ExampleQuestion(BaseModel):
     answer: str | None = None
     #: Hidden test count, for code types graded by tests.
     tests: int | None = None
+    #: Code types: the correct program, and the ``tests`` hidden tests it passes. Never shown
+    #: on the card; CI runs them through the type's checks and grader (``app/styles/checks.py``).
+    solution: str | None = None
+    test_cases: list[ExampleTestCase] = Field(default_factory=list)
     #: The book section (or kind of section) the example is grounded in.
     grounding: str = ""
 

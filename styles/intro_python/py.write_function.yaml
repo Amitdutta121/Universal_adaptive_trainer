@@ -19,9 +19,35 @@ examples:
     change t.
   answer: 'Reference: return len(set(t)) < len(t), or a loop with a dict of seen items'
   tests: 6
+  solution: |-
+    def has_duplicates(t):
+        return len(set(t)) < len(t)
+  test_cases:
+  - assert: 'assert has_duplicates([1, 2, 1]) is True'
+  - assert: 'assert has_duplicates([1, 2, 3]) is False'
+  - assert: 'assert has_duplicates([]) is False'
+  - assert: 'assert has_duplicates([''a'', ''a'']) is True'
+  - assert: |-
+      t = [3, 1, 3]
+      has_duplicates(t)
+      assert t == [3, 1, 3]
+  - assert: 'assert has_duplicates([7]) is False'
   grounding: Dictionary as a collection of counters
 - prompt: 'Write is_palindrome(word) using recursion: a word is a palindrome if its first and last letters
     match and the middle is a palindrome.'
   answer: 'Reference: base case len(word) <= 1; else compare the ends and recurse on word[1:-1]'
   tests: 7
+  solution: |-
+    def is_palindrome(word):
+        if len(word) <= 1:
+            return True
+        return word[0] == word[-1] and is_palindrome(word[1:-1])
+  test_cases:
+  - assert: 'assert is_palindrome(''noon'') is True'
+  - assert: 'assert is_palindrome(''redivider'') is True'
+  - assert: 'assert is_palindrome(''python'') is False'
+  - assert: 'assert is_palindrome('''') is True'
+  - assert: 'assert is_palindrome(''a'') is True'
+  - assert: 'assert is_palindrome(''ab'') is False'
+  - assert: 'assert is_palindrome(''abca'') is False'
   grounding: More recursion

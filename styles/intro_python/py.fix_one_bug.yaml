@@ -22,6 +22,17 @@ examples:
         return total / len(t)
   answer: 'Line 4 should add to the running total: total = total + x'
   tests: 4
+  solution: |-
+    def average(t):
+        total = 0
+        for x in t:
+            total = total + x
+        return total / len(t)
+  test_cases:
+  - assert: 'assert average([2, 3]) == 2.5'
+  - assert: 'assert average([5]) == 5'
+  - assert: 'assert average([1, 2, 3, 4]) == 2.5'
+  - assert: 'assert average([-1, 1]) == 0'
   grounding: Map, filter and reduce
 - prompt: countdown(n) should print n down to 1, but it never stops. Fix it.
   code: |-
@@ -31,4 +42,19 @@ examples:
         n = n - 1
   answer: Indent n = n - 1 so it runs inside the loop
   tests: 3
+  solution: |-
+    def countdown(n):
+        while n > 0:
+            print(n)
+            n = n - 1
+  test_cases:
+  - assert: 'countdown(3)'
+    stdout: |-
+      3
+      2
+      1
+  - assert: 'countdown(1)'
+    stdout: '1'
+  - assert: 'countdown(0)'
+    stdout: ''
   grounding: The while statement
