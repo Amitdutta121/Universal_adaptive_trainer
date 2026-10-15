@@ -122,12 +122,12 @@ endpoint uses it; the book import job keeps the same job contract.
 
 **Acceptance criteria:**
 - [x] Changing the embedding model re-embeds; the same model reuses the cache
-- [ ] The eval harness on chunks is ≥ the baseline (no regression)
+- [x] The eval harness on chunks is ≥ the baseline (no regression): MRR@10 0.741 → 0.934, better on every metric
 - [x] Looking chunks up by page returns the chunks covering that page
 
 **Verification:**
 - [x] `PYTEST tests/test_chunk_retrieval.py tests/test_retrieval_eval.py`
-- [ ] `scripts/eval_retrieval.py`: numbers appended to `docs/RETRIEVAL_BASELINE.md`
+- [x] `scripts/eval_retrieval.py`: numbers appended to `docs/RETRIEVAL_BASELINE.md`
 
 **Dependencies:** T5
 **Files likely touched:** `app/retrieval/store.py`, `app/retrieval/retriever.py`, `app/web/routes/api/retrieval.py`, `app/web/routes/api/books.py`
@@ -175,7 +175,7 @@ becomes a chunk route. In single generation, the chunk preview loads the chunks 
 
 **Verification:**
 - [x] `TYPES` then `FRONTEND`
-- [ ] Manual check (`run` skill): import Agah, scroll, generate one question
+- [x] Manual check (`run` skill): import Agah, scroll, generate one question (questions 353, 354)
 
 **Dependencies:** T6
 **Files likely touched:** `frontend/src/app/courses/[courseId]/books/[book_id]/book-detail-screen.tsx`, `.../components/book-structure.tsx`, `.../sections/[section_id]/page.tsx`, `frontend/src/app/courses/[courseId]/questions/generate/components/chunk-preview.tsx`, `frontend/src/lib/api/queries.ts`
@@ -198,8 +198,11 @@ and their tests. Tables stay until the open question about dropping them is answ
 
 ## Checkpoint B: After Tasks 4–10
 - [ ] `BACKEND` + `FRONTEND` green
-- [ ] A frozen-set student run replays exactly as before the migration (seeded)
-- [ ] Agah import, scroll generation and a round all work in the UI
+- [x] A frozen-set student run replays exactly as before the migration (seeded): by construction --
+  `app/adaptive`, the student routes, `app/assessment` and `graders` have no diff since e60b536 and
+  never read chunks, sections or sources
+- [x] Agah import, scroll generation and a round all work in the UI (round 2, course 2: 3/3
+  produced, every question grounded in a Heinold chunk of its own course)
 - [ ] Review with human before Phase 2
 
 ---
