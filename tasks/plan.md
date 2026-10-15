@@ -62,9 +62,9 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint C: Eval report shows hybrid ≥ baseline on every metric
 
 ### Phase 2b: Model settings
-- [ ] T41: Settings store, with the database overriding environment variables, per role
-- [ ] T42: Settings API + test connection + model list
-- [ ] T43: Changing the embedding model re-embeds and switches atomically
+- [x] T41: Settings store, with the database overriding environment variables, per role
+- [x] T42: Settings API + test connection + model list
+- [x] T43: Changing the embedding model re-embeds and switches atomically
 - [ ] T44: Settings screen
 
 ### Checkpoint C2: Switch the generation model and the embedding model from the UI; retrieval keeps working throughout
@@ -157,6 +157,6 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 - Parser: **Docling** (decided at Checkpoint A, 2026-10-14; `docs/PARSE_SPIKE.md`).
 - How long to keep the old `book_sections`/`book_chapters` tables after T10 before dropping them?
 - Which model does the agent use by default? It can be changed later in Settings (T41–T44).
-- Who is "admin" for settings: a superuser flag on the existing user model, or the first registered account?
+- Admin for settings: **the existing fastapi-users `is_superuser` flag** (decided 2026-10-14; `python -m app.auth.create_user --superuser`).
 - Whisper: local `faster-whisper` or a hosted API?
 - T39 needs hints to exist. Do `cue` tutorial blocks count as hints, or is a separate hint feature needed first?

@@ -2,7 +2,16 @@
 
 /** The persistent professor navigation, driven entirely by `lib/navigation.ts`. */
 
-import { ArrowLeft, ChevronRight, ChevronsUpDown, LogOut, Moon, Sun, SunMoon } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  LogOut,
+  Moon,
+  SlidersHorizontal,
+  Sun,
+  SunMoon,
+} from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -216,6 +225,23 @@ function ThemeSwitcher() {
   );
 }
 
+/** Instance-wide model settings; only an admin can change them, so only an admin sees it. */
+function SettingsLink() {
+  const currentUser = useCurrentUser();
+  if (!currentUser.data?.is_superuser) return null;
+  return (
+    <Link
+      href={"/settings" as Route}
+      className="app-sidebar-footer-row text-[13px] hover:underline"
+    >
+      <span className="flex items-center gap-2">
+        <SlidersHorizontal className="size-3.5" />
+        Model settings
+      </span>
+    </Link>
+  );
+}
+
 function AccountFooter() {
   const router = useRouter();
   const currentUser = useCurrentUser();
@@ -365,6 +391,7 @@ export function AppSidebar() {
             <ThemeSwitcher />
           </div>
           <LlmStatus />
+          <SettingsLink />
           <SidebarSeparator className="my-0" />
           <AccountFooter />
         </div>

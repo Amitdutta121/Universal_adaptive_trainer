@@ -244,12 +244,12 @@ encrypted with a server secret from `.env` (new dependency `cryptography`, for F
 embedder clients are built from the resolver, not from `get_settings()` directly.
 
 **Acceptance criteria:**
-- [ ] With no DB rows, behaviour is identical to today
-- [ ] A DB row for a role changes only that role's client
-- [ ] Keys never appear in plaintext in the DB, the logs or `repr`
+- [x] With no DB rows, behaviour is identical to today
+- [x] A DB row for a role changes only that role's client
+- [x] Keys never appear in plaintext in the DB, the logs or `repr` (Fernet, key derived from AUTH_SECRET_KEY)
 
 **Verification:**
-- [ ] `PYTEST tests/test_model_settings.py tests/test_config.py tests/test_llm_client.py`
+- [x] `PYTEST tests/test_model_settings.py tests/test_config.py tests/test_llm_client.py`
 
 **Dependencies:** Checkpoint C
 **Files likely touched:** `app/settings_store.py`, `app/persistence/models.py` (+ migration), `app/llm/client.py`, `app/retrieval/embedder.py`, `tests/test_model_settings.py`
@@ -262,12 +262,12 @@ embeddings, it also returns the vector dimension). `GET /settings/models?provide
 (e.g. OpenRouter `/models`), cached.
 
 **Acceptance criteria:**
-- [ ] A non-admin gets 403 on PUT and test
-- [ ] A failed test returns the provider's error without saving anything
-- [ ] Saving requires that a test has passed for that config
+- [x] A non-admin gets 403 on PUT and test (admin = `is_superuser`)
+- [x] A failed test returns the provider's error without saving anything
+- [x] Saving requires that a test has passed for that config (signed test token bound to the config, 30 min)
 
 **Verification:**
-- [ ] `PYTEST tests/test_settings_api.py` (provider HTTP mocked), then `TYPES`
+- [x] `PYTEST tests/test_settings_api.py` (provider HTTP mocked), then `TYPES`
 
 **Dependencies:** T41
 **Files likely touched:** `app/web/routes/api/settings.py`, `app/web/routes/api/schemas.py`, `tests/test_settings_api.py`
@@ -279,12 +279,12 @@ already keyed by model, T6). Retrieval keeps using the old vectors until the job
 atomically. The UI shows progress, and the eval harness can be run on the new version.
 
 **Acceptance criteria:**
-- [ ] Retrieval works at every moment of the switch (test queries mid-job)
-- [ ] A failed or cancelled job leaves the old model active
-- [ ] Old vectors are kept until the next successful switch
+- [x] Retrieval works at every moment of the switch (test queries mid-job)
+- [x] A failed or cancelled job leaves the old model active
+- [x] Old vectors are kept until the next successful switch
 
 **Verification:**
-- [ ] `PYTEST tests/test_embedding_switch.py tests/test_jobs.py`
+- [x] `PYTEST tests/test_embedding_switch.py tests/test_jobs.py`
 
 **Dependencies:** T42
 **Files likely touched:** `app/retrieval/store.py`, `app/retrieval/reembed.py`, `app/jobs/*`, `tests/test_embedding_switch.py`
@@ -297,11 +297,11 @@ It shows whether each value comes from the database or from `.env`, and the re-e
 It follows the existing course-screen design patterns, with no new visual language.
 
 **Acceptance criteria:**
-- [ ] A non-admin doesn't see the page in navigation and gets 403 from the API
+- [x] A non-admin doesn't see the page in navigation and gets 403 from the API (link in the sidebar footer: settings are instance-wide, the nav is per course)
 - [ ] Switching the generation model and the embedding model works end to end
 
 **Verification:**
-- [ ] `FRONTEND`
+- [x] `FRONTEND`
 - [ ] Manual check (`run` skill): switch the generation model, generate one question; switch the embedding model, watch the re-embed, retrieve
 
 **Dependencies:** T43

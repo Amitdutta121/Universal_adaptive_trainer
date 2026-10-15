@@ -1582,6 +1582,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Settings */
+        get: operations["read_settings_api_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Provider Models
+         * @description The provider's model ids for the picker; any other id can still be typed.
+         */
+        get: operations["provider_models_api_settings_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/{role}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Settings
+         * @description One minimal call with the candidate configuration. Saves nothing.
+         */
+        post: operations["test_settings_api_settings__role__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Settings */
+        put: operations["save_settings_api_settings__role__put"];
+        post?: never;
+        /**
+         * Reset Settings
+         * @description Use ``.env`` for every value again. For embeddings on another model, via a switch.
+         */
+        delete: operations["reset_settings_api_settings__role__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/question-sets/prod": {
         parameters: {
             query?: never;
@@ -3003,6 +3081,11 @@ export interface components {
             email: string;
             /** Is Verified */
             is_verified: boolean;
+            /**
+             * Is Superuser
+             * @default false
+             */
+            is_superuser: boolean;
         };
         /**
          * CurriculumItemLabelUpdate
@@ -3257,6 +3340,27 @@ export interface components {
             message: string;
             /** Location */
             location?: string | null;
+        };
+        /**
+         * EmbeddingSwitchOut
+         * @description The latest embedding model switch (Task 43); the old model serves until it is done.
+         */
+        EmbeddingSwitchOut: {
+            /** Job Id */
+            job_id: string;
+            /** Model */
+            model: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Error */
+            error?: string | null;
         };
         /**
          * EnumOption
@@ -3828,7 +3932,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bulk_generation" | "coverage_fill" | "book_import" | "question_round" | "judge_run";
+            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "question_round" | "judge_run";
             /** Title */
             title: string;
             /**
@@ -4206,6 +4310,21 @@ export interface components {
             /** Audit Revoked */
             audit_revoked: boolean;
         };
+        /**
+         * ModelRole
+         * @description What a model is used for; each can be pointed at its own provider and model.
+         * @enum {string}
+         */
+        ModelRole: "generation" | "judges" | "agent" | "tutorials" | "ask_why" | "embeddings" | "transcription";
+        /** ModelSettingsResponse */
+        ModelSettingsResponse: {
+            /** Roles */
+            roles: components["schemas"]["RoleSettingsResponse"][];
+            /** Providers */
+            providers: string[];
+            /** Can Edit */
+            can_edit: boolean;
+        };
         /** MostMissedOut */
         MostMissedOut: {
             /** Subtopic */
@@ -4312,6 +4431,13 @@ export interface components {
             prompt_excerpt: string;
             /** Score */
             score: number;
+        };
+        /** ProviderModel */
+        ProviderModel: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /**
          * QuadrantCell
@@ -4881,6 +5007,67 @@ export interface components {
             reason_distribution: components["schemas"]["ReasonCount"][];
         };
         /**
+         * RoleSettingsResponse
+         * @description One role's effective model settings. The key is only ever masked.
+         */
+        RoleSettingsResponse: {
+            role: components["schemas"]["ModelRole"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Base Url */
+            base_url: string | null;
+            /** Api Key Masked */
+            api_key_masked: string | null;
+            /** Sources */
+            sources: {
+                [key: string]: "db" | "env";
+            };
+            /** Configured */
+            configured: boolean;
+            /** Testable */
+            testable: boolean;
+            switch?: components["schemas"]["EmbeddingSwitchOut"] | null;
+        };
+        /** RoleSettingsSave */
+        RoleSettingsSave: {
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /**
+             * Clear Api Key
+             * @default false
+             */
+            clear_api_key: boolean;
+            /** Test Token */
+            test_token: string;
+        };
+        /**
+         * RoleSettingsUpdate
+         * @description A role's settings to test or save. ``null`` means "use .env" for that field.
+         */
+        RoleSettingsUpdate: {
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /**
+             * Clear Api Key
+             * @default false
+             */
+            clear_api_key: boolean;
+        };
+        /**
          * RoundStatus
          * @description Lifecycle of one generation round of a question setup.
          *
@@ -4965,6 +5152,17 @@ export interface components {
             /** Answer Hint */
             answer_hint?: string | null;
         };
+        /** SettingsTestResponse */
+        SettingsTestResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Error */
+            error?: string | null;
+            /** Dimension */
+            dimension?: number | null;
+            /** Test Token */
+            test_token?: string | null;
+        };
         /** SetupStepOut */
         SetupStepOut: {
             /** Key */
@@ -4999,11 +5197,11 @@ export interface components {
         };
         /**
          * SourceFormat
-         * @description Accepted upload formats.
+         * @description The format a book was imported from.
          *
-         *     Structured book JSON is declared directly. A PDF is turned into that same
-         *     declared shape by ``app.ingestion.pdf`` before validation -- its own
-         *     embedded outline stands in for a hand-authored declaration (ADR-048).
+         *     PDF, DOCX and PPTX are parsed into chunks (``app.ingestion.parsing``). ``BOOK_JSON``
+         *     is the retired book JSON document (Task 10): no longer accepted, kept so older
+         *     book rows still read.
          * @enum {string}
          */
         SourceFormat: "book_json" | "book_pdf" | "book_docx" | "book_pptx";
@@ -8555,6 +8753,158 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobStartedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+        };
+    };
+    provider_models_api_settings_models_get: {
+        parameters: {
+            query?: {
+                provider?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderModel"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_settings_api_settings__role__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["ModelRole"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_settings_api_settings__role__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["ModelRole"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleSettingsSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_settings_api_settings__role__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["ModelRole"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleSettingsResponse"];
                 };
             };
             /** @description Validation Error */

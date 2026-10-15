@@ -13,6 +13,7 @@ export const KIND_LABEL: Record<Job["kind"], string> = {
   bulk_generation: "Bulk generation",
   coverage_fill: "Coverage fill",
   book_import: "Book import",
+  embedding_switch: "Embedding model switch",
   question_round: "Question round",
   judge_run: "Judge run",
 };
@@ -94,6 +95,8 @@ export function outcomeText(job: Job): string {
         ? `Imported “${book.title}” (partial)`
         : `Imported “${book.title}”`;
     }
+    case "embedding_switch":
+      return `${pluralise(counts.chunks ?? job.done, "chunk")} re-embedded`;
     case "coverage_fill": {
       // `done` counts gap cells handled; a skipped cell made no question.
       const result = job.result;

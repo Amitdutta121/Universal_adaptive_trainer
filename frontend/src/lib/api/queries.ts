@@ -125,6 +125,11 @@ export const qk = {
   auth: {
     me: () => ["auth", "me"] as const,
   },
+  settings: {
+    all: ["settings"] as const,
+    roles: () => ["settings", "roles"] as const,
+    models: (provider: string) => ["settings", "models", provider] as const,
+  },
   setup: {
     all: ["setup"] as const,
     styles: (subject?: string | null) => ["setup", "styles", subject ?? null] as const,
@@ -1651,5 +1656,65 @@ export function useUpdateCustomJudge() {
         }),
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: qk.customJudges.all }),
+  });
+}
+
+// ------------------------------------------------------------- model settings (Task 44)
+
+type ModelRole = Schemas["ModelRole"];
+
+/** Instance-wide model settings per role. Polls while an embedding model switch runs. */
+export const useModelSettings = () =>
+  useQuery({
+    queryKey: qk.settings.roles(),
+    queryFn: () => unwrap(api.GET("/api/settings")),
+    refetchInterval: (query) => {
+      const embeddings = query.state.data?.roles.find((role) => role.role === "embeddings");
+      const status = embeddings?.switch?.status;
+      return status === "queued" || status === "running" ? 2_000 : false;
+    },
+  });
+
+/** The provider's model ids for the picker; cached by the backend for an hour. */
+export const useProviderModels = (provider: string, enabled: boolean) =>
+  useQuery({
+    queryKey: qk.settings.models(provider),
+    queryFn: () => unwrap(api.GET("/api/settings/models", { params: { query: { provider } } })),
+    enabled,
+    staleTime: 60 * 60 * 1000,
+  });
+
+/** One minimal provider call with the edited values; nothing is saved. */
+export function useTestRoleSettings() {
+  return useMutation({
+    mutationFn: ({ role, body }: { role: ModelRole; body: Schemas["RoleSettingsUpdate"] }) =>
+      unwrap(api.POST("/api/settings/{role}/test", { params: { path: { role } }, body })),
+  });
+}
+
+export function useSaveRoleSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ role, body }: { role: ModelRole; body: Schemas["RoleSettingsSave"] }) =>
+      unwrap(api.PUT("/api/settings/{role}", { params: { path: { role } }, body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.settings.all });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+/** Back to `.env` for every value of the role. */
+export function useResetRoleSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (role: ModelRole) =>
+      unwrap(api.DELETE("/api/settings/{role}", { params: { path: { role } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.settings.all });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
   });
 }
