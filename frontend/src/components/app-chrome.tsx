@@ -3,12 +3,14 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AgentPanel } from "@/components/agent/agent-panel";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
 import { LogoGlyph } from "@/components/brand-logo";
 import { CourseGate } from "@/components/course-gate";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
+import { courseIdFromPath } from "@/lib/course";
 
 function ProfessorChrome({
   children,
@@ -17,6 +19,8 @@ function ProfessorChrome({
   children: React.ReactNode;
   isWideRoute: boolean;
 }) {
+  // The agent works inside one course, so its panel exists only on course pages.
+  const courseId = courseIdFromPath(usePathname());
   return (
     <AuthGate>
       <SidebarProvider>
@@ -37,6 +41,7 @@ function ProfessorChrome({
             <CourseGate>{children}</CourseGate>
           </div>
         </SidebarInset>
+        {courseId !== null ? <AgentPanel courseId={courseId} /> : null}
       </SidebarProvider>
     </AuthGate>
   );

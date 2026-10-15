@@ -230,6 +230,39 @@
   --sidebar-ring: color-mix(in oklch, var(--accent-solid) 55%, black);
 }
 
+/* The agent panel (components/agent): CopilotKit's stylesheet re-declares the shadcn tokens on
+   `[data-copilotkit]` with its own neutral palette. Map them back onto the Studio palette (whose
+   base colours already switch with `.dark`); `html` / `html.dark` outrank its
+   `[data-copilotkit]` / `.dark [data-copilotkit]`. */
+html [data-copilotkit],
+html.dark [data-copilotkit] {
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent-solid);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--muted-ink);
+  --accent: var(--accent-wash);
+  --accent-foreground: var(--accent-text);
+  --destructive: var(--critical-solid);
+  --border: var(--hairline);
+  --input: var(--hairline);
+  --ring: color-mix(in oklch, var(--accent-solid) 45%, white);
+  --radius: 0.85rem;
+}
+
+html.dark [data-copilotkit] {
+  --primary-foreground: #0d1214;
+  --input: var(--hairline-2);
+  --ring: color-mix(in oklch, var(--accent-solid) 55%, black);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

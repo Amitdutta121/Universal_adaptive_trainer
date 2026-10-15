@@ -801,11 +801,20 @@ for a human click. `plan_generation` returns a dry-run cost; `run_generation` re
 style-comparison cards render in the chat. New dependency: `@copilotkit/*`, with justification.
 
 **Acceptance criteria:**
-- [ ] The panel works on every course page without breaking the existing screens
+- [x] The panel works on every course page without breaking the existing screens
+  (2026-10-15, production build on :4107 against a no-LLM backend on a copy of
+  `data/checkpoint_h.db`: the panel is on coverage, books, curriculum, questions, review,
+  students, tutorials and dashboard, each still renders its own heading with no error; absent on
+  `/courses`. A sent message reaches `POST /api/agent` through the CopilotKit runtime with the
+  session cookie and course header, and the backend's refusal shows as a toast.)
+- Transport: `@copilotkit/runtime` in `frontend/src/app/copilotkit/[[...path]]/route.ts` relays
+  to `/api/agent`, forwarding only the cookie and `X-Course-Id`; telemetry off. Not
+  `selfManagedAgents` in the browser: CopilotKit flags that as its licensed Enterprise tier.
 
 **Verification:**
-- [ ] `FRONTEND`
+- [x] `FRONTEND` (typecheck, biome lint, 717 tests passed; `next build` passes)
 - [ ] Manual check: set up the Agah course by chat (import → curriculum → styles → generate → publish)
+  -- not run: needs a real model (spends API credit); waiting for the go-ahead
 
 **Dependencies:** T34
 **Files likely touched:** `frontend/src/app/courses/[courseId]/layout.tsx`, `frontend/src/components/agent/*`, `frontend/package.json`
