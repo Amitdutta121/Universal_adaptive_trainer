@@ -1620,6 +1620,34 @@ class TutorialBlockRow(TimestampMixin, Base):
         return list(chunk_ids)
 
 
+class TutorialBlockViewRow(TimestampMixin, Base):
+    """One tutorial block shown to a student, and how their next answer went (Task 28).
+
+    ``moment`` is ``before`` (pre-teaching, shown with the attempt it precedes) or ``after``
+    (on the result card of ``attempt_id``). ``next_correct`` is filled by the student's next
+    answer in the same subtopic of the run -- for a ``before`` view, the attempt itself -- and
+    stays ``None`` until then. Per-recipe stats are read from these rows.
+    """
+
+    __tablename__ = "tutorial_block_views"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "block_id", "moment", name="uq_tutorial_block_views_shown"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    attempt_id: Mapped[int] = mapped_column(
+        ForeignKey("student_attempts.id", ondelete="CASCADE"), index=True
+    )
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("training_sessions.id", ondelete="CASCADE"), index=True
+    )
+    block_id: Mapped[int] = mapped_column(ForeignKey("tutorial_blocks.id", ondelete="CASCADE"))
+    recipe_id: Mapped[str] = mapped_column(String(100), index=True)
+    subtopic_id: Mapped[int] = mapped_column(Integer)
+    moment: Mapped[str] = mapped_column(String(8))
+    next_correct: Mapped[bool | None] = mapped_column(Boolean, default=None)
+
+
 class TutorialRecipeDecisionRow(TimestampMixin, Base):
     """The professor's approval of one recipe for one taxonomy (Phase 6, Task 24).
 

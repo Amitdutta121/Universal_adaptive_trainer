@@ -26,6 +26,27 @@ import {
 import type { Schemas } from "@/lib/api/types";
 
 type Plan = Schemas["TutorialPregenerationPlan"];
+type RecipeStats = Schemas["TutorialRecipeStatsOut"];
+
+function percent(rate: number) {
+  return `${Math.round(rate * 100)}%`;
+}
+
+/** What students' next answers say about a recipe, and whether it is still chosen. */
+function StatsLine({ stats }: { stats?: RecipeStats }) {
+  if (!stats || stats.outcomes === 0) {
+    return <p className="text-muted-foreground text-xs">No student outcomes yet.</p>;
+  }
+  return (
+    <p className="text-muted-foreground text-xs">
+      Next answer right after its blocks: {percent(stats.next_correct_rate ?? 0)} of{" "}
+      {stats.outcomes}
+      {stats.weight === 0 ? (
+        <span className="text-destructive"> · no longer shown to students</span>
+      ) : null}
+    </p>
+  );
+}
 
 function errorText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -156,6 +177,7 @@ export function RecipeApproval({ versionId }: { versionId: number }) {
                     </Button>
                   </div>
                 </div>
+                <StatsLine stats={recipes.data.stats?.[recipe.id]} />
                 {sampled === recipe.id ? (
                   <RecipeSample versionId={versionId} recipeId={recipe.id} />
                 ) : null}

@@ -32,6 +32,7 @@ from app.tutorials.generator import (
     get_recipes,
 )
 from app.tutorials.jobs import plan_pregeneration, queue_pregeneration
+from app.tutorials.stats import recipe_stats
 from app.web.routes.api.deps import (
     SPENDS_LLM_CREDIT,
     CourseProfile,
@@ -50,6 +51,7 @@ from app.web.routes.api.schemas import (
     TutorialRecipeDecisionOut,
     TutorialRecipeDecisionRequest,
     TutorialRecipeListResponse,
+    TutorialRecipeStatsOut,
 )
 
 router = APIRouter(tags=["tutorials"])
@@ -86,8 +88,23 @@ def list_recipes(
     if curriculum_version_id is not None:
         _version_in_course(session, curriculum_version_id, course)
         decided = decisions(session, curriculum_version_id)
+    recipes = get_recipes(profile.storage_key)
+    ids = {recipe.id for recipe in recipes}
     return TutorialRecipeListResponse(
-        subject=profile.storage_key, recipes=get_recipes(profile.storage_key), decisions=decided
+        subject=profile.storage_key,
+        recipes=recipes,
+        decisions=decided,
+        stats={
+            recipe_id: TutorialRecipeStatsOut(
+                decided=stats.decided,
+                approval_rate=stats.approval_rate,
+                outcomes=stats.outcomes,
+                next_correct_rate=stats.next_correct_rate,
+                weight=stats.weight,
+            )
+            for recipe_id, stats in recipe_stats(session, course).items()
+            if recipe_id in ids
+        },
     )
 
 

@@ -748,16 +748,15 @@ def _next_or_generate(
     served = result
     if plan_refill(session, training_session_id) is not None:
         background_tasks.add_task(schedule_refill, training_session_id)
+    # Composed before the commit: showing them is logged for per-recipe stats (Task 28).
+    preteach = preteach_blocks(session, served.attempt)
     session.commit()
     subtopic_name = None
     if served.attempt.subtopic_id is not None:
         labels = CurriculumRepository(session).subtopic_labels_for([served.attempt.subtopic_id])
         subtopic_name = labels.get(served.attempt.subtopic_id, (None, None))[0]
     out = ServedQuestionOut.from_served(served, subtopic_name=subtopic_name)
-    out.preteach_blocks = [
-        StudentTutorialBlockOut.model_validate(block)
-        for block in preteach_blocks(session, served.attempt)
-    ]
+    out.preteach_blocks = [StudentTutorialBlockOut.model_validate(block) for block in preteach]
     return out
 
 

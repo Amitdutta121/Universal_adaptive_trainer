@@ -141,3 +141,34 @@ def test_only_blocks_frozen_with_the_set_are_read(session: Session) -> None:
 
     assert [(b.recipe_id, b.set_version_id) for b in frozen] == [("py.misconception_line", row.id)]
     assert all(b.renderer is TutorialRenderer.MARKDOWN for b in frozen)
+
+
+def test_a_recipe_weighted_zero_is_never_chosen() -> None:
+    bank = _bank(per_cell=2, exact=True)
+    state = ComposeState(
+        mastery=0.2,
+        last_correct=False,
+        content_kinds=CODE_FIRST,
+        seed="s",
+        weights={"py.code_trace_stepper": 0.0},
+    )
+    picked = compose(bank, RECIPES, state)
+    assert picked
+    assert "py.code_trace_stepper" not in {b.recipe_id for b in picked}
+
+
+def test_between_equal_fits_the_heavier_recipe_comes_first() -> None:
+    bank = _bank(per_cell=1, exact=True)
+    kinds = [ContentKind.CONCEPT]  # misconception_line and topic_flow both fit it
+    for heavy, light in [
+        ("py.topic_flow", "py.misconception_line"),
+        ("py.misconception_line", "py.topic_flow"),
+    ]:
+        state = ComposeState(
+            mastery=0.6,
+            last_correct=True,
+            content_kinds=kinds,
+            seed="s",
+            weights={heavy: 1.8, light: 0.6},
+        )
+        assert compose(bank, RECIPES, state)[0].recipe_id == heavy

@@ -6033,6 +6033,26 @@ export interface components {
             decisions?: {
                 [key: string]: boolean;
             };
+            /** Stats */
+            stats?: {
+                [key: string]: components["schemas"]["TutorialRecipeStatsOut"];
+            };
+        };
+        /**
+         * TutorialRecipeStatsOut
+         * @description How a recipe has done: professors' decisions and students' next answers.
+         */
+        TutorialRecipeStatsOut: {
+            /** Decided */
+            decided: number;
+            /** Approval Rate */
+            approval_rate: number | null;
+            /** Outcomes */
+            outcomes: number;
+            /** Next Correct Rate */
+            next_correct_rate: number | null;
+            /** Weight */
+            weight: number;
         };
         /**
          * TutorialRenderer

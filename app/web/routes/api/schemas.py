@@ -2969,6 +2969,20 @@ class TutorialRecipeListResponse(BaseModel):
     #: ``recipe_id -> approved`` in the taxonomy asked about (``curriculum_version_id``);
     #: a recipe missing here is undecided.
     decisions: dict[str, bool] = Field(default_factory=dict)
+    #: Per-recipe stats in this course (Task 28); a recipe missing here has none yet.
+    stats: dict[str, TutorialRecipeStatsOut] = Field(default_factory=dict)
+
+
+class TutorialRecipeStatsOut(BaseModel):
+    """How a recipe has done: professors' decisions and students' next answers."""
+
+    decided: int
+    approval_rate: float | None
+    #: Blocks shown whose next answer is known.
+    outcomes: int
+    next_correct_rate: float | None
+    #: What the composer weighs it by; 0 means it is no longer chosen.
+    weight: float
 
 
 class TutorialPregenerationRequest(BaseModel):

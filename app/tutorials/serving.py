@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.domain.enums import MasteryBand
 from app.domain.mastery import mastery_band
 from app.persistence.models import (
+    CurriculumVersionRow,
     QuestionRow,
     StudentAttemptRow,
     TrainingSessionRow,
@@ -25,6 +26,7 @@ from app.subjects import profile_for_version
 from app.tutorials.composer import ComposeState, compose, frozen_blocks
 from app.tutorials.generator import get_recipes
 from app.tutorials.schema import ContentKind
+from app.tutorials.stats import recipe_weights, record_outcome, record_views
 
 #: A score that counts as a correct answer, as the student page shows it.
 CORRECT_SCORE = 100.0
@@ -70,6 +72,7 @@ def _compose(
     if not blocks:
         return []
     subject = profile_for_version(session, question.curriculum_version_id).storage_key
+    version = session.get(CurriculumVersionRow, question.curriculum_version_id)
     recipes = {recipe.id: recipe for recipe in get_recipes(subject)}
     return compose(
         blocks,
@@ -79,6 +82,7 @@ def _compose(
             last_correct=last_correct,
             content_kinds=_kinds(question, before=last_correct is None),
             seed=f"{run.rng_seed}:{attempt.id}:{moment}",
+            weights=recipe_weights(session, version.course_id if version else None),
         ),
     )
 
@@ -86,22 +90,27 @@ def _compose(
 def blocks_after_answer(
     session: Session, attempt: StudentAttemptRow, *, mastery: float | None
 ) -> list[TutorialBlockRow]:
-    """The blocks for the result card of an answered attempt."""
+    """The blocks for the result card of an answered attempt, logged as shown; the answer is
+    also the outcome of the blocks shown before it (Task 28)."""
     if attempt.score is None:
         return []
+    correct = attempt.score >= CORRECT_SCORE
+    record_outcome(session, attempt, correct=correct)
     run = session.get(TrainingSessionRow, attempt.session_id)
     question = session.get(QuestionRow, attempt.question_id)
     if run is None or question is None:
         return []
-    return _compose(
+    blocks = _compose(
         session,
         run,
         attempt,
         question,
         mastery=mastery if mastery is not None else 0.0,
-        last_correct=attempt.score >= CORRECT_SCORE,
+        last_correct=correct,
         moment="after",
     )
+    record_views(session, attempt, blocks, moment="after")
+    return blocks
 
 
 def preteach_blocks(session: Session, attempt: StudentAttemptRow) -> list[TutorialBlockRow]:
@@ -126,6 +135,8 @@ def preteach_blocks(session: Session, attempt: StudentAttemptRow) -> list[Tutori
     )
     if earlier is not None:
         return []
-    return _compose(
+    blocks = _compose(
         session, run, attempt, question, mastery=prior, last_correct=None, moment="before"
     )
+    record_views(session, attempt, blocks, moment="before")
+    return blocks
