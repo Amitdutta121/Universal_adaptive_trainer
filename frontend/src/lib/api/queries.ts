@@ -31,6 +31,10 @@ type ChunkGenerationSpec = Schemas["ChunkGenerationSpec"];
 
 /** The query key factory. Every key in the app starts here. */
 export const qk = {
+  tutorials: {
+    recipes: () => ["tutorials", "recipes"] as const,
+    blocks: (subtopicId: number) => ["tutorials", "blocks", subtopicId] as const,
+  },
   system: {
     health: () => ["system", "health"] as const,
     config: () => ["system", "config"] as const,
@@ -1809,5 +1813,37 @@ export function useResetRoleSettings() {
       client.invalidateQueries({ queryKey: qk.system.health() });
       client.invalidateQueries({ queryKey: qk.jobs.all });
     },
+  });
+}
+
+// ---------------------------------------------------------------- tutorials (Phase 5)
+
+/** The tutorial recipes of the course's subject; shipped with the backend. */
+export const useTutorialRecipes = () =>
+  useQuery({
+    queryKey: qk.tutorials.recipes(),
+    queryFn: () => unwrap(api.GET("/api/tutorial-recipes")),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/** A subtopic's generated tutorial blocks, newest first. */
+export const useTutorialBlocks = (subtopicId: number | null) =>
+  useQuery({
+    queryKey: qk.tutorials.blocks(subtopicId ?? 0),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-blocks", { params: { query: { subtopic_id: subtopicId ?? 0 } } }),
+      ),
+    enabled: subtopicId !== null,
+  });
+
+/** Generate one block (one model call, plus the recipe's tool and checks). */
+export function useGenerateTutorialBlock() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["GenerateTutorialBlockRequest"]) =>
+      unwrap(api.POST("/api/tutorial-blocks", { body })),
+    onSuccess: (block) =>
+      client.invalidateQueries({ queryKey: qk.tutorials.blocks(block.subtopic_id) }),
   });
 }

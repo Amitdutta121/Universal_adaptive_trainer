@@ -521,12 +521,21 @@ the renderer's contract → saved with chunk_ids. No judge.
 New dependencies: `mermaid` and `chart.js`, with justification.
 
 **Acceptance criteria:**
-- [ ] html can't read the parent page or make network requests (tests cover both)
-- [ ] An unknown renderer shows a safe fallback
+- [x] html can't read the parent page or make network requests (tests cover both)
+  (2026-10-15: vitest pins `sandbox="allow-scripts"` and the CSP placed first; in real Chromium
+  on the Tutorials page a probe block got origin `null`, SecurityError on parent.document,
+  cookies and localStorage, and fetch/img blocked by `connect-src 'none'`/`img-src data:`.
+  Residual: a script can still navigate its own frame, which neither sandbox nor CSP stops)
+- [x] An unknown renderer shows a safe fallback
 
 **Verification:**
-- [ ] `FRONTEND`
-- [ ] Manual check: render each seed recipe's block
+- [x] `FRONTEND` (typecheck; biome lint: only the pre-existing info in job-display.ts; vitest
+  696 passed). New deps: `mermaid`, `chart.js`, plus `react-markdown` for the markdown
+  renderer (builds React elements, drops raw html)
+- [x] Manual check: render each seed recipe's block (Agah book, subtopic 255 "Accumulator
+  patterns": all 3 recipes generated through the real generator, tracer and Chromium check
+  with SCRIPTED model replies, then rendered on /courses/1/tutorials. The real-LLM run is
+  Checkpoint F)
 
 **Dependencies:** T21
 **Files likely touched:** `frontend/src/components/tutorial/renderer-registry.tsx`, `.../html-frame.tsx`, `.../mermaid-block.tsx`, `.../chart-block.tsx`, `frontend/package.json`

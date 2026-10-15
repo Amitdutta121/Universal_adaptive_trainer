@@ -88,7 +88,7 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 - [x] T19: Recipe schema + loader + seed recipes + tutorial_blocks table
 - [x] T20: `python_trace` tool
 - [x] T21: Block generator (recipe + chunks + tool → payload)
-- [ ] T22: Frontend renderers + sandboxed html
+- [x] T22: Frontend renderers + sandboxed html
 - [x] T23: Playwright check for html blocks
 
 ### Checkpoint F: The 3 seed recipes generate and render for one Agah subtopic

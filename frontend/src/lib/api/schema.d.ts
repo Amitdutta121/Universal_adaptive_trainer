@@ -1535,6 +1535,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tutorial-recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recipes
+         * @description The tutorial recipes of the course's subject (shipped content, not course data).
+         */
+        get: operations["list_recipes_api_tutorial_recipes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Blocks
+         * @description A subtopic's blocks, newest first.
+         */
+        get: operations["list_blocks_api_tutorial_blocks_get"];
+        put?: never;
+        /**
+         * Create Block
+         * @description Generate one block. A block that stayed invalid comes back ``failed`` with ``error``.
+         */
+        post: operations["create_block_api_tutorial_blocks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/question-sets/prod": {
         parameters: {
             query?: never;
@@ -2711,6 +2755,12 @@ export interface components {
             judge_calls_per_question: number;
         };
         /**
+         * ContentKind
+         * @description What a subtopic's material is mostly about; the composer matches it to ``fits``.
+         * @enum {string}
+         */
+        ContentKind: "code" | "concept" | "process" | "misconception";
+        /**
          * CountsResponse
          * @description Dashboard counts, one per section.
          */
@@ -3482,6 +3532,19 @@ export interface components {
             planned: components["schemas"]["PlannedQuestionOut"][];
         };
         /**
+         * GenerateTutorialBlockRequest
+         * @description ``POST /api/tutorial-blocks``: generate one block of a recipe for a subtopic.
+         */
+        GenerateTutorialBlockRequest: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            /** Code */
+            code?: string | null;
+        };
+        /**
          * GeneratedRunQuestion
          * @description One question a generation run produced, and how its aim landed.
          *
@@ -3681,6 +3744,12 @@ export interface components {
          * @enum {string}
          */
         GeneratorKind: "base" | "personalized";
+        /**
+         * GuidanceLevel
+         * @description How much a tutorial block does for the student, from most to least (BKT-driven).
+         * @enum {string}
+         */
+        GuidanceLevel: "worked" | "faded" | "cue";
         /**
          * GuidelineListResponse
          * @description ``GET /api/guidelines``: the course subject's pending and active guidelines.
@@ -4690,6 +4759,24 @@ export interface components {
             /** Count */
             count: number;
         };
+        /**
+         * RecipeCheck
+         * @description A generation-time check a block of the recipe must pass (Task 23).
+         * @enum {string}
+         */
+        RecipeCheck: "html_loads" | "trace_matches";
+        /**
+         * RecipeInput
+         * @description What the generator hands the model besides the recipe's prompt.
+         * @enum {string}
+         */
+        RecipeInput: "subtopic" | "chunks" | "code";
+        /**
+         * RecipeTool
+         * @description A tool whose output a block embeds as-is (Task 20).
+         * @enum {string}
+         */
+        RecipeTool: "python_trace";
         /** RegenerateQuestionResponse */
         RegenerateQuestionResponse: {
             /** Question Id */
@@ -5740,6 +5827,89 @@ export interface components {
             /** Scope Key */
             scope_key: string;
         };
+        /**
+         * TutorialBlockOut
+         * @description One generated tutorial block; ``payload`` follows ``renderer``'s contract.
+         */
+        TutorialBlockOut: {
+            /** Id */
+            id: number;
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Chunk Ids */
+            chunk_ids: string[];
+            status: components["schemas"]["TutorialBlockStatus"];
+            /** Error */
+            error: string | null;
+            /** Model */
+            model: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * TutorialBlockStatus
+         * @description A generated tutorial block: ``DRAFT`` until the professor approves it (Phase 6);
+         *     ``FAILED`` when its payload stayed invalid after the one repair retry.
+         * @enum {string}
+         */
+        TutorialBlockStatus: "draft" | "failed";
+        /**
+         * TutorialRecipe
+         * @description One recipe in a subject's library.
+         *
+         *     ``id`` is stable and namespaced by subject (``py.code_trace_stepper``): blocks store it and
+         *     per-recipe stats key on it, so it is never renamed.
+         */
+        TutorialRecipe: {
+            /** Id */
+            id: string;
+            /** Subject */
+            subject: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Prompt */
+            prompt: string;
+            /** Fits */
+            fits: components["schemas"]["ContentKind"][];
+            /** Guidance Levels */
+            guidance_levels: components["schemas"]["GuidanceLevel"][];
+            /** Inputs */
+            inputs?: components["schemas"]["RecipeInput"][];
+            tool?: components["schemas"]["RecipeTool"] | null;
+            /** Checks */
+            checks?: components["schemas"]["RecipeCheck"][];
+        };
+        /**
+         * TutorialRecipeListResponse
+         * @description ``GET /api/tutorial-recipes``: the recipes of the course's subject.
+         */
+        TutorialRecipeListResponse: {
+            /** Subject */
+            subject: string;
+            /** Recipes */
+            recipes: components["schemas"]["TutorialRecipe"][];
+        };
+        /**
+         * TutorialRenderer
+         * @description How the frontend draws a tutorial block (Phase 5). Few and trusted: each has a payload
+         *     contract (``app/tutorials/renderers.py``) and one frontend component.
+         * @enum {string}
+         */
+        TutorialRenderer: "markdown" | "mermaid" | "chartjs" | "html";
         /**
          * TypeCalibrationOut
          * @description One question type's four-cell report (ADR-034).
@@ -8677,6 +8847,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recipes_api_tutorial_recipes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialRecipeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_blocks_api_tutorial_blocks_get: {
+        parameters: {
+            query: {
+                subtopic_id: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialBlockOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_block_api_tutorial_blocks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateTutorialBlockRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialBlockOut"];
                 };
             };
             /** @description Validation Error */

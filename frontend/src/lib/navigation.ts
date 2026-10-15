@@ -21,6 +21,7 @@ import {
   ListChecks,
   type LucideIcon,
   Network,
+  Presentation,
   Scale,
   Table2,
   Users,
@@ -74,6 +75,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     icon: ListChecks,
   },
   {
+    key: "tutorials",
+    label: "Tutorials",
+    path: "/tutorials",
+    summary:
+      "Generate short tutorial blocks for a subtopic from the course's recipes, and preview them as students will see them.",
+    icon: Presentation,
+  },
+  {
     key: "review",
     label: "Review Queue",
     path: "/review",
@@ -113,7 +122,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     key: "students",
     label: "Students",
     path: "/students/list",
-    summary: "Every enrolled learner in one filterable table: score, answered count, and last activity.",
+    summary:
+      "Every enrolled learner in one filterable table: score, answered count, and last activity.",
     icon: Table2,
   },
 ] as const;
