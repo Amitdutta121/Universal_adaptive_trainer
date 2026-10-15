@@ -80,3 +80,55 @@ At k = 5, by query kind:
   (0.935), so the in-app pipeline reproduces what the spike measured.
 - **The import ceiling is gone:** 0 of 66 queries now have no overlapping unit (was 9).
 - nDCG is not strictly comparable across unit sizes (see the parse spike); it rose anyway.
+
+## Hybrid BM25 + RRF (Task 11, 2026-10-14)
+
+`ChunkRetriever(hybrid=True)`: the dense cosine ranking and a `bm25s` ranking over the same
+text (heading path + chunk text, English stopwords) merged by reciprocal rank fusion, k = 60,
+equal weights. Same book, chunks and embedder as above; dense re-run in the same session.
+
+```
+python -m scripts.eval_retrieval --mode hybrid
+```
+
+| k | recall | precision | nDCG | MRR | Δ MRR vs dense |
+|---|---|---|---|---|---|
+| 1 | 0.564 | 0.818 | 0.818 | 0.818 | −0.076 |
+| 3 | 0.872 | 0.626 | 0.732 | 0.881 | −0.043 |
+| 5 | 0.937 | 0.476 | 0.734 | 0.885 | −0.047 |
+| 10 | 0.965 | 0.291 | 0.777 | 0.888 | −0.046 |
+
+At k = 5, by query kind:
+
+| kind | recall | precision | nDCG | MRR |
+|---|---|---|---|---|
+| heading (n=36) | 0.977 | 0.556 | 0.823 | 0.926 |
+| student (n=18) | 0.861 | 0.300 | 0.564 | 0.769 |
+| subtopic (n=12) | 0.931 | 0.500 | 0.723 | 0.938 |
+
+**Hybrid fails the acceptance bar: it is below dense on every metric at every k** (only
+heading/subtopic recall@5 rise, by one query). The drop is largest where BM25 was supposed to
+help: student MRR@5 0.875 → 0.769.
+
+Why, from a one-off diagnostic (one embedding pass, same queries; not a committed script):
+
+| variant | MRR@10 | nDCG@10 | R@5 | student MRR@5 | heading MRR@5 |
+|---|---|---|---|---|---|
+| dense | 0.934 | 0.824 | 0.954 | 0.875 | 0.951 |
+| BM25 alone (heading + text) | 0.784 | 0.677 | 0.845 | 0.602 | 0.845 |
+| BM25 alone (text only) | 0.666 | 0.557 | 0.781 | 0.622 | 0.630 |
+| RRF k=60, 1:1 (shipped) | 0.888 | 0.778 | 0.937 | 0.769 | 0.926 |
+| RRF k=60, dense 3:1 | 0.929 | 0.810 | 0.973 | 0.889 | 0.940 |
+| RRF k=10, dense 2:1 | 0.929 | 0.820 | 0.977 | 0.917 | 0.926 |
+
+- **BM25 is the weak leg, not the fusion.** Alone it is 0.15 MRR@10 below dense, and below it
+  on student questions too. On a 174-chunk book whose chunks are already embedded with their
+  heading path, the dense ranking has little left for exact-term matching to fix.
+- **Down-weighting BM25 recovers dense but does not beat it** on MRR or nDCG; it gains a
+  little recall@5. Those weights were picked on the gold set itself (66 queries), so the gains
+  are within what tuning on the test set buys. Not adopted.
+- **LlamaIndex `QueryFusionRetriever` was not tried.** Its `reciprocal_rerank` mode is the same
+  formula, and its BM25 retriever is built on `bm25s`; it would reproduce this result.
+- **Dense stays the default.** `hybrid` is off everywhere in the app; only
+  `scripts/eval_retrieval.py --mode hybrid` turns it on. Worth re-running when a larger or
+  more code-heavy book is in the gold set.

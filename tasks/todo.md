@@ -215,12 +215,14 @@ vector ranking by reciprocal rank fusion inside `ChunkRetriever`. Compare with L
 `QueryFusionRetriever` only if the in-house version falls short of the baseline.
 
 **Acceptance criteria:**
-- [ ] Hybrid ≥ vector-only on every metric in the harness, with the results in the doc
-- [ ] Results are deterministic for a fixed index
+- [ ] Hybrid ≥ vector-only on every metric in the harness, with the results in the doc -- NOT met:
+  hybrid is below dense on every metric (MRR@10 0.934 → 0.888); results and diagnosis in
+  `docs/RETRIEVAL_BASELINE.md`. Dense stays the default; hybrid is off in the app
+- [x] Results are deterministic for a fixed index (stable sort in BM25 and RRF ties)
 
 **Verification:**
 - [x] `PYTEST tests/test_chunk_retrieval.py tests/test_retrieval_eval.py`
-- [ ] `scripts/eval_retrieval.py --mode hybrid`
+- [x] `scripts/eval_retrieval.py --mode hybrid` (2026-10-14)
 
 **Dependencies:** Checkpoint B
 **Files likely touched:** `app/retrieval/retriever.py`, `app/retrieval/bm25.py`, `pyproject.toml`, `docs/RETRIEVAL_BASELINE.md`
