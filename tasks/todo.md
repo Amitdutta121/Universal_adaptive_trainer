@@ -712,7 +712,7 @@ never claims to show what's on screen.
 
 **Verification:**
 - [x] `PYTEST tests/test_video_clip.py`, `FRONTEND` (`video-clip-block.test.tsx`, `youtube-import-form.test.tsx`)
-- [ ] Manual check: a YouTube clip in a tutorial (human review)
+- [x] Manual check: a YouTube clip in a tutorial (2026-10-15, see Checkpoint H)
 
 **Dependencies:** T30
 **Files likely touched:** `frontend/src/components/tutorial/video-clip-block.tsx`, `recipes/intro_python/video_clip.yaml`, `app/tutorials/renderers.py`
@@ -720,6 +720,16 @@ never claims to show what's on screen.
 
 ## Checkpoint H
 - [ ] A YouTube clip plays inside a tutorial; human review (uploaded clips descoped)
+  (2026-10-15, DB copy `data/checkpoint_h.db`, Azure Foundry gpt-5-mini + text-embedding-3-small
+  from the dugong `.env`: video kqtD5dpn9C8 imported into course 1 as book 10 (59 timed chunks);
+  block 621 `py.video_clip` for subtopic 255 "Accumulator patterns" = 52:54-53:52, no model
+  call; recipe approved for taxonomy 7, frozen into set 6. API run 40: wrong answer on 255 at
+  attempt 536 -> result card stepper + misconception + flow + the clip. Chrome run 41 (attempt
+  553, answered wrong in the UI): player on youtube-nocookie with start=3174/end=3233 renders on
+  the result card, plays from the clip start, and after the end is paused back at the start;
+  no console errors. Caveat: the clip is about iterating a list with for/while, adjacent to
+  accumulators rather than about them -- this video has no accumulator segment. Awaiting human
+  review)
 
 ---
 
