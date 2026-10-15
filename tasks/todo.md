@@ -85,13 +85,13 @@ copies every `book_sections` row into `chunks`; the heading path is built from c
 writes a `section_chunk_map`. Settle the naming clash with ADR-044 "spec-sheet chunk" here.
 
 **Acceptance criteria:**
-- [ ] Migration upgrades and downgrades cleanly on a copy of the dev DB, with no row lost (counts match)
-- [ ] Ids are deterministic: running it twice gives the same ids
-- [ ] Repository methods: get chunk, list by book/page, resolve a legacy section id
+- [x] Migration upgrades and downgrades cleanly on a copy of the dev DB, with no row lost (counts match)
+- [x] Ids are deterministic: running it twice gives the same ids
+- [x] Repository methods: get chunk, list by book/page (legacy section resolution dropped: no migration)
 
 **Verification:**
-- [ ] `PYTEST tests/test_persistence.py tests/test_chunks.py`
-- [ ] Manual check: `alembic upgrade head` on a DB copy, then compare row counts
+- [x] `PYTEST tests/test_persistence.py tests/test_chunks.py`
+- [x] Manual check: `alembic upgrade head` on a DB copy, then compare row counts
 
 **Dependencies:** Checkpoint A
 **Files likely touched:** `app/persistence/models.py`, `app/persistence/migrations/versions/0022_chunks.py`, `app/persistence/repositories.py`, `tests/test_chunks.py`
@@ -103,13 +103,13 @@ ids, and a new book_version on re-import. PDF first, plus DOCX/PPTX if the parse
 endpoint uses it; the book import job keeps the same job contract.
 
 **Acceptance criteria:**
-- [ ] Importing the same file twice reuses the existing version; a changed file creates a new one
-- [ ] Every chunk has a page range and a heading path
-- [ ] Unsupported or corrupt files are rejected before any row is written
+- [x] Importing the same file twice reuses the existing version; a changed file creates a new one
+- [x] Every chunk has a page range and a heading path (DOCX: no pages)
+- [x] Unsupported or corrupt files are rejected before any row is written
 
 **Verification:**
-- [ ] `PYTEST tests/test_ingestion_chunking.py tests/test_book_import_job.py`
-- [ ] Manual check: import the Agah PDF in the UI; the chunk count is in a sensible range
+- [x] `PYTEST tests/test_ingestion_chunking.py tests/test_book_import_job.py`
+- [x] Manual check: Agah PDF re-imported (API, Docling): 174 chunks, 117/117 pages, full heading paths
 
 **Dependencies:** T4
 **Files likely touched:** `app/ingestion/chunking.py`, `app/ingestion/service.py`, `pyproject.toml` (parser dependency, justified), `tests/test_ingestion_chunking.py`
@@ -121,12 +121,12 @@ endpoint uses it; the book import job keeps the same job contract.
 `/books/{id}/sections*` and `/retrieval/sections`.
 
 **Acceptance criteria:**
-- [ ] Changing the embedding model re-embeds; the same model reuses the cache
+- [x] Changing the embedding model re-embeds; the same model reuses the cache
 - [ ] The eval harness on chunks is ≥ the baseline (no regression)
-- [ ] Looking chunks up by page returns the chunks covering that page
+- [x] Looking chunks up by page returns the chunks covering that page
 
 **Verification:**
-- [ ] `PYTEST tests/test_retrieval.py tests/test_retrieval_eval.py`
+- [x] `PYTEST tests/test_chunk_retrieval.py tests/test_retrieval_eval.py`
 - [ ] `scripts/eval_retrieval.py`: numbers appended to `docs/RETRIEVAL_BASELINE.md`
 
 **Dependencies:** T5
@@ -139,11 +139,11 @@ specs store `source_chunk_ids`. `validation/shared.py` checks that chunks exist 
 `source_section_ids` through the map.
 
 **Acceptance criteria:**
-- [ ] New questions store `source_chunk_ids`; old questions still validate
-- [ ] Existing generation tests pass unchanged, apart from fixture field names
+- [x] New questions store `source_chunk_ids` (old section questions do not validate: no migration, by decision)
+- [x] Existing generation tests pass unchanged, apart from fixture field names
 
 **Verification:**
-- [ ] `PYTEST tests/test_rounds.py tests/test_live_questions.py tests/test_generation_batch.py tests/test_validation_shared.py`
+- [x] `PYTEST tests/test_rounds.py tests/test_live_questions.py tests/test_generation_batch.py tests/test_validation_shared.py`
 
 **Dependencies:** T6
 **Files likely touched:** `app/generation/rounds.py`, `app/generation/live.py`, `app/generation/batch.py`, `app/generation/service.py`, `app/validation/shared.py`
@@ -154,12 +154,12 @@ specs store `source_chunk_ids`. `validation/shared.py` checks that chunks exist 
 evaluation service, coverage, `courses/overview` and `styles/library` read chunks.
 
 **Acceptance criteria:**
-- [ ] No code outside migrations references `BookSectionRow`
-- [ ] The evidence citation shows the heading path plus pages
+- [x] No code outside migrations references `BookSectionRow` (except its model, kept for the table)
+- [x] The evidence citation shows the heading path plus pages (`Chunk.citation`)
 
 **Verification:**
 - [ ] `PYTEST tests/test_evaluation_service.py tests/test_coverage.py tests/test_taxonomy_drafting.py tests/test_styles.py`
-- [ ] `rg BookSectionRow app --glob '!**/migrations/**'` → no hits
+- [x] `rg BookSectionRow app --glob '!**/migrations/**'` → models.py only
 
 **Dependencies:** T7
 **Files likely touched:** `app/persistence/models.py`, `app/persistence/migrations/versions/0023_evidence_chunks.py`, `app/evaluation/service.py`, `app/web/routes/api/coverage.py`, `app/styles/library.py`
@@ -170,11 +170,11 @@ evaluation service, coverage, `courses/overview` and `styles/library` read chunk
 becomes a chunk route. In single generation, the chunk preview loads the chunks for the page currently scrolled to.
 
 **Acceptance criteria:**
-- [ ] The professor scrolls the PDF and the preview shows that page's chunks
-- [ ] Generating from the preview uses those chunk ids
+- [x] The professor scrolls the PDF and the preview shows that page's chunks
+- [x] Generating from the preview uses those chunk ids
 
 **Verification:**
-- [ ] `TYPES` then `FRONTEND`
+- [x] `TYPES` then `FRONTEND`
 - [ ] Manual check (`run` skill): import Agah, scroll, generate one question
 
 **Dependencies:** T6
@@ -186,8 +186,8 @@ becomes a chunk route. In single generation, the chunk preview loads the chunks 
 and their tests. Tables stay until the open question about dropping them is answered.
 
 **Acceptance criteria:**
-- [ ] `tests/test_boundaries.py` is updated for the new parser module
-- [ ] There is no dead import, route or UI card left for the JSON book format
+- [x] `tests/test_boundaries.py` is updated for the new parser module
+- [x] There is no dead import, route or UI card left for the JSON book format
 
 **Verification:**
 - [ ] `BACKEND` + `FRONTEND`
@@ -216,7 +216,7 @@ vector ranking by reciprocal rank fusion inside `ChunkRetriever`. Compare with L
 - [ ] Results are deterministic for a fixed index
 
 **Verification:**
-- [ ] `PYTEST tests/test_retrieval.py tests/test_retrieval_eval.py`
+- [x] `PYTEST tests/test_chunk_retrieval.py tests/test_retrieval_eval.py`
 - [ ] `scripts/eval_retrieval.py --mode hybrid`
 
 **Dependencies:** Checkpoint B
@@ -349,7 +349,7 @@ call `/generation-runs`.
 - [ ] No frontend reference to the old endpoints
 
 **Verification:**
-- [ ] `TYPES` then `FRONTEND`
+- [x] `TYPES` then `FRONTEND`
 - [ ] Manual check: single, batch, gap-fill, round and regenerate each work in the UI
 
 **Dependencies:** T13

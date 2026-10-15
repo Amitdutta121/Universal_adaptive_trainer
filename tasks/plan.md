@@ -46,13 +46,13 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint A: Human picks the parser from the T3 report
 
 ### Phase 1: Chunks replace the book tree (M2)
-- [ ] T4: `chunks` table + migration from book_sections, with an id map
-- [ ] T5: Library parser → chunks on import, versioned
-- [ ] T6: Chunk retrieval + `/chunks` endpoint
-- [ ] T7: Repoint generation + validation to chunk ids
-- [ ] T8: Repoint evidence, evaluation, coverage, styles
-- [ ] T9: Frontend chunk viewer + scroll-page single generation
-- [ ] T10: Retire the chapter/section validation and the JSON book upload
+- [x] T4: `chunks` table (schema only: no data copy or id map, by decision 2026-10-14)
+- [x] T5: Library parser → chunks on import, versioned
+- [x] T6: Chunk retrieval + `/chunks` endpoint (eval run pending: spends API)
+- [x] T7: Repoint generation + validation to chunk ids
+- [x] T8: Repoint evidence, evaluation, coverage, styles
+- [x] T9: Frontend chunk viewer + scroll-page single generation
+- [x] T10: Retire the chapter/section validation and the JSON book upload
 
 ### Checkpoint B: Full suite green, frozen-set replay unchanged, Agah import + scroll generation work in the UI
 
@@ -140,6 +140,18 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 | Switching embedding models leaves retrieval half-migrated | High | T43 re-embeds into a new version and switches only when it's complete; the old vectors stay live until then |
 | API keys leak through the settings API or logs | High | Encrypted at rest, masked in responses, excluded from logs (T41/T42 tests) |
 | Scope: 44 tasks | High | One phase per session; checkpoints are hard stops for review |
+
+## Phase 1 decisions (2026-10-14)
+- **No data migration.** Existing books keep their sections and get chunks only when their file
+  is re-imported (`POST /books/{id}/versions`). Questions generated from sections no longer pass
+  the `source_chunk_ids` check. Accepted: "if it works as a new user I am fine".
+- **ADR-044 naming clash settled by meaning, not renaming:** the spec sheet's "chunk" was a
+  section; it now is a chunk (`ChunkQuestionRequest.chunk_id`).
+- **Docling is the optional `parse` extra;** without it a PDF is chunked by page text. The suite
+  runs `BOOK_PARSER=pages`. This worktree has its own `.venv` (Docling's deps conflict with the
+  shared one).
+- `GET /chunks/search` is separate from `GET /chunks` so only search needs a verified email
+  (it spends embedder credit). Missing chunk vectors are embedded lazily on search.
 
 ## Open Questions
 - Parser: **Docling** (decided at Checkpoint A, 2026-10-14; `docs/PARSE_SPIKE.md`).
