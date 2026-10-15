@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../schema.json
+name: Show the clip that explains this
+summary: The stretch of the course video where the lecturer explains this subtopic, with what is said.
+renderer: video_clip
+tool: video_clip
+fits: [concept, process]
+guidance_levels: [worked]
+inputs: [subtopic, chunks]
+checks: []

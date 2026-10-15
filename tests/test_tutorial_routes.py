@@ -51,6 +51,7 @@ def test_recipes_are_listed_for_the_subject(client: TestClient) -> None:
         "py.code_trace_stepper",
         "py.topic_flow",
         "py.misconception_line",
+        "py.video_clip",
     }
 
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import GuidanceLevel, TutorialRenderer
 
@@ -46,6 +46,9 @@ class RecipeTool(StrEnum):
     """A tool whose output a block embeds as-is (Task 20)."""
 
     PYTHON_TRACE = "python_trace"
+    #: Picks the course video's stretch that explains the subtopic (Task 31). The clip is the
+    #: whole block, so no model is called and ``prompt`` stays empty.
+    VIDEO_CLIP = "video_clip"
 
 
 class RecipeCheck(StrEnum):
@@ -75,8 +78,9 @@ class TutorialRecipe(BaseModel):
     summary: str
     renderer: TutorialRenderer
     #: The model's instructions for this recipe. The generator adds the subtopic, the guidance
-    #: level and the chunk excerpts; the prompt says what to write and how.
-    prompt: str = Field(min_length=1)
+    #: level and the chunk excerpts; the prompt says what to write and how. Empty only for a
+    #: ``video_clip`` recipe, which calls no model.
+    prompt: str = ""
     #: The kinds of content this recipe teaches well; never empty.
     fits: list[ContentKind] = Field(min_length=1)
     #: The guidance levels this recipe can be written at; never empty.
@@ -84,3 +88,14 @@ class TutorialRecipe(BaseModel):
     inputs: list[RecipeInput] = Field(default_factory=lambda: [RecipeInput.SUBTOPIC])
     tool: RecipeTool | None = None
     checks: list[RecipeCheck] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _clip_rules(self) -> TutorialRecipe:
+        clip_tool = self.tool is RecipeTool.VIDEO_CLIP
+        if clip_tool != (self.renderer is TutorialRenderer.VIDEO_CLIP):
+            raise ValueError("the video_clip renderer and the video_clip tool go together")
+        if not clip_tool and not self.prompt.strip():
+            raise ValueError("prompt is required")
+        if clip_tool and self.prompt.strip():
+            raise ValueError("a video_clip recipe calls no model, so it has no prompt")
+        return self

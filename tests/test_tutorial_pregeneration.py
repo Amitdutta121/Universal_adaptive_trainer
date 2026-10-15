@@ -166,9 +166,9 @@ def test_a_dry_run_prices_every_missing_block(client: TestClient, session: Sessi
 
     assert response.status_code == 200, response.text
     plan = response.json()
-    # 2 subtopics x (stepper: worked, faded + misconception: 3 levels + flow: 3 levels) = 16,
-    # minus the cue misconception block already made.
-    assert plan["blocks_to_create"] == 15
+    # 2 subtopics x (stepper: worked, faded + misconception: 3 levels + flow: 3 levels
+    # + clip: worked) = 18, minus the cue misconception block already made. A clip calls no model.
+    assert plan["blocks_to_create"] == 17
     assert plan["already_made"] == 1
     assert plan["generation_calls"] == 15
     assert plan["max_attempts_per_block"] == 2

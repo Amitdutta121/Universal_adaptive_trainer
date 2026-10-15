@@ -23,6 +23,7 @@ from app.persistence.models import (
     TutorialBlockRow,
 )
 from app.subjects import profile_for_version
+from app.tutorials.clips import playable
 from app.tutorials.composer import ComposeState, compose, frozen_blocks
 from app.tutorials.generator import get_recipes
 from app.tutorials.schema import ContentKind
@@ -68,7 +69,7 @@ def _compose(
     subtopic_id = _subtopic_id(attempt, question)
     if run.set_version_id is None or subtopic_id is None:
         return []
-    blocks = frozen_blocks(session, run.set_version_id, subtopic_id)
+    blocks = playable(session, frozen_blocks(session, run.set_version_id, subtopic_id))
     if not blocks:
         return []
     subject = profile_for_version(session, question.curriculum_version_id).storage_key

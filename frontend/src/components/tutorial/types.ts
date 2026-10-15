@@ -30,3 +30,14 @@ export interface HtmlPayload {
   html: string;
   title?: string;
 }
+
+export interface VideoClipPayload {
+  provider: "youtube";
+  video_id: string;
+  /** Seconds. */
+  start: number;
+  end: number;
+  title?: string;
+  /** What is said in the range. */
+  transcript?: string;
+}

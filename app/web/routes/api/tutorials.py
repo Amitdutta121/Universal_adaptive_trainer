@@ -32,6 +32,7 @@ from app.tutorials.generator import (
     get_recipes,
 )
 from app.tutorials.jobs import plan_pregeneration, queue_pregeneration
+from app.tutorials.schema import RecipeTool
 from app.tutorials.stats import recipe_stats
 from app.web.routes.api.deps import (
     SPENDS_LLM_CREDIT,
@@ -194,7 +195,11 @@ def pregenerate(
             planned=[PlannedTutorialBlock.model_validate(p, from_attributes=True) for p in planned],
             blocks_to_create=len(planned),
             already_made=existing,
-            generation_calls=len(planned),
+            # A video_clip recipe picks a transcript chunk and calls no model.
+            generation_calls=sum(
+                get_recipe(profile.storage_key, p.recipe_id).tool is not RecipeTool.VIDEO_CLIP
+                for p in planned
+            ),
             max_attempts_per_block=MAX_ATTEMPTS,
         )
     if not planned:

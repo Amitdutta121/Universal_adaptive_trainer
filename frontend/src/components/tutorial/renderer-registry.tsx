@@ -5,7 +5,14 @@ import { ChartBlock } from "./chart-block";
 import { HtmlFrame } from "./html-frame";
 import { MarkdownBlock } from "./markdown-block";
 import { MermaidBlock } from "./mermaid-block";
-import type { ChartPayload, HtmlPayload, MarkdownPayload, MermaidPayload } from "./types";
+import type {
+  ChartPayload,
+  HtmlPayload,
+  MarkdownPayload,
+  MermaidPayload,
+  VideoClipPayload,
+} from "./types";
+import { VideoClipBlock } from "./video-clip-block";
 
 type Payload = Record<string, unknown>;
 
@@ -32,6 +39,17 @@ const RENDERERS: Record<string, (payload: Payload) => ReactNode | null> = {
     if (typeof payload.html !== "string") return null;
     const { html, title } = payload as unknown as HtmlPayload;
     return <HtmlFrame html={html} title={title ?? ""} />;
+  },
+  video_clip: (payload) => {
+    const clip = payload as unknown as VideoClipPayload;
+    const valid =
+      clip.provider === "youtube" &&
+      typeof clip.video_id === "string" &&
+      /^[A-Za-z0-9_-]{11}$/.test(clip.video_id) &&
+      typeof clip.start === "number" &&
+      typeof clip.end === "number" &&
+      clip.end > clip.start;
+    return valid ? <VideoClipBlock clip={clip} /> : null;
   },
 };
 

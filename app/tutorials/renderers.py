@@ -13,7 +13,7 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.domain.enums import TutorialRenderer
 from app.tutorials.tools.python_trace import TraceStep
@@ -72,11 +72,34 @@ class StepperPayload(HtmlPayload):
     notes: list[LineNote] = Field(default_factory=list)
 
 
+class VideoClipPayload(BaseModel):
+    """A range of a YouTube video, played through the IFrame API (Task 31).
+
+    ``start``/``end`` are seconds, on sentence boundaries of the transcript and padded a little.
+    ``transcript`` is what is said in the range; the block never describes what is on screen,
+    because nothing here has seen the picture.
+    """
+
+    provider: Literal["youtube"] = "youtube"
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    start: float = Field(ge=0)
+    end: float
+    title: str = ""
+    transcript: str = ""
+
+    @model_validator(mode="after")
+    def _a_range(self) -> VideoClipPayload:
+        if self.end <= self.start:
+            raise ValueError("end must be after start")
+        return self
+
+
 _CONTRACTS: dict[TutorialRenderer, type[BaseModel]] = {
     TutorialRenderer.MARKDOWN: MarkdownPayload,
     TutorialRenderer.MERMAID: MermaidPayload,
     TutorialRenderer.CHARTJS: ChartPayload,
     TutorialRenderer.HTML: HtmlPayload,
+    TutorialRenderer.VIDEO_CLIP: VideoClipPayload,
 }
 
 #: First keyword of every Mermaid diagram type a tutorial may use.

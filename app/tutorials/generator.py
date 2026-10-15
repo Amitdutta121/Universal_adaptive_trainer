@@ -11,6 +11,9 @@ For a ``python_trace`` recipe the model writes a program and notes, never the ru
 traced (``app/tutorials/tools/python_trace.py``) and the recorded steps are embedded as-is in
 the stepper's html. Code the caller gives (e.g. the question a student got wrong) is traced
 before the call, and the model writes notes for it.
+
+A ``video_clip`` recipe calls no model at all: the block is the course video's chunk that the
+subtopic retrieves best, as a clip (``app/tutorials/clips.py``, Task 31).
 """
 
 from __future__ import annotations
@@ -26,7 +29,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.domain.chunks import HEADING_SEPARATOR
-from app.domain.enums import GuidanceLevel, TutorialBlockStatus, TutorialRenderer
+from app.domain.enums import (
+    ChunkSourceKind,
+    GuidanceLevel,
+    TutorialBlockStatus,
+    TutorialRenderer,
+)
 from app.errors import DomainRuleError, MalformedModelOutputError, NotFoundError
 from app.llm import ChatTurn, StructuredLLMClient
 from app.persistence.models import TutorialBlockRow
@@ -34,6 +42,7 @@ from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.retrieval.chunks import ChunkRetriever
 from app.subjects import profile_for_version
 from app.tutorials.approval import initial_status
+from app.tutorials.clips import clip_payload
 from app.tutorials.html_check import HtmlCheckUnavailable, check_html_block
 from app.tutorials.loader import load_recipes
 from app.tutorials.renderers import (
@@ -118,7 +127,7 @@ class BlockRequest:
 
 
 def draft_model(recipe: TutorialRecipe) -> type[BaseModel]:
-    """The structure the model answers in for this recipe."""
+    """The structure the model answers in for this recipe (not called for a ``video_clip``)."""
     if recipe.tool is RecipeTool.PYTHON_TRACE:
         return StepperDraft
     return _DRAFTS[recipe.renderer]
@@ -215,6 +224,8 @@ def generate_block(
         raise DomainRuleError(
             f"Recipe {recipe.id} is written at {allowed}, not {request.guidance_level.value}."
         )
+    if recipe.tool is RecipeTool.VIDEO_CLIP:
+        return _clip_block(session, subtopic, recipe, request, retriever)
     trace: TraceResult | None = None
     if request.code is not None:
         if RecipeInput.CODE not in recipe.inputs:
@@ -285,6 +296,41 @@ def generate_block(
         else initial_status(session, subtopic.topic.curriculum_version_id, recipe.id),
         error="; ".join(problems) if problems else None,
         model=client.description,
+    )
+    session.add(block)
+    session.flush()
+    return block
+
+
+def _clip_block(
+    session: Session,
+    subtopic,
+    recipe: TutorialRecipe,
+    request: BlockRequest,
+    retriever: ChunkRetriever,
+) -> TutorialBlockRow:
+    """The block of a ``video_clip`` recipe: the best-matching video chunk, no model call."""
+    found = retriever.for_subtopic(request.subtopic_id, top_k=1, source_kind=ChunkSourceKind.VIDEO)
+    if not found:
+        raise DomainRuleError(
+            "No playable course video was found for this subtopic. Import a YouTube video "
+            "for the course first."
+        )
+    chunk = ChunkRepository(session).get_many([found[0].chunk_id])[found[0].chunk_id]
+    payload = clip_payload(chunk)
+    problems = payload_problems(recipe.renderer, payload)
+    block = TutorialBlockRow(
+        subtopic_id=subtopic.id,
+        recipe_id=recipe.id,
+        guidance_level=request.guidance_level,
+        renderer=recipe.renderer,
+        payload=payload if not problems else {},
+        chunk_ids=[chunk.id],
+        status=TutorialBlockStatus.FAILED
+        if problems
+        else initial_status(session, subtopic.topic.curriculum_version_id, recipe.id),
+        error="; ".join(problems) if problems else None,
+        model="",
     )
     session.add(block)
     session.flush()

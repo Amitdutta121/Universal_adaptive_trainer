@@ -213,6 +213,7 @@ def test_the_seed_recipes_are_offered_for_intro_python() -> None:
         "py.code_trace_stepper",
         "py.topic_flow",
         "py.misconception_line",
+        "py.video_clip",
     }
     assert get_recipes("no_such_subject") == []
 

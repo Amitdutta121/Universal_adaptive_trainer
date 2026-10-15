@@ -43,7 +43,8 @@
     "RecipeTool": {
       "description": "A tool whose output a block embeds as-is (Task 20).",
       "enum": [
-        "python_trace"
+        "python_trace",
+        "video_clip"
       ],
       "title": "RecipeTool",
       "type": "string"
@@ -54,7 +55,8 @@
         "markdown",
         "mermaid",
         "chartjs",
-        "html"
+        "html",
+        "video_clip"
       ],
       "title": "TutorialRenderer",
       "type": "string"
@@ -84,7 +86,7 @@
       "$ref": "#/$defs/TutorialRenderer"
     },
     "prompt": {
-      "minLength": 1,
+      "default": "",
       "title": "Prompt",
       "type": "string"
     },
@@ -134,7 +136,6 @@
     "name",
     "summary",
     "renderer",
-    "prompt",
     "fits",
     "guidance_levels"
   ],

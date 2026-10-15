@@ -19,13 +19,21 @@ RECIPES = load_recipes()
 ALL_RECIPES = [recipe for recipes in RECIPES.values() for recipe in recipes]
 
 
-def test_the_three_seed_recipes_ship() -> None:
+def test_the_seed_recipes_ship() -> None:
     by_id = {recipe.id: recipe for recipe in RECIPES["intro_python"]}
-    assert set(by_id) == {"py.code_trace_stepper", "py.topic_flow", "py.misconception_line"}
+    assert set(by_id) == {
+        "py.code_trace_stepper",
+        "py.topic_flow",
+        "py.misconception_line",
+        "py.video_clip",
+    }
     stepper = by_id["py.code_trace_stepper"]
     assert (stepper.renderer, stepper.tool) == (TutorialRenderer.HTML, RecipeTool.PYTHON_TRACE)
     assert by_id["py.topic_flow"].renderer is TutorialRenderer.MERMAID
     assert by_id["py.misconception_line"].renderer is TutorialRenderer.MARKDOWN
+    clip = by_id["py.video_clip"]
+    assert (clip.renderer, clip.tool) == (TutorialRenderer.VIDEO_CLIP, RecipeTool.VIDEO_CLIP)
+    assert clip.guidance_levels == [GuidanceLevel.WORKED]
 
 
 # ------------------------------------------------------------------ CI checks (mirror Task 17)

@@ -103,11 +103,11 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint G: A playbook student run shows blocks fading as mastery rises
 
 ### Phase 7: Video (M8)
-- [ ] T29: Lecture upload → Whisper → timestamped chunks
-- [ ] T30: YouTube transcript + paste fallback + availability check
-- [ ] T31: `video_clip` renderer + clip recipe
+- [x] T29: ~~Lecture upload → Whisper~~ (descoped 2026-10-15, YouTube only) → timestamped chunks
+- [x] T30: YouTube transcript + paste fallback + availability check
+- [x] T31: `video_clip` renderer + clip recipe
 
-### Checkpoint H: A clip from an uploaded lecture and one from YouTube play in a tutorial
+### Checkpoint H: A YouTube clip plays in a tutorial (uploaded lectures descoped)
 
 ### Phase 8: Professor agent (M9)
 - [ ] T32: Pydantic AI agent + AG-UI endpoint + first 4 tools
@@ -158,5 +158,5 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 - How long to keep the old `book_sections`/`book_chapters` tables after T10 before dropping them?
 - Which model does the agent use by default? It can be changed later in Settings (T41–T44).
 - Admin for settings: **the existing fastapi-users `is_superuser` flag** (decided 2026-10-14; `python -m app.auth.create_user --superuser`).
-- Whisper: local `faster-whisper` or a hosted API?
+- Whisper: moot for now — custom video upload descoped 2026-10-15 (YouTube only).
 - T39 needs hints to exist. Do `cue` tutorial blocks count as hints, or is a separate hint feature needed first?

@@ -666,15 +666,20 @@ question of a topic, pre-teaching blocks show if prior mastery is low. Blocks fa
 ## Phase 7: Video
 
 ## Task 29: Lecture upload → Whisper → timestamped chunks
+> **Descoped 2026-10-15:** no custom video upload; YouTube only. The shared part — timed chunks at
+> sentence boundaries, stored as `source_kind=video` and retrieved like book chunks — is built in
+> `app/ingestion/youtube.py` and tested here on a fixture transcript instead of a clip.
+
 **Description:** Upload a video or audio file; transcribe it (`faster-whisper`, or a hosted API, per the open
 question); chunk at sentence boundaries into `chunks` with `source_kind=video` and start/end seconds.
 
 **Acceptance criteria:**
-- [ ] Chunks have monotonic, non-overlapping timestamps
-- [ ] Video chunks are retrievable like book chunks
+- [x] Chunks have monotonic, non-overlapping timestamps
+- [x] Video chunks are retrievable like book chunks
+- [ ] ~~Upload + Whisper~~ (descoped)
 
 **Verification:**
-- [ ] `PYTEST tests/test_video_ingestion.py`, using a short fixture clip
+- [x] `PYTEST tests/test_video_ingestion.py`, using a fixture transcript (`tests/fixtures/lecture_transcript.json`, synthetic)
 
 **Dependencies:** Checkpoint G
 **Files likely touched:** `app/ingestion/video.py`, `app/web/routes/api/books.py` (or a new media route), `pyproject.toml`
@@ -686,10 +691,11 @@ pastes the transcript. A periodic job flags videos that are private, deleted or 
 Never download the video.
 
 **Acceptance criteria:**
-- [ ] A failed fetch shows the paste option; nothing half-imports
+- [x] A failed fetch shows the paste option; nothing half-imports
 
 **Verification:**
-- [ ] `PYTEST tests/test_youtube_source.py` (network mocked)
+- [x] `PYTEST tests/test_youtube_source.py` (network mocked) — 30 passed
+- [x] Live, unmocked import of a public video (kqtD5dpn9C8): 59 chunks, contiguous timestamps
 
 **Dependencies:** T29
 **Files likely touched:** `app/ingestion/youtube.py`, `app/jobs/*`, `tests/test_youtube_source.py`
@@ -702,18 +708,18 @@ Never download the video.
 never claims to show what's on screen.
 
 **Acceptance criteria:**
-- [ ] The clip plays only the chosen range, in both player types
+- [x] The clip plays only the chosen range (YouTube player only; `<video>` path descoped with T29)
 
 **Verification:**
-- [ ] `PYTEST tests/test_video_clip.py`, `FRONTEND`
-- [ ] Manual check: one uploaded and one YouTube clip in a tutorial
+- [x] `PYTEST tests/test_video_clip.py`, `FRONTEND` (`video-clip-block.test.tsx`, `youtube-import-form.test.tsx`)
+- [ ] Manual check: a YouTube clip in a tutorial (human review)
 
 **Dependencies:** T30
 **Files likely touched:** `frontend/src/components/tutorial/video-clip-block.tsx`, `recipes/intro_python/video_clip.yaml`, `app/tutorials/renderers.py`
 **Estimated scope:** S
 
 ## Checkpoint H
-- [ ] Both kinds of clip play inside a tutorial; human review
+- [ ] A YouTube clip plays inside a tutorial; human review (uploaded clips descoped)
 
 ---
 

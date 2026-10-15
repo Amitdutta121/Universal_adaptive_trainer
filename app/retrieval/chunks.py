@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.domain.chunks import HEADING_SEPARATOR
+from app.domain.enums import ChunkSourceKind, SourceFormat, VideoAvailability
 from app.persistence.models import (
     BookRow,
     ChunkEmbeddingRow,
@@ -213,12 +214,26 @@ class ChunkRetriever:
         ]
 
     def for_subtopic(
-        self, subtopic_id: int, *, top_k: int = 5, book_ids: list[int] | None = None
+        self,
+        subtopic_id: int,
+        *,
+        top_k: int = 5,
+        book_ids: list[int] | None = None,
+        source_kind: ChunkSourceKind | None = None,
     ) -> list[RetrievedChunk]:
         """Chunks for a subtopic: from its taxonomy's source books, else ``book_ids``, else the
-        books of the taxonomy's own course -- never another course's books (ADR-060)."""
+        books of the taxonomy's own course -- never another course's books (ADR-060).
+
+        ``source_kind=VIDEO`` searches the course's playable videos instead (Task 31): a
+        taxonomy's source books never list them.
+        """
         subtopic = CurriculumRepository(self._session).get_subtopic(subtopic_id)
         version = self._session.get(CurriculumVersionRow, subtopic.topic.curriculum_version_id)
+        if source_kind is ChunkSourceKind.VIDEO:
+            videos = playable_video_ids(self._session, version.course_id if version else None)
+            if not videos:
+                return []
+            return self.search(subtopic_query_text(subtopic), book_ids=videos, top_k=top_k)
         if version and version.source_book_ids:
             scoped: list[int] | None = list(version.source_book_ids)
         elif book_ids is not None:
@@ -233,6 +248,21 @@ def course_book_ids(session: Session, course_id: int | None) -> list[int] | None
     if course_id is None:
         return None
     return list(session.scalars(select(BookRow.id).where(BookRow.course_id == course_id)))
+
+
+#: A video in one of these states cannot play a clip (``app/jobs/video_availability.py``).
+UNPLAYABLE = (VideoAvailability.UNAVAILABLE, VideoAvailability.NOT_EMBEDDABLE)
+
+
+def playable_video_ids(session: Session, course_id: int | None) -> list[int]:
+    """The course's YouTube sources a clip can still play from (every course's when ``None``)."""
+    stmt = select(BookRow.id).where(
+        BookRow.source_format == SourceFormat.YOUTUBE,
+        BookRow.video_availability.is_(None) | BookRow.video_availability.not_in(UNPLAYABLE),
+    )
+    if course_id is not None:
+        stmt = stmt.where(BookRow.course_id == course_id)
+    return list(session.scalars(stmt.order_by(BookRow.id)))
 
 
 def _to_result(row: ChunkRow, score: float) -> RetrievedChunk:
