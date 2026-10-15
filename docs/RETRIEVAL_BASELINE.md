@@ -127,8 +127,46 @@ Why, from a one-off diagnostic (one embedding pass, same queries; not a committe
 - **Down-weighting BM25 recovers dense but does not beat it** on MRR or nDCG; it gains a
   little recall@5. Those weights were picked on the gold set itself (66 queries), so the gains
   are within what tuning on the test set buys. Not adopted.
-- **LlamaIndex `QueryFusionRetriever` was not tried.** Its `reciprocal_rerank` mode is the same
-  formula, and its BM25 retriever is built on `bm25s`; it would reproduce this result.
+- **LlamaIndex `QueryFusionRetriever`: see below.**
 - **Dense stays the default.** `hybrid` is off everywhere in the app; only
   `scripts/eval_retrieval.py --mode hybrid` turns it on. Worth re-running when a larger or
   more code-heavy book is in the gold set.
+
+### LlamaIndex `QueryFusionRetriever` (Task 11, 2026-10-14)
+
+llama-index-core 0.14.25 + llama-index-retrievers-bm25, run in a throwaway venv (not a project
+dependency) on the same chunk vectors and query vectors exported from the app, so dense is
+identical. `num_queries=1` (no LLM query rewriting), each sub-retriever `similarity_top_k=10`
+(LlamaIndex's usual setup), final top 10.
+
+| variant | MRR@10 | nDCG@10 | R@5 | student MRR@5 | heading MRR@5 |
+|---|---|---|---|---|---|
+| dense | **0.934** | **0.824** | 0.954 | 0.875 | **0.951** |
+| LI BM25 alone (stemmed) | 0.824 | 0.689 | 0.865 | 0.694 | 0.861 |
+| LI `reciprocal_rerank` | **0.937** | 0.810 | 0.964 | **0.944** | 0.931 |
+| LI `relative_score` | 0.947 | 0.818 | 0.961 | 0.917 | 0.944 |
+| LI `dist_based_score` | 0.929 | 0.807 | 0.964 | 0.889 | 0.940 |
+| LI `reciprocal_rerank`, sub-retrievers return all 174 | 0.916 | 0.781 | 0.942 | 0.852 | 0.931 |
+
+Ablation of the in-house RRF (k = 60, 1:1), toggling LlamaIndex's two differing defaults:
+
+| BM25 stemming | lists fused | MRR@10 | nDCG@10 | R@5 | student MRR@5 | heading MRR@5 |
+|---|---|---|---|---|---|---|
+| no (shipped) | all | 0.888 | 0.778 | 0.937 | 0.769 | 0.926 |
+| no | top 10 | 0.915 | 0.811 | 0.977 | 0.880 | 0.926 |
+| yes | all | 0.914 | 0.788 | 0.949 | 0.852 | 0.931 |
+| yes | top 10 | 0.937 | 0.811 | 0.964 | 0.944 | 0.931 |
+
+- **LlamaIndex's RRF is the in-house RRF plus two defaults:** an English stemmer on BM25 and
+  fusing only each retriever's top 10. With both, the in-house code reproduces LlamaIndex to the
+  third decimal. Each default is worth about half the gain; fusing full lists lets BM25's long
+  tail of weak matches outvote the dense ranking.
+- **It still misses the bar:** MRR@10 and recall@5 tie or edge past dense, student MRR@5 rises
+  0.875 → 0.944, but nDCG@10 (−0.013) and heading MRR@5 (−0.020) fall. It's a trade between
+  query kinds, not a dominant ranker. With n = 18 student queries, +0.069 is two or three
+  queries moving up.
+- These settings are LlamaIndex's defaults, not picked on the gold set, so they are not
+  overfit the way the weighted variants above are. The weighted `dist_based_score` 0.7:0.3
+  (0.952 / 0.830) was picked on the gold set and is not adopted.
+- **LlamaIndex adds nothing a dependency would pay for:** the same result is two parameters
+  in `app/retrieval/bm25.py` (`PyStemmer`, already what `bm25s` uses) and `chunks.py`.
