@@ -443,8 +443,11 @@ library styles. An "Export to YAML" action downloads a file ready for a PR.
 - [x] Manual check: create, use and export a style in the UI (2026-10-15, Chrome, CS115:
   duplicate id and a question type the course does not use are refused in the dialog;
   a new style is created, appears in the picker and is selected for a subtopic; Export to
-  YAML yields the style's file. Not done: Approve, which starts a round and spends credit.
-  Fixed from the walkthrough: "Start from a style" offered types the course does not use)
+  YAML yields the style's file. Fixed from the walkthrough: "Start from a style" offered
+  types the course does not use. With LLM credit: the suggester proposed the course style
+  for 9/11 subtopics; Approve saved it and round 4 produced 6 questions (4 hard targets
+  skipped by the existing lesson check), 2 in py.cs115_concept, all validation_passed; the
+  rebuilt round target for question 383 states the course style)
 
 **Dependencies:** T17
 **Files likely touched:** `app/persistence/models.py` (+ migration), `app/web/routes/api/setup.py`, `frontend/.../questions/setup/question-setup-dialog.tsx`, `tests/test_course_styles.py`
