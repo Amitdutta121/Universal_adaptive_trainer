@@ -762,10 +762,16 @@ service (its model is the `agent` role from the settings resolver, T41) and the 
 for a human click. `plan_generation` returns a dry-run cost; `run_generation` requires that plan to be confirmed.
 
 **Acceptance criteria:**
-- [ ] A test shows the agent can't approve, publish or spend without a human confirmation event
+- [x] A test shows the agent can't approve, publish or spend without a human confirmation event
+  (`approve_curriculum`, `edit_curriculum`, `save_style`, `publish_set`, `run_generation` are
+  `requires_approval` tools: no click / denied writes nothing, approved runs the service; over
+  AG-UI only `resume` with `approved: true` runs them. `run_generation` takes the signed plan id
+  from `plan_generation` and its call count; a changed count, forged or foreign plan is refused.
+  `edit_curriculum` is gated too: it changes the live taxonomy. A new setup is planned as
+  `new_setup` and saved by `run_generation`, since saving one starts round 1.)
 
 **Verification:**
-- [ ] `PYTEST tests/test_agent_approvals.py`
+- [x] `PYTEST tests/test_agent_approvals.py` (16 passed, 2026-10-15)
 
 **Dependencies:** T32, T13
 **Files likely touched:** `app/agent/tools.py`, `app/agent/approvals.py`, `tests/test_agent_approvals.py`

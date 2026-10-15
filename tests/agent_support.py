@@ -11,6 +11,8 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+from pydantic_ai import DeferredToolRequests, DeferredToolResults
+from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -21,6 +23,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, DeltaToolCalls, FunctionModel
 
+from app.agent.agent import professor_agent
 from app.agent.tools import AgentDeps
 from app.persistence.database import get_session_factory
 
@@ -91,3 +94,27 @@ def result_of(messages: list[ModelMessage], tool_name: str) -> Any:
     found = [part.content for part in tool_returns(messages) if part.tool_name == tool_name]
     assert found, f"{tool_name} was not called"
     return found[-1]
+
+
+def run(
+    *calls: tuple[str, dict[str, Any]],
+    decision: bool | None = None,
+    final: str = "Done.",
+    **deps_overrides: Any,
+) -> AgentRunResult:
+    """Run the agent through ``calls``. Calls that wait for approval end the run with
+    ``DeferredToolRequests``; ``decision`` is then the professor's click on each of them
+    (``None``: no click), and the run resumes with it."""
+    deps = agent_deps(**deps_overrides)
+    model = scripted(*calls, final=final)
+    result = professor_agent.run_sync("go", model=model, deps=deps)
+    while decision is not None and isinstance(result.output, DeferredToolRequests):
+        result = professor_agent.run_sync(
+            message_history=result.all_messages(),
+            model=model,
+            deps=deps,
+            deferred_tool_results=DeferredToolResults(
+                approvals={call.tool_call_id: decision for call in result.output.approvals}
+            ),
+        )
+    return result

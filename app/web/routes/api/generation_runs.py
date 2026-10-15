@@ -9,6 +9,8 @@ returns the plan and its call counts without a model call or a written row.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import APIRouter, Request, Response, status
 from sqlalchemy.orm import Session
 
@@ -18,7 +20,8 @@ from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.rounds import plan_targets
 from app.generation.service import regeneration_spec
 from app.ingestion import SourceRetrieval
-from app.jobs.queue import JobQueueDep
+from app.jobs.queue import JobQueue, JobQueueDep
+from app.llm.client import StructuredLLMClient
 from app.persistence.repositories import QuestionSetupRepository
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.coverage import GenerationClientDep, queue_coverage_fill
@@ -43,6 +46,7 @@ from app.web.routes.api.schemas import (
     GenerationRunTotals,
     PlannedRunQuestion,
     RegenerateRunTarget,
+    RunTarget,
     SetupCellsRunTarget,
 )
 
@@ -70,30 +74,57 @@ def start_generation_run(
 
     Everything that can be refused is checked before the ``202``, as on the old routes.
     """
-    target = payload.target
     if payload.dry_run:
         response.status_code = status.HTTP_200_OK
+        return plan_run(session, course, payload.target)
+    return queue_run(
+        session,
+        course,
+        payload.target,
+        queue=queue,
+        client=client,
+        embedder=lambda: _query_embedder(request),
+    )
+
+
+def plan_run(session: Session, course: int | None, target: RunTarget) -> GenerationRunPlan:
+    """The questions a run of ``target`` would create and its call counts. Writes nothing."""
+    if isinstance(target, ChunksRunTarget):
+        return _chunks_plan(_chunk_sheet(session, course, target))
+    if isinstance(target, GapsRunTarget):
+        return _gaps_plan(target)
+    if isinstance(target, SetupCellsRunTarget):
+        return _setup_cells_plan(session, course, target)
+    # The only kind left: the union is closed (ADR-066).
+    assert isinstance(target, RegenerateRunTarget)
+    return _regenerate_plan(session, course, target)
+
+
+def queue_run(
+    session: Session,
+    course: int | None,
+    target: RunTarget,
+    *,
+    queue: JobQueue,
+    client: StructuredLLMClient | None,
+    embedder: Callable[[], Embedder],
+) -> GenerationRunStarted:
+    """Check ``target`` and queue its run. ``embedder`` is called only for ``gaps``."""
     if isinstance(target, ChunksRunTarget):
         sheet = _chunk_sheet(session, course, target)
-        if payload.dry_run:
-            return _chunks_plan(sheet)
         started = queue_chunk_sheet(session, course, sheet, queue)
         return GenerationRunStarted(kind=target.kind, job_id=started.job_id)
     if isinstance(target, GapsRunTarget):
-        if payload.dry_run:
-            return _gaps_plan(target)
         started = queue_coverage_fill(
             session,
             course,
             target.targets,
-            embedder=_query_embedder(request),
+            embedder=embedder(),
             client=client,
             queue=queue,
         )
         return GenerationRunStarted(kind=target.kind, job_id=started.job_id)
     if isinstance(target, SetupCellsRunTarget):
-        if payload.dry_run:
-            return _setup_cells_plan(session, course, target)
         round_started = queue_next_round(
             session, course, target.setup_id, target.size, queue, client
         )
@@ -102,10 +133,7 @@ def start_generation_run(
             job_id=f"round-{round_started.round_id}",
             round_id=round_started.round_id,
         )
-    # The only kind left: the union is closed (ADR-066).
     assert isinstance(target, RegenerateRunTarget)
-    if payload.dry_run:
-        return _regenerate_plan(session, course, target)
     started = queue_regeneration(
         session,
         course,
@@ -177,10 +205,14 @@ def _setup_cells_plan(
     may pick other styles for the same cells. Empty when every cell has reached its target."""
     _ensure_setup_in_course(session, target.setup_id, course)
     setup = QuestionSetupRepository(session).get(target.setup_id)
-    targets = plan_targets(session, setup, size=target.size)
+    return round_plan(target.kind, plan_targets(session, setup, size=target.size))
+
+
+def round_plan(kind: str, targets: list[dict[str, object]]) -> GenerationRunPlan:
+    """The plan of a round that would draw ``targets`` (from ``rounds.plan_targets``)."""
     hard = sum(1 for t in targets if t["difficulty"] == Difficulty.HARD.value)
     return GenerationRunPlan(
-        kind=target.kind,
+        kind=kind,
         planned=[
             PlannedRunQuestion(
                 subtopic_id=int(t["subtopic_id"]),

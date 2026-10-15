@@ -7,7 +7,7 @@ tools; what is allowed is decided by the tools' own service calls, never by this
 
 from __future__ import annotations
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -46,8 +46,11 @@ def agent_model(settings: Settings | None = None) -> Model:
     return OpenAIChatModel(settings.llm_model, provider=provider)
 
 
-professor_agent: Agent[AgentDeps, str] = Agent(
+#: ``DeferredToolRequests``: a run that reaches an approval-required call ends there, and the
+#: AG-UI adapter turns it into an interrupt for the chat panel's approval card.
+professor_agent: Agent[AgentDeps, str | DeferredToolRequests] = Agent(
     deps_type=AgentDeps,
+    output_type=[str, DeferredToolRequests],
     instructions=INSTRUCTIONS,
     toolsets=[toolset],
     name="professor",

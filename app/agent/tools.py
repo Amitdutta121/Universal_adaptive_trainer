@@ -12,22 +12,44 @@ import functools
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ParamSpec, TypeVar
+from typing import Annotated, Any, Literal, ParamSpec, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import FunctionToolset, RunContext
 from sqlalchemy.orm import Session
 
-from app.curriculum import TreeUpdate
+from app.agent.approvals import APPROVAL_REQUIRED, SignedPlan, open_plan, sign_plan
+from app.curriculum import TaxonomyImportService, TreeUpdate
 from app.curriculum.drafting import DraftBrief, draft_taxonomy
+from app.curriculum.taxonomy_schema import TaxonomyDocument
 from app.errors import AdaptiveTrainerError
+from app.generation.rounds import plan_targets
 from app.ingestion.youtube import AvailabilityCheck, TranscriptFetch
 from app.jobs.queue import JobQueue
 from app.llm.client import StructuredLLMClient
+from app.persistence.models import QuestionSetupRow
+from app.persistence.repositories import CurriculumRepository
+from app.retrieval.embedder import Embedder
+from app.subjects import profile_for_course_id
 from app.web.routes.api import books as books_routes
 from app.web.routes.api import coverage as coverage_routes
 from app.web.routes.api import curriculum as curriculum_routes
-from app.web.routes.api.schemas import CurriculumVersionDetail, YouTubeImportRequest
+from app.web.routes.api import generation_runs as run_routes
+from app.web.routes.api import setup as setup_routes
+from app.web.routes.api.deps import ensure_in_course
+from app.web.routes.api.retrieval import get_query_embedder
+from app.web.routes.api.schemas import (
+    ChunksRunTarget,
+    CreateCourseStyleRequest,
+    CurriculumVersionDetail,
+    GapsRunTarget,
+    GenerationRunPlan,
+    RegenerateRunTarget,
+    RunTarget,
+    SaveSetupRequest,
+    SetupCellsRunTarget,
+    YouTubeImportRequest,
+)
 
 
 @dataclass
@@ -43,8 +65,10 @@ class AgentDeps:
     user_id: uuid.UUID
     queue: JobQueue
     draft_client: StructuredLLMClient | None = None
+    generation_client: StructuredLLMClient | None = None
     youtube_fetch: TranscriptFetch | None = None
     youtube_check: AvailabilityCheck | None = None
+    embedder: Callable[[], Embedder] = get_query_embedder
 
 
 class ToolRefusal(BaseModel):
@@ -73,8 +97,12 @@ toolset: FunctionToolset[AgentDeps] = FunctionToolset()
 
 
 def tool(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Register ``func`` on :data:`toolset`, with app refusals returned to the model."""
-    toolset.tool(_refusals_to_model(func))
+    """Register ``func`` on :data:`toolset`, with app refusals returned to the model.
+
+    A tool named in :data:`~app.agent.approvals.APPROVAL_REQUIRED` runs only after the
+    professor approves that call in the chat (see :mod:`app.agent.approvals`).
+    """
+    toolset.tool(_refusals_to_model(func), requires_approval=func.__name__ in APPROVAL_REQUIRED)
     return func
 
 
@@ -230,3 +258,170 @@ def coverage_report(
         is_ready=report.is_ready,
         gaps=gaps,
     )
+
+
+# -- Approval-gated: curriculum, styles, publishing -------------------------------------------
+
+
+@tool
+def approve_curriculum(ctx: RunContext[AgentDeps], document: TaxonomyDocument) -> CurriculumTree:
+    """Save a proposed taxonomy as the course's approved curriculum. Waits for approval.
+
+    ``document`` is a proposal's ``document`` (as edited with the professor), unchanged in shape.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        version = TaxonomyImportService(session).import_upload(
+            filename="taxonomy.json",
+            data=document.model_dump_json().encode("utf-8"),
+            course_id=deps.course_id,
+        )
+        session.commit()
+        return CurriculumTree.from_detail(
+            curriculum_routes.get_version(session, deps.course_id, version.id)
+        )
+
+
+class SavedStyle(BaseModel):
+    style_id: str
+    name: str
+
+
+@tool
+def save_style(ctx: RunContext[AgentDeps], yaml: str) -> SavedStyle:
+    """Add a question style to this course, in the library's YAML format. Waits for approval.
+
+    The style must pass the same checks as a library file (CONTRIBUTING-styles.md).
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        style = setup_routes.create_course_style(
+            session,
+            profile_for_course_id(session, deps.course_id),
+            CreateCourseStyleRequest(yaml=yaml),
+        )
+    return SavedStyle(style_id=style.id, name=style.name)
+
+
+class PublishedSet(BaseModel):
+    set_version_id: int
+    label: str
+    question_count: int
+    #: The classroom link students join with; it stays the same across publishes.
+    join_path: str
+
+
+@tool
+def publish_set(ctx: RunContext[AgentDeps], curriculum_version_id: int) -> PublishedSet:
+    """Freeze the taxonomy's approved questions and point its classroom link at them.
+
+    Waits for approval. Students already in a run keep the set they started on.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        published = coverage_routes.sync_taxonomy_set(
+            session, deps.course_id, curriculum_version_id
+        )
+    return PublishedSet(
+        set_version_id=published.id,
+        label=published.label,
+        question_count=published.question_count,
+        join_path=f"/students/join?taxonomy={curriculum_version_id}",
+    )
+
+
+# -- Spending: plan, then run the approved plan -----------------------------------------------
+
+
+class NewSetupTarget(SaveSetupRequest):
+    """Save a question setup (styles per subtopic, a target per cell) and run its first round."""
+
+    kind: Literal["new_setup"] = "new_setup"
+
+
+AgentRunTarget = Annotated[
+    ChunksRunTarget | GapsRunTarget | SetupCellsRunTarget | RegenerateRunTarget | NewSetupTarget,
+    Field(discriminator="kind"),
+]
+_RUN_TARGET: TypeAdapter[RunTarget] = TypeAdapter(RunTarget)
+
+
+class PricedPlan(BaseModel):
+    """A run's dry-run plan and the id ``run_generation`` needs to start exactly this run."""
+
+    plan_id: str
+    #: Generation calls plus judge calls on every question's first attempt; the number the
+    #: professor approves. A round's judges run inside its retry loop and are not counted.
+    model_calls: int
+    plan: GenerationRunPlan
+
+
+def _new_setup_plan(session: Session, course: int | None, target: NewSetupTarget):
+    version = CurriculumRepository(session).get_with_tree(target.curriculum_version_id)
+    ensure_in_course(version.course_id, course, f"Curriculum version {version.id}")
+    setup_routes._validate(session, version, target)
+    unsaved = QuestionSetupRow(
+        curriculum_version_id=target.curriculum_version_id,
+        approved_styles={
+            str(entry.subtopic_id): list(dict.fromkeys(entry.style_ids))
+            for entry in target.approved_styles
+            if entry.style_ids
+        },
+        cell_targets=[cell.model_dump(mode="json") for cell in target.cell_targets],
+    )
+    return run_routes.round_plan(
+        target.kind, plan_targets(session, unsaved, size=target.round_size)
+    )
+
+
+@tool
+def plan_generation(ctx: RunContext[AgentDeps], target: AgentRunTarget) -> PricedPlan:
+    """Price a generation run without running it: the questions it would create and its calls.
+
+    Kinds: ``chunks`` (questions from book chunks), ``gaps`` (fill coverage gaps),
+    ``setup_cells`` (the next round of a saved setup), ``regenerate`` (replace one question),
+    ``new_setup`` (save styles per subtopic and run the first round). Show the professor the
+    plan, then call ``run_generation`` with its ``plan_id`` and ``model_calls``.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        if isinstance(target, NewSetupTarget):
+            plan = _new_setup_plan(session, deps.course_id, target)
+        else:
+            plan = run_routes.plan_run(session, deps.course_id, target)
+    calls = plan.totals.generation_calls + (plan.totals.judge_calls or 0)
+    signed = SignedPlan(
+        course_id=deps.course_id, target=target.model_dump(mode="json"), model_calls=calls
+    )
+    return PricedPlan(plan_id=sign_plan(signed), model_calls=calls, plan=plan)
+
+
+class StartedRun(BaseModel):
+    kind: str
+    #: ``job-N`` or ``round-N``, as the Jobs panel lists it.
+    job_id: str
+
+
+@tool
+def run_generation(ctx: RunContext[AgentDeps], plan_id: str, model_calls: int) -> StartedRun:
+    """Start a run priced by ``plan_generation``. Waits for approval; spends model credit.
+
+    ``model_calls`` must be the plan's, so the professor approves the number it was priced at.
+    """
+    deps = ctx.deps
+    plan = open_plan(plan_id, course_id=deps.course_id, model_calls=model_calls)
+    with deps.session_factory() as session:
+        if plan.target.get("kind") == "new_setup":
+            saved = setup_routes.save_setup(
+                session, deps.course_id, NewSetupTarget.model_validate(plan.target), deps.queue
+            )
+            return StartedRun(kind="new_setup", job_id=f"round-{saved.round_id}")
+        started = run_routes.queue_run(
+            session,
+            deps.course_id,
+            _RUN_TARGET.validate_python(plan.target),
+            queue=deps.queue,
+            client=deps.generation_client,
+            embedder=deps.embedder,
+        )
+    return StartedRun(kind=started.kind, job_id=started.job_id)

@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import select
 
-from app.agent.agent import agent_model, professor_agent
+from app.agent.agent import agent_model
 from app.agent.tools import CoverageSummary, CurriculumProposal, CurriculumTree, ToolRefusal
 from app.config import LLMProvider, Settings
 from app.curriculum import TaxonomyImportService
@@ -24,7 +24,7 @@ from app.errors import ConfigurationError
 from app.persistence.database import get_session_factory
 from app.persistence.models import BookRow, CourseRow, CurriculumVersionRow
 from app.web.routes.api.agent import get_agent_model
-from tests.agent_support import agent_deps, result_of, scripted
+from tests.agent_support import result_of, run, scripted
 from tests.test_taxonomy_drafting import _FakeDrafter
 from tests.test_youtube_source import URL, Fakes
 
@@ -64,9 +64,8 @@ def _course(name: str) -> int:
 
 
 def _run(*calls: tuple[str, dict], **deps_overrides):
-    return professor_agent.run_sync(
-        "go", model=scripted(*calls), deps=agent_deps(**deps_overrides)
-    ).all_messages()
+    """Run ``calls``, with the professor approving any that wait for approval."""
+    return run(*calls, decision=True, **deps_overrides).all_messages()
 
 
 # -- import_material ---------------------------------------------------------------------------
