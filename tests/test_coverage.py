@@ -363,15 +363,11 @@ def test_the_endpoint_creates_and_reads_back_a_set(client: TestClient, session: 
     assert listed["total"] == 1
 
 
-def test_the_api_can_sync_and_read_the_current_prod_set(
-    client: TestClient, session: Session
-) -> None:
+def test_the_api_reads_the_current_prod_set(client: TestClient, session: Session) -> None:
     version, (subtopic_id,) = _taxonomy(session)
     approved = _question(session, version=version, subtopic_id=subtopic_id)
 
-    synced = client.post("/api/question-sets/prod/sync")
-    assert synced.status_code == 201
-    assert synced.json()["is_prod"] is True
+    sync_prod_question_set(session)
 
     fetched = client.get("/api/question-sets/prod")
 
@@ -428,7 +424,7 @@ def test_the_openapi_documents_coverage_as_read_only(client: TestClient) -> None
     assert set(schema["paths"]["/api/coverage"]) == {"get"}
     assert set(schema["paths"]["/api/question-sets"]) == {"get", "post"}
     assert set(schema["paths"]["/api/question-sets/prod"]) == {"get"}
-    assert set(schema["paths"]["/api/question-sets/prod/sync"]) == {"post"}
+    assert "/api/question-sets/prod/sync" not in schema["paths"]
     # No PUT, PATCH or DELETE: a frozen set is never edited (ADR-036).
     assert set(schema["paths"]["/api/question-sets/{set_version_id}"]) == {"get"}
 
@@ -647,10 +643,13 @@ class _FinishedRun:
 
 
 def _run(app: FastAPI, gen_client: object, targets: list[dict]) -> object:
+    """A gap run through ``POST /generation-runs`` (ADR-066)."""
     app.dependency_overrides[get_query_embedder] = KeywordEmbedder
     app.dependency_overrides[get_generation_client] = lambda: gen_client
     with TestClient(app) as http:
-        posted = http.post("/api/coverage/generation-runs", json={"targets": targets})
+        posted = http.post(
+            "/api/generation-runs", json={"target": {"kind": "gaps", "targets": targets}}
+        )
         if posted.status_code != 202:
             return posted
         job_id = posted.json()["job_id"]

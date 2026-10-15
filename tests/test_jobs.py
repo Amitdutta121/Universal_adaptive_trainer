@@ -34,7 +34,12 @@ from app.web.routes.api import questions as api_questions
 from tests.conftest import TEST_PROFESSOR_ID
 from tests.test_api import _import_taxonomy
 
-BATCH = {"chunks": [{"chunk_id": "a" * 32, "easy": 2, "question_types": ["debugging"]}]}
+BATCH = {
+    "target": {
+        "kind": "chunks",
+        "chunks": [{"chunk_id": "a" * 32, "easy": 2, "question_types": ["debugging"]}],
+    }
+}
 
 
 def _fake_service(*, fail_after: int | None = None) -> type:
@@ -70,7 +75,7 @@ def test_bulk_generation_runs_as_a_job_and_stores_its_result(
     _import_taxonomy(client)
     monkeypatch.setattr(api_questions, "GenerationService", _fake_service())
 
-    response = client.post("/api/questions/generate-batch", json=BATCH)
+    response = client.post("/api/generation-runs", json=BATCH)
 
     assert response.status_code == 202, response.text
     job = _job(client, response.json()["job_id"])
@@ -93,7 +98,7 @@ def test_a_failed_bulk_generation_keeps_what_it_made_and_says_why(
     _import_taxonomy(client)
     monkeypatch.setattr(api_questions, "GenerationService", _fake_service(fail_after=1))
 
-    response = client.post("/api/questions/generate-batch", json=BATCH)
+    response = client.post("/api/generation-runs", json=BATCH)
 
     job = _job(client, response.json()["job_id"])
     assert (job["status"], job["done"], job["total"]) == ("failed", 1, 2)
@@ -104,7 +109,7 @@ def test_a_failed_bulk_generation_keeps_what_it_made_and_says_why(
 
 def test_a_refused_sheet_is_refused_before_any_job_is_queued(client: TestClient) -> None:
     # No approved taxonomy yet: the fixable problem is reported now, not as a failed job.
-    response = client.post("/api/questions/generate-batch", json=BATCH)
+    response = client.post("/api/generation-runs", json=BATCH)
 
     assert response.status_code == 422, response.text
     assert client.get("/api/jobs").json()["jobs"] == []
@@ -307,7 +312,7 @@ def test_a_cancelled_run_stops_after_its_question_and_a_retry_does_the_rest(
         api_questions, "GenerationService", _cancelling_service(engine, job_ref, seen)
     )
 
-    started = client.post("/api/questions/generate-batch", json=BATCH).json()["job_id"]
+    started = client.post("/api/generation-runs", json=BATCH).json()["job_id"]
 
     job = _job(client, started)
     assert (job["status"], job["done"], job["total"]) == ("cancelled", 1, 2)
@@ -467,7 +472,11 @@ def test_a_job_stored_as_a_bare_sheet_still_retries_from_the_start(
         kind=JobKind.BULK_GENERATION,
         title="Bulk generate · 2 questions",
         total=2,
-        request={**BATCH, "curriculum_version_id": version_id, "seed": None},
+        request={
+            "chunks": BATCH["target"]["chunks"],
+            "curriculum_version_id": version_id,
+            "seed": None,
+        },
         course_id=None,
     )
     old.status = RoundStatus.FAILED

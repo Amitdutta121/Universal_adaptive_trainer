@@ -47,9 +47,10 @@ export const qk = {
       after?: number | null;
       curriculumVersionId?: number | null;
     }) => ["questions", "review-queue", params] as const,
-    generationPlan: (bookId: number) => ["questions", "generation-plan", bookId] as const,
+    // Under "questions" so a generation's invalidation refreshes what each chunk has produced.
+    chunkOutline: (bookId: number) => ["questions", "chunk-outline", bookId] as const,
     batchPlan: (chunks: readonly ChunkGenerationSpec[]) =>
-      ["questions", "batch-plan", chunks] as const,
+      ["questions", "run-plan", chunks] as const,
   },
   books: {
     all: ["books"] as const,
@@ -453,24 +454,22 @@ export function useSubmitReview() {
 // --- Generating from book chunks --------------------------------------------
 
 /**
- * Every candidate chunk in one book, with what it has already produced.
- *
- * The plan endpoint is per-book, so a screen that spans several books asks for
- * one plan each and merges them; see `useGenerationPlans`.
+ * One book's current chunks without their text, each with the questions it has produced —
+ * what a chunk picker lists. Several books are asked for one by one; see `useChunkOutlines`.
  */
-export const generationPlanQuery = (bookId: number) =>
+export const chunkOutlineQuery = (bookId: number) =>
   queryOptions({
-    queryKey: qk.questions.generationPlan(bookId),
+    queryKey: qk.questions.chunkOutline(bookId),
     queryFn: () =>
-      unwrap(api.GET("/api/questions/generation-plan", { params: { query: { book_id: bookId } } })),
+      unwrap(api.GET("/api/chunks/outline", { params: { query: { book_id: bookId } } })),
   });
 
-/** The plans for several books at once, as one loading state. */
-export function useGenerationPlans(bookIds: readonly number[]) {
+/** The outlines of several books at once, as one loading state. */
+export function useChunkOutlines(bookIds: readonly number[]) {
   return useQueries({
-    queries: bookIds.map((bookId) => generationPlanQuery(bookId)),
+    queries: bookIds.map((bookId) => chunkOutlineQuery(bookId)),
     combine: (results) => ({
-      plans: results.flatMap((result) => (result.data ? [result.data] : [])),
+      outlines: results.flatMap((result) => (result.data ? [result.data] : [])),
       isPending: results.some((result) => result.isPending),
       isError: results.some((result) => result.isError),
       error: results.find((result) => result.error)?.error ?? null,
@@ -527,8 +526,61 @@ export const useBatchPlan = (chunks: readonly ChunkGenerationSpec[]) =>
     // A plan is a pure function of the sheet, so a cached one never goes stale.
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
-    queryFn: () => unwrap(api.POST("/api/questions/batch-plan", { body: { chunks: [...chunks] } })),
+    queryFn: async () => {
+      const plan = await planGenerationRun({ kind: "chunks", chunks: [...chunks] });
+      const count = (difficulty: Schemas["Difficulty"]) =>
+        plan.planned.filter((question) => question.difficulty === difficulty).length;
+      return {
+        planned: plan.planned,
+        totals: {
+          ...plan.totals,
+          chunks_specified: new Set(plan.planned.map((question) => question.chunk_id)).size,
+          easy: count("easy"),
+          medium: count("medium"),
+          hard: count("hard"),
+        },
+      };
+    },
   });
+
+type RunTarget = Schemas["GenerationRunRequest"]["target"];
+
+/** Queue a generation run of any kind (ADR-066): `202 { job_id }`, plus `round_id` for a round. */
+async function startGenerationRun(target: RunTarget): Promise<Schemas["GenerationRunStarted"]> {
+  const run = await unwrap(api.POST("/api/generation-runs", { body: { target, dry_run: false } }));
+  if (!("job_id" in run)) {
+    throw new Error("The server returned a plan instead of starting the run.");
+  }
+  return run;
+}
+
+/**
+ * Resolve once a queued job ends: its final state when done, its error when it failed or was
+ * cancelled. For the screens that show the one question a short run makes, as soon as it exists.
+ */
+export async function waitForJob(
+  jobId: string,
+  pollMs: number = JOBS_ACTIVE_POLL_MS,
+): Promise<Schemas["JobOut"]> {
+  for (;;) {
+    const { jobs } = await unwrap(api.GET("/api/jobs"));
+    const job = jobs.find((listed) => listed.id === jobId);
+    if (job?.status === "done") return job;
+    if (job?.status === "failed" || job?.status === "cancelled") {
+      throw new Error(job.error ?? "The run stopped before it finished.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/** Plan and price a generation run: no model call, nothing written. */
+async function planGenerationRun(target: RunTarget): Promise<Schemas["GenerationRunPlan"]> {
+  const plan = await unwrap(api.POST("/api/generation-runs", { body: { target, dry_run: true } }));
+  if (!("planned" in plan)) {
+    throw new Error("The server started the run instead of planning it.");
+  }
+  return plan;
+}
 
 /**
  * Queue a per-chunk spec sheet as a background job.
@@ -541,8 +593,8 @@ export const useBatchPlan = (chunks: readonly ChunkGenerationSpec[]) =>
 export function useGenerateBatch() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["GenerateBatchRequest"]) =>
-      unwrap(api.POST("/api/questions/generate-batch", { body })),
+    mutationFn: (body: Omit<Schemas["ChunksRunTarget"], "kind">) =>
+      startGenerationRun({ ...body, kind: "chunks" }),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.jobs.all });
     },
@@ -552,15 +604,38 @@ export function useGenerateBatch() {
 /**
  * Generate from one chunk, one type, one difficulty at a time.
  *
- * The same endpoint the bulk sheet's per-format rows resolve to underneath —
- * given a single section id it creates exactly one question, so the
- * single-chunk generator needs no endpoint of its own.
+ * A `chunks` run with one question per chunk, queued like any other; the mutation resolves
+ * when its job has made the questions, so the screen can open the one it asked for.
  */
 export function useGenerateQuestions() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["GenerateQuestionsRequest"]) =>
-      unwrap(api.POST("/api/questions/generate", { body })),
+    mutationFn: async ({
+      chunk_ids,
+      question_type,
+      difficulty,
+      curriculum_version_id,
+    }: {
+      chunk_ids: string[];
+      question_type: Schemas["QuestionType"];
+      difficulty: Schemas["Difficulty"];
+      curriculum_version_id?: number | null;
+    }) => {
+      const run = await startGenerationRun({
+        kind: "chunks",
+        curriculum_version_id,
+        chunks: chunk_ids.map((chunk_id) => ({
+          chunk_id,
+          easy: difficulty === "easy" ? 1 : 0,
+          medium: difficulty === "medium" ? 1 : 0,
+          hard: difficulty === "hard" ? 1 : 0,
+          question_types: [question_type],
+        })),
+      });
+      const result = (await waitForJob(run.job_id)).result;
+      if (!result || !("question_ids" in result)) throw new Error("The run stored no questions.");
+      return result;
+    },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
@@ -572,7 +647,7 @@ export function useGenerateQuestions() {
 export function useRegenerateWithFeedback() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       questionId,
       feedback,
       professor_id,
@@ -580,13 +655,19 @@ export function useRegenerateWithFeedback() {
       questionId: number;
       feedback: string;
       professor_id?: number | null;
-    }) =>
-      unwrap(
-        api.POST("/api/questions/{question_id}/regenerate", {
-          params: { path: { question_id: questionId } },
-          body: { feedback, professor_id },
-        }),
-      ),
+    }) => {
+      const run = await startGenerationRun({
+        kind: "regenerate",
+        question_id: questionId,
+        feedback,
+        professor_id,
+      });
+      const result = (await waitForJob(run.job_id)).result;
+      if (!result || !("regenerated_from_question_id" in result)) {
+        throw new Error("The regeneration stored no question.");
+      }
+      return result;
+    },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
@@ -621,8 +702,8 @@ export const useCoverage = (setVersionId?: number) =>
 export function useGenerateCoverageRun() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["FillGapsRequest"]) =>
-      unwrap(api.POST("/api/coverage/generation-runs", { body })),
+    mutationFn: ({ targets }: { targets: Schemas["CoverageTargetRef"][] }) =>
+      startGenerationRun({ kind: "gaps", targets }),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.coverage.all });
       client.invalidateQueries({ queryKey: qk.jobs.all });
@@ -1016,18 +1097,6 @@ export function useSyncTaxonomyClassroom() {
       ),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questionSets.all });
-      client.invalidateQueries({ queryKey: qk.coverage.all });
-    },
-  });
-}
-
-export function useSyncProdQuestionSet() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: () => unwrap(api.POST("/api/question-sets/prod/sync", {})),
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: qk.questionSets.all });
-      client.invalidateQueries({ queryKey: qk.questionSets.prod() });
       client.invalidateQueries({ queryKey: qk.coverage.all });
     },
   });
@@ -1574,7 +1643,11 @@ export function useSaveSetup() {
 export function useStartNextRound() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["StartRoundRequest"]) => unwrap(api.POST("/api/rounds", { body })),
+    mutationFn: async ({ setup_id, size }: { setup_id: number; size: number }) => {
+      const run = await startGenerationRun({ kind: "setup_cells", setup_id, size });
+      if (run.round_id == null) throw new Error("The server started no round.");
+      return { round_id: run.round_id };
+    },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.setup.all });
       client.invalidateQueries({ queryKey: qk.rounds.all });

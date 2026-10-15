@@ -154,13 +154,25 @@ def _generate(
 ) -> dict[str, Any]:
     """Generate one question through the API and return its detail."""
     fake.use(draft)
-    generated = client.post(
-        "/api/questions/generate",
+    started = client.post(
+        "/api/generation-runs",
         headers=_in(course_id),
-        json={"question_type": question_type, "difficulty": "easy", "chunk_ids": [chunk_id]},
+        json={
+            "target": {
+                "kind": "chunks",
+                "chunks": [{"chunk_id": chunk_id, "easy": 1, "question_types": [question_type]}],
+            }
+        },
     )
-    assert generated.status_code == 201, generated.text
-    (question_id,) = generated.json()["question_ids"]
+    assert started.status_code == 202, started.text
+    # TestClient runs the queued job before returning; its result names the question.
+    (job,) = [
+        job
+        for job in client.get("/api/jobs", headers=_in(course_id)).json()["jobs"]
+        if job["id"] == started.json()["job_id"]
+    ]
+    assert job["status"] == "done", job
+    (question_id,) = job["result"]["question_ids"]
     detail = client.get(f"/api/questions/{question_id}", headers=_in(course_id))
     assert detail.status_code == 200, detail.text
     return detail.json()

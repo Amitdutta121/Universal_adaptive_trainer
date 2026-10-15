@@ -27,7 +27,6 @@ from sqlalchemy.orm import Session
 from app.coverage import (
     build_coverage_report,
     create_question_set,
-    sync_prod_question_set,
     sync_taxonomy_question_set,
     taxonomy_alias,
 )
@@ -35,16 +34,15 @@ from app.domain.enums import JobKind, QuestionType, RoundStatus
 from app.errors import DomainRuleError, LLMRequestError, MalformedModelOutputError
 from app.evaluation import new_run_id
 from app.generation import ChunkQuestionRequest, GenerationService
-from app.jobs.queue import JobQueue, JobQueueDep
+from app.jobs.queue import JobQueue
 from app.jobs.runner import Progress, create_job, execute
 from app.llm import StructuredLLMClient
-from app.persistence.models import BackgroundJobRow, CurriculumVersionRow
+from app.persistence.models import BackgroundJobRow
 from app.persistence.repositories import CurriculumRepository, QuestionSetRepository
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.dedup import flag_possible_duplicates
 from app.web.routes.api.deps import (
-    SPENDS_LLM_CREDIT,
     CourseScope,
     DbSession,
     ensure_in_course,
@@ -52,13 +50,12 @@ from app.web.routes.api.deps import (
     subtopics_in_course,
 )
 from app.web.routes.api.questions import approved_curriculum_id
-from app.web.routes.api.retrieval import EmbedderDep, get_query_embedder
+from app.web.routes.api.retrieval import get_query_embedder
 from app.web.routes.api.schemas import (
     CoverageReportResponse,
     CoverageTargetRef,
     CreateQuestionSetRequest,
     FailedRunTarget,
-    FillGapsRequest,
     GeneratedRunQuestion,
     GenerationRunResponse,
     JobStartedResponse,
@@ -124,33 +121,6 @@ def coverage(
     return CoverageReportResponse.from_report(
         build_coverage_report(session, set_version_id=set_version_id, course_id=course),
         active_run_topic_ids=active_generation_topic_ids(session, course),
-    )
-
-
-@router.post(
-    "/coverage/generation-runs",
-    response_model=JobStartedResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=SPENDS_LLM_CREDIT,
-)
-def start_generation_run(
-    session: DbSession,
-    course: CourseScope,
-    payload: FillGapsRequest,
-    embedder: EmbedderDep,
-    client: GenerationClientDep,
-    queue: JobQueueDep,
-) -> JobStartedResponse:
-    """Queue one grounded question for each selected coverage gap, as a background job.
-
-    For every target the job retrieves the top book section that teaches its subtopic,
-    generates one multiple-choice question from it at the requested difficulty, and
-    records what the generator claimed it wrote for (:func:`run_generation_for_gaps`).
-    Everything that can be refused is checked here, before the ``202``, including a
-    topic that already has a run in flight.
-    """
-    return queue_coverage_fill(
-        session, course, payload.targets, embedder=embedder, client=client, queue=queue
     )
 
 
@@ -407,16 +377,6 @@ def create_set(
     return QuestionSetOut.from_row(row)
 
 
-@router.post(
-    "/question-sets/prod/sync",
-    response_model=QuestionSetOut,
-    status_code=status.HTTP_201_CREATED,
-)
-def sync_prod_set(session: DbSession, course: CourseScope) -> QuestionSetOut:
-    """Superseded by per-taxonomy links; kept so an existing prod link can still be refreshed."""
-    return _sync_prod(session, course)
-
-
 @router.get("/question-sets/taxonomy-links", response_model=TaxonomyLinkListResponse)
 def list_taxonomy_links(session: DbSession, course: CourseScope) -> TaxonomyLinkListResponse:
     """Every taxonomy in the course with its classroom link's current snapshot, if any.
@@ -458,19 +418,3 @@ def sync_taxonomy_set(
     ensure_in_course(version.course_id, course, f"Curriculum version {curriculum_version_id}")
     row = sync_taxonomy_question_set(session, curriculum_version_id)
     return QuestionSetOut.from_row(row)
-
-
-def _sync_prod(session: DbSession, course: int | None) -> QuestionSetOut:
-    """Freeze the approved bank now and repoint the stable prod classroom link.
-
-    There is one ``prod`` alias per installation, so a course may only repoint it while it
-    is unset or already serves this course: otherwise one professor could swap another's
-    students onto their own bank (ADR-060).
-    """
-    current = QuestionSetRepository(session).get_alias("prod")
-    if current is not None and current.set_version is not None:
-        version_id = current.set_version.curriculum_version_id
-        version = session.get(CurriculumVersionRow, version_id) if version_id else None
-        ensure_in_course(version.course_id if version else None, course, "The prod classroom")
-    row = sync_prod_question_set(session, course_id=course)
-    return QuestionSetOut.from_row(row, is_prod=True)

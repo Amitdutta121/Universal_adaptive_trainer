@@ -651,133 +651,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/questions/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Questions
-         * @description Generate and persist one question per selected source chunk.
-         *
-         *     Every spec is validated before the first model call, so an invalid id later
-         *     in the list cannot leave a partially generated batch behind.
-         */
-        post: operations["generate_questions_api_questions_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/{question_id}/regenerate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Regenerate Question
-         * @description Generate a new question from an existing one, with instructor feedback.
-         *
-         *     The source question is never modified: this returns a fresh row, grounded in
-         *     the same section, type and difficulty, with the feedback threaded into the
-         *     generation prompt. It writes no review and triggers no instruction relearn --
-         *     that is the review endpoint's job, not this one.
-         */
-        post: operations["regenerate_question_api_questions__question_id__regenerate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/batch-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Batch Plan
-         * @description Compile a per-chunk spec sheet into the questions it would generate (ADR-044).
-         *
-         *     Read-only and free: it makes no model call and touches no row, so a professor
-         *     can price a spec sheet and revise it as often as they like. The compilation
-         *     lives here rather than in either UI because the rule that decides which format
-         *     each question gets must not be restated by a client (ADR-027).
-         */
-        post: operations["batch_plan_api_questions_batch_plan_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/generate-batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Batch
-         * @description Queue the questions a per-chunk spec sheet asks for (ADR-044) as a background job.
-         *
-         *     One chunk may produce several questions, at several difficulties, in several
-         *     formats — which is what separates this from ``/generate``, where a run carries
-         *     one difficulty and one format for every chunk in it.
-         *
-         *     Each question costs one generation call plus one judge call per metric, made in
-         *     sequence, so a sheet can take minutes. Everything that can be refused is checked
-         *     here, before the ``202``; the questions are then made by :func:`run_bulk_generation`,
-         *     which keeps going if the professor leaves the page. ``GET /api/jobs`` reports it.
-         */
-        post: operations["generate_batch_api_questions_generate_batch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/generation-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Generation Plan
-         * @description What generating from this selection would produce, before it runs.
-         *
-         *     Every chunk of the book's current version, grouped by its top-level heading. Read-only
-         *     and free: it makes no model call, so a professor can price a run and revise it as often
-         *     as they like. The arithmetic lives here rather than in the template because the page is
-         *     only one client of it (ADR-027).
-         */
-        get: operations["generation_plan_api_questions_generation_plan_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/questions/review-queue": {
         parameters: {
             query?: never;
@@ -820,6 +693,28 @@ export interface paths {
         get: operations["get_question_api_questions__question_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/generation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Generation Run
+         * @description Queue a run of one target kind, or with ``dry_run`` plan it for free.
+         *
+         *     Everything that can be refused is checked before the ``202``, as on the old routes.
+         */
+        post: operations["start_generation_run_api_generation_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1195,32 +1090,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/coverage/generation-runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Generation Run
-         * @description Queue one grounded question for each selected coverage gap, as a background job.
-         *
-         *     For every target the job retrieves the top book section that teaches its subtopic,
-         *     generates one multiple-choice question from it at the requested difficulty, and
-         *     records what the generator claimed it wrote for (:func:`run_generation_for_gaps`).
-         *     Everything that can be refused is checked here, before the ``202``, including a
-         *     topic that already has a run in flight.
-         */
-        post: operations["start_generation_run_api_coverage_generation_runs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/question-sets": {
         parameters: {
             query?: never;
@@ -1236,26 +1105,6 @@ export interface paths {
          * @description Freeze every approved question of the course's approved curriculum under a name.
          */
         post: operations["create_set_api_question_sets_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/question-sets/prod/sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Sync Prod Set
-         * @description Superseded by per-taxonomy links; kept so an existing prod link can still be refreshed.
-         */
-        post: operations["sync_prod_set_api_question_sets_prod_sync_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1349,6 +1198,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chunks/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Chunk Outline
+         * @description A book's current chunks without their text, each with the questions it has produced.
+         *
+         *     What a chunk picker lists; grouping by heading is the client's (ADR-066).
+         */
+        get: operations["chunk_outline_api_chunks_outline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chunks/{chunk_id}": {
         parameters: {
             query?: never;
@@ -1427,26 +1298,6 @@ export interface paths {
          * @description Save the approved setup and start round 1 in the background.
          */
         post: operations["save_setup_api_setup_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rounds": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Next Round
-         * @description Queue the next round of a setup, for cells still below target.
-         */
-        post: operations["start_next_round_api_rounds_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2291,37 +2142,6 @@ export interface components {
             /** Answered At */
             answered_at: string | null;
         };
-        /**
-         * BatchPlanResponse
-         * @description The compiled plan for a spec sheet. Read-only: no question is generated.
-         */
-        BatchPlanResponse: {
-            /** Planned */
-            planned: components["schemas"]["PlannedQuestionOut"][];
-            totals: components["schemas"]["BatchPlanTotals"];
-        };
-        /**
-         * BatchPlanTotals
-         * @description What a compiled spec sheet costs, before any model call is made.
-         */
-        BatchPlanTotals: {
-            /** Chunks Specified */
-            chunks_specified: number;
-            /** Questions To Create */
-            questions_to_create: number;
-            /** Generation Calls */
-            generation_calls: number;
-            /** Judge Calls */
-            judge_calls: number;
-            /** Easy */
-            easy: number;
-            /** Medium */
-            medium: number;
-            /** Hard */
-            hard: number;
-            /** Identical Repeats */
-            identical_repeats: number;
-        };
         /** BatchRunListResponse */
         BatchRunListResponse: {
             /** Runs */
@@ -2685,6 +2505,24 @@ export interface components {
             text: string;
         };
         /**
+         * ChunkOutlineEntry
+         * @description One chunk without its text, and how many questions it has already produced.
+         */
+        ChunkOutlineEntry: {
+            chunk: components["schemas"]["ChunkSummary"];
+            /** Existing Question Count */
+            existing_question_count: number;
+        };
+        /**
+         * ChunkOutlineResponse
+         * @description ``GET /chunks/outline``: a book's current chunks in reading order, for a chunk picker.
+         */
+        ChunkOutlineResponse: {
+            book: components["schemas"]["BookSummary"];
+            /** Chunks */
+            chunks: components["schemas"]["ChunkOutlineEntry"][];
+        };
+        /**
          * ChunkSummary
          * @description One chunk's identity and location, without its text.
          */
@@ -2707,6 +2545,24 @@ export interface components {
             location_label: string | null;
             /** Char Count */
             char_count: number;
+        };
+        /**
+         * ChunksRunTarget
+         * @description Questions from chosen chunks: a spec sheet, or one instruction for a whole book.
+         */
+        ChunksRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "chunks";
+            /** Chunks */
+            chunks?: components["schemas"]["ChunkGenerationSpec"][];
+            whole_book?: components["schemas"]["WholeBookSpec"] | null;
+            /** Curriculum Version Id */
+            curriculum_version_id?: number | null;
+            /** Seed */
+            seed?: string | null;
         };
         /**
          * ClaimViolation
@@ -3544,28 +3400,17 @@ export interface components {
             meaning: string;
         };
         /**
-         * FillGapsRequest
-         * @description The gaps a professor selected on the coverage page.
-         *
-         *     Deliberately a list of *targets*, not a question count. The generator picks
-         *     its own topic and subtopics from the chunk it is given (ADR-031), so asking
-         *     for "seven questions" would promise an aim the generator does not accept.
+         * GapsRunTarget
+         * @description One multiple-choice question per coverage gap (``POST /coverage/generation-runs``).
          */
-        FillGapsRequest: {
+        GapsRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "gaps";
             /** Targets */
             targets: components["schemas"]["CoverageTargetRef"][];
-        };
-        /**
-         * GenerateBatchRequest
-         * @description A per-chunk generation run: many chunks, each with its own instruction.
-         */
-        GenerateBatchRequest: {
-            /** Curriculum Version Id */
-            curriculum_version_id?: number | null;
-            /** Chunks */
-            chunks: components["schemas"]["ChunkGenerationSpec"][];
-            /** Seed */
-            seed?: string | null;
         };
         /**
          * GenerateBatchResponse
@@ -3583,42 +3428,6 @@ export interface components {
             questions: components["schemas"]["QuestionSummary"][];
             /** Planned */
             planned: components["schemas"]["PlannedQuestionOut"][];
-        };
-        /**
-         * GenerateQuestionsRequest
-         * @description A generation request.
-         *
-         *     Exactly one source selection is required: either ``chunk_ids`` or
-         *     ``all_chunks_of_book``. One question is generated per resolved chunk.
-         *
-         *     No topic or subtopic: the generator reads the chunk and classifies its own
-         *     question against the approved taxonomy (ADR-031).
-         */
-        GenerateQuestionsRequest: {
-            /** Curriculum Version Id */
-            curriculum_version_id?: number | null;
-            question_type: components["schemas"]["QuestionType"];
-            difficulty: components["schemas"]["Difficulty"];
-            /** Book Id */
-            book_id?: number | null;
-            /** Chunk Ids */
-            chunk_ids?: string[] | null;
-            /**
-             * All Chunks Of Book
-             * @default false
-             */
-            all_chunks_of_book: boolean;
-            /** Seed */
-            seed?: string | null;
-        };
-        /** GenerateQuestionsResponse */
-        GenerateQuestionsResponse: {
-            /** Created */
-            created: number;
-            /** Question Ids */
-            question_ids: number[];
-            /** Questions */
-            questions: components["schemas"]["QuestionSummary"][];
         };
         /**
          * GeneratedRunQuestion
@@ -3683,62 +3492,6 @@ export interface components {
             model?: string | null;
         };
         /**
-         * GenerationPlanChapter
-         * @description The chunks under one top-level heading, in reading order.
-         *
-         *     ``label`` is the first entry of the chunks' heading path; chunks under no heading
-         *     are grouped under the book's title.
-         */
-        GenerationPlanChapter: {
-            /** Id */
-            id: number;
-            /** Label */
-            label: string;
-            /** Location Label */
-            location_label: string | null;
-            /** Chunks */
-            chunks: components["schemas"]["GenerationPlanChunk"][];
-        };
-        /**
-         * GenerationPlanChunk
-         * @description One candidate source chunk, and what generating from it would mean.
-         */
-        GenerationPlanChunk: {
-            chunk: components["schemas"]["ChunkSummary"];
-            /** Existing Question Count */
-            existing_question_count: number;
-            /** Selected */
-            selected: boolean;
-        };
-        /**
-         * GenerationPlanResponse
-         * @description The chunk plan: every chunk of the book's current version, and the cost.
-         */
-        GenerationPlanResponse: {
-            book: components["schemas"]["BookSummary"];
-            /** Chapters */
-            chapters: components["schemas"]["GenerationPlanChapter"][];
-            totals: components["schemas"]["GenerationPlanTotals"];
-        };
-        /**
-         * GenerationPlanTotals
-         * @description What the selected run costs, before any model call is made.
-         */
-        GenerationPlanTotals: {
-            /** Chunks Available */
-            chunks_available: number;
-            /** Chunks Selected */
-            chunks_selected: number;
-            /** Questions To Create */
-            questions_to_create: number;
-            /** Generation Calls */
-            generation_calls: number;
-            /** Judge Calls */
-            judge_calls: number;
-            /** Source Chars */
-            source_chars: number;
-        };
-        /**
          * GenerationRoundOut
          * @description ``GET /api/rounds/{id}``: one round's status and progress.
          */
@@ -3789,6 +3542,30 @@ export interface components {
             finished_at: string | null;
         };
         /**
+         * GenerationRunPlan
+         * @description ``200`` for ``dry_run``: the planned questions and their cost. Nothing was run.
+         */
+        GenerationRunPlan: {
+            /** Kind */
+            kind: string;
+            /** Planned */
+            planned: components["schemas"]["PlannedRunQuestion"][];
+            totals: components["schemas"]["GenerationRunTotals"];
+        };
+        /**
+         * GenerationRunRequest
+         * @description ``POST /api/generation-runs``: one target kind per run (ADR-066).
+         */
+        GenerationRunRequest: {
+            /** Target */
+            target: components["schemas"]["ChunksRunTarget"] | components["schemas"]["GapsRunTarget"] | components["schemas"]["SetupCellsRunTarget"] | components["schemas"]["RegenerateRunTarget"];
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+        };
+        /**
          * GenerationRunResponse
          * @description The outcome of one coverage "Generate" run.
          *
@@ -3807,6 +3584,41 @@ export interface components {
             failed: components["schemas"]["FailedRunTarget"][];
             /** Possible Duplicates */
             possible_duplicates: number;
+        };
+        /**
+         * GenerationRunStarted
+         * @description ``202``: the run is queued. Follow ``job_id`` in ``GET /api/jobs``.
+         */
+        GenerationRunStarted: {
+            /** Kind */
+            kind: string;
+            /** Job Id */
+            job_id: string;
+            /** Round Id */
+            round_id?: number | null;
+        };
+        /**
+         * GenerationRunTotals
+         * @description What a run costs on the first attempt of every question.
+         *
+         *     A question that fails a check is retried, up to ``max_attempts_per_question`` times, so
+         *     the real count can be higher. ``judge_calls`` is ``None`` for a round: its judges are
+         *     the setup's enabled judges and rules, run inside the retry loop.
+         */
+        GenerationRunTotals: {
+            /** Questions To Create */
+            questions_to_create: number;
+            /** Generation Calls */
+            generation_calls: number;
+            /** Judge Calls */
+            judge_calls: number | null;
+            /** Max Attempts Per Question */
+            max_attempts_per_question: number;
+            /**
+             * Identical Repeats
+             * @default 0
+             */
+            identical_repeats: number;
         };
         /**
          * GeneratorKind
@@ -3923,7 +3735,8 @@ export interface components {
          *     output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
          *     ``result`` is what the old blocking response returned, for the kinds that had one:
          *     :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
-         *     coverage fill, :class:`BookImportResult` for a book import.
+         *     coverage fill, :class:`BookImportResult` for a book import,
+         *     :class:`RegenerateQuestionResponse` for a regeneration.
          */
         JobOut: {
             /** Id */
@@ -3932,7 +3745,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "question_round" | "judge_run";
+            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "regeneration" | "question_round" | "judge_run";
             /** Title */
             title: string;
             /**
@@ -3953,7 +3766,7 @@ export interface components {
             /** Link */
             link?: string | null;
             /** Result */
-            result?: components["schemas"]["GenerateBatchResponse"] | components["schemas"]["GenerationRunResponse"] | components["schemas"]["BookImportResult"] | null;
+            result?: components["schemas"]["GenerateBatchResponse"] | components["schemas"]["GenerationRunResponse"] | components["schemas"]["BookImportResult"] | components["schemas"]["RegenerateQuestionResponse"] | null;
             /**
              * Can Cancel
              * @default false
@@ -4403,6 +4216,22 @@ export interface components {
             question_type: components["schemas"]["QuestionType"];
         };
         /**
+         * PlannedRunQuestion
+         * @description One question a run would ask for. Which fields are set depends on the kind.
+         */
+        PlannedRunQuestion: {
+            difficulty?: components["schemas"]["Difficulty"] | null;
+            question_type?: components["schemas"]["QuestionType"] | null;
+            /** Chunk Id */
+            chunk_id?: string | null;
+            /** Subtopic Id */
+            subtopic_id?: number | null;
+            /** Style Id */
+            style_id?: string | null;
+            /** Question Id */
+            question_id?: number | null;
+        };
+        /**
          * PollBatchRunResponse
          * @description What one poll collected.
          *
@@ -4809,19 +4638,6 @@ export interface components {
             /** Count */
             count: number;
         };
-        /**
-         * RegenerateQuestionRequest
-         * @description Regenerate one existing question with instructor feedback.
-         *
-         *     The feedback is threaded into the generation prompt. The source question is
-         *     never modified -- a new question is produced (ADR-002).
-         */
-        RegenerateQuestionRequest: {
-            /** Feedback */
-            feedback: string;
-            /** Professor Id */
-            professor_id?: number | null;
-        };
         /** RegenerateQuestionResponse */
         RegenerateQuestionResponse: {
             /** Question Id */
@@ -4829,6 +4645,23 @@ export interface components {
             /** Regenerated From Question Id */
             regenerated_from_question_id: number;
             question: components["schemas"]["QuestionSummary"];
+        };
+        /**
+         * RegenerateRunTarget
+         * @description A new question from an existing one, with instructor feedback (ADR-002).
+         */
+        RegenerateRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "regenerate";
+            /** Question Id */
+            question_id: number;
+            /** Feedback */
+            feedback: string;
+            /** Professor Id */
+            professor_id?: number | null;
         };
         /**
          * RejectionReason
@@ -5163,6 +4996,24 @@ export interface components {
             /** Test Token */
             test_token?: string | null;
         };
+        /**
+         * SetupCellsRunTarget
+         * @description The next round of a question setup, for cells still below target (``POST /rounds``).
+         */
+        SetupCellsRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "setup_cells";
+            /** Setup Id */
+            setup_id: number;
+            /**
+             * Size
+             * @default 10
+             */
+            size: number;
+        };
         /** SetupStepOut */
         SetupStepOut: {
             /** Key */
@@ -5205,24 +5056,6 @@ export interface components {
          * @enum {string}
          */
         SourceFormat: "book_json" | "book_pdf" | "book_docx" | "book_pptx";
-        /**
-         * StartRoundRequest
-         * @description ``POST /api/rounds``: generate the next round of a setup.
-         */
-        StartRoundRequest: {
-            /** Setup Id */
-            setup_id: number;
-            /**
-             * Size
-             * @default 10
-             */
-            size: number;
-        };
-        /** StartRoundResponse */
-        StartRoundResponse: {
-            /** Round Id */
-            round_id: number;
-        };
         /** StartTrainingSessionRequest */
         StartTrainingSessionRequest: {
             /** Student Id */
@@ -5980,6 +5813,31 @@ export interface components {
          * @enum {string}
          */
         WarningSeverity: "defect" | "info";
+        /**
+         * WholeBookSpec
+         * @description One instruction for every chunk of a book's current version.
+         */
+        WholeBookSpec: {
+            /** Book Id */
+            book_id: number;
+            /**
+             * Easy
+             * @default 0
+             */
+            easy: number;
+            /**
+             * Medium
+             * @default 0
+             */
+            medium: number;
+            /**
+             * Hard
+             * @default 0
+             */
+            hard: number;
+            /** Question Types */
+            question_types?: components["schemas"]["QuestionType"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -7230,181 +7088,6 @@ export interface operations {
             };
         };
     };
-    generate_questions_api_questions_generate_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateQuestionsRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerateQuestionsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    regenerate_question_api_questions__question_id__regenerate_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path: {
-                question_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegenerateQuestionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegenerateQuestionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    batch_plan_api_questions_batch_plan_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BatchPlanResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_batch_api_questions_generate_batch_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobStartedResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generation_plan_api_questions_generation_plan_get: {
-        parameters: {
-            query: {
-                book_id: number;
-                chunk_ids?: string[] | null;
-                all_chunks?: boolean;
-            };
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerationPlanResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     review_queue_api_questions_review_queue_get: {
         parameters: {
             query?: {
@@ -7460,6 +7143,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_generation_run_api_generation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerationRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRunStarted"] | components["schemas"]["GenerationRunPlan"];
                 };
             };
             /** @description Validation Error */
@@ -8057,41 +7775,6 @@ export interface operations {
             };
         };
     };
-    start_generation_run_api_coverage_generation_runs_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FillGapsRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobStartedResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_question_sets_api_question_sets_get: {
         parameters: {
             query?: never;
@@ -8137,37 +7820,6 @@ export interface operations {
                 "application/json": components["schemas"]["CreateQuestionSetRequest"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["QuestionSetOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sync_prod_set_api_question_sets_prod_sync_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             201: {
@@ -8314,6 +7966,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievedChunkOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chunk_outline_api_chunks_outline_get: {
+        parameters: {
+            query: {
+                book_id: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkOutlineResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8483,41 +8168,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveSetupResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    start_next_round_api_rounds_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StartRoundRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StartRoundResponse"];
                 };
             };
             /** @description Validation Error */

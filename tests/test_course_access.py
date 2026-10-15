@@ -182,14 +182,13 @@ def test_the_course_list_shows_only_the_professors_own_courses(
     [
         ("get", "/api/books/{book}"),
         ("get", "/api/chunks?book_id={book}"),
-        ("get", "/api/questions/generation-plan?book_id={book}"),
+        ("get", "/api/chunks/outline?book_id={book}"),
         ("get", "/api/curriculum/versions/{version}"),
         ("get", "/api/curriculum/subtopics/{subtopic}"),
         ("patch", "/api/curriculum/topics/{topic}"),
         ("patch", "/api/curriculum/subtopics/{subtopic}"),
         ("get", "/api/questions/{question}"),
         ("get", "/api/questions/{question}/evaluations"),
-        ("post", "/api/questions/{question}/regenerate"),
         ("get", "/api/students/{student}"),
         ("get", "/api/students/{student}/progress"),
         ("get", "/api/training-sessions?student_id={student}"),
@@ -264,35 +263,55 @@ def alice_set(session: Session, alice: AliceCourse) -> int:
         ("get", "/api/coverage?set_version_id={set}", None),
         (
             "post",
-            "/api/coverage/generation-runs",
-            {"targets": [{"subtopic_id": "{subtopic}", "difficulty": "easy"}]},
-        ),
-        (
-            "post",
-            "/api/questions/generate",
+            "/api/generation-runs",
             {
-                "curriculum_version_id": "{version}",
-                "question_type": "multiple_choice",
-                "difficulty": "easy",
-                "chunk_ids": ["{chunk}"],
+                "target": {
+                    "kind": "chunks",
+                    "curriculum_version_id": "{version}",
+                    "chunks": [{"chunk_id": "{chunk}", "easy": 1, "question_types": ["coding"]}],
+                }
             },
         ),
         (
             "post",
-            "/api/questions/generate",
+            "/api/generation-runs",
+            {"target": {"kind": "chunks", "whole_book": {"book_id": "{book}", "easy": 1}}},
+        ),
+        (
+            "post",
+            "/api/generation-runs",
             {
-                "question_type": "multiple_choice",
-                "difficulty": "easy",
-                "book_id": "{book}",
-                "all_chunks_of_book": True,
+                "target": {"kind": "chunks", "whole_book": {"book_id": "{book}", "easy": 1}},
+                "dry_run": True,
             },
         ),
         (
             "post",
-            "/api/questions/generate-batch",
-            {"chunks": [{"chunk_id": "{chunk}", "easy": 1}]},
+            "/api/generation-runs",
+            {
+                "target": {
+                    "kind": "gaps",
+                    "targets": [{"subtopic_id": "{subtopic}", "difficulty": "easy"}],
+                }
+            },
         ),
-        ("get", "/api/questions/generation-plan?book_id={book}&chunk_ids={chunk}", None),
+        (
+            "post",
+            "/api/generation-runs",
+            {"target": {"kind": "regenerate", "question_id": "{question}", "feedback": "Harder."}},
+        ),
+        (
+            "post",
+            "/api/generation-runs",
+            {
+                "target": {
+                    "kind": "regenerate",
+                    "question_id": "{question}",
+                    "feedback": "Harder.",
+                },
+                "dry_run": True,
+            },
+        ),
         ("get", "/api/chunks/search?subtopic_id={subtopic}", None),
         ("get", "/api/setup?curriculum_version_id={version}", None),
         ("get", "/api/custom-judges?curriculum_version_id={version}", None),

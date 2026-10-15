@@ -1,7 +1,8 @@
 """A book's chunks, and semantic retrieval over them.
 
 ``GET /chunks`` lists a book's current chunks (optionally those covering one page) and
-``GET /chunks/{id}`` reads one of any version. ``GET /chunks/search`` ranks chunks for
+``GET /chunks/{id}`` reads one of any version; ``GET /chunks/outline`` lists a book's chunks
+without their text, for a picker. ``GET /chunks/search`` ranks chunks for
 free text or a curriculum subtopic by dense cosine over ``chunk_embeddings`` -- the
 retrieval half of the coverage-page "Generate" flow, exposed so it can be inspected.
 """
@@ -15,14 +16,18 @@ from fastapi import APIRouter, Depends, Query
 from app.config import get_settings
 from app.errors import DomainRuleError
 from app.ingestion import SourceRetrieval
-from app.persistence.repositories import BookRepository, CurriculumRepository
+from app.persistence.repositories import BookRepository, CurriculumRepository, QuestionRepository
 from app.retrieval import get_embedder
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever, course_book_ids
 from app.retrieval.embedder import Embedder
 from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
+    BookSummary,
     ChunkListResponse,
     ChunkOut,
+    ChunkOutlineEntry,
+    ChunkOutlineResponse,
+    ChunkSummary,
     RetrievedChunkOut,
 )
 
@@ -93,6 +98,28 @@ def search_chunks(
         assert q is not None
         results = retriever.search(q, top_k=top_k, book_ids=book_ids)
     return [RetrievedChunkOut.from_result(result) for result in results]
+
+
+# Declared before "/chunks/{chunk_id}", which would otherwise read "outline" as a chunk id.
+@router.get("/chunks/outline", response_model=ChunkOutlineResponse)
+def chunk_outline(session: DbSession, course: CourseScope, book_id: int) -> ChunkOutlineResponse:
+    """A book's current chunks without their text, each with the questions it has produced.
+
+    What a chunk picker lists; grouping by heading is the client's (ADR-066).
+    """
+    book = BookRepository(session).get(book_id)
+    ensure_in_course(book.course_id, course, f"Book {book_id}")
+    produced = QuestionRepository(session).count_by_source_chunk()
+    return ChunkOutlineResponse(
+        book=BookSummary.from_row(book),
+        chunks=[
+            ChunkOutlineEntry(
+                chunk=ChunkSummary.from_chunk(chunk),
+                existing_question_count=produced.get(chunk.id, 0),
+            )
+            for chunk in SourceRetrieval(session).chunks_in_book(book_id)
+        ],
+    )
 
 
 @router.get("/chunks/{chunk_id}", response_model=ChunkOut)

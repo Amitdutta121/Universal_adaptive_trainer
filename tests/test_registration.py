@@ -39,16 +39,12 @@ NEW_PASSWORD = "an-even-longer-passphrase"
 #: Every route that spends LLM or embedder credit, and so needs a verified email. Kept in sync
 #: with the app by :func:`test_the_llm_route_list_matches_the_app`.
 LLM_ROUTES: dict[tuple[str, str], str] = {
-    ("POST", "/api/questions/generate"): "/api/questions/generate",
-    ("POST", "/api/questions/{question_id}/regenerate"): "/api/questions/999999/regenerate",
-    ("POST", "/api/questions/generate-batch"): "/api/questions/generate-batch",
     ("POST", "/api/questions/{question_id}/review"): "/api/questions/999999/review",
-    ("POST", "/api/coverage/generation-runs"): "/api/coverage/generation-runs",
     ("GET", "/api/chunks/search"): "/api/chunks/search",
     ("POST", "/api/curriculum/drafts"): "/api/curriculum/drafts",
     ("POST", "/api/setup/suggest"): "/api/setup/suggest",
     ("POST", "/api/setup"): "/api/setup",
-    ("POST", "/api/rounds"): "/api/rounds",
+    ("POST", "/api/generation-runs"): "/api/generation-runs",
     ("POST", "/api/jobs/{job_id}/retry"): "/api/jobs/job-999999/retry",
     ("POST", "/api/evaluation/batch-runs"): "/api/evaluation/batch-runs",
     ("POST", "/api/evaluation/batch-runs/{run_id}/poll"): "/api/evaluation/batch-runs/x/poll",

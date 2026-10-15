@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.assessment.catalog import (
     LEGACY_SUBJECT,
@@ -981,44 +981,6 @@ class ReviewQueueResponse(BaseModel):
     question: QuestionDetail | None
 
 
-class GenerateQuestionsRequest(BaseModel):
-    """A generation request.
-
-    Exactly one source selection is required: either ``chunk_ids`` or
-    ``all_chunks_of_book``. One question is generated per resolved chunk.
-
-    No topic or subtopic: the generator reads the chunk and classifies its own
-    question against the approved taxonomy (ADR-031).
-    """
-
-    curriculum_version_id: int | None = None
-    question_type: QuestionType
-    difficulty: Difficulty
-    book_id: int | None = None
-    chunk_ids: list[str] | None = None
-    all_chunks_of_book: bool = False
-    seed: str | None = None
-
-
-class GenerateQuestionsResponse(BaseModel):
-    created: int
-    question_ids: list[int]
-    questions: list[QuestionSummary]
-
-
-class RegenerateQuestionRequest(BaseModel):
-    """Regenerate one existing question with instructor feedback.
-
-    The feedback is threaded into the generation prompt. The source question is
-    never modified -- a new question is produced (ADR-002).
-    """
-
-    feedback: str = Field(min_length=1, max_length=4000)
-    #: Parity with ``ReviewRequest.professor_id``; recorded for provenance only,
-    #: not used to switch generators.
-    professor_id: int | None = None
-
-
 class RegenerateQuestionResponse(BaseModel):
     question_id: int
     regenerated_from_question_id: int
@@ -1112,50 +1074,6 @@ class GenerateBatchResponse(BaseModel):
     question_ids: list[int]
     questions: list[QuestionSummary]
     planned: list[PlannedQuestionOut]
-
-
-class GenerationPlanChunk(BaseModel):
-    """One candidate source chunk, and what generating from it would mean."""
-
-    chunk: ChunkSummary
-    #: How many questions this chunk has already produced. Re-generating is
-    #: allowed; the count is here so it is a decision rather than an accident.
-    existing_question_count: int
-    selected: bool
-
-
-class GenerationPlanChapter(BaseModel):
-    """The chunks under one top-level heading, in reading order.
-
-    ``label`` is the first entry of the chunks' heading path; chunks under no heading
-    are grouped under the book's title.
-    """
-
-    id: int
-    label: str
-    location_label: str | None
-    chunks: list[GenerationPlanChunk]
-
-
-class GenerationPlanTotals(BaseModel):
-    """What the selected run costs, before any model call is made."""
-
-    chunks_available: int
-    chunks_selected: int
-    questions_to_create: int
-    generation_calls: int
-    #: ``chunks_selected`` times the number of advisory metrics, because the
-    #: judge makes one call per metric per question (ADR-031).
-    judge_calls: int
-    source_chars: int
-
-
-class GenerationPlanResponse(BaseModel):
-    """The chunk plan: every chunk of the book's current version, and the cost."""
-
-    book: BookSummary
-    chapters: list[GenerationPlanChapter]
-    totals: GenerationPlanTotals
 
 
 # ------------------------------------------------------------------------- feedback
@@ -1975,17 +1893,6 @@ class CoverageTargetRef(BaseModel):
     difficulty: Difficulty
 
 
-class FillGapsRequest(BaseModel):
-    """The gaps a professor selected on the coverage page.
-
-    Deliberately a list of *targets*, not a question count. The generator picks
-    its own topic and subtopics from the chunk it is given (ADR-031), so asking
-    for "seven questions" would promise an aim the generator does not accept.
-    """
-
-    targets: list[CoverageTargetRef] = Field(min_length=1)
-
-
 class GeneratedRunQuestion(BaseModel):
     """One question a generation run produced, and how its aim landed.
 
@@ -2540,6 +2447,21 @@ class ChunkListResponse(BaseModel):
     total: int
 
 
+class ChunkOutlineEntry(BaseModel):
+    """One chunk without its text, and how many questions it has already produced."""
+
+    chunk: ChunkSummary
+    #: Re-generating is allowed; the count is here so it is a decision, not an accident.
+    existing_question_count: int
+
+
+class ChunkOutlineResponse(BaseModel):
+    """``GET /chunks/outline``: a book's current chunks in reading order, for a chunk picker."""
+
+    book: BookSummary
+    chunks: list[ChunkOutlineEntry]
+
+
 class RetrievedChunkOut(BaseModel):
     """One chunk returned by semantic retrieval."""
 
@@ -2687,13 +2609,6 @@ class CurrentSetupResponse(BaseModel):
     setup: QuestionSetupOut | None
 
 
-class StartRoundRequest(BaseModel):
-    """``POST /api/rounds``: generate the next round of a setup."""
-
-    setup_id: int
-    size: int = Field(default=10, ge=1, le=50)
-
-
 class StartRoundResponse(BaseModel):
     round_id: int
 
@@ -2767,7 +2682,8 @@ class JobOut(BaseModel):
     output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
     ``result`` is what the old blocking response returned, for the kinds that had one:
     :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
-    coverage fill, :class:`BookImportResult` for a book import.
+    coverage fill, :class:`BookImportResult` for a book import,
+    :class:`RegenerateQuestionResponse` for a regeneration.
     """
 
     id: str
@@ -2776,6 +2692,7 @@ class JobOut(BaseModel):
         "coverage_fill",
         "book_import",
         "embedding_switch",
+        "regeneration",
         "question_round",
         "judge_run",
     ]
@@ -2786,7 +2703,13 @@ class JobOut(BaseModel):
     counts: dict[str, int] = Field(default_factory=dict)
     error: str | None = None
     link: str | None = None
-    result: GenerateBatchResponse | GenerationRunResponse | BookImportResult | None = None
+    result: (
+        GenerateBatchResponse
+        | GenerationRunResponse
+        | BookImportResult
+        | RegenerateQuestionResponse
+        | None
+    ) = None
     #: Whether ``POST /jobs/{id}/cancel`` would stop it (queued or running, not yet asked).
     can_cancel: bool = False
     #: A stop was asked for; a running job ends after the question in flight.
@@ -2888,3 +2811,117 @@ class SettingsTestResponse(BaseModel):
 class ProviderModel(BaseModel):
     id: str
     name: str
+
+
+# --------------------------------------------------------------- generation runs (ADR-066)
+
+
+class WholeBookSpec(BaseModel):
+    """One instruction for every chunk of a book's current version."""
+
+    book_id: int
+    easy: int = Field(default=0, ge=0, le=20)
+    medium: int = Field(default=0, ge=0, le=20)
+    hard: int = Field(default=0, ge=0, le=20)
+    question_types: list[QuestionType] = Field(default_factory=list)
+
+    def for_chunk(self, chunk_id: str) -> ChunkGenerationSpec:
+        return ChunkGenerationSpec(chunk_id=chunk_id, **self.model_dump(exclude={"book_id"}))
+
+
+class ChunksRunTarget(BaseModel):
+    """Questions from chosen chunks: a spec sheet, or one instruction for a whole book."""
+
+    kind: Literal["chunks"] = "chunks"
+    chunks: list[ChunkGenerationSpec] = Field(default_factory=list)
+    whole_book: WholeBookSpec | None = None
+    curriculum_version_id: int | None = None
+    seed: str | None = None
+
+    @model_validator(mode="after")
+    def _one_selection(self) -> ChunksRunTarget:
+        if bool(self.chunks) == (self.whole_book is not None):
+            raise ValueError("Give either chunks or whole_book, not both and not neither.")
+        return self
+
+
+class GapsRunTarget(BaseModel):
+    """One multiple-choice question per coverage gap (``POST /coverage/generation-runs``)."""
+
+    kind: Literal["gaps"] = "gaps"
+    targets: list[CoverageTargetRef] = Field(min_length=1)
+
+
+class SetupCellsRunTarget(BaseModel):
+    """The next round of a question setup, for cells still below target (``POST /rounds``)."""
+
+    kind: Literal["setup_cells"] = "setup_cells"
+    setup_id: int
+    size: int = Field(default=10, ge=1, le=50)
+
+
+class RegenerateRunTarget(BaseModel):
+    """A new question from an existing one, with instructor feedback (ADR-002)."""
+
+    kind: Literal["regenerate"] = "regenerate"
+    question_id: int
+    feedback: str = Field(min_length=1, max_length=4000)
+    professor_id: int | None = None
+
+
+RunTarget = Annotated[
+    ChunksRunTarget | GapsRunTarget | SetupCellsRunTarget | RegenerateRunTarget,
+    Field(discriminator="kind"),
+]
+
+
+class GenerationRunRequest(BaseModel):
+    """``POST /api/generation-runs``: one target kind per run (ADR-066)."""
+
+    target: RunTarget
+    #: Plan and price the run: no model call, no row written.
+    dry_run: bool = False
+
+
+class GenerationRunStarted(BaseModel):
+    """``202``: the run is queued. Follow ``job_id`` in ``GET /api/jobs``."""
+
+    kind: str
+    #: ``job-N`` for a background job, ``round-N`` for a question round, as Jobs lists them.
+    job_id: str
+    #: Set for ``setup_cells``: poll ``GET /api/rounds/{round_id}``.
+    round_id: int | None = None
+
+
+class PlannedRunQuestion(BaseModel):
+    """One question a run would ask for. Which fields are set depends on the kind."""
+
+    difficulty: Difficulty | None = None
+    question_type: QuestionType | None = None
+    chunk_id: str | None = None
+    subtopic_id: int | None = None
+    style_id: str | None = None
+    question_id: int | None = None
+
+
+class GenerationRunTotals(BaseModel):
+    """What a run costs on the first attempt of every question.
+
+    A question that fails a check is retried, up to ``max_attempts_per_question`` times, so
+    the real count can be higher. ``judge_calls`` is ``None`` for a round: its judges are
+    the setup's enabled judges and rules, run inside the retry loop.
+    """
+
+    questions_to_create: int
+    generation_calls: int
+    judge_calls: int | None
+    max_attempts_per_question: int
+    identical_repeats: int = 0
+
+
+class GenerationRunPlan(BaseModel):
+    """``200`` for ``dry_run``: the planned questions and their cost. Nothing was run."""
+
+    kind: str
+    planned: list[PlannedRunQuestion]
+    totals: GenerationRunTotals

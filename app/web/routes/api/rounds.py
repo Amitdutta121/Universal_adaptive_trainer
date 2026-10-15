@@ -7,42 +7,38 @@ background task; the client polls ``GET /rounds/{id}`` until ``status`` is ``don
 
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter
+from sqlalchemy.orm import Session
 
 from app.errors import DomainRuleError
 from app.generation.rounds import next_round, run_round
-from app.jobs.queue import JobQueueDep
+from app.jobs.queue import JobQueue
+from app.llm import StructuredLLMClient
 from app.persistence.models import CurriculumVersionRow
 from app.persistence.repositories import GenerationRoundRepository, QuestionSetupRepository
-from app.web.routes.api.coverage import GenerationClientDep
-from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, DbSession, ensure_in_course
-from app.web.routes.api.schemas import GenerationRoundOut, StartRoundRequest, StartRoundResponse
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
+from app.web.routes.api.schemas import GenerationRoundOut, StartRoundResponse
 
 router = APIRouter(prefix="/rounds", tags=["question-setup"])
 
 
-def _ensure_setup_in_course(session: DbSession, setup_id: int, course: int | None) -> None:
+def _ensure_setup_in_course(session: Session, setup_id: int, course: int | None) -> None:
     setup = QuestionSetupRepository(session).get(setup_id)
     version = session.get(CurriculumVersionRow, setup.curriculum_version_id)
     ensure_in_course(version.course_id if version else None, course, f"Question setup {setup_id}")
 
 
-@router.post(
-    "",
-    response_model=StartRoundResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=SPENDS_LLM_CREDIT,
-)
-def start_next_round(
-    session: DbSession,
-    course: CourseScope,
-    body: StartRoundRequest,
-    queue: JobQueueDep,
-    client: GenerationClientDep,
+def queue_next_round(
+    session: Session,
+    course: int | None,
+    setup_id: int,
+    size: int,
+    queue: JobQueue,
+    client: StructuredLLMClient | None,
 ) -> StartRoundResponse:
-    """Queue the next round of a setup, for cells still below target."""
-    _ensure_setup_in_course(session, body.setup_id, course)
-    row = next_round(session, body.setup_id, size=body.size)
+    """Create the setup's next round, commit it and hand ``run_round`` to the queue."""
+    _ensure_setup_in_course(session, setup_id, course)
+    row = next_round(session, setup_id, size=size)
     if row.requested == 0:
         # Not committed: an empty round is an answer, not a row worth keeping.
         session.rollback()

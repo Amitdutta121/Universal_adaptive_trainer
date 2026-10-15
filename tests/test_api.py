@@ -18,7 +18,6 @@ from app.config import Settings
 from app.domain.enums import (
     CurriculumStatus,
     GuidelineStatus,
-    JudgeMetricId,
     QuestionStatus,
     QuestionType,
     ReviewDecision,
@@ -257,151 +256,6 @@ def test_an_older_approved_curriculum_can_be_made_active_again(client: TestClien
     assert client.get("/api/curriculum/approved").json()["version"]["id"] == old
 
 
-def test_single_generation_uses_the_active_curriculum_version(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.web.routes.api import questions as api_questions
-
-    old = _import_taxonomy(client)["version"]["id"]
-    _import_taxonomy(client)
-    activate = client.post(f"/api/curriculum/versions/{old}/activate")
-    assert activate.status_code == 200
-
-    seen: dict[str, int] = {}
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def generate_for_chunks(self, **kwargs: object) -> list[object]:
-            seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
-            return []
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "question_type": "debugging",
-            "difficulty": "medium",
-            "chunk_ids": ["a" * 32],
-        },
-    )
-
-    assert response.status_code == 201, response.text
-    assert seen["curriculum_version_id"] == old
-
-
-def test_batch_generation_uses_the_active_curriculum_version(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.web.routes.api import questions as api_questions
-
-    old = _import_taxonomy(client)["version"]["id"]
-    _import_taxonomy(client)
-    activate = client.post(f"/api/curriculum/versions/{old}/activate")
-    assert activate.status_code == 200
-
-    seen: dict[str, int] = {}
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def generate_batch(self, **kwargs: object) -> list[object]:
-            seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
-            return []
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post(
-        "/api/questions/generate-batch",
-        json={
-            "chunks": [
-                {
-                    "chunk_id": "a" * 32,
-                    "easy": 1,
-                    "question_types": ["debugging"],
-                }
-            ]
-        },
-    )
-
-    # Queued as a background job; TestClient runs it before returning.
-    assert response.status_code == 202, response.text
-    assert seen["curriculum_version_id"] == old
-
-
-def test_regenerate_threads_feedback_and_returns_both_ids(
-    client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.persistence.models import QuestionRow
-    from app.web.routes.api import questions as api_questions
-
-    _import_taxonomy(client)
-    # The route checks the source question is in the request's course before generating.
-    source = QuestionRow(prompt="the original question", original_prompt="the original question")
-    session.add(source)
-    session.commit()
-    seen: dict[str, object] = {}
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
-            seen["question_id"] = question_id
-            seen["feedback"] = feedback
-            row = QuestionRow(
-                prompt="a regenerated question", original_prompt="a regenerated question"
-            )
-            self._session.add(row)
-            self._session.flush()
-            return row
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post(
-        f"/api/questions/{source.id}/regenerate",
-        json={"feedback": "Make the distractors subtler."},
-    )
-
-    assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["regenerated_from_question_id"] == source.id
-    assert body["question_id"] == body["question"]["id"]
-    assert seen == {"question_id": source.id, "feedback": "Make the distractors subtler."}
-
-
-def test_regenerate_surfaces_an_unknown_question_as_a_json_404(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.errors import NotFoundError
-    from app.web.routes.api import questions as api_questions
-
-    _import_taxonomy(client)
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
-            raise NotFoundError(f"Question {question_id} does not exist.")
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post("/api/questions/424242/regenerate", json={"feedback": "anything"})
-
-    assert response.status_code == 404
-    assert response.headers["content-type"].startswith("application/json")
-
-
-def test_regenerate_requires_feedback(client: TestClient) -> None:
-    response = client.post("/api/questions/1/regenerate", json={"feedback": ""})
-
-    assert response.status_code == 422
-
-
 def test_subtopic_detail_reports_a_taxonomy_upload_has_no_evidence(client: TestClient) -> None:
     version = _import_taxonomy(client)
     subtopic_id = version["topics"][0]["subtopics"][0]["id"]
@@ -543,58 +397,6 @@ def test_question_list_filters_by_chunk_across_the_whole_bank(
     assert payload["total"] == 3
 
 
-def test_generation_without_an_approved_curriculum_is_refused(client: TestClient) -> None:
-    book, chunks = _import_chunked_book(client)
-
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "topic_id": 1,
-            "subtopic_id": 1,
-            "question_type": "debugging",
-            "difficulty": "medium",
-            "book_id": book["id"],
-            "chunk_ids": [chunks[0]["id"]],
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_question_spec"
-
-
-def test_generation_requires_a_source_selection(client: TestClient) -> None:
-    _import_taxonomy(client)
-
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "topic_id": 1,
-            "subtopic_id": 1,
-            "question_type": "debugging",
-            "difficulty": "medium",
-        },
-    )
-
-    assert response.status_code == 422
-    assert "chunk" in response.json()["error"]["message"].lower()
-
-
-def test_generation_rejects_an_unknown_question_type(client: TestClient) -> None:
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "topic_id": 1,
-            "subtopic_id": 1,
-            "question_type": "essay",
-            "difficulty": "medium",
-            "chunk_ids": ["a" * 32],
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_request"
-
-
 def test_unknown_question_is_a_json_404(client: TestClient) -> None:
     response = client.get("/api/questions/4242")
 
@@ -602,66 +404,29 @@ def test_unknown_question_is_a_json_404(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
-def test_generation_plan_prices_a_selection_without_running_it(client: TestClient) -> None:
-    book, chunks = _import_chunked_book(client)
-    chosen = [chunks[0]["id"], chunks[1]["id"]]
-
-    response = client.get(
-        "/api/questions/generation-plan",
-        params={"book_id": book["id"], "chunk_ids": chosen},
-    )
-
-    assert response.status_code == 200
-    plan = response.json()
-    totals = plan["totals"]
-    assert totals["chunks_available"] == len(chunks)
-    assert totals["chunks_selected"] == 2
-    assert totals["questions_to_create"] == 2
-    assert totals["generation_calls"] == 2
-    # One judge call per advisory metric per question (ADR-031).
-    assert totals["judge_calls"] == 2 * len(JudgeMetricId)
-    assert totals["source_chars"] == len(chunks[0]["text"]) + len(chunks[1]["text"])
-    # Pricing a run must not create one.
-    assert client.get("/api/questions").json()["total"] == 0
-
-
-def test_generation_plan_groups_chunks_by_chapter_and_marks_the_selection(
-    client: TestClient,
+def test_the_chunk_outline_lists_a_books_chunks_with_what_they_produced(
+    client: TestClient, session: Session
 ) -> None:
+    from app.persistence.models import QuestionRow
+
     book, chunks = _import_chunked_book(client)
-    chunk_id = chunks[0]["id"]
+    session.add(
+        QuestionRow(prompt="q", original_prompt="q", spec={"source_chunk_ids": [chunks[0]["id"]]})
+    )
+    session.commit()
 
-    plan = client.get(
-        "/api/questions/generation-plan",
-        params={"book_id": book["id"], "chunk_ids": [chunk_id]},
-    ).json()
+    outline = client.get("/api/chunks/outline", params={"book_id": book["id"]}).json()
 
-    assert [chapter["label"] for chapter in plan["chapters"]] == [
-        "1 The Way of the Program",
-        "2 Variables, Expressions and Statements",
-    ]
-    entries = {
-        item["chunk"]["id"]: item for chapter in plan["chapters"] for item in chapter["chunks"]
-    }
-    assert entries[chunk_id]["selected"] is True
-    assert entries[chunk_id]["existing_question_count"] == 0
-    assert sum(1 for item in entries.values() if item["selected"]) == 1
+    assert outline["book"]["id"] == book["id"]
+    assert [entry["chunk"]["id"] for entry in outline["chunks"]] == [c["id"] for c in chunks]
+    counts = {e["chunk"]["id"]: e["existing_question_count"] for e in outline["chunks"]}
+    assert counts[chunks[0]["id"]] == 1 and counts[chunks[1]["id"]] == 0
+    assert outline["chunks"][0]["chunk"]["char_count"] == len(chunks[0]["text"])
+    assert "text" not in outline["chunks"][0]["chunk"]
 
 
-def test_generation_plan_for_a_whole_book_selects_every_chunk(client: TestClient) -> None:
-    book, chunks = _import_chunked_book(client)
-
-    plan = client.get(
-        "/api/questions/generation-plan",
-        params={"book_id": book["id"], "all_chunks": True},
-    ).json()
-
-    assert plan["totals"]["chunks_selected"] == len(chunks)
-    assert plan["totals"]["judge_calls"] == len(chunks) * len(JudgeMetricId)
-
-
-def test_generation_plan_for_an_unknown_book_is_a_json_404(client: TestClient) -> None:
-    response = client.get("/api/questions/generation-plan", params={"book_id": 4242})
+def test_the_chunk_outline_of_an_unknown_book_is_a_json_404(client: TestClient) -> None:
+    response = client.get("/api/chunks/outline", params={"book_id": 4242})
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
@@ -878,6 +643,8 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/books/{book_id}",
         "/api/chunks",
         "/api/chunks/{chunk_id}",
+        "/api/chunks/outline",
+        "/api/generation-runs",
         "/api/curriculum/versions",
         "/api/curriculum/approved",
         "/api/curriculum/document-guide",
@@ -886,9 +653,7 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/curriculum/topics/{topic_id}",
         "/api/curriculum/subtopics/{subtopic_id}",
         "/api/questions",
-        "/api/questions/generate",
         "/api/questions/{question_id}",
-        "/api/questions/{question_id}/regenerate",
         "/api/questions/{question_id}/review",
         "/api/reviews",
         "/api/reviews/stats",
@@ -905,6 +670,17 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/questions/{question_id}/evaluations",
     ):
         assert path in paths, f"{path} is missing from the OpenAPI schema"
+    # Replaced by POST /api/generation-runs (ADR-066).
+    for gone in (
+        "/api/questions/generate",
+        "/api/questions/{question_id}/regenerate",
+        "/api/questions/generate-batch",
+        "/api/questions/batch-plan",
+        "/api/questions/generation-plan",
+        "/api/coverage/generation-runs",
+    ):
+        assert gone not in paths, f"{gone} should be gone"
+    assert "post" not in paths["/api/rounds/{round_id}"] and "/api/rounds" not in paths
 
 
 # ------------------------------------------------------------------------- cors
@@ -915,7 +691,7 @@ ALLOWED_ORIGIN = "http://localhost:5173"
 
 def test_preflight_from_an_allowed_origin_is_accepted(client: TestClient) -> None:
     response = client.options(
-        "/api/questions/generate",
+        "/api/generation-runs",
         headers={
             "Origin": ALLOWED_ORIGIN,
             "Access-Control-Request-Method": "POST",

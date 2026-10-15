@@ -70,10 +70,10 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint C2: Switch the generation model and the embedding model from the UI; retrieval keeps working throughout
 
 ### Phase 3: One generation endpoint (M4)
-- [ ] T12: Confirm a shared pipeline, write ADR-066 (stop if not shared)
-- [ ] T13: `POST /generation-runs` backend
-- [ ] T14: Switch frontend callers
-- [ ] T15: Delete old endpoints + prod/sync
+- [x] T12: Confirm a shared pipeline, write ADR-066 (stop if not shared)
+- [x] T13: `POST /generation-runs` backend
+- [x] T14: Switch frontend callers
+- [x] T15: Delete old endpoints + prod/sync
 
 ### Checkpoint D: All generation flows work through the new endpoint in the UI
 

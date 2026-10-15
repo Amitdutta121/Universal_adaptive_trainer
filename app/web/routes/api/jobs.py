@@ -284,9 +284,10 @@ def _retry_label(row: BackgroundJobRow) -> str | None:
     status = RoundStatus(row.status)
     if status in _IN_FLIGHT or (row.request or {}).get("retried_by"):
         return None
-    if JobKind(row.kind) in (JobKind.BOOK_IMPORT, JobKind.EMBEDDING_SWITCH):
+    if JobKind(row.kind) in (JobKind.BOOK_IMPORT, JobKind.EMBEDDING_SWITCH, JobKind.REGENERATION):
         # A refused document is refused again; importing it anew is a new upload. A model
-        # switch is started again from Settings.
+        # switch is started again from Settings. A regeneration is asked for again from the
+        # question, with feedback the professor may want to change.
         return None
     if JobKind(row.kind) is JobKind.BULK_GENERATION:
         remaining = row.total - row.done

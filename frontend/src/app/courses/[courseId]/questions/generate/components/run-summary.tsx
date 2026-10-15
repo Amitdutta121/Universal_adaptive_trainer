@@ -3,7 +3,7 @@
 /**
  * What the sheet will cost, and the button that spends it.
  *
- * Every number here comes from `/api/questions/batch-plan` — the same compiler
+ * Every number here comes from a `dry_run` of `/api/generation-runs` — the same compiler
  * that runs the batch — so what is shown is what will happen rather than a second
  * opinion computed in the browser.
  */

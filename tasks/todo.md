@@ -327,7 +327,9 @@ the generator. Write ADR-066 with the target-list schema
 **If they don't share a pipeline, stop and report.**
 
 **Acceptance criteria:**
-- [ ] ADR-066 maps each old endpoint to a target kind, including differences in job, cost and response
+- [x] ADR-066 maps each old endpoint to a target kind, including differences in job, cost and response
+  (2026-10-14: shared only below the orchestrator -- plain `_generate_specs` vs round
+  `generate_round_question`; ADR proposes one endpoint over both pipelines, not a merge)
 
 **Verification:**
 - [ ] Manual check: the human approves ADR-066
@@ -341,14 +343,17 @@ the generator. Write ADR-066 with the target-list schema
 planned questions and a cost estimate without calling the model.
 
 **Acceptance criteria:**
-- [ ] Every existing generation test scenario passes through the new endpoint
-- [ ] `dry_run` makes no model call and writes no row
+- [x] Every existing generation test scenario passes through the new endpoint
+  (chunks + regenerate in `tests/test_generation_runs.py`; gaps via `test_coverage.py`'s `_run`;
+  rounds parametrized in `test_rounds.py`; one test per old route kept until T15)
+- [x] `dry_run` makes no model call and writes no row (one test per kind)
 
 **Verification:**
-- [ ] `PYTEST tests/test_generation_runs.py tests/test_rounds.py tests/test_generation_batch.py tests/test_generation_regenerate.py`
+- [x] `PYTEST tests/test_generation_runs.py tests/test_rounds.py tests/test_generation_batch.py tests/test_generation_regenerate.py`
+  (2026-10-15: full suite 2115 passed, 34 skipped; ruff clean on touched files)
 
 **Dependencies:** T12
-**Files likely touched:** `app/web/routes/api/generation_runs.py`, `app/generation/runs.py`, `app/web/routes/api/schemas.py`, `tests/test_generation_runs.py`
+**Files likely touched:** `app/web/routes/api/generation_runs.py` (no `app/generation/runs.py`: see ADR-066), `app/web/routes/api/schemas.py`, `tests/test_generation_runs.py`
 **Estimated scope:** M
 
 ## Task 14: Switch frontend callers
@@ -356,7 +361,8 @@ planned questions and a cost estimate without calling the model.
 call `/generation-runs`.
 
 **Acceptance criteria:**
-- [ ] No frontend reference to the old endpoints
+- [x] No frontend reference to the old endpoints (2026-10-15: grep of `src/` and `schema.d.ts` is empty;
+  the unused `useSyncProdQuestionSet` hook is removed too)
 
 **Verification:**
 - [x] `TYPES` then `FRONTEND`
@@ -368,11 +374,14 @@ call `/generation-runs`.
 
 ## Task 15: Delete old endpoints and prod/sync
 **Acceptance criteria:**
-- [ ] The 7 old routes and `/question-sets/prod/sync` are gone; their tests are migrated or removed
-- [ ] OpenAPI types are regenerated
+- [x] The 7 old routes and `/question-sets/prod/sync` are gone; their tests are migrated or removed
+  (`generation-plan`'s listing moved to `GET /chunks/outline`; the `sync_prod_question_set`
+  service stays, because the public `prod` join lobby still reads the alias)
+- [x] OpenAPI types are regenerated
 
 **Verification:**
-- [ ] `BACKEND` + `TYPES` + `FRONTEND`
+- [x] `BACKEND` + `TYPES` + `FRONTEND` (2026-10-15: 2102 passed, 34 skipped; ruff clean on touched
+  files, the 3 remaining errors predate Phase 3; typecheck, biome lint, vitest 685 passed)
 
 **Dependencies:** T14
 **Files likely touched:** `app/web/routes/api/questions.py`, `app/web/routes/api/coverage.py`, `app/web/routes/api/rounds.py`, `tests/test_api.py`

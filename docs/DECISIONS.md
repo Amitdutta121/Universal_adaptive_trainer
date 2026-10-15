@@ -2681,3 +2681,95 @@ output (Q357) are still not caught: solvers read code charitably; a compile-and-
 code in stems and options is the next step. Live student generation does not blind-solve yet:
 it serves before review, so holding would change that flow. Ambiguity is flagged but rarely
 repaired; it is left to the professor.
+
+## ADR-066 — One `POST /generation-runs` over two generation pipelines
+
+**Status:** accepted 2026-10-14 (Task 12). Implemented in Task 13: `app/web/routes/api/generation_runs.py` (the job bodies already live in the route modules, and `app.generation` must not import `app.web`, so there is no `app/generation/runs.py`).
+
+The plan assumed the seven generation endpoints share one pipeline. Traced to the generator,
+they share the bottom layer only: every path builds a `QuestionSpec`
+(`build_question_spec`), calls `BaseQuestionGenerator.generate_one`, stores a `QuestionRow`,
+records the evaluation under a run id and commits per question. Above that there are **two
+orchestrators**, not one:
+
+- **Plain** -- `GenerationService._generate_specs` (`app/generation/service.py`): generate with
+  validator retries, then the four `JudgeMetricId` judges once, after the fact. Used by
+  `/questions/generate`, `/questions/{id}/regenerate`, `/questions/generate-batch` and
+  `/coverage/generation-runs` (one `generate_batch` call per gap target).
+- **Round** -- `GenerationService.generate_round_question` driven by `rounds._generate_round`:
+  judges, custom rules, duplicate and concept checks and blind solve run *inside* the retry
+  loop; a question that still fails is dropped, not stored; hard cells are two-step; style
+  facets, memory lessons and trust routing apply; progress lives on `GenerationRoundRow`, not
+  `BackgroundJobRow`. Used by `POST /rounds` (and round 1 from `POST /question-setups`).
+
+`/questions/batch-plan` and `/questions/generation-plan` generate nothing; they are free
+planners.
+
+### Old endpoint → target kind
+
+| Old endpoint | Kind | Pipeline | Runs as | Cost per question (calls) | Response today |
+|---|---|---|---|---|---|
+| `POST /questions/generate` | `chunks` (each chunk `{difficulty: 1}`, one type) | plain | **inline, 201** | ≤3 gen + 4 judge | `GenerateQuestionsResponse` |
+| `POST /questions/generate-batch` | `chunks` | plain | job `bulk_generation`, 202 | ≤3 gen + 4 judge | job result `GenerateBatchResponse` |
+| `POST /questions/{id}/regenerate` | `regenerate{question_id, feedback}` | plain + feedback | **inline, 201** | ≤3 gen + 4 judge | `RegenerateQuestionResponse` |
+| `POST /coverage/generation-runs` | `gaps` (MCQ only) | plain, per target, + retrieval + dedup flag | job `coverage_fill`, 202 | 1 query embed + ≤3 gen + 4 judge + dedup embed | job result `GenerationRunResponse` |
+| `POST /rounds` | `setup_cells{setup_id, size}` | round | `GenerationRoundRow`, 202, polled at `GET /rounds/{id}` | per attempt: gen (×2 hard) + enabled judges + custom rules + 2 blind solve + 1 concept, ≤3 attempts; + facets and lessons once per round | `StartRoundResponse` |
+| `POST /questions/batch-plan` | `dry_run` of `chunks` | -- | inline, free | 0 | `BatchPlanResponse` |
+| `GET /questions/generation-plan` | totals → `dry_run` of `chunks`; chunk listing → `GET /chunks` | -- | inline, free | 0 | `GenerationPlanResponse` |
+
+Other differences the new endpoint must keep:
+
+- **Guards.** `chunks`: question types allowed, chunks and curriculum in course. `gaps`:
+  subtopics in course, MCQ allowed, refuses a topic with a run in flight. `setup_cells`: setup in
+  course, one active round per taxonomy, a round with no targets is a 422, never committed.
+  `regenerate`: question in course, a single recoverable source chunk.
+- **Retry.** The Jobs panel retries `bulk_generation` from `start_at` and `coverage_fill` from
+  its failed targets (`app/web/routes/api/jobs.py`). Rounds have no retry; the next round is it.
+- **Retrieval.** `gaps` skips a target with no chunk above `MIN_CHUNK_SCORE`; rounds fall back to
+  the subtopic's evidence chunk. Kept as is.
+
+### Decision
+
+1. **One endpoint, two pipelines.** `POST /api/generation-runs` dispatches by kind; the plain and
+   round orchestrators are not merged. Merging would either add in-loop judging and blind solve
+   to every plain run (≈2-3x the calls) or drop them from rounds (the checks ADR-063/065 added
+   for measured failures).
+2. **Request.** One kind per run, a discriminated union; no caller mixes kinds.
+   ```
+   { dry_run: bool = false,
+     target: {kind: "chunks", chunks: [ChunkRequest] | whole_book: {book_id, easy, medium, hard, question_types},
+              curriculum_version_id?, seed?}
+           | {kind: "gaps", targets: [{subtopic_id, difficulty}]}
+           | {kind: "setup_cells", setup_id: int, size?: int}
+           | {kind: "regenerate", question_id: int, feedback: str} }
+   ```
+   `whole_book` keeps the whole-book shorthand so a client never sends 800 ids.
+3. **Every run is queued (202).** `chunks` → `bulk_generation`, `gaps` → `coverage_fill`,
+   `regenerate` → a new `regeneration` job kind, `setup_cells` → a round. This moves
+   `/generate` and `/regenerate` off the request: today they hold the request open for
+   ≈10 s per question (only `proxyTimeout: 600_000` in `frontend/next.config.ts` keeps a
+   long `/generate` alive), are lost if the professor leaves the page, and never show in
+   Jobs. Response:
+   `{kind, job_id, round_id?}`; `job_id` is `job-N` or `round-N`, as `GET /jobs` lists them,
+   and rounds keep `GET /rounds/{id}` for progress. A regeneration has no retry in Jobs.
+4. **`dry_run`** returns `200 {planned[], totals}` with no model call and no row:
+   `chunks` = today's `compile_chunk_requests` totals; `gaps` = one question per target, no
+   retrieval; `setup_cells` = `plan_targets`, which only reads (style draws are random, so the
+   run may pick other styles for the same cells); `regenerate` = one question. Totals are call
+   counts for the first attempt of each question, as `batch-plan` reports today -- no prices;
+   `max_attempts_per_question` bounds the retries, and a round's `judge_calls` is `null` (its
+   judges are the setup's, run inside the loop). The route needs a verified email even for
+   `dry_run` (`SPENDS_LLM_CREDIT`).
+5. **The chunk picker** loses `GET /questions/generation-plan` for `GET /chunks/outline?book_id=`:
+   each chunk's summary and `existing_question_count`, without its text (`GET /chunks` carries
+   the full text, too heavy for a picker over every book). The heading grouping moves to the
+   client, with the same rule and chapter ids. The single and regenerate screens wait on their
+   job (`waitForJob`) and read its stored result, so their flow is unchanged.
+6. **Out of scope.** `POST /question-setups` keeps starting round 1 itself; live student
+   generation (`app/generation/live.py`) and refill are not professor runs and are untouched.
+   `POST /question-sets/prod/sync` is removed in Task 15 with its unused frontend hook
+   (`useSyncProdQuestionSet`, no consumer).
+
+**Consequences.** The single and regenerate screens must poll a job instead of reading a 201 body
+(Task 14). Test scenarios of the five old generation routes are rerun through the new one
+(Task 13). The two pipelines remain, so a fix to judging still has to land in the right one.

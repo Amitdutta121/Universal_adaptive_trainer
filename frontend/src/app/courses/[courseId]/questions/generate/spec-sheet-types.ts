@@ -5,7 +5,7 @@
  * (`@/lib/question-types`). Everything here is either a name for something the
  * backend already models or a shaping helper with no rule in it — the rule that
  * turns counts into questions lives in the API (ADR-044) and is read from
- * `/api/questions/batch-plan`.
+ * a `dry_run` of `/api/generation-runs`.
  */
 
 import type { Difficulty, QuestionType, Schemas } from "@/lib/api/types";
@@ -15,9 +15,14 @@ import {
   questionTypeShortLabel,
 } from "@/lib/question-types/registry";
 
-export type GenerationPlanResponse = Schemas["GenerationPlanResponse"];
 export type ChunkGenerationSpec = Schemas["ChunkGenerationSpec"];
-export type BatchPlanTotals = Schemas["BatchPlanTotals"];
+/** A sheet's price: the run plan's totals, with the counts the summary shows per sheet. */
+export type BatchPlanTotals = Schemas["GenerationRunTotals"] & {
+  chunks_specified: number;
+  easy: number;
+  medium: number;
+  hard: number;
+};
 export type BookSummary = Schemas["BookSummary"];
 
 /** The three difficulty columns, in the order the compiled run walks them. */

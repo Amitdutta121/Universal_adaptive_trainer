@@ -95,7 +95,6 @@ export type QuestionSetup = Schemas["QuestionSetupOut"];
 export type CurrentSetupResponse = Schemas["CurrentSetupResponse"];
 export type GenerationRound = Schemas["GenerationRoundOut"];
 export type RoundStatus = Schemas["RoundStatus"];
-export type StartRoundRequest = Schemas["StartRoundRequest"];
 export type CustomJudge = Schemas["CustomJudgeOut"];
 export type CustomJudgeKind = Schemas["CustomJudgeKind"];
 export type CustomJudgeResult = Schemas["CustomJudgeResult"];

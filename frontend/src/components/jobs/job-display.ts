@@ -14,6 +14,7 @@ export const KIND_LABEL: Record<Job["kind"], string> = {
   coverage_fill: "Coverage fill",
   book_import: "Book import",
   embedding_switch: "Embedding model switch",
+  regeneration: "Regeneration",
   question_round: "Question round",
   judge_run: "Judge run",
 };

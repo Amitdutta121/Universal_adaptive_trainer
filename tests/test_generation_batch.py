@@ -1,4 +1,4 @@
-"""Per-chunk batch generation: the compiler, the service, and the two endpoints.
+"""Per-chunk batch generation: the compiler, the service, and its dry run.
 
 The compiler is tested on its own because it is the one rule the console is not
 allowed to restate (ADR-044): how many questions a chunk produces, and which
@@ -240,16 +240,20 @@ def test_service_refuses_a_sheet_that_asks_for_nothing(session, settings) -> Non
 
 def test_batch_plan_prices_a_sheet_without_generating(client) -> None:
     response = client.post(
-        "/api/questions/batch-plan",
+        "/api/generation-runs",
         json={
-            "chunks": [
-                {
-                    "chunk_id": "c1",
-                    "easy": 1,
-                    "hard": 2,
-                    "question_types": ["coding", "debugging"],
-                }
-            ]
+            "target": {
+                "kind": "chunks",
+                "chunks": [
+                    {
+                        "chunk_id": "c1",
+                        "easy": 1,
+                        "hard": 2,
+                        "question_types": ["coding", "debugging"],
+                    }
+                ],
+            },
+            "dry_run": True,
         },
     )
 
@@ -259,8 +263,8 @@ def test_batch_plan_prices_a_sheet_without_generating(client) -> None:
     assert body["totals"]["questions_to_create"] == 6
     assert body["totals"]["generation_calls"] == 6
     assert body["totals"]["judge_calls"] == 24
-    assert body["totals"]["easy"] == 2
-    assert body["totals"]["hard"] == 4
+    assert sum(1 for question in body["planned"] if question["difficulty"] == "easy") == 2
+    assert sum(1 for question in body["planned"] if question["difficulty"] == "hard") == 4
     assert body["totals"]["identical_repeats"] == 2
     assert [question["question_type"] for question in body["planned"]][:2] == [
         "coding",
@@ -270,8 +274,14 @@ def test_batch_plan_prices_a_sheet_without_generating(client) -> None:
 
 def test_batch_plan_reports_identical_repeats(client) -> None:
     response = client.post(
-        "/api/questions/batch-plan",
-        json={"chunks": [{"chunk_id": "c1", "medium": 3, "question_types": ["coding"]}]},
+        "/api/generation-runs",
+        json={
+            "target": {
+                "kind": "chunks",
+                "chunks": [{"chunk_id": "c1", "medium": 3, "question_types": ["coding"]}],
+            },
+            "dry_run": True,
+        },
     )
 
     assert response.json()["totals"]["identical_repeats"] == 2
@@ -279,7 +289,10 @@ def test_batch_plan_reports_identical_repeats(client) -> None:
 
 def test_batch_plan_refuses_a_sheet_with_no_chunks(client) -> None:
     """Refused by the request schema, before the compiler is reached."""
-    response = client.post("/api/questions/batch-plan", json={"chunks": []})
+    response = client.post(
+        "/api/generation-runs",
+        json={"target": {"kind": "chunks", "chunks": []}, "dry_run": True},
+    )
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
@@ -287,8 +300,14 @@ def test_batch_plan_refuses_a_sheet_with_no_chunks(client) -> None:
 
 def test_batch_plan_refuses_counts_without_a_format(client) -> None:
     response = client.post(
-        "/api/questions/batch-plan",
-        json={"chunks": [{"chunk_id": "c1", "easy": 1, "question_types": []}]},
+        "/api/generation-runs",
+        json={
+            "target": {
+                "kind": "chunks",
+                "chunks": [{"chunk_id": "c1", "easy": 1, "question_types": []}],
+            },
+            "dry_run": True,
+        },
     )
 
     assert response.status_code == 422

@@ -174,7 +174,7 @@ def test_a_style_needs_two_examples_and_a_difficulty() -> None:
 
 # The setup routes (agent A) are implemented: tests/test_setup_routes.py.
 IMPLEMENTED_ROUTES = [
-    ("POST", "/api/rounds", {"setup_id": 1}),
+    ("POST", "/api/generation-runs", {"target": {"kind": "setup_cells", "setup_id": 1}}),
     ("GET", "/api/rounds/1", None),
     ("GET", "/api/custom-judges?curriculum_version_id=1", None),
     ("POST", "/api/custom-judges", {"curriculum_version_id": 1, "rule_text": "No globals"}),

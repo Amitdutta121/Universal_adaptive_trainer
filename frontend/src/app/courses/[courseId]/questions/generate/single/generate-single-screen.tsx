@@ -143,7 +143,6 @@ export function GenerateSingleScreen() {
         question_type: type,
         difficulty,
         chunk_ids: [selectedRow.chunkId],
-        all_chunks_of_book: false,
       },
       {
         onSuccess: (response) => {

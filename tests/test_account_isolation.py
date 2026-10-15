@@ -98,7 +98,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", "/api/auth/reset-password"): "public; keyed by a signed token, not an id",
     ("GET", "/api/courses/catalog"): "the shipped subject/question-type catalogue, same for all",
     ("GET", "/api/curriculum/document-guide"): "static description of the taxonomy format",
-    ("POST", "/api/questions/batch-plan"): "pure compile of the posted spec; touches no row",
     ("POST", "/api/curriculum/drafts"): "LLM draft from the posted brief; nothing is read or saved",
     ("POST", "/api/courses"): "creates the caller's own course; owner stamping tested below",
     ("POST", "/api/students"): "public student enrolment; creates a new learner, reads nothing",
@@ -138,20 +137,16 @@ BODIES: dict[tuple[str, str], Any] = {
     ("PUT", "/api/curriculum/versions/{version_id}/tree"): {"label": "Taken", "topics": []},
     ("PATCH", "/api/curriculum/topics/{topic_id}"): {"name": "Taken"},
     ("PATCH", "/api/curriculum/subtopics/{subtopic_id}"): {"name": "Taken"},
-    ("POST", "/api/questions/{question_id}/regenerate"): {"feedback": "Make it harder."},
     ("POST", "/api/questions/{question_id}/review"): {"decision": "approve"},
     ("PATCH", "/api/custom-judges/{judge_id}"): {"enabled": False},
     ("POST", "/api/attempts/{attempt_id}/answer"): {"answer": "true"},
     ("PUT", "/api/judge-prompts/{metric}"): {"system_prompt": "Taken"},
-    ("POST", "/api/questions/generate"): {
-        "curriculum_version_id": "{version}",
-        "question_type": "true_false",
-        "difficulty": "easy",
-        "chunk_ids": ["{chunk}"],
-    },
-    ("POST", "/api/questions/generate-batch"): {"chunks": [{"chunk_id": "{chunk}", "easy": 1}]},
-    ("POST", "/api/coverage/generation-runs"): {
-        "targets": [{"subtopic_id": "{subtopic}", "difficulty": "easy"}]
+    ("POST", "/api/generation-runs"): {
+        "target": {
+            "kind": "chunks",
+            "curriculum_version_id": "{version}",
+            "chunks": [{"chunk_id": "{chunk}", "easy": 1, "question_types": ["true_false"]}],
+        }
     },
     ("POST", "/api/setup/suggest"): {"curriculum_version_id": "{version}"},
     ("POST", "/api/setup"): {
@@ -159,7 +154,6 @@ BODIES: dict[tuple[str, str], Any] = {
         "approved_styles": [],
         "cell_targets": [],
     },
-    ("POST", "/api/rounds"): {"setup_id": "{setup}"},
     ("POST", "/api/custom-judges"): {"curriculum_version_id": "{version}", "rule_text": "Taken"},
     ("POST", "/api/training-sessions"): {"student_id": "{student}", "set_version_id": "{qset}"},
     ("POST", "/api/evaluation/batch-runs"): {"question_ids": ["{question}"]},

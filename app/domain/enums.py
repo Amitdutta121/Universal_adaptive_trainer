@@ -420,6 +420,8 @@ class JobKind(StrEnum):
     BOOK_IMPORT = "book_import"
     #: Re-embedding every chunk in a newly chosen embedding model (Task 43).
     EMBEDDING_SWITCH = "embedding_switch"
+    #: One new question from an existing one, with instructor feedback (ADR-066).
+    REGENERATION = "regeneration"
 
 
 class CustomJudgeKind(StrEnum):

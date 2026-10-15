@@ -770,7 +770,14 @@ def http(configured_app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> SimpleName
         yield holder
 
 
-def test_post_rounds_queues_and_runs_the_next_round(
+def _start_round(http: SimpleNamespace, setup_id: int):
+    """The next round of a setup, as a ``setup_cells`` generation run (ADR-066)."""
+    return http.http.post(
+        "/api/generation-runs", json={"target": {"kind": "setup_cells", "setup_id": setup_id}}
+    )
+
+
+def test_a_setup_cells_run_queues_and_runs_the_next_round(
     http: SimpleNamespace, session: Session, env: SimpleNamespace
 ) -> None:
     setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
@@ -778,7 +785,7 @@ def test_post_rounds_queues_and_runs_the_next_round(
         draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
     )
 
-    response = http.http.post("/api/rounds", json={"setup_id": setup.id})
+    response = _start_round(http, setup.id)
 
     assert response.status_code == 202, response.text
     round_id = response.json()["round_id"]
@@ -792,7 +799,7 @@ def test_post_rounds_queues_and_runs_the_next_round(
         0,
     )
 
-    full = http.http.post("/api/rounds", json={"setup_id": setup.id})
+    full = _start_round(http, setup.id)
     assert full.status_code == 422
     assert full.json()["error"]["message"] == "Every cell has reached its target."
     session.expire_all()
@@ -800,7 +807,46 @@ def test_post_rounds_queues_and_runs_the_next_round(
 
 
 def test_round_routes_404_on_unknown_ids(http: SimpleNamespace) -> None:
-    assert http.http.post("/api/rounds", json={"setup_id": 999}).status_code == 404
+    assert _start_round(http, 999).status_code == 404
+
+
+def test_a_setup_cells_run_is_listed_in_jobs_under_its_job_id(
+    http: SimpleNamespace, session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(session, env, [(env.while_loops.id, "medium", 1)])
+    http.client = MetricJudgeClient(
+        draft=_mcq(env.while_loops.topic_id, env.while_loops.id), difficulty=Difficulty.MEDIUM
+    )
+
+    body = _start_round(http, setup.id).json()
+
+    assert body["job_id"] == f"round-{body['round_id']}"
+    listed = [job["id"] for job in http.http.get("/api/jobs").json()["jobs"]]
+    assert body["job_id"] in listed
+
+
+def test_a_setup_cells_dry_run_plans_the_round_without_a_row_or_a_model_call(
+    http: SimpleNamespace, session: Session, env: SimpleNamespace
+) -> None:
+    setup = _setup(
+        session, env, [(env.while_loops.id, "medium", 2), (env.while_loops.id, "hard", 1)]
+    )
+    http.client = None  # a model call would fail: no provider is configured
+
+    response = http.http.post(
+        "/api/generation-runs",
+        json={"target": {"kind": "setup_cells", "setup_id": setup.id}, "dry_run": True},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert sorted(q["difficulty"] for q in body["planned"]) == ["hard", "medium", "medium"]
+    assert all(q["style_id"] for q in body["planned"])
+    # The hard cell is two generations: a medium question, then a harder one.
+    assert body["totals"]["generation_calls"] == 4
+    assert body["totals"]["judge_calls"] is None
+    session.expire_all()
+    assert session.scalars(select(GenerationRoundRow)).all() == []
     assert http.http.get("/api/rounds/999").status_code == 404
 
 

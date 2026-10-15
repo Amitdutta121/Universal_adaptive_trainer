@@ -333,18 +333,28 @@ def test_generation_refuses_a_type_the_course_did_not_choose(client: TestClient)
         json={"name": "Physics", "subject": "physics", "question_types": ["multiple_choice"]},
     ).json()["id"]
     response = client.post(
-        "/api/questions/generate",
+        "/api/generation-runs",
         headers=_in(course_id),
-        json={"chunk_ids": ["a" * 32], "question_type": "coding", "difficulty": "easy"},
+        json={
+            "target": {
+                "kind": "chunks",
+                "chunks": [{"chunk_id": "a" * 32, "easy": 1, "question_types": ["coding"]}],
+            }
+        },
     )
     assert response.status_code == 422, response.text
     assert response.json()["error"]["message"] == "This course does not use these question types."
     assert "Coding" in response.json()["error"]["detail"]
 
     batch = client.post(
-        "/api/questions/generate-batch",
+        "/api/generation-runs",
         headers=_in(course_id),
-        json={"chunks": [{"chunk_id": "a" * 32, "easy": 1, "question_types": ["parsons"]}]},
+        json={
+            "target": {
+                "kind": "chunks",
+                "chunks": [{"chunk_id": "a" * 32, "easy": 1, "question_types": ["parsons"]}],
+            }
+        },
     )
     assert batch.status_code == 422, batch.text
 

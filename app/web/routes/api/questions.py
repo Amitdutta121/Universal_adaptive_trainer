@@ -17,11 +17,10 @@ from collections import Counter
 from contextlib import suppress
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.domain.chunks import Chunk, page_range_label
 from app.domain.enums import Difficulty, JobKind, JudgeMetricId, QuestionStatus
 from app.errors import DomainRuleError, InvalidQuestionSpecError, NotFoundError
 from app.evaluation import (
@@ -33,23 +32,20 @@ from app.evaluation import (
 from app.evaluation.severity import borderline_notes
 from app.evaluation.trust import judge_trust
 from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
-from app.ingestion import SourceRetrieval
-from app.jobs.queue import JobQueue, JobQueueDep
+from app.generation.service import regeneration_spec
+from app.generation.spec import require_approved_version
+from app.jobs.queue import JobQueue
 from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow, QuestionRow
 from app.persistence.repositories import (
-    BookRepository,
     CurriculumRepository,
     QuestionEvaluationRepository,
     QuestionRepository,
 )
 from app.web.routes.api.deps import (
-    SPENDS_LLM_CREDIT,
     CourseScope,
     DbSession,
-    book_in_course,
     chunks_in_course,
-    ensure_in_course,
     ensure_question_types_allowed,
     question_in_course,
     version_in_course,
@@ -57,16 +53,9 @@ from app.web.routes.api.deps import (
 from app.web.routes.api.schemas import (
     BatchPlanResponse,
     BatchPlanTotals,
-    BookSummary,
-    ChunkSummary,
+    ChunkGenerationSpec,
     GenerateBatchRequest,
     GenerateBatchResponse,
-    GenerateQuestionsRequest,
-    GenerateQuestionsResponse,
-    GenerationPlanChapter,
-    GenerationPlanChunk,
-    GenerationPlanResponse,
-    GenerationPlanTotals,
     JobStartedResponse,
     PersonalizationEvidence,
     PlannedQuestionOut,
@@ -74,7 +63,6 @@ from app.web.routes.api.schemas import (
     QuestionListResponse,
     QuestionSummary,
     QuestionTaxonomy,
-    RegenerateQuestionRequest,
     RegenerateQuestionResponse,
     ReviewOut,
     ReviewQueueMode,
@@ -135,104 +123,9 @@ def list_questions(
     )
 
 
-@router.post(
-    "/generate",
-    response_model=GenerateQuestionsResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=SPENDS_LLM_CREDIT,
-)
-def generate_questions(
-    session: DbSession, course: CourseScope, payload: GenerateQuestionsRequest
-) -> GenerateQuestionsResponse:
-    """Generate and persist one question per selected source chunk.
-
-    Every spec is validated before the first model call, so an invalid id later
-    in the list cannot leave a partially generated batch behind.
-    """
-    if payload.all_chunks_of_book and payload.book_id is None:
-        raise InvalidQuestionSpecError(
-            "Generating from a whole book needs a book id.",
-            detail="Set book_id, or list chunk_ids instead.",
-        )
-    if not payload.all_chunks_of_book and not payload.chunk_ids:
-        raise InvalidQuestionSpecError(
-            "No source chunks were selected.",
-            detail="Provide chunk_ids, or set all_chunks_of_book with a book_id.",
-        )
-    ensure_question_types_allowed(session, course, [payload.question_type.value])
-    if payload.curriculum_version_id is not None:
-        version_in_course(session, payload.curriculum_version_id, course)
-    if payload.book_id is not None:
-        book_in_course(session, payload.book_id, course)
-    chunks_in_course(session, payload.chunk_ids or [], course)
-    # Resolved before the service is built so that a missing curriculum reports
-    # the fixable problem rather than an LLM-configuration error raised first.
-    curriculum_version_id = payload.curriculum_version_id or approved_curriculum_id(session, course)
-
-    try:
-        generated = GenerationService(session).generate_for_chunks(
-            curriculum_version_id=curriculum_version_id,
-            question_type=payload.question_type,
-            difficulty=payload.difficulty,
-            source_chunk_ids=None if payload.all_chunks_of_book else payload.chunk_ids,
-            book_id=payload.book_id if payload.all_chunks_of_book else None,
-            seed=payload.seed,
-        )
-    except Exception:
-        session.rollback()
-        raise
-
-    return GenerateQuestionsResponse(
-        created=len(generated),
-        question_ids=[row.id for row in generated],
-        questions=[QuestionSummary.from_row(row) for row in generated],
-    )
-
-
-@router.post(
-    "/{question_id}/regenerate",
-    response_model=RegenerateQuestionResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=SPENDS_LLM_CREDIT,
-)
-def regenerate_question(
-    session: DbSession, course: CourseScope, question_id: int, payload: RegenerateQuestionRequest
-) -> RegenerateQuestionResponse:
-    """Generate a new question from an existing one, with instructor feedback.
-
-    The source question is never modified: this returns a fresh row, grounded in
-    the same section, type and difficulty, with the feedback threaded into the
-    generation prompt. It writes no review and triggers no instruction relearn --
-    that is the review endpoint's job, not this one.
-    """
-    question_in_course(session, question_id, course)
-    try:
-        new_row = GenerationService(session).regenerate_from_question(
-            question_id,
-            feedback=payload.feedback,
-            professor_id=payload.professor_id,
-        )
-    except Exception:
-        session.rollback()
-        raise
-
-    return RegenerateQuestionResponse(
-        question_id=new_row.id,
-        regenerated_from_question_id=question_id,
-        question=QuestionSummary.from_row(new_row),
-    )
-
-
-@router.post("/batch-plan", response_model=BatchPlanResponse)
-def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
-    """Compile a per-chunk spec sheet into the questions it would generate (ADR-044).
-
-    Read-only and free: it makes no model call and touches no row, so a professor
-    can price a spec sheet and revise it as often as they like. The compilation
-    lives here rather than in either UI because the rule that decides which format
-    each question gets must not be restated by a client (ADR-027).
-    """
-    planned = compile_chunk_requests([chunk.to_request() for chunk in payload.chunks])
+def plan_chunk_sheet(sheet: list[ChunkGenerationSpec]) -> BatchPlanResponse:
+    """The compiled plan and its call counts. Makes no model call and touches no row."""
+    planned = compile_chunk_requests([chunk.to_request() for chunk in sheet])
     counts = Counter(question.difficulty for question in planned)
     return BatchPlanResponse(
         planned=[PlannedQuestionOut.from_planned(question) for question in planned],
@@ -249,26 +142,10 @@ def batch_plan(payload: GenerateBatchRequest) -> BatchPlanResponse:
     )
 
 
-@router.post(
-    "/generate-batch",
-    response_model=JobStartedResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=SPENDS_LLM_CREDIT,
-)
-def generate_batch(
-    session: DbSession, course: CourseScope, payload: GenerateBatchRequest, queue: JobQueueDep
+def queue_chunk_sheet(
+    session: Session, course: int | None, payload: GenerateBatchRequest, queue: JobQueue
 ) -> JobStartedResponse:
-    """Queue the questions a per-chunk spec sheet asks for (ADR-044) as a background job.
-
-    One chunk may produce several questions, at several difficulties, in several
-    formats — which is what separates this from ``/generate``, where a run carries
-    one difficulty and one format for every chunk in it.
-
-    Each question costs one generation call plus one judge call per metric, made in
-    sequence, so a sheet can take minutes. Everything that can be refused is checked
-    here, before the ``202``; the questions are then made by :func:`run_bulk_generation`,
-    which keeps going if the professor leaves the page. ``GET /api/jobs`` reports it.
-    """
+    """Check a per-chunk spec sheet against the course, then queue it as a bulk job."""
     chunks = [chunk.to_request() for chunk in payload.chunks]
     ensure_question_types_allowed(
         session, course, [qt.value for chunk in chunks for qt in chunk.question_types]
@@ -367,6 +244,57 @@ def _bulk_generation(session: Session, job: BackgroundJobRow, progress: Progress
     ).model_dump(mode="json")
 
 
+def queue_regeneration(
+    session: Session,
+    course: int | None,
+    question_id: int,
+    *,
+    feedback: str,
+    professor_id: int | None,
+    queue: JobQueue,
+) -> JobStartedResponse:
+    """Check the source question can be regenerated, then queue the regeneration as a job."""
+    source = question_in_course(session, question_id, course)
+    # Refused now, not as a failed job: no single source chunk, or a superseded curriculum.
+    spec = regeneration_spec(session, source)
+    require_approved_version(session, spec.curriculum_version_id)
+    job = create_job(
+        session,
+        kind=JobKind.REGENERATION,
+        title=f"Regenerate question {question_id}",
+        total=1,
+        request={"question_id": question_id, "feedback": feedback, "professor_id": professor_id},
+        course_id=course,
+        run_id=new_run_id(),
+    )
+    session.commit()
+    queue.submit(run_regeneration, job.id)
+    return JobStartedResponse(job_id=f"job-{job.id}")
+
+
+def run_regeneration(job_id: int, *, session_factory=None) -> None:
+    """Background body of a ``regenerate`` run; stores the old ``/regenerate`` response."""
+    execute(job_id, _regeneration, session_factory=session_factory)
+
+
+def _regeneration(session: Session, job: BackgroundJobRow, progress: Progress) -> dict:
+    request = job.request
+    question_id = int(request["question_id"])
+    # Looked up on the module per run, so tests can replace the service.
+    new_row = GenerationService(session).regenerate_from_question(
+        question_id,
+        feedback=request["feedback"],
+        professor_id=request.get("professor_id"),
+        run_id=job.run_id,
+    )
+    progress()
+    return RegenerateQuestionResponse(
+        question_id=new_row.id,
+        regenerated_from_question_id=question_id,
+        question=QuestionSummary.from_row(new_row),
+    ).model_dump(mode="json")
+
+
 def approved_curriculum_id(session: Session, course: int | None = None) -> int:
     """Return the course's approved curriculum id or raise an actionable generation error."""
     approved = CurriculumRepository(session).get_approved(course_id=course)
@@ -376,67 +304,6 @@ def approved_curriculum_id(session: Session, course: int | None = None) -> int:
             detail="Upload a valid taxonomy before generating questions.",
         )
     return approved.id
-
-
-# Declared before "/{question_id}": FastAPI matches in registration order, so a
-# literal path added after it would be parsed as a question id and 422.
-@router.get("/generation-plan", response_model=GenerationPlanResponse)
-def generation_plan(
-    session: DbSession,
-    course: CourseScope,
-    book_id: int,
-    chunk_ids: Annotated[list[str] | None, Query()] = None,
-    all_chunks: bool = False,
-) -> GenerationPlanResponse:
-    """What generating from this selection would produce, before it runs.
-
-    Every chunk of the book's current version, grouped by its top-level heading. Read-only
-    and free: it makes no model call, so a professor can price a run and revise it as often
-    as they like. The arithmetic lives here rather than in the template because the page is
-    only one client of it (ADR-027).
-    """
-    book = BookRepository(session).get(book_id)
-    ensure_in_course(book.course_id, course, f"Book {book_id}")
-    chunks = SourceRetrieval(session).chunks_in_book(book_id)
-    already_generated = QuestionRepository(session).count_by_source_chunk()
-    chosen = set(chunk_ids or [])
-
-    groups: dict[str, list[Chunk]] = {}
-    for chunk in chunks:
-        groups.setdefault(chunk.heading_path[0] if chunk.heading_path else book.title, []).append(
-            chunk
-        )
-    selected_chunks = [chunk for chunk in chunks if all_chunks or chunk.id in chosen]
-    plan_chapters = [
-        GenerationPlanChapter(
-            id=index,
-            label=label,
-            location_label=page_range_label(members[0].page_start, members[-1].page_end),
-            chunks=[
-                GenerationPlanChunk(
-                    chunk=ChunkSummary.from_chunk(chunk),
-                    existing_question_count=already_generated.get(chunk.id, 0),
-                    selected=all_chunks or chunk.id in chosen,
-                )
-                for chunk in members
-            ],
-        )
-        for index, (label, members) in enumerate(groups.items())
-    ]
-
-    count = len(selected_chunks)
-    return GenerationPlanResponse(
-        book=BookSummary.from_row(book),
-        chapters=plan_chapters,
-        totals=GenerationPlanTotals(
-            chunks_available=len(chunks),
-            chunks_selected=count,
-            questions_to_create=count,
-            generation_calls=count,
-            judge_calls=count * len(JudgeMetricId),
-            source_chars=sum(len(chunk.text) for chunk in selected_chunks),
-        ),
-    )
 
 
 @router.get("/review-queue", response_model=ReviewQueueResponse)

@@ -157,6 +157,7 @@ class GenerationService:
         *,
         feedback: str,
         professor_id: int | None = None,
+        run_id: str | None = None,
     ) -> QuestionRow:
         """Generate a NEW question from the same inputs as an existing one.
 
@@ -171,51 +172,20 @@ class GenerationService:
         :mod:`app.web.routes.api.feedback`, not here.
 
         ``professor_id`` is accepted for parity with the review endpoint but is
-        not used to switch generators.
+        not used to switch generators. ``run_id`` lets a job group the new question
+        under its own run.
         """
         source = self._questions.get(question_id)
-        spec = self._spec_from_row(source)
+        spec = regeneration_spec(self._session, source)
         version = require_approved_version(self._session, spec.curriculum_version_id)
-        rows = self._generate_specs([spec], version=version, instructor_feedback=feedback)
+        rows = self._generate_specs(
+            [spec], version=version, instructor_feedback=feedback, run_id=run_id
+        )
         new_row = rows[0]
         new_row.regenerated_from_question_id = source.id
         new_row.regeneration_feedback = feedback
         self._session.commit()
         return new_row
-
-    def _spec_from_row(self, row: QuestionRow) -> QuestionSpec:
-        """Rebuild the generation spec for an existing question.
-
-        Prefers the frozen ``spec_json``; falls back to the chunk ids recorded
-        in ``content["sources"]``. The rebuilt spec is re-validated through
-        :func:`build_question_spec` so a since-deleted chunk or a curriculum that is no
-        longer approved is reported before any model call.
-        """
-        if row.question_type is None:
-            raise InvalidQuestionSpecError(
-                "This question has no recorded type.",
-                detail="Generate a fresh question instead of regenerating this one.",
-            )
-        if row.curriculum_version_id is None:
-            raise InvalidQuestionSpecError(
-                "This question is not grounded in a curriculum version.",
-                detail="Generate a fresh question instead of regenerating this one.",
-            )
-        chunk_ids = source_chunk_ids(row)
-        if len(chunk_ids) != 1:
-            raise InvalidQuestionSpecError(
-                "Cannot recover a single source chunk for this question.",
-                detail=f"Recovered chunk ids: {chunk_ids or 'none'}.",
-            )
-        seed = (row.spec or {}).get("seed")
-        return build_question_spec(
-            self._session,
-            curriculum_version_id=row.curriculum_version_id,
-            question_type=row.question_type,
-            difficulty=row.difficulty,
-            source_chunk_ids=chunk_ids,
-            seed=seed if isinstance(seed, str) else None,
-        )
 
     def _generate_specs(
         self,
@@ -487,6 +457,41 @@ class GenerationService:
             trigger=EvaluationTrigger.GENERATION,
         )
         self._session.flush()
+
+
+def regeneration_spec(session: Session, row: QuestionRow) -> QuestionSpec:
+    """Rebuild the generation spec for an existing question.
+
+    Prefers the frozen ``spec_json``; falls back to the chunk ids recorded
+    in ``content["sources"]``. The rebuilt spec is re-validated through
+    :func:`build_question_spec` so a since-deleted chunk or a curriculum that is no
+    longer approved is reported before any model call.
+    """
+    if row.question_type is None:
+        raise InvalidQuestionSpecError(
+            "This question has no recorded type.",
+            detail="Generate a fresh question instead of regenerating this one.",
+        )
+    if row.curriculum_version_id is None:
+        raise InvalidQuestionSpecError(
+            "This question is not grounded in a curriculum version.",
+            detail="Generate a fresh question instead of regenerating this one.",
+        )
+    chunk_ids = source_chunk_ids(row)
+    if len(chunk_ids) != 1:
+        raise InvalidQuestionSpecError(
+            "Cannot recover a single source chunk for this question.",
+            detail=f"Recovered chunk ids: {chunk_ids or 'none'}.",
+        )
+    seed = (row.spec or {}).get("seed")
+    return build_question_spec(
+        session,
+        curriculum_version_id=row.curriculum_version_id,
+        question_type=row.question_type,
+        difficulty=row.difficulty,
+        source_chunk_ids=chunk_ids,
+        seed=seed if isinstance(seed, str) else None,
+    )
 
 
 def _audit_metric(evaluation: PedagogicalEvaluation) -> str | None:
