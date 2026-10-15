@@ -19,6 +19,7 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.persistence.repositories import ChunkRepository
+from app.retrieval.bm25 import bm25_ranking, reciprocal_rank_fusion
 from app.retrieval.chunks import (
     ChunkEmbeddingStore,
     ChunkRetriever,
@@ -198,3 +199,27 @@ def test_subtopic_query_text_shape(session: Session) -> None:
         "A variable is a name that refers to a value."
     )
     assert subtopic_query_text(bare) == "Values and Variables - break"
+
+
+# --- Hybrid retrieval (Task 11) ---------------------------------------------------------
+
+
+def test_bm25_ranks_exact_code_tokens_and_drops_documents_without_a_query_term() -> None:
+    corpus = [
+        "Strings have strip and rstrip methods.",
+        "random.randint(a, b) picks an integer.",
+        "Lists hold values in order.",
+        "randint is in the random module; randint includes both ends.",
+    ]
+
+    assert bm25_ranking(corpus, "how does randint work?") == [3, 1]
+    assert bm25_ranking(corpus, "the of and") == []
+    assert bm25_ranking([], "randint") == []
+
+
+def test_rrf_sums_reciprocal_ranks_and_breaks_ties_by_first_seen() -> None:
+    # a: 1/61 + 1/62, b: 1/62 + 1/61 (tie, a seen first), c: 1/63 only.
+    assert reciprocal_rank_fusion([["a", "b", "c"], ["b", "a"]]) == ["a", "b", "c"]
+    # k = 1: y is second in both lists (1/3 + 1/3) and beats each list's top (1/2).
+    assert reciprocal_rank_fusion([["x", "y"], ["z", "y"]], k=1) == ["y", "x", "z"]
+    assert reciprocal_rank_fusion([]) == []

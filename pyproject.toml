@@ -39,6 +39,9 @@ dependencies = [
     # ADR-048.
     "pymupdf>=1.28",
     "pymupdf4llm>=1.28",
+    # BM25 half of hybrid chunk retrieval (app/retrieval/bm25.py, Task 11). MIT, needs only
+    # numpy; rank_bm25 is unmaintained since 2022.
+    "bm25s>=0.2",
 ]
 
 [project.optional-dependencies]
