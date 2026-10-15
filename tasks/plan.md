@@ -86,7 +86,7 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 
 ### Phase 5: Tutorial renderers and recipes (M6)
 - [x] T19: Recipe schema + loader + seed recipes + tutorial_blocks table
-- [ ] T20: `python_trace` tool
+- [x] T20: `python_trace` tool
 - [ ] T21: Block generator (recipe + chunks + tool → payload)
 - [ ] T22: Frontend renderers + sandboxed html
 - [ ] T23: Playwright check for html blocks

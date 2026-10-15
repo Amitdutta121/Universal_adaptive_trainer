@@ -485,11 +485,13 @@ recipe_id, guidance_level, renderer, payload, chunk_ids, status and set_version_
 the steps `[{line, locals, stdout}]`, with step and time limits.
 
 **Acceptance criteria:**
-- [ ] Traces of loops, functions and exceptions are correct
-- [ ] Infinite loops hit the step cap and return an error, not a hang
+- [x] Traces of loops, functions and exceptions are correct (2026-10-15: line/call/return/
+  exception/end events, state before each line; runs through `LocalCodeRunner`)
+- [x] Infinite loops hit the step cap and return an error, not a hang (a bare `except` that
+  swallows the cap still ends at the executor's time limit)
 
 **Verification:**
-- [ ] `PYTEST tests/test_python_trace.py`
+- [x] `PYTEST tests/test_python_trace.py`
 
 **Dependencies:** T19
 **Files likely touched:** `app/tutorials/tools/python_trace.py`, `tests/test_python_trace.py`
