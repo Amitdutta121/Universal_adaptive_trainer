@@ -78,9 +78,9 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint D: All generation flows work through the new endpoint in the UI
 
 ### Phase 4: YAML question styles (M5)
-- [ ] T16: YAML loader + convert the Python library + JSON Schema
-- [ ] T17: CI checks + id lock + CONTRIBUTING-styles.md
-- [ ] T18: Course-local styles + export to YAML
+- [x] T16: YAML loader + convert the Python library + JSON Schema
+- [x] T17: CI checks + id lock + CONTRIBUTING-styles.md
+- [x] T18: Course-local styles + export to YAML
 
 ### Checkpoint E: Contributor flow: adding one YAML style passes CI and appears in setup
 

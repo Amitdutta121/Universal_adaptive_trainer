@@ -400,11 +400,13 @@ Convert `app/styles/python.py` with ids unchanged and remove `_LIBRARIES`. A scr
 `styles/schema.json` from `QuestionStyle.model_json_schema()`.
 
 **Acceptance criteria:**
-- [ ] `get_library()` returns the same styles as before (a test compares them)
-- [ ] An invalid YAML file fails with the file name and field named
+- [x] `get_library()` returns the same styles as before (a test compares them)
+  (2026-10-15: `test_yaml_library_matches_the_python_library` in ad4840a, removed with
+  `python.py` in 097018c; `order.txt` keeps display order)
+- [x] An invalid YAML file fails with the file name and field named
 
 **Verification:**
-- [ ] `PYTEST tests/test_styles.py tests/test_setup_routes.py`
+- [x] `PYTEST tests/test_styles.py tests/test_setup_routes.py` (+ `styles/schema.json` staleness test)
 
 **Dependencies:** Checkpoint D
 **Files likely touched:** `app/styles/library.py`, `app/styles/loader.py`, `styles/intro_python/*.yaml`, `scripts/export_style_schema.py`
@@ -416,10 +418,12 @@ Ids are unique and namespaced. A `styles/ids.lock` file fails CI if an id is rem
 Add `CONTRIBUTING-styles.md`.
 
 **Acceptance criteria:**
-- [ ] Removing an id, a broken example and a duplicate id each fail CI with a clear message
+- [x] Removing an id, a broken example and a duplicate id each fail CI with a clear message
+  (2026-10-15: `app/styles/checks.py`; code examples gained `solution` + `test_cases` so they
+  can go through their type's authoring checks and grader)
 
 **Verification:**
-- [ ] `PYTEST tests/test_styles.py`
+- [x] `PYTEST tests/test_styles.py`
 
 **Dependencies:** T16
 **Files likely touched:** `tests/test_styles.py`, `styles/ids.lock`, `CONTRIBUTING-styles.md`
@@ -430,12 +434,15 @@ Add `CONTRIBUTING-styles.md`.
 library styles. An "Export to YAML" action downloads a file ready for a PR.
 
 **Acceptance criteria:**
-- [ ] A course style is visible only in its course
-- [ ] The exported YAML passes T17's checks
+- [x] A course style is visible only in its course (also in the account-isolation sweep)
+- [x] The exported YAML passes T17's checks
 
 **Verification:**
-- [ ] `PYTEST tests/test_course_styles.py`, `TYPES`, `FRONTEND`
-- [ ] Manual check: create, use and export a style in the UI
+- [x] `PYTEST tests/test_course_styles.py`, `TYPES`, `FRONTEND` (2026-10-15: full backend
+  2131 passed, 9 account-isolation failures then fixed and that file rerun green; typecheck, biome lint, vitest 687 passed)
+- [ ] Manual check: create, use and export a style in the UI (2026-10-15: create, list,
+  duplicate refusal and export checked over HTTP on a fresh backend; not clicked through in
+  the browser, and "use" stops short of saving a setup, which spends LLM credit)
 
 **Dependencies:** T17
 **Files likely touched:** `app/persistence/models.py` (+ migration), `app/web/routes/api/setup.py`, `frontend/.../questions/setup/question-setup-dialog.tsx`, `tests/test_course_styles.py`
