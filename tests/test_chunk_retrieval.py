@@ -223,3 +223,31 @@ def test_rrf_sums_reciprocal_ranks_and_breaks_ties_by_first_seen() -> None:
     # k = 1: y is second in both lists (1/3 + 1/3) and beats each list's top (1/2).
     assert reciprocal_rank_fusion([["x", "y"], ["z", "y"]], k=1) == ["y", "x", "z"]
     assert reciprocal_rank_fusion([]) == []
+
+
+def test_hybrid_lifts_a_lexical_match_the_embedder_misses_and_keeps_cosine_scores(
+    session: Session,
+) -> None:
+    book = _book(session)
+    texts = [
+        "A program is a list of steps.",
+        "randint picks a random integer.",
+        "Values have types.",
+        "Strings are text.",
+        "Loops repeat steps.",
+    ]
+    ChunkRepository(session).add_version(
+        book, [ChunkRow(text=text, page_start=i, page_end=i) for i, text in enumerate(texts, 1)]
+    )
+    session.commit()
+    store = ChunkEmbeddingStore(session, KeywordEmbedder())
+
+    # "randint" is outside the embedder's vocabulary: dense sees only "program".
+    hybrid = ChunkRetriever(session, store, hybrid=True)
+    hits = hybrid.search("randint program", top_k=2)
+
+    assert {hit.snippet for hit in hits} == {texts[0], texts[1]}
+    assert {hit.snippet: hit.score for hit in hits}[texts[1]] == 0.0  # still the cosine
+    assert hybrid.search("randint program", top_k=5) == hybrid.search("randint program", top_k=5)
+    dense = ChunkRetriever(session, store).search("randint program", top_k=1)
+    assert [hit.snippet for hit in dense] == [texts[0]]

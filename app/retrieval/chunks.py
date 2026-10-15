@@ -4,9 +4,10 @@
 model), filled lazily for whatever is missing, so switching the embedding model embeds
 afresh and the same model reuses the cache. Only a book's current version is searched.
 
-``ChunkRetriever`` ranks chunks by dense cosine, as the section retriever did; hybrid
-BM25 + RRF is Task 11. A chunk is embedded with its heading path prepended, which beat
-raw text in the parse spike (``docs/PARSE_SPIKE.md``).
+``ChunkRetriever`` ranks chunks by dense cosine or, with ``hybrid``, by reciprocal rank
+fusion of the cosine ranking and a BM25 ranking over the same text (Task 11). A chunk is
+embedded, and BM25-indexed, with its heading path prepended, which beat raw text in the
+parse spike (``docs/PARSE_SPIKE.md``).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from app.persistence.models import (
     SubtopicRow,
 )
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
+from app.retrieval.bm25 import bm25_ranking, reciprocal_rank_fusion
 from app.retrieval.embedder import Embedder
 
 #: Chunks embedded and committed together, so a provider failure keeps finished groups.
@@ -114,9 +116,15 @@ class ChunkEmbeddingStore:
         """Every current-version vector in this embedder's model, normalised."""
         if book_ids is not None and not book_ids:
             return ChunkVectors([], np.empty((0, 0), dtype=np.float32))
-        stmt = select(ChunkEmbeddingRow.chunk_id, ChunkEmbeddingRow.vector).where(
-            ChunkEmbeddingRow.model == self._embedder.model,
-            ChunkEmbeddingRow.chunk_id.in_(ChunkRepository(self._session).current_ids(book_ids)),
+        stmt = (
+            select(ChunkEmbeddingRow.chunk_id, ChunkEmbeddingRow.vector)
+            .where(
+                ChunkEmbeddingRow.model == self._embedder.model,
+                ChunkEmbeddingRow.chunk_id.in_(
+                    ChunkRepository(self._session).current_ids(book_ids)
+                ),
+            )
+            .order_by(ChunkEmbeddingRow.chunk_id)
         )
         ids: list[str] = []
         rows: list[np.ndarray] = []
@@ -144,16 +152,20 @@ class RetrievedChunk:
 
 
 class ChunkRetriever:
-    def __init__(self, session: Session, store: ChunkEmbeddingStore) -> None:
+    def __init__(
+        self, session: Session, store: ChunkEmbeddingStore, *, hybrid: bool = False
+    ) -> None:
         self._session = session
         self._store = store
+        self._hybrid = hybrid
 
     def search(
         self, query: str, *, book_ids: list[int] | None = None, top_k: int = 5
     ) -> list[RetrievedChunk]:
         """The ``top_k`` current chunks most similar to ``query``, best first.
 
-        Embeds any chunk still missing a vector in the current model first.
+        Embeds any chunk still missing a vector in the current model first. ``score`` is
+        always the cosine, also in hybrid mode, so callers' cosine floors keep their meaning.
         """
         self._store.backfill(book_ids)
         loaded = self._store.load(book_ids)
@@ -164,6 +176,8 @@ class ChunkRetriever:
         if norm == 0.0:
             return []
         sims = loaded.matrix @ (query_vector / norm)
+        if self._hybrid:
+            return self._fused(query, loaded, sims, top_k)
         k = min(top_k, sims.shape[0])
         top = np.argpartition(-sims, k - 1)[:k]
         top = top[np.argsort(-sims[top])]
@@ -172,6 +186,19 @@ class ChunkRetriever:
             _to_result(rows[loaded.chunk_ids[i]], float(sims[i]))
             for i in top
             if loaded.chunk_ids[i] in rows
+        ]
+
+    def _fused(
+        self, query: str, loaded: ChunkVectors, sims: np.ndarray, top_k: int
+    ) -> list[RetrievedChunk]:
+        rows = ChunkRepository(self._session).get_many(loaded.chunk_ids)
+        ids = [chunk_id for chunk_id in loaded.chunk_ids if chunk_id in rows]
+        position = {chunk_id: i for i, chunk_id in enumerate(loaded.chunk_ids)}
+        dense = sorted(ids, key=lambda chunk_id: -sims[position[chunk_id]])
+        lexical = [ids[i] for i in bm25_ranking([embedding_text(rows[c]) for c in ids], query)]
+        return [
+            _to_result(rows[chunk_id], float(sims[position[chunk_id]]))
+            for chunk_id in reciprocal_rank_fusion([dense, lexical])[:top_k]
         ]
 
     def for_subtopic(
