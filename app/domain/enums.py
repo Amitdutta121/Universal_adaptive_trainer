@@ -433,3 +433,31 @@ class CustomJudgeKind(StrEnum):
 
     LLM = "llm"
     PATTERN = "pattern"
+
+
+class TutorialRenderer(StrEnum):
+    """How the frontend draws a tutorial block (Phase 5). Few and trusted: each has a payload
+    contract (``app/tutorials/renderers.py``) and one frontend component."""
+
+    MARKDOWN = "markdown"
+    MERMAID = "mermaid"
+    CHARTJS = "chartjs"
+    #: Runs in ``<iframe sandbox="allow-scripts">`` without same-origin, under a CSP that
+    #: blocks the network.
+    HTML = "html"
+
+
+class GuidanceLevel(StrEnum):
+    """How much a tutorial block does for the student, from most to least (BKT-driven)."""
+
+    WORKED = "worked"
+    FADED = "faded"
+    CUE = "cue"
+
+
+class TutorialBlockStatus(StrEnum):
+    """A generated tutorial block: ``DRAFT`` until the professor approves it (Phase 6);
+    ``FAILED`` when its payload stayed invalid after the one repair retry."""
+
+    DRAFT = "draft"
+    FAILED = "failed"

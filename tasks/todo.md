@@ -467,11 +467,14 @@ checks), loaded from `recipes/<subject>/*.yaml`, with a JSON Schema exported. Se
 recipe_id, guidance_level, renderer, payload, chunk_ids, status and set_version_id.
 
 **Acceptance criteria:**
-- [ ] A block without chunk_ids can't be saved
-- [ ] The recipe CI checks mirror T17 (id lock, schema)
+- [x] A block without chunk_ids can't be saved (2026-10-15: refused by the ORM validator and,
+  if bypassed, by the `ck_tutorial_blocks_chunk_ids` constraint; migration 0027)
+- [x] The recipe CI checks mirror T17 (id lock, schema) (`recipes/ids.lock` through the
+  styles' `check_ids`/`check_lock`, `recipes/schema.json` staleness, plus recipe coherence
+  rules in `app/tutorials/checks.py`)
 
 **Verification:**
-- [ ] `PYTEST tests/test_recipes.py`
+- [x] `PYTEST tests/test_recipes.py`
 
 **Dependencies:** Checkpoint E
 **Files likely touched:** `app/tutorials/schema.py`, `app/tutorials/loader.py`, `recipes/intro_python/*.yaml`, `app/persistence/models.py` (+ migration)

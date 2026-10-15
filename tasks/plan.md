@@ -85,7 +85,7 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint E: Contributor flow: adding one YAML style passes CI and appears in setup
 
 ### Phase 5: Tutorial renderers and recipes (M6)
-- [ ] T19: Recipe schema + loader + seed recipes + tutorial_blocks table
+- [x] T19: Recipe schema + loader + seed recipes + tutorial_blocks table
 - [ ] T20: `python_trace` tool
 - [ ] T21: Block generator (recipe + chunks + tool → payload)
 - [ ] T22: Frontend renderers + sandboxed html

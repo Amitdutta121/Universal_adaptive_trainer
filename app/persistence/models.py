@@ -19,6 +19,7 @@ from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTa
 from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Dialect,
     Float,
@@ -31,7 +32,7 @@ from sqlalchemy import (
     and_,
 )
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.books import ExtractionWarning
@@ -46,6 +47,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidanceLevel,
     GuidelineStatus,
     JobKind,
     JudgeBatchStatus,
@@ -60,6 +62,8 @@ from app.domain.enums import (
     SourceFormat,
     StructureConfidence,
     StructureSource,
+    TutorialBlockStatus,
+    TutorialRenderer,
 )
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.domain.questions import DEFAULT_PRIORITY, GenerationAttempt, QuestionValidationReport
@@ -1573,6 +1577,47 @@ class CourseStyleRow(TimestampMixin, Base):
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
     style_id: Mapped[str] = mapped_column(String(100))
     style: Mapped[dict] = mapped_column("style_json", JsonObject)
+
+
+class TutorialBlockRow(TimestampMixin, Base):
+    """One generated tutorial block for a subtopic (Phase 5, Task 19).
+
+    Made from a recipe (``recipes/<subject>/<id>.yaml``) at one guidance level. ``payload`` is
+    the renderer's contract (``app/tutorials/renderers.py``). ``chunk_ids`` are the chunks the
+    block was written from -- never empty, so every block can be traced to the book; there is
+    no groundedness judge. ``set_version_id`` is set when the block is frozen with a question
+    set (Phase 6). ``error`` says why a ``failed`` block failed.
+    """
+
+    __tablename__ = "tutorial_blocks"
+    __table_args__ = (
+        CheckConstraint("chunk_ids_json <> '[]'", name="ck_tutorial_blocks_chunk_ids"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), index=True
+    )
+    recipe_id: Mapped[str] = mapped_column(String(100), index=True)
+    guidance_level: Mapped[GuidanceLevel] = mapped_column(StrEnumType(GuidanceLevel, 16))
+    renderer: Mapped[TutorialRenderer] = mapped_column(StrEnumType(TutorialRenderer, 16))
+    payload: Mapped[dict] = mapped_column("payload_json", JsonObject)
+    chunk_ids: Mapped[list[str]] = mapped_column("chunk_ids_json", JsonList)
+    status: Mapped[TutorialBlockStatus] = mapped_column(
+        StrEnumType(TutorialBlockStatus, 16), default=TutorialBlockStatus.DRAFT
+    )
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Provider and model that wrote the block (``StructuredLLMClient.description``).
+    model: Mapped[str] = mapped_column(String(200), default="")
+    set_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_set_versions.id", ondelete="SET NULL"), default=None, index=True
+    )
+
+    @validates("chunk_ids")
+    def _needs_chunks(self, _key: str, chunk_ids: list[str] | None) -> list[str]:
+        if not chunk_ids:
+            raise ValueError("A tutorial block needs the chunk_ids it was written from.")
+        return list(chunk_ids)
 
 
 class StudentRow(TimestampMixin, Base):

@@ -12,9 +12,9 @@ Every check returns problems as plain sentences naming the style (and example), 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from app.assessment.specs import Unmarkable
 from app.domain.enums import QuestionType
@@ -24,6 +24,14 @@ from graders import SpecError, get_grader
 
 #: ``<prefix>.<name>``: one prefix per subject (``py``), a snake_case name.
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*\.[a-z][a-z0-9_]*$")
+
+
+class HasId(Protocol):
+    """A style or a tutorial recipe: anything the id checks look at."""
+
+    @property
+    def id(self) -> str: ...
+
 
 _EXECUTABLE = {QuestionType.CODE_COMPLETION, QuestionType.DEBUGGING, QuestionType.CODING}
 
@@ -99,7 +107,7 @@ def check_example(
     return problems
 
 
-def check_ids(libraries: dict[str, list[QuestionStyle]]) -> list[str]:
+def check_ids(libraries: Mapping[str, Sequence[HasId]]) -> list[str]:
     """Ids match ``<prefix>.<name>``, one prefix per subject, no id or prefix shared."""
     problems: list[str] = []
     owner: dict[str, str] = {}
@@ -134,17 +142,26 @@ def read_lock(path: Path) -> list[str]:
     return [line for line in lines if line]
 
 
-def check_lock(libraries: dict[str, list[QuestionStyle]], locked: Iterable[str]) -> list[str]:
-    """Every locked id still ships; every shipped id is locked."""
-    shipped = {f"{subject}/{style.id}" for subject, styles in libraries.items() for style in styles}
+def check_lock(
+    libraries: Mapping[str, Sequence[HasId]],
+    locked: Iterable[str],
+    *,
+    lock: str = "styles/ids.lock",
+    noun: str = "style",
+) -> list[str]:
+    """Every locked id still ships; every shipped id is locked.
+
+    Also run over the tutorial recipes (``recipes/ids.lock``), which follow the same rule.
+    """
+    shipped = {f"{subject}/{item.id}" for subject, items in libraries.items() for item in items}
     locked = set(locked)
     problems = [
-        f"{entry}: in styles/ids.lock but its style file is gone. Ids are stored on questions and "
-        "setups, so a style is never removed or renamed: restore the file (a new id is a new style)"
+        f"{entry}: in {lock} but its {noun} file is gone. Ids are stored, so a {noun} is never "
+        f"removed or renamed: restore the file (a new id is a new {noun})"
         for entry in sorted(locked - shipped)
     ]
     problems.extend(
-        f"{entry}: new style id not in styles/ids.lock; add the line '{entry}' to it"
+        f"{entry}: new {noun} id not in {lock}; add the line '{entry}' to it"
         for entry in sorted(shipped - locked)
     )
     return problems

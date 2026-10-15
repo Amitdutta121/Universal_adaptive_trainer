@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "ContentKind": {
+      "description": "What a subtopic's material is mostly about; the composer matches it to ``fits``.",
+      "enum": [
+        "code",
+        "concept",
+        "process",
+        "misconception"
+      ],
+      "title": "ContentKind",
+      "type": "string"
+    },
+    "GuidanceLevel": {
+      "description": "How much a tutorial block does for the student, from most to least (BKT-driven).",
+      "enum": [
+        "worked",
+        "faded",
+        "cue"
+      ],
+      "title": "GuidanceLevel",
+      "type": "string"
+    },
+    "RecipeCheck": {
+      "description": "A generation-time check a block of the recipe must pass (Task 23).",
+      "enum": [
+        "html_loads",
+        "trace_matches"
+      ],
+      "title": "RecipeCheck",
+      "type": "string"
+    },
+    "RecipeInput": {
+      "description": "What the generator hands the model besides the recipe's prompt.",
+      "enum": [
+        "subtopic",
+        "chunks",
+        "code"
+      ],
+      "title": "RecipeInput",
+      "type": "string"
+    },
+    "RecipeTool": {
+      "description": "A tool whose output a block embeds as-is (Task 20).",
+      "enum": [
+        "python_trace"
+      ],
+      "title": "RecipeTool",
+      "type": "string"
+    },
+    "TutorialRenderer": {
+      "description": "How the frontend draws a tutorial block (Phase 5). Few and trusted: each has a payload\ncontract (``app/tutorials/renderers.py``) and one frontend component.",
+      "enum": [
+        "markdown",
+        "mermaid",
+        "chartjs",
+        "html"
+      ],
+      "title": "TutorialRenderer",
+      "type": "string"
+    }
+  },
+  "description": "One recipe in a subject's library.\n\n``id`` is stable and namespaced by subject (``py.code_trace_stepper``): blocks store it and\nper-recipe stats key on it, so it is never renamed.",
+  "properties": {
+    "id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "subject": {
+      "title": "Subject",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "renderer": {
+      "$ref": "#/$defs/TutorialRenderer"
+    },
+    "prompt": {
+      "minLength": 1,
+      "title": "Prompt",
+      "type": "string"
+    },
+    "fits": {
+      "items": {
+        "$ref": "#/$defs/ContentKind"
+      },
+      "minItems": 1,
+      "title": "Fits",
+      "type": "array"
+    },
+    "guidance_levels": {
+      "items": {
+        "$ref": "#/$defs/GuidanceLevel"
+      },
+      "minItems": 1,
+      "title": "Guidance Levels",
+      "type": "array"
+    },
+    "inputs": {
+      "items": {
+        "$ref": "#/$defs/RecipeInput"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "tool": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecipeTool"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/RecipeCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "summary",
+    "renderer",
+    "prompt",
+    "fits",
+    "guidance_levels"
+  ],
+  "title": "Tutorial recipe file",
+  "type": "object"
+}
