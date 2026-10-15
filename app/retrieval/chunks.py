@@ -20,13 +20,30 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.chunks import HEADING_SEPARATOR
-from app.persistence.models import BookRow, ChunkEmbeddingRow, ChunkRow, CurriculumVersionRow
+from app.persistence.models import (
+    BookRow,
+    ChunkEmbeddingRow,
+    ChunkRow,
+    CurriculumVersionRow,
+    SubtopicRow,
+)
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.retrieval.embedder import Embedder
-from app.retrieval.retriever import SNIPPET_CHARS, subtopic_query_text
 
 #: Chunks embedded and committed together, so a provider failure keeps finished groups.
 _COMMIT_EVERY = 64
+#: Characters of chunk text a search result carries.
+SNIPPET_CHARS = 300
+
+
+def subtopic_query_text(subtopic: SubtopicRow) -> str:
+    """The string handed to retrieval for a subtopic.
+
+    ``"{topic} - {subtopic}: {description}"`` -- the representation that scored
+    hit@1 0.85 on the taxonomy benchmark, versus 0.65 for the name alone.
+    """
+    head = f"{subtopic.topic.name} - {subtopic.name}"
+    return f"{head}: {subtopic.description}" if subtopic.description else head
 
 
 def embedding_text(chunk: ChunkRow) -> str:

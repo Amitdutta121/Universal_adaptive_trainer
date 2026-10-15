@@ -181,7 +181,7 @@ def test_the_course_list_shows_only_the_professors_own_courses(
     ("method", "path"),
     [
         ("get", "/api/books/{book}"),
-        ("get", "/api/books/{book}/sections"),
+        ("get", "/api/chunks?book_id={book}"),
         ("get", "/api/questions/generation-plan?book_id={book}"),
         ("get", "/api/curriculum/versions/{version}"),
         ("get", "/api/curriculum/subtopics/{subtopic}"),
@@ -293,7 +293,7 @@ def alice_set(session: Session, alice: AliceCourse) -> int:
             {"chunks": [{"chunk_id": "{chunk}", "easy": 1}]},
         ),
         ("get", "/api/questions/generation-plan?book_id={book}&chunk_ids={chunk}", None),
-        ("get", "/api/retrieval/sections?subtopic_id={subtopic}", None),
+        ("get", "/api/chunks/search?subtopic_id={subtopic}", None),
         ("get", "/api/setup?curriculum_version_id={version}", None),
         ("get", "/api/custom-judges?curriculum_version_id={version}", None),
         ("get", "/api/students/class-summary?curriculum_version_id={version}", None),

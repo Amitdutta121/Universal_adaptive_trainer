@@ -348,30 +348,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/books/document-guide": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Document Guide
-         * @description What a valid book document is, and the prompt that produces one.
-         *
-         *     Rendered from the ingestion contract rather than written out here, so a
-         *     client cannot describe a document this application would refuse. The prompt
-         *     is advisory: it grants nothing, and every upload is still validated in full.
-         */
-        get: operations["document_guide_api_books_document_guide_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/books/{book_id}": {
         parameters: {
             query?: never;
@@ -381,14 +357,14 @@ export interface paths {
         };
         /**
          * Get Book
-         * @description One book: import status, warnings and its chapter/section hierarchy.
+         * @description One book: import status, warnings, and how many chunks its current version has.
          */
         get: operations["get_book_api_books__book_id__get"];
         put?: never;
         post?: never;
         /**
          * Delete Book
-         * @description Delete a book, its structure and its retained document.
+         * @description Delete a book, its chunks and its retained document.
          *
          *     Refuses with 409 while questions cite the book, naming how many. ``force``
          *     proceeds anyway; the questions are kept and their citations are stranded.
@@ -415,54 +391,14 @@ export interface paths {
          * @description The original PDF as uploaded, for in-browser rendering.
          *
          *     Only a book imported from a PDF (``SourceFormat.BOOK_PDF``) has a source
-         *     file worth serving back -- a book declared directly as structured JSON has
-         *     no PDF to render, even though it also retains its uploaded file.
+         *     file worth serving back -- a DOCX or PPTX (or an old JSON book) has no PDF
+         *     to render, even though it also retains its uploaded file.
          *
          *     Not a download: no ``filename`` is passed to ``FileResponse``, so no
          *     ``Content-Disposition: attachment`` header is sent, and a PDF-rendering
          *     client can fetch it inline.
          */
         get: operations["get_book_source_api_books__book_id__source_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/books/{book_id}/sections": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Sections
-         * @description Every section of one book in reading order, without section text.
-         */
-        get: operations["list_sections_api_books__book_id__sections_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/books/{book_id}/sections/{section_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Section
-         * @description One section's verbatim text plus the citation that makes it traceable.
-         */
-        get: operations["get_section_api_books__book_id__sections__section_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1365,26 +1301,6 @@ export interface paths {
          *     any taxonomy can be taught, not only the selected one.
          */
         post: operations["sync_taxonomy_set_api_question_sets_taxonomy__curriculum_version_id__sync_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/retrieval/sections": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Retrieve Sections
-         * @description Rank the course's sections for a query or a subtopic. Exactly one is required.
-         */
-        get: operations["retrieve_sections_api_retrieval_sections_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2419,14 +2335,10 @@ export interface components {
         };
         /**
          * BookDetail
-         * @description One book with its chapter/section hierarchy and import warnings.
+         * @description One book with its chunk count and import warnings.
          */
         BookDetail: {
             book: components["schemas"]["BookSummary"];
-            /** Section Count */
-            section_count: number;
-            /** Chapters */
-            chapters: components["schemas"]["ChapterOut"][];
             /**
              * Chunk Count
              * @default 0
@@ -2441,32 +2353,6 @@ export interface components {
              * @default 0
              */
             grounded_question_count: number;
-        };
-        /**
-         * BookDocumentGuide
-         * @description Everything a professor needs to obtain a valid book document.
-         *
-         *     The prompt and the example are rendered from the ingestion contract itself,
-         *     so a client that shows them cannot describe a document the validator would
-         *     refuse.
-         */
-        BookDocumentGuide: {
-            /** Schema Version */
-            schema_version: string;
-            /** Supported Extensions */
-            supported_extensions: string[];
-            /** Max Upload Mb */
-            max_upload_mb: number;
-            /** Prompt */
-            prompt: string;
-            /** Example Json */
-            example_json: string;
-            /** Structure Sources */
-            structure_sources: components["schemas"]["VocabularyTermOut"][];
-            /** Warning Codes */
-            warning_codes: components["schemas"]["VocabularyTermOut"][];
-            /** Warning Severities */
-            warning_severities: components["schemas"]["VocabularyTermOut"][];
         };
         /**
          * BookImportResult
@@ -2660,34 +2546,6 @@ export interface components {
             target: number;
         };
         /**
-         * ChapterOut
-         * @description One chapter and the sections beneath it.
-         */
-        ChapterOut: {
-            /** Id */
-            id: number;
-            /** Book Id */
-            book_id: number;
-            /** Number */
-            number: string | null;
-            /** Title */
-            title: string | null;
-            /** Position */
-            position: number;
-            /** Start Page */
-            start_page: number | null;
-            /** End Page */
-            end_page: number | null;
-            /** Location Label */
-            location_label: string | null;
-            /** Is Unlabelled */
-            is_unlabelled: boolean;
-            structure_source: components["schemas"]["StructureSource"];
-            structure_confidence: components["schemas"]["StructureConfidence"];
-            /** Sections */
-            sections: components["schemas"]["SectionSummary"][];
-        };
-        /**
          * ChunkGenerationSpec
          * @description One chunk's instruction on the spec sheet (ADR-044).
          *
@@ -2875,8 +2733,6 @@ export interface components {
             llm_model: string;
             /** Embedding Model */
             embedding_model: string;
-            /** Book Schema Version */
-            book_schema_version: string;
             /** Taxonomy Schema Version */
             taxonomy_schema_version: string;
             /** Supported Book Extensions */
@@ -4887,28 +4743,6 @@ export interface components {
             snippet: string;
         };
         /**
-         * RetrievedSectionOut
-         * @description One book section returned by semantic retrieval, with its citation.
-         */
-        RetrievedSectionOut: {
-            /** Section Id */
-            section_id: number;
-            /** Book Id */
-            book_id: number;
-            /** Book Title */
-            book_title: string;
-            /** Chapter Title */
-            chapter_title: string | null;
-            /** Section Number */
-            section_number: string | null;
-            /** Section Title */
-            section_title: string | null;
-            /** Score */
-            score: number;
-            /** Snippet */
-            snippet: string;
-        };
-        /**
          * ReviewDecision
          * @description A professor's verdict on a generated question.
          *
@@ -5086,100 +4920,6 @@ export interface components {
             round_id: number;
         };
         /**
-         * SectionDetail
-         * @description One section's full text plus the citation that makes it traceable.
-         */
-        SectionDetail: {
-            section: components["schemas"]["SectionSummary"];
-            /** Text */
-            text: string;
-            /** Warnings */
-            warnings: components["schemas"]["ExtractionWarning"][];
-            source: components["schemas"]["SectionSource"];
-            /** Citation */
-            citation: string;
-        };
-        /** SectionListResponse */
-        SectionListResponse: {
-            /** Sections */
-            sections: components["schemas"]["SectionSummary"][];
-            /** Total */
-            total: number;
-        };
-        /**
-         * SectionSource
-         * @description Everything needed to cite a section back to the book it came from.
-         *
-         *     This is the traceability contract that later question generation depends on:
-         *     given a section, a generated question can name the book, chapter, section and
-         *     pages it was grounded in.
-         */
-        SectionSource: {
-            /** Book Id */
-            book_id: number;
-            /** Book Title */
-            book_title: string;
-            /** Book Author */
-            book_author?: string | null;
-            /** Section Id */
-            section_id: number;
-            /** Chapter Id */
-            chapter_id?: number | null;
-            /** Chapter Number */
-            chapter_number?: string | null;
-            /** Chapter Title */
-            chapter_title?: string | null;
-            /** Section Number */
-            section_number?: string | null;
-            /** Section Title */
-            section_title?: string | null;
-            /** Start Page */
-            start_page?: number | null;
-            /** End Page */
-            end_page?: number | null;
-            structure_source: components["schemas"]["StructureSource"];
-            structure_confidence: components["schemas"]["StructureConfidence"];
-            /**
-             * Location Label
-             * @description Human-readable page location, or ``None`` if pages are unknown.
-             */
-            readonly location_label: string | null;
-        };
-        /**
-         * SectionSummary
-         * @description One section's identity and location, without its text.
-         */
-        SectionSummary: {
-            /** Id */
-            id: number;
-            /** Book Id */
-            book_id: number;
-            /** Chapter Id */
-            chapter_id: number | null;
-            /** Number */
-            number: string | null;
-            /** Title */
-            title: string | null;
-            /** Display Title */
-            display_title: string;
-            /** Position */
-            position: number;
-            /** Char Count */
-            char_count: number;
-            /** Start Page */
-            start_page: number | null;
-            /** End Page */
-            end_page: number | null;
-            /** Location Label */
-            location_label: string | null;
-            /** Is Unlabelled */
-            is_unlabelled: boolean;
-            /** Is Empty */
-            is_empty: boolean;
-            structure_source: components["schemas"]["StructureSource"];
-            structure_confidence: components["schemas"]["StructureConfidence"];
-        };
-        /**
          * ServedQuestionOut
          * @description One question as the student sees it.
          *
@@ -5292,25 +5032,6 @@ export interface components {
             /** Set Version Id */
             set_version_id: number;
         };
-        /**
-         * StructureConfidence
-         * @description How much to trust a boundary.
-         *
-         *     ``LOW`` means the producer guessed; such units must never be presented as
-         *     though the source document had declared them.
-         * @enum {string}
-         */
-        StructureConfidence: "high" | "medium" | "low";
-        /**
-         * StructureSource
-         * @description How a chapter or section boundary was determined.
-         *
-         *     Declared *by the book document*, never inferred by this application. It
-         *     records what the producer of the JSON actually relied on, so the professor
-         *     can tell a boundary the source document stated from one a producer guessed at.
-         * @enum {string}
-         */
-        StructureSource: "pdf_outline" | "markdown_heading" | "manual" | "structured_json" | "producer_inferred";
         /**
          * StudentIdentityOut
          * @description A learner plus the token their browser keeps to come back as them.
@@ -6052,16 +5773,6 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
-         * VocabularyTermOut
-         * @description One closed-vocabulary value, and what it means to a professor.
-         */
-        VocabularyTermOut: {
-            /** Value */
-            value: string;
-            /** Meaning */
-            meaning: string;
-        };
-        /**
          * WarningSeverity
          * @description Whether a warning describes a defect or merely states a fact.
          *
@@ -6711,26 +6422,6 @@ export interface operations {
             };
         };
     };
-    document_guide_api_books_document_guide_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookDocumentGuide"];
-                };
-            };
-        };
-    };
     get_book_api_books__book_id__get: {
         parameters: {
             query?: never;
@@ -6856,73 +6547,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_sections_api_books__book_id__sections_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path: {
-                book_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SectionListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_section_api_books__book_id__sections__section_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path: {
-                book_id: number;
-                section_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SectionDetail"];
                 };
             };
             /** @description Validation Error */
@@ -8418,43 +8042,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionSetOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    retrieve_sections_api_retrieval_sections_get: {
-        parameters: {
-            query?: {
-                /** @description Free-text query. */
-                query?: string | null;
-                /** @description Curriculum subtopic; its topic + name + description becomes the query. */
-                subtopic_id?: number | null;
-                top_k?: number;
-            };
-            header?: {
-                "X-Course-Id"?: number | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RetrievedSectionOut"][];
                 };
             };
             /** @description Validation Error */

@@ -44,7 +44,6 @@ LLM_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/questions/generate-batch"): "/api/questions/generate-batch",
     ("POST", "/api/questions/{question_id}/review"): "/api/questions/999999/review",
     ("POST", "/api/coverage/generation-runs"): "/api/coverage/generation-runs",
-    ("GET", "/api/retrieval/sections"): "/api/retrieval/sections",
     ("GET", "/api/chunks/search"): "/api/chunks/search",
     ("POST", "/api/curriculum/drafts"): "/api/curriculum/drafts",
     ("POST", "/api/setup/suggest"): "/api/setup/suggest",

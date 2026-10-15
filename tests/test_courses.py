@@ -31,7 +31,7 @@ def _import_book(client: TestClient, course_id: int, title: str) -> dict:
         client,
         headers=_in(course_id),
         data={"title": title},
-        files={"file": ("book.json", docs.to_bytes(docs.think_python()), "application/json")},
+        files={"file": ("book.pdf", docs.to_pdf(docs.think_python()), "application/pdf")},
     )
 
 
@@ -181,6 +181,7 @@ def test_the_overview_reports_progress_and_activity_per_course(client: TestClien
 
     kinds = [(event["kind"], event["course_name"]) for event in overview["activity"]]
     assert ("book", "Python") in kinds
+    assert "Imported Think Python (4 chunks)" in [event["text"] for event in overview["activity"]]
     assert ("taxonomy", "Python") in kinds
 
 

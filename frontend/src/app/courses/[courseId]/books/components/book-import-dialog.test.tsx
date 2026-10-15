@@ -11,13 +11,9 @@ vi.mock("nuqs", () => ({
   parseAsString: {},
   useQueryState: () => [null, setJobParam],
 }));
-// The guide's own card is not what is under test here.
-vi.mock("./document-guide-card", () => ({ DocumentGuideCard: () => <div>guide card</div> }));
 vi.mock("@/lib/api/queries", () => ({
-  useBookDocumentGuide: () => ({
-    data: { schema_version: "1", supported_extensions: [".json", ".pdf"], max_upload_mb: 5 },
-    isPending: false,
-    error: null,
+  useConfig: () => ({
+    data: { supported_book_extensions: [".docx", ".pdf", ".pptx"], max_book_upload_mb: 5 },
   }),
   useImportBook: () => ({ mutateAsync, reset: vi.fn(), isPending: false, error: null }),
 }));
@@ -32,26 +28,21 @@ function Harness() {
   );
 }
 
-const DOCUMENT = '{"schema_version":"1","title":"T","chapters":[]}';
-
 beforeEach(() => {
   mutateAsync.mockReset();
   setJobParam.mockReset();
 });
 
 describe("BookImportDialog", () => {
-  it("shows only the file field until Advanced options is opened", async () => {
+  it("offers the file types the backend reads, and the title only under Advanced options", async () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    expect(screen.getByLabelText("Book file")).toBeInTheDocument();
+    expect(screen.getByLabelText("Book file")).toHaveAttribute("accept", ".docx,.pdf,.pptx");
     expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-    expect(screen.queryByText("guide card")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Advanced options" }));
     expect(screen.getByLabelText("Title")).toBeInTheDocument();
-    expect(screen.getByLabelText("Paste JSON instead of a file")).toBeInTheDocument();
-    expect(screen.getByText("guide card")).toBeInTheDocument();
   });
 
   it("starts the import with its title override, closes, and opens the job", async () => {
@@ -70,34 +61,17 @@ describe("BookImportDialog", () => {
     expect(setJobParam).toHaveBeenCalledWith("job-7");
   });
 
-  it("imports pasted JSON as a document", async () => {
-    mutateAsync.mockResolvedValue({ job_id: "job-8" });
-    const user = userEvent.setup();
-    render(<Harness />);
-
-    await user.click(screen.getByRole("button", { name: "Advanced options" }));
-    await user.click(screen.getByLabelText("Paste JSON instead of a file"));
-    await user.paste(DOCUMENT);
-    await user.click(screen.getByRole("button", { name: "Import book" }));
-
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
-    const [[{ file }]] = mutateAsync.mock.calls as [[{ file: File }]];
-    expect(await file.text()).toBe(DOCUMENT);
-  });
-
-  it("stays open with the text intact when the document is refused", async () => {
+  it("stays open when the file is refused", async () => {
     mutateAsync.mockRejectedValue(new Error("refused"));
     const user = userEvent.setup();
     render(<Harness />);
 
-    await user.click(screen.getByRole("button", { name: "Advanced options" }));
-    await user.click(screen.getByLabelText("Paste JSON instead of a file"));
-    await user.paste(DOCUMENT);
+    const file = new File(["%PDF-1.4"], "book.pdf", { type: "application/pdf" });
+    await user.upload(screen.getByLabelText("Book file"), file);
     await user.click(screen.getByRole("button", { name: "Import book" }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
     expect(screen.getByText("open")).toBeInTheDocument();
-    expect(screen.getByLabelText("Paste JSON instead of a file")).toHaveValue(DOCUMENT);
     expect(setJobParam).not.toHaveBeenCalled();
   });
 
@@ -107,7 +81,7 @@ describe("BookImportDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Import book" }));
 
-    expect(await screen.findByText(/Choose a file, or paste JSON/)).toBeInTheDocument();
+    expect(await screen.findByText("Choose a book file.")).toBeInTheDocument();
     expect(mutateAsync).not.toHaveBeenCalled();
   });
 });

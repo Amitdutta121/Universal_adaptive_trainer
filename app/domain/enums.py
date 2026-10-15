@@ -24,16 +24,16 @@ class BookStatus(StrEnum):
 
 
 class SourceFormat(StrEnum):
-    """Accepted upload formats.
+    """The format a book was imported from.
 
-    Structured book JSON is declared directly. A PDF is turned into that same
-    declared shape by ``app.ingestion.pdf`` before validation -- its own
-    embedded outline stands in for a hand-authored declaration (ADR-048).
+    PDF, DOCX and PPTX are parsed into chunks (``app.ingestion.parsing``). ``BOOK_JSON``
+    is the retired book JSON document (Task 10): no longer accepted, kept so older
+    book rows still read.
     """
 
     BOOK_JSON = "book_json"
     BOOK_PDF = "book_pdf"
-    #: Read by Docling only (``app.ingestion.parsing``); chunks, no chapter/section tree.
+    #: Read by Docling only.
     BOOK_DOCX = "book_docx"
     BOOK_PPTX = "book_pptx"
 

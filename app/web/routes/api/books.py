@@ -1,13 +1,13 @@
-"""Book endpoints: import a structured book document, read it back, edit, delete.
+"""Book endpoints: import a book file as chunks, re-import a new version, read, edit, delete.
 
-Import is all-or-nothing. An invalid document raises before any row is written,
+Import is all-or-nothing. An unreadable file raises before any row is written,
 and the error handler renders the reason as JSON (see :mod:`app.errors`). The checks
-quick enough to wait for run in the request; extracting a PDF's text can take minutes
-for a textbook, so the import itself is a background job (ADR-062) the Jobs panel shows.
+quick enough to wait for run in the request; parsing a textbook can take minutes,
+so the import itself is a background job (ADR-062) the Jobs panel shows. A book's
+chunks are read through ``/chunks`` (:mod:`app.web.routes.api.retrieval`).
 
-Editing covers the row's labels only -- title, author, notes. Structure is
-declared by the imported document (ADR-015), so correcting a chapter means
-correcting the document and importing it again, not editing rows here.
+Editing covers the row's labels only -- title, author, notes. The chunks come from
+the file, so correcting them means importing a corrected file as a new version.
 
 Deleting refuses by default while questions still cite the book, because their
 grounding lives in a frozen spec rather than a foreign key and nothing would
@@ -27,38 +27,21 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.domain.enums import JobKind, SourceFormat
 from app.errors import NotFoundError
-from app.ingestion import (
-    SCHEMA_VERSION,
-    STRUCTURE_SOURCE_TERMS,
-    SUPPORTED_EXTENSIONS,
-    WARNING_CODE_TERMS,
-    WARNING_SEVERITY_TERMS,
-    BookImportService,
-    BookLibraryService,
-    SourceRetrieval,
-    book_authoring_prompt,
-    example_json,
-)
+from app.ingestion import BookImportService, BookLibraryService
 from app.ingestion.storage import resolve_stored_path, store_upload
 from app.jobs.queue import JobQueue, JobQueueDep
 from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow
-from app.persistence.repositories import BookRepository, BookStructureRepository, ChunkRepository
+from app.persistence.repositories import BookRepository, ChunkRepository
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookDeletion,
     BookDetail,
-    BookDocumentGuide,
     BookImportResult,
     BookListResponse,
     BookMetadataUpdate,
     BookSummary,
-    ChapterOut,
     JobStartedResponse,
-    SectionDetail,
-    SectionListResponse,
-    SectionSummary,
-    VocabularyTermOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -196,37 +179,13 @@ def _book_import(session: Session, job: BackgroundJobRow, _progress: Progress) -
     return BookImportResult(book=BookSummary.from_row(book)).model_dump(mode="json")
 
 
-@router.get("/document-guide", response_model=BookDocumentGuide)
-def document_guide() -> BookDocumentGuide:
-    """What a valid book document is, and the prompt that produces one.
-
-    Rendered from the ingestion contract rather than written out here, so a
-    client cannot describe a document this application would refuse. The prompt
-    is advisory: it grants nothing, and every upload is still validated in full.
-    """
-    settings = get_settings()
-    return BookDocumentGuide(
-        schema_version=SCHEMA_VERSION,
-        supported_extensions=list(SUPPORTED_EXTENSIONS),
-        max_upload_mb=settings.max_book_upload_mb,
-        prompt=book_authoring_prompt(max_upload_mb=settings.max_book_upload_mb),
-        example_json=example_json(),
-        structure_sources=VocabularyTermOut.from_terms(STRUCTURE_SOURCE_TERMS),
-        warning_codes=VocabularyTermOut.from_terms(WARNING_CODE_TERMS),
-        warning_severities=VocabularyTermOut.from_terms(WARNING_SEVERITY_TERMS),
-    )
-
-
 @router.get("/{book_id}", response_model=BookDetail)
 def get_book(session: DbSession, course: CourseScope, book_id: int) -> BookDetail:
-    """One book: import status, warnings and its chapter/section hierarchy."""
-    book = BookRepository(session).get_with_structure(book_id)
+    """One book: import status, warnings, and how many chunks its current version has."""
+    book = BookRepository(session).get(book_id)
     ensure_in_course(book.course_id, course, f"Book {book_id}")
-    chapters = SourceRetrieval(session).chapters_in_book(book_id)
     return BookDetail(
         book=BookSummary.from_row(book),
-        section_count=BookStructureRepository(session).section_count(book_id),
-        chapters=[ChapterOut.from_chapter(chapter) for chapter in chapters],
         chunk_count=ChunkRepository(session).count(book_id),
         current_version=book.current_version,
         warnings=list(book.warnings or []),
@@ -251,7 +210,7 @@ def update_book(
 def delete_book(
     session: DbSession, course: CourseScope, book_id: int, force: bool = False
 ) -> BookDeletion:
-    """Delete a book, its structure and its retained document.
+    """Delete a book, its chunks and its retained document.
 
     Refuses with 409 while questions cite the book, naming how many. ``force``
     proceeds anyway; the questions are kept and their citations are stranded.
@@ -267,8 +226,8 @@ def get_book_source(session: DbSession, course: CourseScope, book_id: int) -> Fi
     """The original PDF as uploaded, for in-browser rendering.
 
     Only a book imported from a PDF (``SourceFormat.BOOK_PDF``) has a source
-    file worth serving back -- a book declared directly as structured JSON has
-    no PDF to render, even though it also retains its uploaded file.
+    file worth serving back -- a DOCX or PPTX (or an old JSON book) has no PDF
+    to render, even though it also retains its uploaded file.
 
     Not a download: no ``filename`` is passed to ``FileResponse``, so no
     ``Content-Disposition: attachment`` header is sent, and a PDF-rendering
@@ -283,41 +242,3 @@ def get_book_source(session: DbSession, course: CourseScope, book_id: int) -> Fi
     if not path.is_file():
         raise NotFoundError(f"Book {book_id} has no retained PDF source file.")
     return FileResponse(path, media_type="application/pdf")
-
-
-@router.get("/{book_id}/sections", response_model=SectionListResponse)
-def list_sections(session: DbSession, course: CourseScope, book_id: int) -> SectionListResponse:
-    """Every section of one book in reading order, without section text."""
-    # Confirms the book exists, so an unknown id is a 404 rather than an empty list.
-    _book_in_course(session, book_id, course)
-    sections = SourceRetrieval(session).sections_in_book(book_id)
-    return SectionListResponse(
-        sections=[SectionSummary.from_section(section) for section in sections],
-        total=len(sections),
-    )
-
-
-@router.get("/{book_id}/sections/{section_id}", response_model=SectionDetail)
-def get_section(
-    session: DbSession, course: CourseScope, book_id: int, section_id: int
-) -> SectionDetail:
-    """One section's verbatim text plus the citation that makes it traceable."""
-    _book_in_course(session, book_id, course)
-    return _section_detail(session, book_id=book_id, section_id=section_id)
-
-
-def _section_detail(session: Session, *, book_id: int, section_id: int) -> SectionDetail:
-    retrieval = SourceRetrieval(session)
-    section = retrieval.get_section(section_id)
-    if section.book_id != book_id:
-        # The URL asserts a book/section relationship; refuse to serve a section
-        # under a book it does not belong to rather than return a wrong citation.
-        raise NotFoundError(f"Section {section_id} does not belong to book {book_id}.")
-    source = retrieval.section_source(section_id)
-    return SectionDetail(
-        section=SectionSummary.from_section(section),
-        text=section.text,
-        warnings=list(section.warnings or []),
-        source=source,
-        citation=source.citation(),
-    )

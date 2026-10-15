@@ -19,7 +19,7 @@ from app.coverage import build_coverage_report
 from app.domain.enums import CurriculumStatus, QuestionStatus, ReviewDecision
 from app.persistence.models import (
     BookRow,
-    BookSectionRow,
+    ChunkRow,
     CourseRow,
     CurriculumVersionRow,
     ProfessorReviewRow,
@@ -241,9 +241,12 @@ def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEv
                 ActivityEvent(kind, text, at, course_id, course_names.get(course_id or -1))
             )
 
-    section_counts = dict(
+    chunk_counts = dict(
         session.execute(
-            select(BookSectionRow.book_id, func.count()).group_by(BookSectionRow.book_id)
+            select(ChunkRow.book_id, func.count())
+            .join(BookRow, BookRow.id == ChunkRow.book_id)
+            .where(ChunkRow.book_version == BookRow.current_version)
+            .group_by(ChunkRow.book_id)
         ).all()
     )
     for book in session.scalars(
@@ -252,8 +255,8 @@ def _activity(session: Session, course_names: dict[int, str]) -> list[ActivityEv
         .order_by(BookRow.created_at.desc())
         .limit(ACTIVITY_LIMIT)
     ):
-        sections = _plural(section_counts.get(book.id, 0), "section")
-        add("book", f"Imported {book.title} ({sections})", book.created_at, book.course_id)
+        chunks = _plural(chunk_counts.get(book.id, 0), "chunk")
+        add("book", f"Imported {book.title} ({chunks})", book.created_at, book.course_id)
 
     for version in session.scalars(
         select(CurriculumVersionRow)

@@ -3,10 +3,9 @@
 /**
  * Edit a book's labels — title, author, notes.
  *
- * Only the labels. Chapters, sections and section text are declared by the
- * imported document (ADR-015), so a wrong boundary is corrected by fixing the
- * document and importing it again, and this form says so rather than leaving a
- * professor hunting for a field that does not exist.
+ * Only the labels. The chunks come from the imported file, so wrong text is
+ * corrected by importing a fixed file as a new version, and this form says so rather
+ * than leaving a professor hunting for a field that does not exist.
  *
  * A cleared author or note is sent as an empty string, which the API reads as
  * "clear it"; an untouched field is not sent at all.
@@ -77,8 +76,8 @@ export function BookEditDialog({
           <DialogHeader>
             <DialogTitle>Edit book</DialogTitle>
             <DialogDescription>
-              Labels only. Chapters and section text come from the imported document — to correct
-              those, fix the document and import it again.
+              Labels only. The chunks come from the imported file — to correct them, import a
+              fixed file as a new version.
             </DialogDescription>
           </DialogHeader>
 

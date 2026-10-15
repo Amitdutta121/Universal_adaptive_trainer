@@ -3,8 +3,8 @@
 **Spends API: one embedding call per gold query (66 short strings, well under a cent), plus
 embedding any of the book's current chunks not yet embedded in the configured model (about
 200 short texts, once).** Reads the database and needs the Agah book imported with chunks;
-it writes only ``chunk_embeddings``. ``--units sections`` scores the old section retriever
-instead (the Task 2 baseline; needs ``python -m scripts.embed_sections`` first):
+it writes only ``chunk_embeddings``. (The Task 2 section baseline was scored with the
+section retriever, retired in Task 10; its numbers are in ``docs/RETRIEVAL_BASELINE.md``.)
 
     python -m scripts.eval_retrieval                        # the configured DATABASE_URL
     python -m scripts.eval_retrieval --db data/adaptive_trainer.db
@@ -23,10 +23,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.persistence.models import BookRow, BookSectionRow
+from app.persistence.models import BookRow
 from app.persistence.repositories import ChunkRepository
-from app.retrieval import SectionEmbeddingStore, SectionRetriever, get_embedder
-from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
+from app.retrieval import ChunkEmbeddingStore, ChunkRetriever, get_embedder
 from app.retrieval.eval import QueryRun, is_hit, mean_metrics, unit_pages
 
 GOLD = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "retrieval_gold.json"
@@ -50,7 +49,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--db", help="SQLite file to read (default: DATABASE_URL)")
     parser.add_argument("--gold", type=Path, default=GOLD)
-    parser.add_argument("--units", choices=("chunks", "sections"), default="chunks")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -65,23 +63,13 @@ def main() -> None:
         ).first()
         if book is None:
             raise SystemExit("The gold set's book is not imported in this database.")
-        embedder = get_embedder(settings)
-        if args.units == "chunks":
-            index = {
-                c.id: unit_pages(c.page_start, c.page_end)
-                for c in ChunkRepository(session).list_for_book(book.id)
-            }
-            if not index:
-                raise SystemExit("The gold set's book has no chunks: re-import it.")
-            retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, embedder))
-        else:
-            index = {
-                s.id: unit_pages(s.start_page, s.end_page)
-                for s in session.scalars(
-                    select(BookSectionRow).where(BookSectionRow.book_id == book.id)
-                )
-            }
-            retriever = SectionRetriever(session, SectionEmbeddingStore(session, embedder))
+        index = {
+            c.id: unit_pages(c.page_start, c.page_end)
+            for c in ChunkRepository(session).list_for_book(book.id)
+        }
+        if not index:
+            raise SystemExit("The gold set's book has no chunks: re-import it.")
+        retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, get_embedder(settings)))
 
         runs: list[tuple[str, QueryRun]] = []
         for entry in gold["entries"]:
@@ -93,10 +81,7 @@ def main() -> None:
                     QueryRun(
                         query=entry["query"],
                         relevant=relevant,
-                        ranked=[
-                            index[h.chunk_id if args.units == "chunks" else h.section_id]
-                            for h in hits
-                        ],
+                        ranked=[index[h.chunk_id] for h in hits],
                         n_relevant_units=sum(is_hit(p, relevant) for p in index.values()),
                     ),
                 )
@@ -106,7 +91,7 @@ def main() -> None:
     overall = mean_metrics(all_runs, KS)
     unanswerable = sum(r.n_relevant_units == 0 for r in all_runs)
     print(
-        f"book {book.id} ({book.title}), {len(index)} {args.units}, {len(all_runs)} queries "
+        f"book {book.id} ({book.title}), {len(index)} chunks, {len(all_runs)} queries "
         f"({unanswerable} with no overlapping unit), embedder {settings.embedding_model}\n"
     )
     print(table({str(k): overall[k] for k in KS}, "k"))

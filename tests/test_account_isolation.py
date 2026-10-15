@@ -97,7 +97,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/auth/reset-password"): "public; keyed by a signed token, not an id",
     ("GET", "/api/courses/catalog"): "the shipped subject/question-type catalogue, same for all",
-    ("GET", "/api/books/document-guide"): "static description of the book document format",
     ("GET", "/api/curriculum/document-guide"): "static description of the taxonomy format",
     ("POST", "/api/questions/batch-plan"): "pure compile of the posted spec; touches no row",
     ("POST", "/api/curriculum/drafts"): "LLM draft from the posted brief; nothing is read or saved",
@@ -219,9 +218,6 @@ SHIPPED_LISTS = {
 NOTHING_YET = {"/api/curriculum/approved": "the course's approved taxonomy; none yet"}
 #: GETs without required parameters that are still not lists.
 NOT_LISTS = {
-    "/api/retrieval/sections": (
-        "a search: needs query or subtopic_id; subtopic_id is probed by the 404 sweep"
-    ),
     "/api/chunks/search": (
         "a search: needs q or subtopic_id; subtopic_id is probed by the 404 sweep"
     ),

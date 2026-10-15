@@ -66,12 +66,18 @@ def test_book_ingestion_is_implemented() -> None:
     import book_documents as docs
 
     from app.domain.enums import SourceFormat
-    from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename, parse_book_document
+    from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename
+    from app.ingestion.parsing import parse_book
 
-    assert SUPPORTED_EXTENSIONS == (".docx", ".json", ".pdf", ".pptx")
-    assert format_for_filename("book.json") is SourceFormat.BOOK_JSON
+    assert SUPPORTED_EXTENSIONS == (".docx", ".pdf", ".pptx")
     assert format_for_filename("book.pdf") is SourceFormat.BOOK_PDF
-    assert parse_book_document(docs.to_bytes(docs.minimal())).section_count == 1
+    parsed = parse_book(
+        docs.to_pdf(docs.minimal()),
+        filename="book.pdf",
+        source_format=SourceFormat.BOOK_PDF,
+        parser="pages",
+    )
+    assert len(parsed.chunks) == 1
 
 
 def test_unsupported_uploads_are_rejected() -> None:

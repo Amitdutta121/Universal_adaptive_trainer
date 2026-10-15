@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Delete a book, its structure and its retained document.
+ * Delete a book, its chunks and its retained document.
  *
  * The backend refuses while questions cite the book: their grounding lives in a
- * frozen spec rather than a foreign key, so deleting the sections does not delete
+ * frozen spec rather than a foreign key, so deleting the chunks does not delete
  * the questions — it leaves their citation pointing at nothing (ADR-036).
  *
  * That refusal is shown here as what it is, with the count the API named, and an
@@ -62,8 +62,8 @@ export function BookDeleteDialog({
       const stranded = result.stranded_question_count;
       toast.success(`Deleted “${book.title}”`, {
         description: stranded
-          ? `${pluralise(stranded, "question")} now cite sections that no longer exist.`
-          : "Its structure and retained document were removed.",
+          ? `${pluralise(stranded, "question")} now cite chunks that no longer exist.`
+          : "Its chunks and retained document were removed.",
       });
       onOpenChange(false);
       onDeleted?.();
@@ -84,7 +84,7 @@ export function BookDeleteDialog({
         <DialogHeader>
           <DialogTitle>Delete “{book.title}”?</DialogTitle>
           <DialogDescription>
-            This removes the book, its chapters and sections, and the document it was imported from.
+            This removes the book, its chunks, and the file it was imported from.
             It cannot be undone — but the document can be imported again.
           </DialogDescription>
         </DialogHeader>

@@ -33,9 +33,7 @@ from app.domain.enums import (
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.errors import NotFoundError
 from app.persistence.models import (
-    BookChapterRow,
     BookRow,
-    BookSectionRow,
     ChunkRow,
     CourseRow,
     CurriculumVersionRow,
@@ -184,29 +182,13 @@ class BookRepository:
             raise NotFoundError(f"Book {book_id} does not exist.")
         return row
 
-    def get_with_structure(self, book_id: int) -> BookRow:
-        """Load a book with its chapters and their sections eagerly.
-
-        Section ``text`` is included: it is what the professor came to read, and
-        loading it lazily per section would mean one query per section.
-        """
-        stmt = (
-            select(BookRow)
-            .options(selectinload(BookRow.chapters).selectinload(BookChapterRow.sections))
-            .where(BookRow.id == book_id)
-        )
-        row = self._session.scalars(stmt).first()
-        if row is None:
-            raise NotFoundError(f"Book {book_id} does not exist.")
-        return row
-
     def add(self, book: BookRow) -> BookRow:
         self._session.add(book)
         self._session.flush()
         return book
 
     def delete(self, book: BookRow) -> None:
-        """Remove a book and, by cascade, its chapters and sections.
+        """Remove a book and, by cascade, its chunks (and any old chapters and sections).
 
         Questions are not touched: they hold their grounding as data rather than
         as a foreign key, so the caller is responsible for warning about the
@@ -219,85 +201,6 @@ class BookRepository:
         """Every chunk id of every version of one book, for reference counting."""
         stmt = select(ChunkRow.id).where(ChunkRow.book_id == book_id)
         return list(self._session.scalars(stmt))
-
-
-class BookStructureRepository:
-    """Extracted chapters and sections.
-
-    This is the retrieval surface later question generation uses to fetch and
-    cite grounding text, so every read here can be traced back to a book,
-    chapter, section and page range.
-    """
-
-    def __init__(self, session: Session) -> None:
-        self._session = session
-
-    def section_count(self, book_id: int | None = None) -> int:
-        stmt = select(func.count()).select_from(BookSectionRow)
-        if book_id is not None:
-            stmt = stmt.where(BookSectionRow.book_id == book_id)
-        return self._session.scalar(stmt) or 0
-
-    def get_section(self, section_id: int) -> BookSectionRow:
-        """One section, with its chapter and book loaded for citation."""
-        stmt = (
-            select(BookSectionRow)
-            .options(
-                joinedload(BookSectionRow.chapter),
-                joinedload(BookSectionRow.book),
-            )
-            .where(BookSectionRow.id == section_id)
-        )
-        row = self._session.scalars(stmt).first()
-        if row is None:
-            raise NotFoundError(f"Section {section_id} does not exist.")
-        return row
-
-    def sections_in_chapter(self, chapter_id: int) -> list[BookSectionRow]:
-        stmt = (
-            select(BookSectionRow)
-            .where(BookSectionRow.chapter_id == chapter_id)
-            .order_by(BookSectionRow.position, BookSectionRow.id)
-        )
-        return list(self._session.scalars(stmt))
-
-    def sections_in_book(self, book_id: int) -> list[BookSectionRow]:
-        stmt = (
-            select(BookSectionRow)
-            .where(BookSectionRow.book_id == book_id)
-            .order_by(BookSectionRow.position, BookSectionRow.id)
-        )
-        return list(self._session.scalars(stmt))
-
-    def chapters_in_book(self, book_id: int) -> list[BookChapterRow]:
-        stmt = (
-            select(BookChapterRow)
-            .options(selectinload(BookChapterRow.sections))
-            .where(BookChapterRow.book_id == book_id)
-            .order_by(BookChapterRow.position, BookChapterRow.id)
-        )
-        return list(self._session.scalars(stmt))
-
-    def get_chapter(self, chapter_id: int) -> BookChapterRow:
-        row = self._session.get(BookChapterRow, chapter_id)
-        if row is None:
-            raise NotFoundError(f"Chapter {chapter_id} does not exist.")
-        return row
-
-    def replace_structure(
-        self, book: BookRow, chapters: list[BookChapterRow], sections: list[BookSectionRow]
-    ) -> None:
-        """Attach a freshly extracted structure to ``book``, discarding any prior one.
-
-        Re-extraction is expected to be idempotent from the professor's point of
-        view, so this replaces rather than appends.
-        """
-        book.chapters.clear()
-        book.sections.clear()
-        self._session.flush()
-        book.chapters.extend(chapters)
-        book.sections.extend(sections)
-        self._session.flush()
 
 
 class ChunkRepository:
@@ -737,11 +640,7 @@ class QuestionRepository:
         return self._session.scalar(stmt) or 0
 
     def count_by_status(self, *, course_id: int | None = None) -> dict[str, int]:
-        stmt = (
-            select(QuestionRow.status, func.count())
-            .where(_IN_BANK)
-            .group_by(QuestionRow.status)
-        )
+        stmt = select(QuestionRow.status, func.count()).where(_IN_BANK).group_by(QuestionRow.status)
         if course_id is not None:
             stmt = stmt.where(questions_in_course(course_id))
         return {str(status): count for status, count in self._session.execute(stmt)}
@@ -1605,8 +1504,12 @@ class QuestionSetRepository:
         stmt = (
             select(QuestionSetAliasRow)
             .options(
-                selectinload(QuestionSetAliasRow.set_version).selectinload(QuestionSetVersionRow.members),
-                selectinload(QuestionSetAliasRow.set_version).selectinload(QuestionSetVersionRow.aliases),
+                selectinload(QuestionSetAliasRow.set_version).selectinload(
+                    QuestionSetVersionRow.members
+                ),
+                selectinload(QuestionSetAliasRow.set_version).selectinload(
+                    QuestionSetVersionRow.aliases
+                ),
             )
             .where(QuestionSetAliasRow.alias == alias)
         )
@@ -2233,8 +2136,7 @@ class StudentAttemptRepository:
             recent = values[-limit:]
             running = 0.0
             series[student_id] = [
-                (running := running + score) / (index + 1)
-                for index, score in enumerate(recent)
+                (running := running + score) / (index + 1) for index, score in enumerate(recent)
             ]
         return series
 

@@ -38,15 +38,6 @@ VALID_TAXONOMY = (
 )
 
 
-def _import_book(client: TestClient) -> dict:
-    return upload_book(
-        client,
-        files={
-            "file": ("think_python.json", docs.to_bytes(docs.think_python()), "application/json")
-        },
-    )
-
-
 def _import_chunked_book(client: TestClient) -> tuple[dict, list[dict]]:
     """Think Python uploaded as a PDF, and its chunks: one per section, in reading order."""
     book = upload_book(
@@ -92,7 +83,8 @@ def test_health_reports_a_real_database_probe(client: TestClient) -> None:
 def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient) -> None:
     payload = client.get("/api/config").json()
 
-    assert payload["supported_book_extensions"] == [".docx", ".json", ".pdf", ".pptx"]
+    assert payload["supported_book_extensions"] == [".docx", ".pdf", ".pptx"]
+    assert "book_schema_version" not in payload
     assert [option["value"] for option in payload["difficulties"]] == ["easy", "medium", "hard"]
     assert {option["value"] for option in payload["question_types"]} == {
         "multiple_choice",
@@ -130,48 +122,24 @@ def test_book_list_is_empty_before_any_import(client: TestClient) -> None:
 
 
 def test_import_book_returns_the_created_book(client: TestClient, session: Session) -> None:
-    book = _import_book(client)
+    book, _ = _import_chunked_book(client)
 
     assert book["title"] == "Think Python"
+    assert book["author"] == "Allen B. Downey"
     assert book["status"] == "imported"
-    assert book["source_format"] == "book_json"
+    assert book["source_format"] == "book_pdf"
     assert BookRepository(session).count() == 1
 
 
-def test_book_detail_exposes_the_chapter_section_hierarchy(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
+def test_book_detail_reports_the_current_chunk_version(client: TestClient) -> None:
+    book, chunks = _import_chunked_book(client)
 
-    payload = client.get(f"/api/books/{book_id}").json()
+    payload = client.get(f"/api/books/{book['id']}").json()
 
-    assert payload["book"]["id"] == book_id
-    assert payload["section_count"] > 0
-    assert payload["chapters"]
-    first_section = payload["chapters"][0]["sections"][0]
-    assert first_section["display_title"]
-    assert "text" not in first_section  # summaries stay light
-
-
-def test_section_detail_carries_verbatim_text_and_a_citation(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    sections = client.get(f"/api/books/{book_id}/sections").json()["sections"]
-    section_id = sections[0]["id"]
-
-    payload = client.get(f"/api/books/{book_id}/sections/{section_id}").json()
-
-    assert payload["text"]
-    assert payload["citation"]
-    assert payload["source"]["book_title"] == "Think Python"
-    assert payload["section"]["id"] == section_id
-
-
-def test_section_under_the_wrong_book_is_a_404(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
-
-    response = client.get(f"/api/books/{book_id + 999}/sections/{section_id}")
-
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "not_found"
+    assert payload["book"]["id"] == book["id"]
+    assert (payload["chunk_count"], payload["current_version"]) == (4, 1)
+    assert len(chunks) == 4
+    assert "chapters" not in payload  # the chapter/section tree is retired
 
 
 def test_book_source_streams_the_retained_pdf(client: TestClient) -> None:
@@ -184,8 +152,11 @@ def test_book_source_streams_the_retained_pdf(client: TestClient) -> None:
     assert response.content.startswith(b"%PDF")
 
 
-def test_book_source_for_a_json_imported_book_is_a_404(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
+def test_book_source_for_a_book_with_no_retained_pdf_is_a_404(
+    client: TestClient, session: Session
+) -> None:
+    book_id = docs.chunked_book(session, docs.think_python()).id
+    session.commit()
 
     response = client.get(f"/api/books/{book_id}/source")
 
@@ -200,16 +171,17 @@ def test_book_source_for_an_unknown_book_is_a_404(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
-def test_invalid_book_document_is_rejected_and_stores_nothing(
+def test_a_book_json_upload_is_refused_and_stores_nothing(
     client: TestClient, session: Session
 ) -> None:
+    """The book JSON document format is retired: a book is uploaded as the file itself."""
     response = client.post(
         "/api/books",
-        files={"file": ("broken.json", b'{"schema_version":"1"}', "application/json")},
+        files={"file": ("book.json", docs.to_bytes(docs.think_python()), "application/json")},
     )
 
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_book_document"
+    assert response.status_code == 415
+    assert response.json()["error"]["code"] == "unsupported_file"
     assert BookRepository(session).count() == 0
 
 
@@ -873,7 +845,6 @@ def test_the_retired_rule_endpoints_are_gone(client: TestClient) -> None:
         "/api/config",
         "/api/counts",
         "/api/books",
-        "/api/books/document-guide",
         "/api/curriculum/versions",
         "/api/curriculum/document-guide",
         "/api/questions",
@@ -905,8 +876,8 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/counts",
         "/api/books",
         "/api/books/{book_id}",
-        "/api/books/{book_id}/sections",
-        "/api/books/{book_id}/sections/{section_id}",
+        "/api/chunks",
+        "/api/chunks/{chunk_id}",
         "/api/curriculum/versions",
         "/api/curriculum/approved",
         "/api/curriculum/document-guide",

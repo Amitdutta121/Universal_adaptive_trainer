@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 import book_documents as docs
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.persistence.models import ChunkEmbeddingRow, ChunkRow
+from app.domain.enums import CurriculumStatus
+from app.persistence.models import (
+    ChunkEmbeddingRow,
+    ChunkRow,
+    CurriculumVersionRow,
+    SubtopicRow,
+    TopicRow,
+)
 from app.persistence.repositories import ChunkRepository
-from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever, embedding_text
+from app.retrieval.chunks import (
+    ChunkEmbeddingStore,
+    ChunkRetriever,
+    embedding_text,
+    subtopic_query_text,
+)
 from app.web.routes.api.retrieval import get_query_embedder
 
 
@@ -114,3 +127,52 @@ def test_search_endpoint(client: TestClient, session: Session) -> None:
     assert response.status_code == 200, response.text
     assert response.json()[0]["heading_path"][-1] == "2.2 Variables"
     assert neither.status_code in (400, 422)
+
+
+def _subtopic(session: Session, *, source_book_ids: list[int] | None = None) -> SubtopicRow:
+    version = CurriculumVersionRow(
+        label="v1",
+        status=CurriculumStatus.APPROVED,
+        approved_at=datetime.now(UTC),
+        source_book_ids=source_book_ids,
+    )
+    session.add(version)
+    session.flush()
+    topic = TopicRow(curriculum_version_id=version.id, name="Values and Variables", position=0)
+    session.add(topic)
+    session.flush()
+    subtopic = SubtopicRow(
+        topic_id=topic.id,
+        name="Binding names to values",
+        description="A variable is a name that refers to a value.",
+        position=0,
+    )
+    session.add(subtopic)
+    session.commit()
+    return subtopic
+
+
+def test_for_subtopic_searches_only_the_taxonomys_source_books(session: Session) -> None:
+    in_scope = _book(session)
+    out_of_scope = _book(session)
+    subtopic = _subtopic(session, source_book_ids=[in_scope.id])
+    retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, KeywordEmbedder()))
+
+    hits = retriever.for_subtopic(subtopic.id, top_k=10)
+
+    assert hits
+    assert {hit.book_id for hit in hits} == {in_scope.id}
+    assert out_of_scope.id not in {hit.book_id for hit in hits}
+
+
+def test_subtopic_query_text_shape(session: Session) -> None:
+    subtopic = _subtopic(session)
+    bare = SubtopicRow(topic_id=subtopic.topic_id, name="break", description=None)
+    session.add(bare)
+    session.flush()
+
+    assert subtopic_query_text(subtopic) == (
+        "Values and Variables - Binding names to values: "
+        "A variable is a name that refers to a value."
+    )
+    assert subtopic_query_text(bare) == "Values and Variables - break"

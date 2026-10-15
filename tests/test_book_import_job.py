@@ -56,11 +56,12 @@ def test_a_pdf_import_is_a_job_that_ends_with_the_book(client: TestClient) -> No
     assert [entry["id"] for entry in listed] == [book["id"]]
 
 
-def test_a_json_import_keeps_the_professors_title(client: TestClient) -> None:
+def test_an_import_keeps_the_professors_title(client: TestClient) -> None:
+    """The title the professor typed wins over the one in the PDF's metadata."""
     response = client.post(
         "/api/books",
         data={"title": "My course reader"},
-        files={"file": ("book.json", docs.to_bytes(docs.think_python()), "application/json")},
+        files={"file": ("book.pdf", docs.to_pdf(docs.think_python()), "application/pdf")},
     )
 
     job = finished_job(client, response.json()["job_id"])
@@ -73,14 +74,15 @@ def test_quick_refusals_stay_in_the_dialog_and_queue_nothing(
     unreadable = client.post(
         "/api/books", files={"file": ("book.pdf", b"%PDF-1.4\nnot a real pdf", "application/pdf")}
     )
-    invalid_json = client.post(
+    retired_json = client.post(
         "/api/books",
-        files={"file": ("broken.json", b'{"schema_version":"1"}', "application/json")},
+        files={"file": ("book.json", b'{"schema_version":"1"}', "application/json")},
     )
 
     assert unreadable.status_code == 422
-    assert invalid_json.status_code == 422
     assert unreadable.json()["error"]["code"] == "invalid_book_document"
+    assert retired_json.status_code == 415
+    assert retired_json.json()["error"]["code"] == "unsupported_file"
     assert session.query(BackgroundJobRow).count() == 0
     assert _stored_files(settings) == []
 

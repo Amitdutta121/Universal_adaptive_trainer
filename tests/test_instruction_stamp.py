@@ -40,7 +40,7 @@ TAXONOMY = (
 
 def _seed(session: Session, settings) -> None:
     BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
+        filename="book.pdf", data=docs.to_pdf(docs.minimal())
     )
     TaxonomyImportService(session, settings).import_upload(filename="tax.json", data=TAXONOMY)
     session.commit()

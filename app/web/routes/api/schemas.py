@@ -45,7 +45,7 @@ from app.curriculum import (
     FieldLimit,
 )
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
-from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
+from app.domain.books import ExtractionWarning
 from app.domain.chunks import Chunk
 from app.domain.enums import (
     BookStatus,
@@ -67,8 +67,6 @@ from app.domain.enums import (
     ReviewDecision,
     RoundStatus,
     SourceFormat,
-    StructureConfidence,
-    StructureSource,
 )
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
@@ -76,7 +74,6 @@ from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
 from app.evaluation.custom import CustomJudgeResult
 from app.evaluation.trust import TrustReport
 from app.generation import ChunkQuestionRequest, PlannedQuestion
-from app.ingestion import VocabularyTerm
 from app.persistence.models import (
     BookRow,
     CourseRow,
@@ -98,7 +95,6 @@ from app.persistence.models import (
     TopicRow,
     TrainingSessionRow,
 )
-from app.retrieval import RetrievedSection
 from app.retrieval.chunks import RetrievedChunk
 from app.styles import CellTarget, QuestionStyle, SetupSuggestion
 
@@ -150,7 +146,6 @@ class ConfigResponse(BaseModel):
     llm_status: str
     llm_model: str
     embedding_model: str
-    book_schema_version: str
     taxonomy_schema_version: str
     supported_book_extensions: list[str]
     max_book_upload_mb: int
@@ -175,7 +170,6 @@ class ConfigResponse(BaseModel):
         llm_status: str,
         llm_model: str,
         embedding_model: str,
-        book_schema_version: str,
         taxonomy_schema_version: str,
         supported_book_extensions: tuple[str, ...],
         max_book_upload_mb: int,
@@ -188,7 +182,6 @@ class ConfigResponse(BaseModel):
             llm_status=llm_status,
             llm_model=llm_model,
             embedding_model=embedding_model,
-            book_schema_version=book_schema_version,
             taxonomy_schema_version=taxonomy_schema_version,
             supported_book_extensions=list(supported_book_extensions),
             max_book_upload_mb=max_book_upload_mb,
@@ -436,92 +429,16 @@ class BookSummary(BaseModel):
         )
 
 
-class SectionSummary(BaseModel):
-    """One section's identity and location, without its text."""
-
-    id: int
-    book_id: int
-    chapter_id: int | None
-    number: str | None
-    title: str | None
-    display_title: str
-    position: int
-    char_count: int
-    start_page: int | None
-    end_page: int | None
-    location_label: str | None
-    is_unlabelled: bool
-    is_empty: bool
-    structure_source: StructureSource
-    structure_confidence: StructureConfidence
-
-    @classmethod
-    def from_section(cls, section: BookSection) -> SectionSummary:
-        return cls(
-            id=section.id or 0,
-            book_id=section.book_id or 0,
-            chapter_id=section.chapter_id,
-            number=section.number,
-            title=section.title,
-            display_title=section.display_title(),
-            position=section.position,
-            char_count=section.char_count,
-            start_page=section.start_page,
-            end_page=section.end_page,
-            location_label=section.location_label,
-            is_unlabelled=section.is_unlabelled,
-            is_empty=section.is_empty,
-            structure_source=section.structure_source,
-            structure_confidence=section.structure_confidence,
-        )
-
-
-class ChapterOut(BaseModel):
-    """One chapter and the sections beneath it."""
-
-    id: int
-    book_id: int
-    number: str | None
-    title: str | None
-    position: int
-    start_page: int | None
-    end_page: int | None
-    location_label: str | None
-    is_unlabelled: bool
-    structure_source: StructureSource
-    structure_confidence: StructureConfidence
-    sections: list[SectionSummary]
-
-    @classmethod
-    def from_chapter(cls, chapter: BookChapter) -> ChapterOut:
-        return cls(
-            id=chapter.id or 0,
-            book_id=chapter.book_id or 0,
-            number=chapter.number,
-            title=chapter.title,
-            position=chapter.position,
-            start_page=chapter.start_page,
-            end_page=chapter.end_page,
-            location_label=chapter.location_label,
-            is_unlabelled=chapter.is_unlabelled,
-            structure_source=chapter.structure_source,
-            structure_confidence=chapter.structure_confidence,
-            sections=[SectionSummary.from_section(item) for item in chapter.sections],
-        )
-
-
 class BookDetail(BaseModel):
-    """One book with its chapter/section hierarchy and import warnings."""
+    """One book with its chunk count and import warnings."""
 
     book: BookSummary
-    section_count: int
-    chapters: list[ChapterOut]
     #: Chunks in the current version; ``current_version`` is ``None`` for a book imported
     #: before chunks existed (re-import it to chunk it).
     chunk_count: int = 0
     current_version: int | None = None
     warnings: list[ExtractionWarning]
-    #: Questions generated from this book's sections. Deleting the book would
+    #: Questions generated from this book's chunks (any version). Deleting the book would
     #: strand their grounding citation, so the count is shown before it happens.
     grounded_question_count: int = 0
 
@@ -552,55 +469,6 @@ class BookDeletion(BaseModel):
     deleted_book_id: int
     #: Questions whose stored grounding now cites sections that no longer exist.
     stranded_question_count: int
-
-
-class VocabularyTermOut(BaseModel):
-    """One closed-vocabulary value, and what it means to a professor."""
-
-    value: str
-    meaning: str
-
-    @classmethod
-    def from_terms(cls, terms: Iterable[VocabularyTerm]) -> list[VocabularyTermOut]:
-        return [cls(value=str(term.value), meaning=term.meaning) for term in terms]
-
-
-class BookDocumentGuide(BaseModel):
-    """Everything a professor needs to obtain a valid book document.
-
-    The prompt and the example are rendered from the ingestion contract itself,
-    so a client that shows them cannot describe a document the validator would
-    refuse.
-    """
-
-    schema_version: str
-    supported_extensions: list[str]
-    max_upload_mb: int
-    #: The copy-and-paste instruction for an assistant. Advisory: it grants
-    #: nothing, and the upload is still validated in full.
-    prompt: str
-    example_json: str
-    structure_sources: list[VocabularyTermOut]
-    warning_codes: list[VocabularyTermOut]
-    warning_severities: list[VocabularyTermOut]
-
-
-class SectionDetail(BaseModel):
-    """One section's full text plus the citation that makes it traceable."""
-
-    section: SectionSummary
-    text: str
-    warnings: list[ExtractionWarning]
-    source: SectionSource
-    citation: str
-
-
-class SectionListResponse(BaseModel):
-    sections: list[SectionSummary]
-    total: int
-
-
-# ----------------------------------------------------------------------- curriculum
 
 
 class SubtopicSummary(BaseModel):
@@ -2686,41 +2554,6 @@ class RetrievedChunkOut(BaseModel):
     @classmethod
     def from_result(cls, result: RetrievedChunk) -> RetrievedChunkOut:
         return cls(**result.__dict__)
-
-
-class RetrievedSectionOut(BaseModel):
-    """One book section returned by semantic retrieval, with its citation."""
-
-    section_id: int
-    book_id: int
-    book_title: str
-    chapter_title: str | None
-    section_number: str | None
-    section_title: str | None
-    score: float
-    snippet: str
-
-    @classmethod
-    def from_result(cls, result: RetrievedSection) -> RetrievedSectionOut:
-        return cls(
-            section_id=result.section_id,
-            book_id=result.book_id,
-            book_title=result.book_title,
-            chapter_title=result.chapter_title,
-            section_number=result.section_number,
-            section_title=result.section_title,
-            score=result.score,
-            snippet=result.snippet,
-        )
-
-
-SubtopicDetail.model_rebuild()
-QuestionDetail.model_rebuild()
-
-
-# -------------------------------------------------------------- question setup
-# docs/QUESTION_SETUP_PLAN.md. Styles, suggestions and cell targets reuse the
-# ``app.styles`` models directly: they are already API-shaped pure data.
 
 
 class StyleListResponse(BaseModel):

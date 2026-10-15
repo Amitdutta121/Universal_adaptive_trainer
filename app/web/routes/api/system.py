@@ -11,7 +11,6 @@ from app import __version__
 from app.config import get_settings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
 from app.domain.enums import GuidelineStatus
-from app.ingestion import SCHEMA_VERSION as BOOK_SCHEMA_VERSION
 from app.ingestion import SUPPORTED_EXTENSIONS
 from app.llm import describe_availability
 from app.memory import MemoryGuidelineRepository
@@ -67,7 +66,6 @@ def config() -> ConfigResponse:
         llm_status=llm_status,
         llm_model=settings.llm_model,
         embedding_model=settings.embedding_model,
-        book_schema_version=BOOK_SCHEMA_VERSION,
         taxonomy_schema_version=TAXONOMY_SCHEMA_VERSION,
         supported_book_extensions=SUPPORTED_EXTENSIONS,
         max_book_upload_mb=settings.max_book_upload_mb,

@@ -7,12 +7,11 @@ import math
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.ingestion.service import BookImportService
-from app.persistence.models import BookSectionRow
+from app.persistence.repositories import ChunkRepository
 from app.retrieval.eval import (
     QueryRun,
     mean_metrics,
@@ -49,24 +48,22 @@ def test_gold_fixture_loads_with_the_agreed_shape(gold: dict) -> None:
 
 
 @pytest.mark.skipif(not AGAH_PDF.is_file(), reason="Agah PDF (books/) not present")
-def test_gold_sections_and_pages_exist_in_a_fresh_import(
+def test_gold_pages_are_covered_by_a_fresh_import(
     gold: dict, session: Session, settings: Settings
 ) -> None:
-    """Section ids are local to the database the gold set was built from, so each one is
-    checked by heading and page range against the book imported into the test database."""
+    """The gold set is the same file the eval imports, and every query can be answered:
+    each entry's relevant pages overlap at least one chunk of a fresh import."""
     book = BookImportService(session, settings).import_upload(
         filename=AGAH_PDF.name, data=AGAH_PDF.read_bytes()
     )
     assert book.checksum_sha256 == gold["book"]["checksum_sha256"]
     assert book.page_count == gold["book"]["page_count"]
 
-    imported = {
-        (s.title or (s.chapter.title if s.chapter else ""), s.start_page, s.end_page)
-        for s in session.scalars(select(BookSectionRow).where(BookSectionRow.book_id == book.id))
-    }
-    for section_id, section in gold["sections"].items():
-        key = (section["heading"], section["start_page"], section["end_page"])
-        assert key in imported, f"gold section {section_id} {key} not in the import"
+    chunks = ChunkRepository(session).list_for_book(book.id)
+    assert chunks
+    covered = set().union(*(unit_pages(c.page_start, c.page_end) for c in chunks))
+    for entry in gold["entries"]:
+        assert covered & set(entry["relevant_pages"]), f"no chunk covers {entry['query']!r}"
 
 
 # -- metrics, on hand-computed cases ----------------------------------------------

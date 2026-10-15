@@ -55,7 +55,6 @@ export const qk = {
     all: ["books"] as const,
     list: () => ["books", "list"] as const,
     detail: (bookId: number) => ["books", "detail", bookId] as const,
-    guide: () => ["books", "document-guide"] as const,
   },
   chunks: {
     all: ["chunks"] as const,
@@ -637,20 +636,6 @@ export const useBook = (bookId: number) =>
     queryKey: qk.books.detail(bookId),
     queryFn: () =>
       unwrap(api.GET("/api/books/{book_id}", { params: { path: { book_id: bookId } } })),
-  });
-
-/**
- * What a valid book document is, and the prompt that produces one.
- *
- * Rendered by the backend from the ingestion contract, so this client never
- * describes a document the validator would refuse. It only changes when the
- * contract does, hence no refetching.
- */
-export const useBookDocumentGuide = () =>
-  useQuery({
-    queryKey: qk.books.guide(),
-    queryFn: () => unwrap(api.GET("/api/books/document-guide")),
-    staleTime: Number.POSITIVE_INFINITY,
   });
 
 /**

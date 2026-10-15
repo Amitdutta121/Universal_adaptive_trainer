@@ -188,8 +188,8 @@ class GenerationService:
 
         Prefers the frozen ``spec_json``; falls back to the chunk ids recorded
         in ``content["sources"]``. The rebuilt spec is re-validated through
-        :func:`build_question_spec` so a since-deleted chunk or a curriculum that is no longer approved is
-        reported before any model call.
+        :func:`build_question_spec` so a since-deleted chunk or a curriculum that is no
+        longer approved is reported before any model call.
         """
         if row.question_type is None:
             raise InvalidQuestionSpecError(

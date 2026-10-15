@@ -1,8 +1,8 @@
 """Upload validation and file retention.
 
-The uploaded book document is always kept. It is the exact input that produced
-the stored rows, so keeping it makes an import reproducible and lets a corrected
-document be diffed against the one it replaces.
+The uploaded book file is always kept. It is the exact input that produced the
+stored chunks, so keeping it makes an import reproducible and lets the PDF be shown
+beside its chunks.
 """
 
 from __future__ import annotations
@@ -20,11 +20,8 @@ from app.errors import FileTooLargeError, UnsupportedFileError
 
 logger = logging.getLogger(__name__)
 
-#: Accepted extensions. Structured JSON declares its own structure directly; a
-#: PDF is turned into that same declared shape by ``app.ingestion.pdf`` before
-#: validation (ADR-048) -- it is not extracted here, only routed.
+#: Accepted extensions; :mod:`app.ingestion.parsing` turns each into chunks.
 FORMAT_BY_EXTENSION: dict[str, SourceFormat] = {
-    ".json": SourceFormat.BOOK_JSON,
     ".pdf": SourceFormat.BOOK_PDF,
     # Chunked by Docling only; refused at the upload when it is not installed.
     ".docx": SourceFormat.BOOK_DOCX,
@@ -33,9 +30,10 @@ FORMAT_BY_EXTENSION: dict[str, SourceFormat] = {
 
 SUPPORTED_EXTENSIONS = tuple(sorted(FORMAT_BY_EXTENSION))
 
-#: Raw book formats this application still does not convert. They get an
-#: explanation of what to supply instead, rather than a bare refusal.
-_RAW_BOOK_EXTENSIONS = {".epub", ".md", ".markdown", ".txt", ".html", ".htm"}
+#: Book formats this application does not read. They get an explanation of what to
+#: supply instead, rather than a bare refusal. ``.json`` was the retired book JSON
+#: document format (Task 10).
+_RAW_BOOK_EXTENSIONS = {".json", ".epub", ".md", ".markdown", ".txt", ".html", ".htm"}
 
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -55,11 +53,7 @@ def format_for_filename(filename: str) -> SourceFormat:
     if extension in _RAW_BOOK_EXTENSIONS:
         raise UnsupportedFileError(
             f"{extension} files cannot be imported directly.",
-            detail=(
-                "This application imports structured book JSON only, so a book's structure is "
-                "always declared rather than guessed. Supply a book JSON document that lists "
-                "the chapters, sections and section text -- see the document shape on this page."
-            ),
+            detail="Upload the book as a PDF, DOCX or PPTX file.",
         )
     raise UnsupportedFileError(
         f"{extension or 'This file type'} is not a supported textbook format.",
@@ -70,9 +64,8 @@ def format_for_filename(filename: str) -> SourceFormat:
 def validate_upload(filename: str, data: bytes, settings: Settings) -> SourceFormat:
     """Check an upload's name and size before anything is stored.
 
-    Structural validation is separate and happens in
-    :func:`app.ingestion.schema.parse_book_document`; this is only the cheap
-    front gate.
+    Reading the file is separate (:func:`app.ingestion.parsing.check_readable`); this
+    is only the cheap front gate.
 
     Raises:
         UnsupportedFileError: unknown extension, or an empty file.
@@ -99,7 +92,7 @@ def validate_upload(filename: str, data: bytes, settings: Settings) -> SourceFor
 def safe_filename(original: str) -> str:
     """Build a collision-free, filesystem-safe name that keeps the original visible.
 
-    A random prefix guarantees uniqueness, so two uploads of ``book.json`` never
+    A random prefix guarantees uniqueness, so two uploads of ``book.pdf`` never
     overwrite one another.
     """
     name = unicodedata.normalize("NFKD", Path(original).name)
