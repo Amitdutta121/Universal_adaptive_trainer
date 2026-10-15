@@ -94,6 +94,16 @@ class InvalidBookDocumentError(AdaptiveTrainerError):
     code = "invalid_book_document"
 
 
+class TranscriptUnavailableError(AdaptiveTrainerError):
+    """A YouTube video's transcript could not be fetched (no captions, blocked, rate limited).
+
+    Nothing is imported; the professor can paste the transcript instead (Task 30).
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "transcript_unavailable"
+
+
 class InvalidTaxonomyDocumentError(AdaptiveTrainerError):
     """An uploaded taxonomy JSON document does not satisfy the schema.
 

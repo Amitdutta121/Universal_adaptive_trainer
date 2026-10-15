@@ -70,6 +70,7 @@ from app.domain.enums import (
     SourceFormat,
     TutorialBlockStatus,
     TutorialRenderer,
+    VideoAvailability,
 )
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
@@ -411,6 +412,10 @@ class BookSummary(BaseModel):
     defect_count: int
     created_at: datetime
     imported_at: datetime | None
+    #: A YouTube source only (Task 30).
+    video_id: str | None = None
+    video_availability: VideoAvailability | None = None
+    availability_checked_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: BookRow) -> BookSummary:
@@ -431,6 +436,9 @@ class BookSummary(BaseModel):
             defect_count=sum(1 for warning in warnings if warning.is_defect),
             created_at=row.created_at,
             imported_at=row.imported_at,
+            video_id=row.video_id,
+            video_availability=row.video_availability,
+            availability_checked_at=row.availability_checked_at,
         )
 
 
@@ -2696,6 +2704,17 @@ class JobStartedResponse(BaseModel):
     """``202`` from a route that queued a background job; follow it in ``GET /api/jobs``."""
 
     job_id: str
+
+
+class YouTubeImportRequest(BaseModel):
+    """A YouTube video to import from its transcript (Task 30).
+
+    ``transcript`` is the professor's paste, used when fetching it failed; empty means fetch.
+    """
+
+    url: str = Field(min_length=1, max_length=500)
+    title: str = Field(default="", max_length=500)
+    transcript: str = Field(default="", max_length=2_000_000)
 
 
 class BookImportResult(BaseModel):

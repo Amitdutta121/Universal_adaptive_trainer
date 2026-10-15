@@ -15,6 +15,8 @@
  * A quick-check rejection is shown with the backend's own message and detail, because
  * that text is what tells them what to fix. Nothing is stored on a rejection, so the
  * modal stays open with what they chose.
+ *
+ * The second tab imports a YouTube video's transcript instead (`youtube-import-form.tsx`).
  */
 
 import { ChevronDown, Upload } from "lucide-react";
@@ -32,9 +34,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConfig, useImportBook } from "@/lib/api/queries";
 import { exceedsUploadLimit } from "@/lib/json-document";
 import { titleOverride } from "../book-document";
+import { YoutubeImportForm } from "./youtube-import-form";
 
 function ImportForm({ onImported }: { onImported: () => void }) {
   const config = useConfig();
@@ -141,15 +145,27 @@ export function BookImportDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="size-4 text-muted-foreground" />
-            Import a book
+            Import a source
           </DialogTitle>
           <DialogDescription>
-            A PDF, DOCX or PPTX. It is split into chunks, each with its pages and headings; a file
-            that cannot be read is refused and nothing is stored.
+            A PDF, DOCX or PPTX is split into chunks, each with its pages and headings; a YouTube
+            video, by its transcript, into timed chunks. Anything that cannot be read is refused and
+            nothing is stored.
           </DialogDescription>
         </DialogHeader>
 
-        <ImportForm onImported={() => onOpenChange(false)} />
+        <Tabs defaultValue="file" className="min-w-0">
+          <TabsList>
+            <TabsTrigger value="file">File</TabsTrigger>
+            <TabsTrigger value="youtube">YouTube</TabsTrigger>
+          </TabsList>
+          <TabsContent value="file" className="min-w-0">
+            <ImportForm onImported={() => onOpenChange(false)} />
+          </TabsContent>
+          <TabsContent value="youtube" className="min-w-0">
+            <YoutubeImportForm onImported={() => onOpenChange(false)} />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

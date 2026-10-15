@@ -50,6 +50,9 @@ dependencies = [
     # The question-style library is YAML, one file per style (styles/, app/styles/loader.py).
     # Already installed transitively; named because application code uses it.
     "pyyaml>=6.0",
+    # YouTube captions for video sources (app/ingestion/youtube.py, Task 30): the maintained
+    # client for YouTube's transcript endpoint, MIT, two small deps. The video is never downloaded.
+    "youtube-transcript-api>=1.2",
 ]
 
 [project.optional-dependencies]

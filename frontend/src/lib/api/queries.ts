@@ -763,6 +763,21 @@ export function useImportBook() {
   });
 }
 
+/**
+ * Import a YouTube video's transcript as a source (Task 30). Runs in the request, so it resolves
+ * with the book; a `transcript_unavailable` error means paste the transcript and send again.
+ */
+export function useImportYoutube() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["YouTubeImportRequest"]) =>
+      unwrap(api.POST("/api/books/youtube", { body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.books.all });
+    },
+  });
+}
+
 /** Edit a book's labels. Structure is declared by its document and is not editable. */
 export function useUpdateBook() {
   const client = useQueryClient();

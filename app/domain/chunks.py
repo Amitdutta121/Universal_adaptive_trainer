@@ -39,6 +39,21 @@ def page_range_label(start: int | None, end: int | None) -> str | None:
     return f"Pages {start}\u2013{end}"
 
 
+def clock(seconds: float) -> str:
+    """``75.4`` -> ``1:15``; ``3725`` -> ``1:02:05``."""
+    total = int(seconds)
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def time_range_label(start: float | None, end: float | None) -> str | None:
+    """``1:15-2:03`` (en dash) for a video chunk, or ``None`` when it has no times."""
+    if start is None:
+        return None
+    return clock(start) if end is None else f"{clock(start)}\u2013{clock(end)}"
+
+
 class Chunk(BaseModel):
     """One stored chunk, as the rest of the application reads it."""
 
@@ -64,6 +79,8 @@ class Chunk(BaseModel):
 
     @property
     def location_label(self) -> str | None:
+        if self.source_kind is ChunkSourceKind.VIDEO:
+            return time_range_label(self.start_seconds, self.end_seconds)
         return page_range_label(self.page_start, self.page_end)
 
     @property

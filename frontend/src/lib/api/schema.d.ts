@@ -325,6 +325,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/youtube": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Youtube
+         * @description Import a YouTube video's transcript as timestamped chunks; the video is never downloaded.
+         *
+         *     A ``422`` with code ``transcript_unavailable`` means the fetch failed and nothing was
+         *     stored: send the same request again with ``transcript`` pasted. The same video again
+         *     returns the source already imported; a different pasted transcript becomes its next version.
+         */
+        post: operations["import_youtube_api_books_youtube_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/versions": {
         parameters: {
             query?: never;
@@ -2446,6 +2470,11 @@ export interface components {
             created_at: string;
             /** Imported At */
             imported_at: string | null;
+            /** Video Id */
+            video_id?: string | null;
+            video_availability?: components["schemas"]["VideoAvailability"] | null;
+            /** Availability Checked At */
+            availability_checked_at?: string | null;
         };
         /**
          * CalibrationLabel
@@ -4832,7 +4861,7 @@ export interface components {
          * @description A tool whose output a block embeds as-is (Task 20).
          * @enum {string}
          */
-        RecipeTool: "python_trace";
+        RecipeTool: "python_trace" | "video_clip";
         /** RegenerateQuestionResponse */
         RegenerateQuestionResponse: {
             /** Question Id */
@@ -5252,7 +5281,7 @@ export interface components {
          *     book rows still read.
          * @enum {string}
          */
-        SourceFormat: "book_json" | "book_pdf" | "book_docx" | "book_pptx";
+        SourceFormat: "book_json" | "book_pdf" | "book_docx" | "book_pptx" | "youtube";
         /** StartTrainingSessionRequest */
         StartTrainingSessionRequest: {
             /** Student Id */
@@ -5987,7 +6016,10 @@ export interface components {
             /** Summary */
             summary: string;
             renderer: components["schemas"]["TutorialRenderer"];
-            /** Prompt */
+            /**
+             * Prompt
+             * @default
+             */
             prompt: string;
             /** Fits */
             fits: components["schemas"]["ContentKind"][];
@@ -6060,7 +6092,7 @@ export interface components {
          *     contract (``app/tutorials/renderers.py``) and one frontend component.
          * @enum {string}
          */
-        TutorialRenderer: "markdown" | "mermaid" | "chartjs" | "html";
+        TutorialRenderer: "markdown" | "mermaid" | "chartjs" | "html" | "video_clip";
         /**
          * TypeCalibrationOut
          * @description One question type's four-cell report (ADR-034).
@@ -6179,6 +6211,15 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VideoAvailability
+         * @description Whether a YouTube source can still be played in an embedded player (Task 30).
+         *
+         *     Set at import and by the periodic check (``app/jobs/video_availability.py``); a clip of a
+         *     video that is not ``AVAILABLE`` is not shown to students.
+         * @enum {string}
+         */
+        VideoAvailability: "available" | "unavailable" | "not_embeddable" | "unknown";
+        /**
          * WarningSeverity
          * @description Whether a warning describes a defect or merely states a fact.
          *
@@ -6212,6 +6253,26 @@ export interface components {
             hard: number;
             /** Question Types */
             question_types?: components["schemas"]["QuestionType"][];
+        };
+        /**
+         * YouTubeImportRequest
+         * @description A YouTube video to import from its transcript (Task 30).
+         *
+         *     ``transcript`` is the professor's paste, used when fetching it failed; empty means fetch.
+         */
+        YouTubeImportRequest: {
+            /** Url */
+            url: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Transcript
+             * @default
+             */
+            transcript: string;
         };
     };
     responses: never;
@@ -6803,6 +6864,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobStartedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_youtube_api_books_youtube_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["YouTubeImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookImportResult"];
                 };
             };
             /** @description Validation Error */

@@ -64,6 +64,7 @@ from app.domain.enums import (
     StructureSource,
     TutorialBlockStatus,
     TutorialRenderer,
+    VideoAvailability,
 )
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.domain.questions import DEFAULT_PRIORITY, GenerationAttempt, QuestionValidationReport
@@ -208,6 +209,15 @@ class BookRow(TimestampMixin, Base):
     #: chunks existed, which has sections only. Older versions' chunks are kept, never
     #: rewritten, so ids stored on questions and frozen sets keep resolving.
     current_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: A YouTube source only (``SourceFormat.YOUTUBE``): the 11-character video id, and whether
+    #: the video can still be embedded, as of ``availability_checked_at`` (Task 30).
+    video_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    video_availability: Mapped[VideoAvailability | None] = mapped_column(
+        StrEnumType(VideoAvailability, 16), default=None
+    )
+    availability_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     chapters: Mapped[list[BookChapterRow]] = relationship(
         back_populates="book",

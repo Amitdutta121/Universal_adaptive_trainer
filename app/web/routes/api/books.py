@@ -6,6 +6,10 @@ quick enough to wait for run in the request; parsing a textbook can take minutes
 so the import itself is a background job (ADR-062) the Jobs panel shows. A book's
 chunks are read through ``/chunks`` (:mod:`app.web.routes.api.retrieval`).
 
+A YouTube video is a source too (``POST /books/youtube``, Task 30): its transcript is fetched,
+or pasted when fetching fails, and stored as timestamped chunks. That runs in the request --
+it takes seconds, and a failed fetch has to answer at once so the dialog can offer the paste.
+
 Editing covers the row's labels only -- title, author, notes. The chunks come from
 the file, so correcting them means importing a corrected file as a new version.
 
@@ -20,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -29,6 +33,13 @@ from app.domain.enums import JobKind, SourceFormat
 from app.errors import NotFoundError
 from app.ingestion import BookImportService, BookLibraryService
 from app.ingestion.storage import resolve_stored_path, store_upload
+from app.ingestion.youtube import (
+    AvailabilityCheck,
+    TranscriptFetch,
+    YouTubeImportService,
+    check_availability,
+    fetch_transcript,
+)
 from app.jobs.queue import JobQueue, JobQueueDep
 from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow
@@ -42,6 +53,7 @@ from app.web.routes.api.schemas import (
     BookMetadataUpdate,
     BookSummary,
     JobStartedResponse,
+    YouTubeImportRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +104,40 @@ def import_book(
     worker thread, so it does not block the event loop.
     """
     return _start_import(session, course, queue, file, title=title)
+
+
+def get_youtube_fetch() -> TranscriptFetch:
+    """The transcript fetcher; tests override it so no request reaches YouTube."""
+    return fetch_transcript
+
+
+def get_youtube_check() -> AvailabilityCheck:
+    """The availability check; tests override it so no request reaches YouTube."""
+    return check_availability
+
+
+@router.post("/youtube", response_model=BookImportResult, status_code=status.HTTP_201_CREATED)
+def import_youtube(
+    session: DbSession,
+    course: CourseScope,
+    request: YouTubeImportRequest,
+    fetch: Annotated[TranscriptFetch, Depends(get_youtube_fetch)],
+    check: Annotated[AvailabilityCheck, Depends(get_youtube_check)],
+) -> BookImportResult:
+    """Import a YouTube video's transcript as timestamped chunks; the video is never downloaded.
+
+    A ``422`` with code ``transcript_unavailable`` means the fetch failed and nothing was
+    stored: send the same request again with ``transcript`` pasted. The same video again
+    returns the source already imported; a different pasted transcript becomes its next version.
+    """
+    book = YouTubeImportService(session, fetch=fetch, check=check).import_video(
+        request.url,
+        title=request.title,
+        transcript=request.transcript,
+        course_id=course,
+    )
+    session.commit()
+    return BookImportResult(book=BookSummary.from_row(book))
 
 
 @router.post(

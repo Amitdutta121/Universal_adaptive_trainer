@@ -1,0 +1,241 @@
+{
+ "_note": "Synthetic lecture captions written for tests (not from a real video); durations overlap the next caption as YouTube's do.",
+ "video_id": "AbCdEfGhIjK",
+ "segments": [
+  {
+   "text": "Welcome back. Today we look at loops in",
+   "start": 1.2,
+   "duration": 4.46
+  },
+  {
+   "text": "Python, starting with the for loop. A for loop",
+   "start": 4.56,
+   "duration": 4.88
+  },
+  {
+   "text": "repeats a block of code once",
+   "start": 8.34,
+   "duration": 3.62
+  },
+  {
+   "text": "for every item in a sequence. The sequence",
+   "start": 10.86,
+   "duration": 4.46
+  },
+  {
+   "text": "can be a list, a string, or a range of",
+   "start": 14.22,
+   "duration": 5.3
+  },
+  {
+   "text": "numbers. Let us write one together.",
+   "start": 18.42,
+   "duration": 3.62
+  },
+  {
+   "text": "We type for, then a variable name, then in,",
+   "start": 20.94,
+   "duration": 4.88
+  },
+  {
+   "text": "then the sequence, and a colon",
+   "start": 25.52,
+   "duration": 3.62
+  },
+  {
+   "text": "at the end. Everything indented under",
+   "start": 28.04,
+   "duration": 3.62
+  },
+  {
+   "text": "that line is the body of",
+   "start": 31.36,
+   "duration": 3.62
+  },
+  {
+   "text": "the loop. Python runs the body once",
+   "start": 33.88,
+   "duration": 4.04
+  },
+  {
+   "text": "per item, and each time the variable holds the next",
+   "start": 36.82,
+   "duration": 5.3
+  },
+  {
+   "text": "item. So if the list holds",
+   "start": 41.82,
+   "duration": 3.62
+  },
+  {
+   "text": "three numbers, the body runs three",
+   "start": 44.34,
+   "duration": 3.62
+  },
+  {
+   "text": "times. A very common pattern is the accumulator.",
+   "start": 46.86,
+   "duration": 4.46
+  },
+  {
+   "text": "We set a variable called total to",
+   "start": 51.02,
+   "duration": 4.04
+  },
+  {
+   "text": "zero before the loop. Inside the loop we add each",
+   "start": 53.96,
+   "duration": 5.3
+  },
+  {
+   "text": "item to total. When the loop finishes, total holds the",
+   "start": 58.46,
+   "duration": 5.3
+  },
+  {
+   "text": "sum of the whole list. Notice",
+   "start": 62.66,
+   "duration": 3.62
+  },
+  {
+   "text": "that the print call sits outside the loop,",
+   "start": 65.18,
+   "duration": 4.46
+  },
+  {
+   "text": "so it runs only once, at the end. If you",
+   "start": 68.54,
+   "duration": 5.3
+  },
+  {
+   "text": "indent it by mistake, it prints after every item instead.",
+   "start": 72.74,
+   "duration": 5.3
+  },
+  {
+   "text": "That is one of the most common bugs students make",
+   "start": 76.94,
+   "duration": 5.3
+  },
+  {
+   "text": "with loops. Now let us talk about the range",
+   "start": 81.14,
+   "duration": 4.88
+  },
+  {
+   "text": "function. Range gives you a sequence of whole",
+   "start": 85.72,
+   "duration": 4.46
+  },
+  {
+   "text": "numbers without writing a list by hand. Range of five",
+   "start": 89.88,
+   "duration": 5.3
+  },
+  {
+   "text": "gives zero, one, two, three and four. It",
+   "start": 94.88,
+   "duration": 4.46
+  },
+  {
+   "text": "stops before five, which surprises many people",
+   "start": 98.54,
+   "duration": 4.04
+  },
+  {
+   "text": "the first time. You can also give",
+   "start": 101.48,
+   "duration": 4.04
+  },
+  {
+   "text": "range a start and a stop, and even a step.",
+   "start": 104.42,
+   "duration": 5.3
+  },
+  {
+   "text": "Range of two to ten with a step of two",
+   "start": 108.92,
+   "duration": 5.3
+  },
+  {
+   "text": "gives the even numbers from two to eight.",
+   "start": 113.92,
+   "duration": 4.46
+  },
+  {
+   "text": "Next, the while loop. A while loop keeps",
+   "start": 118.08,
+   "duration": 4.46
+  },
+  {
+   "text": "running as long as its condition",
+   "start": 121.44,
+   "duration": 3.62
+  },
+  {
+   "text": "is true. Before every pass, Python checks",
+   "start": 124.76,
+   "duration": 4.04
+  },
+  {
+   "text": "the condition again. If the condition never",
+   "start": 128.0,
+   "duration": 4.04
+  },
+  {
+   "text": "becomes false, the loop runs forever. That is called",
+   "start": 131.74,
+   "duration": 4.88
+  },
+  {
+   "text": "an infinite loop, and you stop",
+   "start": 135.52,
+   "duration": 3.62
+  },
+  {
+   "text": "it with control C. So inside a while",
+   "start": 138.34,
+   "duration": 4.46
+  },
+  {
+   "text": "loop, something must change that eventually makes the condition false.",
+   "start": 142.0,
+   "duration": 5.3
+  },
+  {
+   "text": "Usually that means updating a counter at the end of",
+   "start": 147.0,
+   "duration": 5.3
+  },
+  {
+   "text": "the body. Finally, the break statement",
+   "start": 152.0,
+   "duration": 3.62
+  },
+  {
+   "text": "leaves a loop early, and continue skips to",
+   "start": 154.52,
+   "duration": 4.46
+  },
+  {
+   "text": "the next pass. Use them sparingly,",
+   "start": 158.68,
+   "duration": 3.62
+  },
+  {
+   "text": "because they make a loop harder to read.",
+   "start": 161.2,
+   "duration": 4.46
+  },
+  {
+   "text": "That is all for today, see you next",
+   "start": 165.36,
+   "duration": 4.46
+  },
+  {
+   "text": "time.",
+   "start": 169.52,
+   "duration": 1.52
+  }
+ ]
+}

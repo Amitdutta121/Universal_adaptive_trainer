@@ -36,6 +36,9 @@ class SourceFormat(StrEnum):
     #: Read by Docling only.
     BOOK_DOCX = "book_docx"
     BOOK_PPTX = "book_pptx"
+    #: A YouTube video, imported from its transcript (``app/ingestion/youtube.py``). Never
+    #: downloaded: ``original_filename`` holds the watch URL and ``video_id`` the id.
+    YOUTUBE = "youtube"
 
 
 class ChunkSourceKind(StrEnum):
@@ -43,6 +46,22 @@ class ChunkSourceKind(StrEnum):
 
     BOOK = "book"
     VIDEO = "video"
+
+
+class VideoAvailability(StrEnum):
+    """Whether a YouTube source can still be played in an embedded player (Task 30).
+
+    Set at import and by the periodic check (``app/jobs/video_availability.py``); a clip of a
+    video that is not ``AVAILABLE`` is not shown to students.
+    """
+
+    AVAILABLE = "available"
+    #: Private, deleted, or otherwise gone.
+    UNAVAILABLE = "unavailable"
+    #: Exists, but its owner turned off embedding, so a clip cannot play inside the app.
+    NOT_EMBEDDABLE = "not_embeddable"
+    #: The last check could not reach YouTube; the earlier answer is kept where there is one.
+    UNKNOWN = "unknown"
 
 
 class StructureSource(StrEnum):
@@ -447,6 +466,8 @@ class TutorialRenderer(StrEnum):
     #: Runs in ``<iframe sandbox="allow-scripts">`` without same-origin, under a CSP that
     #: blocks the network.
     HTML = "html"
+    #: A range of a YouTube video, played through the IFrame API (Task 31).
+    VIDEO_CLIP = "video_clip"
 
 
 class GuidanceLevel(StrEnum):

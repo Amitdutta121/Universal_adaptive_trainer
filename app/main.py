@@ -21,6 +21,7 @@ from app.config import Settings, get_settings
 from app.errors import register_error_handlers
 from app.jobs.judge_collector import JudgeCollector
 from app.jobs.recovery import fail_interrupted_jobs
+from app.jobs.video_availability import VideoAvailabilityChecker
 from app.logging_config import configure_logging
 from app.persistence.database import init_db
 from app.web.middleware import RequestLoggingMiddleware
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     collector = JudgeCollector() if settings.judge_batch_enabled else None
     if collector is not None:
         collector.start()
+    videos = VideoAvailabilityChecker()
+    videos.start()
     logger.info(
         "%s v%s ready (environment=%s, llm=%s)",
         settings.app_name,
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     if collector is not None:
         collector.stop()
+    videos.stop()
     logger.info("%s shutting down", settings.app_name)
 
 
