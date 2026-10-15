@@ -1,0 +1,40 @@
+id: py.subtle_output
+name: Predict output where one subtle rule decides it
+summary: Scope, aliasing or mutation decides the answer. Separates tracing from guessing.
+question_type: output_prediction
+difficulty_range:
+- hard
+checked_by: Runs the code when the question is made and compares the exact output
+applies_to:
+- variable scope
+- parameters
+- aliasing
+- mutability
+- list arguments
+examples:
+- prompt: What does this code print?
+  code: |-
+    x = 10
+
+    def bump(x):
+        x = x + 1
+        return x
+
+    y = bump(x)
+    print(x, y)
+  answer: 10 11
+  grounding: Variables and parameters are local
+- prompt: What does this code print?
+  code: |-
+    def chop(t):
+        t = t[1:]
+
+    def pop_first(t):
+        del t[0]
+
+    a = [1, 2, 3]
+    chop(a)
+    pop_first(a)
+    print(a)
+  answer: '[2, 3]'
+  grounding: List arguments

@@ -47,6 +47,9 @@ dependencies = [
     # Fernet encryption of API keys saved in model settings (app/settings_store.py, Task 41).
     # Already installed transitively (paramiko); named because application code uses it.
     "cryptography>=42",
+    # The question-style library is YAML, one file per style (styles/, app/styles/loader.py).
+    # Already installed transitively; named because application code uses it.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

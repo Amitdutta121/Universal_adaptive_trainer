@@ -1,0 +1,32 @@
+id: py.order_lines
+name: Put the lines of a short function in order
+summary: Students arrange 4 to 6 lines into the right order and indentation.
+question_type: parsons
+difficulty_range:
+- easy
+- medium
+checked_by: Checks the order and indentation of the lines
+applies_to:
+- functions
+- loops
+- conditionals
+- counting
+- searching
+examples:
+- prompt: Arrange the lines so count_vowels(s) returns how many vowels s has.
+  lines:
+  - 'def count_vowels(s):'
+  - '    count = 0'
+  - '    for ch in s:'
+  - '        if ch in ''aeiou'':'
+  - '            count = count + 1'
+  - '    return count'
+  grounding: Looping and counting
+- prompt: Arrange the lines so is_sorted(t) returns True when t is in ascending order.
+  lines:
+  - 'def is_sorted(t):'
+  - '    for i in range(len(t) - 1):'
+  - '        if t[i] > t[i + 1]:'
+  - '            return False'
+  - '    return True'
+  grounding: Traversing a list

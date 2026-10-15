@@ -1,0 +1,35 @@
+id: py.edge_case_bug
+name: Find a bug that only shows on some inputs
+summary: The code passes the obvious case. Students find the input that breaks it and fix it.
+question_type: debugging
+difficulty_range:
+- hard
+checked_by: Runs hidden tests on the student's code (cannot read or write files)
+applies_to:
+- searching
+- base cases
+- recursion
+- loop bounds
+- input validation
+examples:
+- prompt: find_index(t, target) should return the index of target, or -1 if it is missing. It fails one
+    of the tests. Fix it.
+  code: |-
+    def find_index(t, target):
+        for i in range(len(t)):
+            if t[i] == target:
+                return i
+            else:
+                return -1
+  answer: Move return -1 after the loop; it currently gives up after the first item
+  tests: 6
+  grounding: Searching
+- prompt: fact(n) should return n! for every n >= 0, but it crashes for one valid input. Fix it.
+  code: |-
+    def fact(n):
+        if n == 1:
+            return 1
+        return n * fact(n - 1)
+  answer: 'The base case should be n == 0: fact(0) recurses until it overflows the stack'
+  tests: 5
+  grounding: More recursion

@@ -1,0 +1,27 @@
+id: py.write_function
+name: Write a complete function from a short spec
+summary: Students write the whole function. Hidden tests give partial credit.
+question_type: coding
+difficulty_range:
+- medium
+- hard
+checked_by: Runs hidden tests on the student's code; the score is tests passed out of total (cannot read
+  or write files)
+applies_to:
+- functions
+- lists
+- dictionaries
+- strings
+- recursion
+- loops
+examples:
+- prompt: Write has_duplicates(t) that returns True if any element appears more than once in t. Do not
+    change t.
+  answer: 'Reference: return len(set(t)) < len(t), or a loop with a dict of seen items'
+  tests: 6
+  grounding: Dictionary as a collection of counters
+- prompt: 'Write is_palindrome(word) using recursion: a word is a palindrome if its first and last letters
+    match and the middle is a palindrome.'
+  answer: 'Reference: base case len(word) <= 1; else compare the ends and recurse on word[1:-1]'
+  tests: 7
+  grounding: More recursion

@@ -1,0 +1,36 @@
+id: py.trace_steps
+name: Trace a loop or call over several steps
+summary: Students follow the values through a loop or a few calls, then give the output.
+question_type: output_prediction
+difficulty_range:
+- medium
+- hard
+checked_by: Runs the code when the question is made and compares the exact output
+applies_to:
+- while loops
+- for loops
+- accumulators
+- function calls
+- aliasing
+- recursion
+examples:
+- prompt: What does this code print?
+  code: |-
+    def f(n):
+        result = 1
+        while n > 1:
+            result = result * n
+            n = n - 2
+        return result
+
+    print(f(7))
+  answer: '105'
+  grounding: The while statement
+- prompt: What does this code print?
+  code: |-
+    t = [1, 2, 3]
+    u = t
+    u.append(4)
+    print(len(t), t[-1])
+  answer: 4 4
+  grounding: Aliasing

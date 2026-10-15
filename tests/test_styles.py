@@ -25,6 +25,7 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.styles import MAX_CELL_TARGET, MIN_CELL_TARGET, get_library, suggest_setup
+from app.styles.loader import StyleFileError, load_libraries, load_subject
 from app.styles.python import PYTHON_STYLES
 
 PYTHON = "intro_python"
@@ -97,6 +98,55 @@ def test_python_library_is_valid() -> None:
     }
     for difficulty in Difficulty:
         assert sum(difficulty in style.difficulty_range for style in styles) >= 3
+
+
+def test_yaml_library_matches_the_python_library() -> None:
+    """The YAML conversion of ``app/styles/python.py`` keeps every style, field and order."""
+    assert load_libraries()[PYTHON] == PYTHON_STYLES
+
+
+def _write(directory: Any, name: str, text: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(text, encoding="utf-8")
+
+
+_MINIMAL = """name: N
+summary: S
+question_type: true_false
+difficulty_range: [easy]
+checked_by: True or false
+examples:
+  - prompt: "True or false: 1 == 1"
+  - prompt: "True or false: 1 == 2"
+"""
+
+
+def test_a_bad_style_file_names_the_file_and_the_field(tmp_path: Any) -> None:
+    subject = tmp_path / "intro_python"
+    _write(subject, "py.bad.yaml", _MINIMAL.replace("true_false", "essay"))
+    with pytest.raises(StyleFileError, match=r"py\.bad\.yaml.*field 'question_type'"):
+        load_subject(subject)
+
+
+def test_id_and_subject_come_from_the_path_and_must_agree(tmp_path: Any) -> None:
+    subject = tmp_path / "intro_python"
+    _write(subject, "py.ok.yaml", _MINIMAL)
+    (style,) = load_subject(subject)
+    assert (style.id, style.subject) == ("py.ok", "intro_python")
+    _write(subject, "py.ok.yaml", "id: py.other\n" + _MINIMAL)
+    with pytest.raises(StyleFileError, match=r"py\.ok\.yaml: field 'id'"):
+        load_subject(subject)
+
+
+def test_order_file_sets_display_order_and_unlisted_styles_follow(tmp_path: Any) -> None:
+    subject = tmp_path / "intro_python"
+    for style_id in ("py.a", "py.b", "py.c"):
+        _write(subject, f"{style_id}.yaml", _MINIMAL)
+    _write(subject, "order.txt", "py.c\n")
+    assert [style.id for style in load_subject(subject)] == ["py.c", "py.a", "py.b"]
+    _write(subject, "order.txt", "py.gone\n")
+    with pytest.raises(StyleFileError, match=r"py.gone"):
+        load_subject(subject)
 
 
 def test_unknown_subject_has_no_library() -> None:

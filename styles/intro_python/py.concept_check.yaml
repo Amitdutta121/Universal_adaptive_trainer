@@ -1,0 +1,37 @@
+id: py.concept_check
+name: Check one concept on a tiny snippet
+summary: Students read one or two lines and pick what is true about them.
+question_type: multiple_choice
+difficulty_range:
+- easy
+- medium
+checked_by: One correct option out of four
+applies_to:
+- data types
+- operators
+- expressions
+- strings
+- lists
+- dictionaries
+- tuples
+examples:
+- prompt: After this line runs, what is the type of x?
+  code: x = 7 / 2
+  options:
+  - text: int
+  - text: float
+    correct: true
+  - text: str
+  - text: It raises an error
+  answer: float
+  grounding: Expressions and statements
+- prompt: What does this expression evaluate to?
+  code: '''abc'' * 2'
+  options:
+  - text: '''abcabc'''
+    correct: true
+  - text: '''aabbcc'''
+  - text: '''abc2'''
+  - text: TypeError
+  answer: '''abcabc'''
+  grounding: String operations
