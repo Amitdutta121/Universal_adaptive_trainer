@@ -741,11 +741,17 @@ service (its model is the `agent` role from the settings resolver, T41) and the 
 `edit_curriculum` and `coverage_report`, calling services directly.
 
 **Acceptance criteria:**
-- [ ] The tools reuse service functions; no business rule lives in the prompt
-- [ ] The agent runs with fake LLMs in tests
+- [x] The tools reuse service functions; no business rule lives in the prompt
+  (each tool calls the route function the Studio uses: `import_youtube`, `draft_taxonomy`,
+  `update_tree`, `coverage`; refusals come back to the model as `ToolRefusal`)
+- [x] The agent runs with fake LLMs in tests (`tests/agent_support.py`: scripted `FunctionModel`)
+- Spike result: pydantic-ai-slim 2.56 `AGUIAdapter.dispatch_request` ↔ CopilotKit 1.79: both speak
+  AG-UI; Pydantic AI maps approval-required tools to AG-UI interrupts and reads `resume`, and
+  CopilotKit v2 `useInterrupt` resolves standard interrupts with `resume`. 2.56 pulls openai 3.31;
+  the full suite passed on it.
 
 **Verification:**
-- [ ] `PYTEST tests/test_agent_tools.py`
+- [x] `PYTEST tests/test_agent_tools.py` (9 passed, 2026-10-15)
 
 **Dependencies:** Checkpoint H
 **Files likely touched:** `app/agent/agent.py`, `app/agent/tools.py`, `app/web/routes/api/agent.py`, `pyproject.toml`

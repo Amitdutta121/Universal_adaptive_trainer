@@ -51,6 +51,7 @@ LLM_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/judge-prompts/{metric}/refresh"): "/api/judge-prompts/issues/refresh",
     ("POST", "/api/tutorial-blocks"): "/api/tutorial-blocks",
     ("POST", "/api/tutorial-pregeneration"): "/api/tutorial-pregeneration",
+    ("POST", "/api/agent"): "/api/agent",
 }
 
 #: Read-only Studio calls an unverified account must still be able to make.

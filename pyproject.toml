@@ -53,6 +53,11 @@ dependencies = [
     # YouTube captions for video sources (app/ingestion/youtube.py, Task 30): the maintained
     # client for YouTube's transcript endpoint, MIT, two small deps. The video is never downloaded.
     "youtube-transcript-api>=1.2",
+    # The professor agent (app/agent/, Phase 8): tool calling over our services, human approval
+    # as deferred tools, and an AG-UI endpoint the CopilotKit panel talks to. MIT. 2.56 needs
+    # openai 3 (pip warns that llama-index-llms-openai, unused by app code, pins openai<3, and
+    # instructor pins jiter<0.15; the full suite passes on both).
+    "pydantic-ai-slim[openai,ag-ui]>=2.56,<3",
 ]
 
 [project.optional-dependencies]

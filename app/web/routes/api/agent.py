@@ -1,0 +1,59 @@
+"""``POST /agent``: the professor agent over AG-UI, for the Studio's chat panel (Phase 8).
+
+The body is an AG-UI ``RunAgentInput`` and the response is its event stream. The run works in
+the request's course (``X-Course-Id``) as the logged-in professor, and spends model credit, so
+it needs a verified email like every other LLM route (ADR-061). A tool that needs the
+professor's approval ends the run with an AG-UI interrupt; the client resumes it with the
+professor's answer in ``resume``.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Request, Response
+from pydantic_ai.models import Model
+from pydantic_ai.ui.ag_ui import AGUIAdapter
+
+from app.agent.agent import agent_model, professor_agent
+from app.agent.tools import AgentDeps
+from app.ingestion.youtube import AvailabilityCheck, TranscriptFetch
+from app.jobs.queue import JobQueueDep
+from app.llm.client import StructuredLLMClient
+from app.persistence.database import get_session_factory
+from app.web.routes.api.books import get_youtube_check, get_youtube_fetch
+from app.web.routes.api.curriculum import get_draft_client
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, CurrentUser
+
+router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+def get_agent_model() -> Model:
+    """The chat model, read from settings per request; tests override it with a fake."""
+    return agent_model()
+
+
+@router.post("", dependencies=SPENDS_LLM_CREDIT, response_class=Response)
+async def run_agent(
+    request: Request,
+    course: CourseScope,
+    user: CurrentUser,
+    queue: JobQueueDep,
+    model: Annotated[Model, Depends(get_agent_model)],
+    draft_client: Annotated[StructuredLLMClient | None, Depends(get_draft_client)],
+    youtube_fetch: Annotated[TranscriptFetch, Depends(get_youtube_fetch)],
+    youtube_check: Annotated[AvailabilityCheck, Depends(get_youtube_check)],
+) -> Response:
+    """Run the agent on an AG-UI ``RunAgentInput`` and stream its events back."""
+    deps = AgentDeps(
+        session_factory=get_session_factory(),
+        course_id=course,
+        user_id=user.id,
+        queue=queue,
+        draft_client=draft_client,
+        youtube_fetch=youtube_fetch,
+        youtube_check=youtube_check,
+    )
+    return await AGUIAdapter.dispatch_request(
+        request, agent=professor_agent, model=model, deps=deps
+    )

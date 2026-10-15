@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth.backend import current_active_user
 from app.web.routes.api import (
+    agent,
     auth,
     books,
     calibration,
@@ -62,6 +63,7 @@ _professor_only = [
     jobs.router,
     settings.router,
     tutorials.router,
+    agent.router,
 ]
 for professor_router in _professor_only:
     router.include_router(professor_router, dependencies=[Depends(current_active_user)])
