@@ -50,3 +50,33 @@ At k = 5, by query kind:
   BM25 on code tokens (`randint`, `rstrip`, `ord(`) should help (Task 11).
 - Query embeddings come from a hosted API, so a re-run can move the third decimal place.
   Count a change as real only when it's bigger than that.
+
+## Chunks (Task 6, 2026-10-14)
+
+`ChunkRetriever`, dense cosine over `chunk_embeddings` (same embedder), Agah re-imported with Docling:
+174 chunks covering all 117 pages. Chunks are embedded with their heading path prepended.
+
+```
+python -m scripts.eval_retrieval            # --units chunks is the default
+```
+
+| k | recall | precision | nDCG | MRR |
+|---|---|---|---|---|
+| 1 | 0.632 | 0.894 | 0.894 | 0.894 |
+| 3 | 0.888 | 0.662 | 0.779 | 0.924 |
+| 5 | 0.954 | 0.512 | 0.786 | 0.932 |
+| 10 | 0.989 | 0.305 | 0.821 | 0.934 |
+
+At k = 5, by query kind:
+
+| kind | recall | precision | nDCG | MRR |
+|---|---|---|---|---|
+| heading (n=36) | 0.971 | 0.561 | 0.836 | 0.951 |
+| student (n=18) | 0.944 | 0.389 | 0.707 | 0.875 |
+| subtopic (n=12) | 0.917 | 0.550 | 0.756 | 0.958 |
+
+- **No regression; better on every metric at every k.** MRR@10 0.741 → 0.934, recall@10
+  0.828 → 0.989, student MRR@5 0.571 → 0.875. It matches the parse spike's Docling number
+  (0.935), so the in-app pipeline reproduces what the spike measured.
+- **The import ceiling is gone:** 0 of 66 queries now have no overlapping unit (was 9).
+- nDCG is not strictly comparable across unit sizes (see the parse spike); it rose anyway.
