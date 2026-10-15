@@ -25,10 +25,10 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.styles import MAX_CELL_TARGET, MIN_CELL_TARGET, get_library, suggest_setup
-from app.styles.loader import StyleFileError, load_libraries, load_subject
-from app.styles.python import PYTHON_STYLES
+from app.styles.loader import StyleFileError, load_subject
 
 PYTHON = "intro_python"
+PYTHON_STYLES = get_library(PYTHON)
 
 
 class FakeSuggester:
@@ -98,11 +98,6 @@ def test_python_library_is_valid() -> None:
     }
     for difficulty in Difficulty:
         assert sum(difficulty in style.difficulty_range for style in styles) >= 3
-
-
-def test_yaml_library_matches_the_python_library() -> None:
-    """The YAML conversion of ``app/styles/python.py`` keeps every style, field and order."""
-    assert load_libraries()[PYTHON] == PYTHON_STYLES
 
 
 def _write(directory: Any, name: str, text: str) -> None:
@@ -382,3 +377,11 @@ def test_the_suggester_sees_the_lesson_and_keeps_hard_at_zero(
     assert "set hard to 0" in fake.calls[0]["system"]
     targets = {(c.subtopic_id, c.difficulty): c.target for c in result.cell_targets}
     assert targets[(while_loops.id, Difficulty.HARD)] == 0
+
+
+def test_published_style_schema_is_current() -> None:
+    from scripts.export_style_schema import SCHEMA_PATH, style_file_schema
+
+    assert SCHEMA_PATH.read_text(encoding="utf-8").replace("\r\n", "\n") == style_file_schema(), (
+        "styles/schema.json is stale; run: python -m scripts.export_style_schema"
+    )

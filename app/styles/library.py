@@ -1,10 +1,10 @@
 """The style library and the setup suggester (docs/QUESTION_SETUP_PLAN.md, agent A).
 
-The library is curated code data per subject (``app/styles/<subject>.py``). The suggester
-makes one structured model call over the approved taxonomy's subtopics and the library, then
-validates what came back: unknown style ids are dropped, targets are clamped, and every
-subtopic leaves with at least one style -- and a style for every difficulty -- chosen by fit
-when the model gave none.
+The library is curated YAML per subject (``styles/<subject>/<id>.yaml``, read by
+``app/styles/loader.py``). The suggester makes one structured model call over the approved
+taxonomy's subtopics and the library, then validates what came back: unknown style ids are
+dropped, targets are clamped, and every subtopic leaves with at least one style -- and a style
+for every difficulty -- chosen by fit when the model gave none.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from functools import cache
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -28,8 +29,7 @@ from app.persistence.models import (
     SubtopicRow,
 )
 from app.persistence.repositories import CurriculumRepository
-from app.styles.python import PYTHON_STYLES
-from app.styles.python import SUBJECT as PYTHON_SUBJECT
+from app.styles.loader import load_libraries
 from app.styles.schema import (
     MAX_CELL_TARGET,
     MIN_CELL_TARGET,
@@ -41,8 +41,6 @@ from app.styles.schema import (
 from app.subjects import profile_for_version
 
 logger = logging.getLogger(__name__)
-
-_LIBRARIES: dict[str, list[QuestionStyle]] = {PYTHON_SUBJECT: PYTHON_STYLES}
 
 #: Default target when the model gives none for a cell. Clamped, should the coverage minimum
 #: ever leave the suggester's bounds.
@@ -59,9 +57,15 @@ def get_library(subject: str) -> list[QuestionStyle]:
 
     ``subject`` is a subject storage key (``SubjectProfile.storage_key``, e.g.
     ``intro_python``). A subject with no curated library returns ``[]`` -- never raises -- so
-    the setup modal can say "no styles for this subject yet". Pure: no I/O, no model call.
+    the setup modal can say "no styles for this subject yet". No model call; the YAML is read
+    once per process.
     """
-    return list(_LIBRARIES.get(subject, []))
+    return list(_libraries().get(subject, []))
+
+
+@cache
+def _libraries() -> dict[str, list[QuestionStyle]]:
+    return load_libraries()
 
 
 # ------------------------------------------------------------------ model output

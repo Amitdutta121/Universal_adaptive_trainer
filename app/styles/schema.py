@@ -1,8 +1,8 @@
 """The question-style vocabulary (docs/QUESTION_SETUP_PLAN.md).
 
 A *style* is a reusable way of asking: one question type, a difficulty range, one way of
-checking the answer. Styles are curated code data versioned in the repo
-(``app/styles/<subject>.py``), not rows: the library is content the product ships, and a
+checking the answer. Styles are curated YAML versioned in the repo
+(``styles/<subject>/<id>.yaml``), not rows: the library is content the product ships, and a
 question records the style it was written in by ``QuestionRow.style_id``.
 
 Pure data models only -- no I/O, no model calls -- so the API, the generator and the setup
