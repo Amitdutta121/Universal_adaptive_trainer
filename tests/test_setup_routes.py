@@ -67,7 +67,7 @@ def test_styles_lists_the_course_subject_library(http: TestClient, session: Sess
     session.add(course)
     session.commit()
     scoped = http.get("/api/styles", headers={"X-Course-Id": str(course.id)}).json()
-    assert scoped == {"subject": "physics", "styles": []}
+    assert scoped == {"subject": "physics", "styles": [], "course_style_ids": []}
     assert len(http.get("/api/styles?subject=intro_python").json()["styles"]) == 10
 
 

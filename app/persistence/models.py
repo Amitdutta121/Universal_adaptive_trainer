@@ -1556,6 +1556,25 @@ class CustomJudgeRow(TimestampMixin, Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
+class CourseStyleRow(TimestampMixin, Base):
+    """A professor's own question style, visible only in its course (Task 18).
+
+    ``style`` is a ``QuestionStyle`` dump, validated and checked like a library file
+    (``app/styles/checks.py``); export gives the same YAML a library contribution uses. Never
+    deleted or renamed: questions and setups store ``style_id``, as they do library ids.
+    """
+
+    __tablename__ = "course_styles"
+    __table_args__ = (
+        UniqueConstraint("course_id", "style_id", name="uq_course_styles_course_id_style_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    style_id: Mapped[str] = mapped_column(String(100))
+    style: Mapped[dict] = mapped_column("style_json", JsonObject)
+
+
 class StudentRow(TimestampMixin, Base):
     """A learner the adaptive engine tracks.
 

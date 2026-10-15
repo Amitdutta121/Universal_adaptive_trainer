@@ -32,7 +32,6 @@ from app.domain.enums import (
 )
 from app.evaluation.schema import MetricResult, evaluation_from_metrics
 from app.feedback import submit_review
-from app.generation import rounds as rounds_module
 from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.memory import SOURCE_AUDIT
 from app.persistence.models import (
@@ -48,10 +47,10 @@ from app.retrieval.chunks import ChunkEmbeddingStore
 
 @pytest.fixture(autouse=True)
 def fake_library(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.styles
+    import app.styles.library
 
-    monkeypatch.setattr(rounds_module, "get_library", lambda subject: list(LIBRARY))
-    monkeypatch.setattr(app.styles, "get_library", lambda subject: list(LIBRARY))
+    # Every lookup goes through styles_for, which reads this module global.
+    monkeypatch.setattr(app.styles.library, "get_library", lambda subject: list(LIBRARY))
 
 
 def _book(session: Session, settings: Settings):

@@ -38,6 +38,8 @@ vi.mock("@/lib/api/queries", () => ({
   useCustomJudges: () => ({ data: { judges: [] }, isPending: false, error: null }),
   useCreateCustomJudge: () => ({ error: null, isPending: false }),
   useUpdateCustomJudge: () => ({ error: null, isPending: false }),
+  useCreateCourseStyle: () => ({ error: null, isPending: false }),
+  fetchStyleYaml: () => Promise.resolve(""),
 }));
 
 import { QuestionSetupButton } from "./question-setup-button";

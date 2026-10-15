@@ -86,7 +86,7 @@ from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.duplicates import DuplicateChecker
 from app.retrieval.embedder import Embedder
 from app.retrieval.examples import retrieve_for_target
-from app.styles import QuestionStyle, get_library
+from app.styles import QuestionStyle, styles_for
 from app.subjects import profile_for_version
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,7 @@ def plan_targets(
     version = require_approved_version(session, setup.curriculum_version_id)
     known_subtopics = {s.id for topic in version.topics for s in topic.subtopics}
     profile = profile_for_version(session, version.id)
-    library = {style.id: style for style in get_library(profile.storage_key)}
+    library = {style.id: style for style in styles_for(session, profile)}
     counts = cell_counts(session, version.id)
     rejects = style_rejects(session, version.id)
     listed = stored_facets(session, known_subtopics)
@@ -614,8 +614,7 @@ def _generate_round(
         for rule in CustomJudgeRepository(session).list_for_version(version_id, enabled_only=True)
     ]
     library = {
-        style.id: style
-        for style in get_library(profile_for_version(session, version_id).storage_key)
+        style.id: style for style in styles_for(session, profile_for_version(session, version_id))
     }
     retriever = (
         ChunkRetriever(session, ChunkEmbeddingStore(session, embedder))

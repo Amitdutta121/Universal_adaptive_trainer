@@ -44,6 +44,7 @@ from app.persistence.models import (
     BookSectionRow,
     ChunkRow,
     CourseRow,
+    CourseStyleRow,
     CurriculumVersionRow,
     CustomJudgeRow,
     GenerationRoundRow,
@@ -65,6 +66,7 @@ from app.persistence.models import (
     UserRow,
 )
 from app.persistence.repositories import ChunkRepository, QuestionSetRepository
+from app.styles import get_library
 from app.subjects import profile_for_course_id
 from app.web.routes.api.coverage import get_generation_client
 from app.web.routes.api.curriculum import get_draft_client
@@ -198,6 +200,7 @@ PATH_IDS = {
     "judge_id": "custom_judge",
     "set_version_id": "qset",
     "guideline_id": "guideline",
+    "style_id": "style",
     # ``round-<id>``: A's question round, as the Jobs panel addresses it.
     "job_id": "job",
 }
@@ -246,6 +249,8 @@ class Seed:
     job: str
     #: A's learned generator guideline (set by ``seed``; 0 for the other content sets).
     guideline: int = 0
+    #: A's course-only question style ("" for content that belongs to no course).
+    style: str = ""
 
 
 # ---------------------------------------------------------------- accounts and seed
@@ -410,6 +415,18 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
     session.flush()
     generation_round = GenerationRoundRow(setup_id=setup.id, number=1)
     session.add(generation_round)
+    style_id = ""
+    if course_id is not None:
+        style_id = f"py.secret_{course_id}"
+        session.add(
+            CourseStyleRow(
+                course_id=course_id,
+                style_id=style_id,
+                style=get_library("intro_python")[0]
+                .model_copy(update={"id": style_id, "name": f"{label} style"})
+                .model_dump(mode="json", by_alias=True),
+            )
+        )
     session.flush()
     return Seed(
         course=course_id or 0,
@@ -429,6 +446,7 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
         round=generation_round.id,
         custom_judge=judge.id,
         job=f"round-{generation_round.id}",
+        style=style_id,
     )
 
 

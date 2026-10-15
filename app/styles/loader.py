@@ -32,17 +32,31 @@ class StyleFileError(ValueError):
 
 def load_style_file(path: Path, subject: str) -> QuestionStyle:
     """Parse and validate one style file of ``subject``."""
+    return parse_style_text(
+        path.read_text(encoding="utf-8"), subject, source=str(path), file_id=path.stem
+    )
+
+
+def parse_style_text(
+    text: str, subject: str, *, source: str, file_id: str | None = None
+) -> QuestionStyle:
+    """Parse and validate one style's YAML. ``file_id`` is the id its file name implies, if any.
+
+    ``source`` names the text in every error (a path, or "the pasted style").
+    """
     try:
-        data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data: Any = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise StyleFileError(f"{path}: not valid YAML: {exc}") from exc
+        raise StyleFileError(f"{source}: not valid YAML: {exc}") from exc
     if not isinstance(data, dict):
-        raise StyleFileError(f"{path}: expected a mapping of style fields at the top level")
-    for field, expected in (("subject", subject), ("id", path.stem)):
-        if data.setdefault(field, expected) != expected:
+        raise StyleFileError(f"{source}: expected a mapping of style fields at the top level")
+    expected = {"subject": (subject, "the directory")}
+    if file_id is not None:
+        expected["id"] = (file_id, "the file name")
+    for field, (value, origin) in expected.items():
+        if data.setdefault(field, value) != value:
             raise StyleFileError(
-                f"{path}: field '{field}' is {data[field]!r} but must be {expected!r} "
-                f"(the {'directory' if field == 'subject' else 'file'} name)"
+                f"{source}: field '{field}' is {data[field]!r} but must be {value!r} ({origin})"
             )
     try:
         return QuestionStyle.model_validate(data)
@@ -51,7 +65,25 @@ def load_style_file(path: Path, subject: str) -> QuestionStyle:
             f"field '{'.'.join(str(part) for part in error['loc'])}': {error['msg']}"
             for error in exc.errors()
         )
-        raise StyleFileError(f"{path}: {problems}") from exc
+        raise StyleFileError(f"{source}: {problems}") from exc
+
+
+class _Dumper(yaml.SafeDumper):
+    """Multi-line strings (code, expected output) as ``|`` blocks, so a file reads like code."""
+
+
+_Dumper.add_representer(
+    str,
+    lambda dumper, value: dumper.represent_scalar(
+        "tag:yaml.org,2002:str", value, style="|" if "\n" in value else None
+    ),
+)
+
+
+def dump_style(style: QuestionStyle) -> str:
+    """The style as a library file: ``styles/<subject>/<id>.yaml`` (subject left to the path)."""
+    data = style.model_dump(mode="json", by_alias=True, exclude_defaults=True, exclude={"subject"})
+    return yaml.dump(data, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=100)
 
 
 def load_subject(directory: Path) -> list[QuestionStyle]:

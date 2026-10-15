@@ -1587,9 +1587,29 @@ export const useStyles = (subject?: string | null, { enabled = true } = {}) =>
     enabled,
     queryFn: () =>
       unwrap(api.GET("/api/styles", { params: { query: subject ? { subject } : {} } })),
-    // The library is code data shipped with the backend; it does not change while a page is open.
+    // The library ships with the backend; course styles change only through
+    // `useCreateCourseStyle`, which invalidates this query.
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+/** Add a style to this course only. The backend runs the library's style checks on it. */
+export function useCreateCourseStyle() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (yaml: string) => unwrap(api.POST("/api/styles", { body: { yaml } })),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["setup", "styles"] }),
+  });
+}
+
+/** One style (library or course) as the YAML file a library contribution uses. */
+export function fetchStyleYaml(styleId: string): Promise<string> {
+  return unwrap(
+    api.GET("/api/styles/{style_id}/export", {
+      params: { path: { style_id: styleId } },
+      parseAs: "text",
+    }),
+  ) as Promise<string>;
+}
 
 /**
  * Ask the AI for styles per subtopic and a target per cell. Persists nothing.

@@ -24,12 +24,14 @@ from app.errors import DomainRuleError, FeatureNotAvailableError
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import (
     ChunkRow,
+    CourseStyleRow,
     CurriculumVersionRow,
     SubtopicEvidenceRow,
     SubtopicRow,
 )
 from app.persistence.repositories import CurriculumRepository
-from app.styles.loader import load_libraries
+from app.styles.checks import check_example, check_ids
+from app.styles.loader import StyleFileError, load_libraries, parse_style_text
 from app.styles.schema import (
     MAX_CELL_TARGET,
     MIN_CELL_TARGET,
@@ -38,7 +40,7 @@ from app.styles.schema import (
     SetupSuggestion,
     SubtopicStyleSuggestion,
 )
-from app.subjects import profile_for_version
+from app.subjects import SubjectProfile, profile_for_version
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,71 @@ def get_library(subject: str) -> list[QuestionStyle]:
 @cache
 def _libraries() -> dict[str, list[QuestionStyle]]:
     return load_libraries()
+
+
+def course_styles(session: Session, course_id: int) -> list[QuestionStyle]:
+    """A course's own styles, oldest first."""
+    rows = session.scalars(
+        select(CourseStyleRow)
+        .where(CourseStyleRow.course_id == course_id)
+        .order_by(CourseStyleRow.id)
+    )
+    return [QuestionStyle.model_validate(row.style) for row in rows]
+
+
+def styles_for(session: Session, profile: SubjectProfile) -> list[QuestionStyle]:
+    """Every style a course can use: its subject's library, then the course's own (Task 18).
+
+    A course style whose id the library has since gained (it was contributed upstream) is
+    shadowed by the library one, so a stored id keeps resolving.
+    """
+    library = get_library(profile.storage_key)
+    if profile.course_id is None:
+        return library
+    shipped = {style.id for style in library}
+    own = [s for s in course_styles(session, profile.course_id) if s.id not in shipped]
+    return library + own
+
+
+def add_course_style(session: Session, profile: SubjectProfile, text: str) -> QuestionStyle:
+    """Validate a style's YAML like a library file, run the CI checks on it, and save it.
+
+    Raises:
+        DomainRuleError: no course, bad YAML or fields, a taken or ill-formed id, a question
+            type the course does not use, or an example that fails its type's checks.
+    """
+    if profile.course_id is None:
+        raise DomainRuleError("A course style needs a course.")
+    try:
+        style = parse_style_text(text, profile.storage_key, source="The style")
+    except StyleFileError as error:
+        raise DomainRuleError("This style could not be read.", detail=str(error)) from error
+    existing = styles_for(session, profile)
+    if style.id in {s.id for s in existing}:
+        raise DomainRuleError(
+            "A style with this id already exists. Give the new style its own id.",
+            detail=f"Taken: {style.id}.",
+        )
+    if profile.question_types and style.question_type.value not in profile.question_types:
+        raise DomainRuleError(
+            "This course does not use the style's question type.",
+            detail=f"{style.question_type.value} is not among the course's question types.",
+        )
+    problems = check_ids({profile.storage_key: [*existing, style]})
+    problems += [p for n in range(len(style.examples)) for p in check_example(style, n)]
+    if problems:
+        raise DomainRuleError(
+            "This style does not pass the style checks.", detail="\n".join(problems)
+        )
+    session.add(
+        CourseStyleRow(
+            course_id=profile.course_id,
+            style_id=style.id,
+            style=style.model_dump(mode="json", by_alias=True),
+        )
+    )
+    session.commit()
+    return style
 
 
 # ------------------------------------------------------------------ model output
@@ -281,7 +348,7 @@ def suggest_setup(
     profile = profile_for_version(session, curriculum_version_id)
     styles = [
         style
-        for style in get_library(profile.storage_key)
+        for style in styles_for(session, profile)
         if not profile.question_types or style.question_type.value in profile.question_types
     ]
     if not styles:

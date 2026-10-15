@@ -19,6 +19,7 @@ from test_rounds import (  # noqa: F401 -- fixtures
     fake_library,
 )
 
+import app.styles.library
 from app.adaptive.inventory import StudentBank
 from app.adaptive.service import AdaptiveTrainingEngine
 from app.domain.enums import Difficulty, QuestionStatus, QuestionType, RoundStatus
@@ -41,7 +42,7 @@ from app.web.routes.api import students
 @pytest.fixture(autouse=True)
 def live_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(live, "_llm_ready", lambda: True)
-    monkeypatch.setattr(live, "get_library", lambda subject: [STYLE_A])
+    monkeypatch.setattr(app.styles.library, "get_library", lambda subject: [STYLE_A])
 
 
 def _answer_everything(session: Session, run_id: int) -> None:

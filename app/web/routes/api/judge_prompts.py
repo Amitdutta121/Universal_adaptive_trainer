@@ -26,7 +26,7 @@ from app.evaluation.prompts import rubric_version_for, system_prompt_for
 from app.evaluation.trust_scope import style_trust_under_current_panel, trusted_scopes
 from app.persistence.models import CurriculumVersionRow, JudgePromptRow
 from app.persistence.repositories import JudgePromptRepository
-from app.styles import get_library
+from app.styles import styles_for
 from app.subjects import SubjectProfile
 from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import (
@@ -118,7 +118,7 @@ def judge_stats(
     subject_wide = (
         scoped if version_ids is None else style_trust_under_current_panel(session, profile)
     )
-    names = {style.id: style.name for style in get_library(profile.personal_key)}
+    names = {style.id: style.name for style in styles_for(session, profile)}
 
     judges = []
     for metric in SHOWN_JUDGES:

@@ -1249,9 +1249,33 @@ export interface paths {
         };
         /**
          * List Styles
-         * @description The style library of ``subject``, or of the course's subject when omitted.
+         * @description The styles of the course's subject and the course's own; another ``subject``'s library.
          */
         get: operations["list_styles_api_styles_get"];
+        put?: never;
+        /**
+         * Create Course Style
+         * @description Add a style to this course only. It must pass the library's CI checks.
+         */
+        post: operations["create_course_style_api_styles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/styles/{style_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Style
+         * @description One style as a library file, ready for ``styles/<subject>/<id>.yaml`` in a PR.
+         */
+        get: operations["export_style_api_styles__style_id__export_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2875,6 +2899,14 @@ export interface components {
             /** Subtopic Id */
             subtopic_id: number;
             difficulty: components["schemas"]["Difficulty"];
+        };
+        /**
+         * CreateCourseStyleRequest
+         * @description ``POST /api/styles``: one style in the library's YAML format (CONTRIBUTING-styles.md).
+         */
+        CreateCourseStyleRequest: {
+            /** Yaml */
+            yaml: string;
         };
         /**
          * CreateCustomJudgeRequest
@@ -5214,13 +5246,15 @@ export interface components {
         };
         /**
          * StyleListResponse
-         * @description ``GET /api/styles``: one subject's style library.
+         * @description ``GET /api/styles``: one subject's style library, then the course's own styles.
          */
         StyleListResponse: {
             /** Subject */
             subject: string;
             /** Styles */
             styles: components["schemas"]["QuestionStyle"][];
+            /** Course Style Ids */
+            course_style_ids?: string[];
         };
         /**
          * StyleTrustOut
@@ -8085,6 +8119,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StyleListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_course_style_api_styles_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCourseStyleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionStyle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_style_api_styles__style_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                style_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": unknown;
                 };
             };
             /** @description Validation Error */

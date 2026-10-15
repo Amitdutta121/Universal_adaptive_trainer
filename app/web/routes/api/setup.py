@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.domain.enums import CurriculumStatus
-from app.errors import DomainRuleError
+from app.errors import DomainRuleError, NotFoundError
 from app.generation import rounds
 from app.jobs.queue import JobQueueDep
 from app.llm import StructuredLLMClient
@@ -23,7 +23,9 @@ from app.persistence.repositories import (
     GenerationRoundRepository,
     QuestionSetupRepository,
 )
-from app.styles import get_library, suggest_setup
+from app.styles import add_course_style, course_styles, get_library, styles_for, suggest_setup
+from app.styles.loader import dump_style
+from app.styles.schema import QuestionStyle
 from app.subjects import profile_for_version
 from app.web.routes.api.deps import (
     SPENDS_LLM_CREDIT,
@@ -33,6 +35,7 @@ from app.web.routes.api.deps import (
     ensure_in_course,
 )
 from app.web.routes.api.schemas import (
+    CreateCourseStyleRequest,
     CurrentSetupResponse,
     QuestionSetupOut,
     SaveSetupRequest,
@@ -55,10 +58,48 @@ SetupClientDep = Annotated[StructuredLLMClient | None, Depends(get_setup_client)
 
 
 @router.get("/styles", response_model=StyleListResponse)
-def list_styles(profile: CourseProfile, subject: str | None = None) -> StyleListResponse:
-    """The style library of ``subject``, or of the course's subject when omitted."""
-    key = subject or profile.storage_key
-    return StyleListResponse(subject=key, styles=get_library(key))
+def list_styles(
+    session: DbSession, profile: CourseProfile, subject: str | None = None
+) -> StyleListResponse:
+    """The styles of the course's subject and the course's own; another ``subject``'s library."""
+    if subject is not None and subject != profile.storage_key:
+        return StyleListResponse(subject=subject, styles=get_library(subject))
+    styles = styles_for(session, profile)
+    own = (
+        {style.id for style in course_styles(session, profile.course_id)}
+        if (profile.course_id is not None)
+        else set()
+    )
+    return StyleListResponse(
+        subject=profile.storage_key,
+        styles=styles,
+        course_style_ids=[style.id for style in styles if style.id in own],
+    )
+
+
+@router.post("/styles", response_model=QuestionStyle, status_code=status.HTTP_201_CREATED)
+def create_course_style(
+    session: DbSession, profile: CourseProfile, body: CreateCourseStyleRequest
+) -> QuestionStyle:
+    """Add a style to this course only. It must pass the library's CI checks."""
+    return add_course_style(session, profile, body.yaml)
+
+
+@router.get(
+    "/styles/{style_id}/export",
+    response_class=Response,
+    responses={200: {"content": {"application/yaml": {}}}},
+)
+def export_style(session: DbSession, profile: CourseProfile, style_id: str) -> Response:
+    """One style as a library file, ready for ``styles/<subject>/<id>.yaml`` in a PR."""
+    style = next((s for s in styles_for(session, profile) if s.id == style_id), None)
+    if style is None:
+        raise NotFoundError(f"Style {style_id} not found.")
+    return Response(
+        dump_style(style),
+        media_type="application/yaml",
+        headers={"Content-Disposition": f'attachment; filename="{style.id}.yaml"'},
+    )
 
 
 @router.post(
@@ -97,9 +138,7 @@ def _validate(session: Session, version: CurriculumVersionRow, body: SaveSetupRe
             detail=f"Version {version.id} has status {version.status}.",
         )
     subtopic_ids = {s.id for topic in version.topics for s in topic.subtopics}
-    library = {
-        style.id for style in get_library(profile_for_version(session, version.id).storage_key)
-    }
+    library = {style.id for style in styles_for(session, profile_for_version(session, version.id))}
 
     named = {entry.subtopic_id for entry in body.approved_styles} | {
         cell.subtopic_id for cell in body.cell_targets

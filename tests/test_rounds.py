@@ -100,10 +100,10 @@ LIBRARY = [STYLE_A, STYLE_B]
 @pytest.fixture(autouse=True)
 def fake_library(monkeypatch: pytest.MonkeyPatch) -> None:
     """Agent A owns the real library; these tests run against two fake styles."""
-    import app.styles
+    import app.styles.library
 
-    monkeypatch.setattr(rounds_module, "get_library", lambda subject: list(LIBRARY))
-    monkeypatch.setattr(app.styles, "get_library", lambda subject: list(LIBRARY))
+    # Every lookup goes through styles_for, which reads this module global.
+    monkeypatch.setattr(app.styles.library, "get_library", lambda subject: list(LIBRARY))
 
 
 class KeywordEmbedder:
@@ -874,11 +874,10 @@ def test_unavailable_required_judge_cannot_publish_round_question(session, engin
 def test_real_library_and_custom_rule_run_through_refill_pipeline(
     session, engine, env, monkeypatch
 ):
-    import app.styles
+    import app.styles.library
     from app.styles.library import get_library
 
-    monkeypatch.setattr(rounds_module, "get_library", get_library)
-    monkeypatch.setattr(app.styles, "get_library", get_library)
+    monkeypatch.setattr(app.styles.library, "get_library", get_library)
     style = next(
         s
         for s in get_library("intro_python")

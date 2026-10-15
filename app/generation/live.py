@@ -62,7 +62,7 @@ from app.persistence.repositories import (
 )
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
-from app.styles import get_library
+from app.styles import styles_for
 from app.subjects import profile_for_version
 
 logger = logging.getLogger(__name__)
@@ -121,9 +121,7 @@ def plan_target(
         return None
     library = {
         style.id: style
-        for style in get_library(
-            profile_for_version(session, bank.curriculum_version_id).storage_key
-        )
+        for style in styles_for(session, profile_for_version(session, bank.curriculum_version_id))
     }
 
     if plan is not None:
@@ -323,8 +321,7 @@ def _generate(
         return "This classroom is no longer set up for new questions."
     version = require_approved_version(session, setup.curriculum_version_id)
     library = {
-        style.id: style
-        for style in get_library(profile_for_version(session, version.id).storage_key)
+        style.id: style for style in styles_for(session, profile_for_version(session, version.id))
     }
     style = library.get(str(job.style_id))
     if style is None:

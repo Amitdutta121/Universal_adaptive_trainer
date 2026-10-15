@@ -253,15 +253,15 @@ class BaseQuestionGenerator:
         )
         return question
 
-    @staticmethod
     def _round_target(
+        self,
         spec: QuestionSpec,
         version: CurriculumVersionRow,
         profile: SubjectProfile,
         examples: RoundExamples | None,
     ) -> str:
         """The target block of a round spec: subtopic, library style, accepted examples."""
-        from app.styles import get_library
+        from app.styles import styles_for
 
         found = next(
             (
@@ -280,7 +280,7 @@ class BaseQuestionGenerator:
         topic, subtopic = found
         style = (
             next(
-                (row for row in get_library(profile.personal_key) if row.id == spec.style_id),
+                (row for row in styles_for(self._session, profile) if row.id == spec.style_id),
                 None,
             )
             if spec.style_id

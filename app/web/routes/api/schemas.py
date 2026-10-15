@@ -2480,10 +2480,18 @@ class RetrievedChunkOut(BaseModel):
 
 
 class StyleListResponse(BaseModel):
-    """``GET /api/styles``: one subject's style library."""
+    """``GET /api/styles``: one subject's style library, then the course's own styles."""
 
     subject: str
     styles: list[QuestionStyle]
+    #: Which of ``styles`` belong to this course only (the rest ship with the library).
+    course_style_ids: list[str] = Field(default_factory=list)
+
+
+class CreateCourseStyleRequest(BaseModel):
+    """``POST /api/styles``: one style in the library's YAML format (CONTRIBUTING-styles.md)."""
+
+    yaml: str = Field(min_length=1, max_length=50_000)
 
 
 class SuggestSetupRequest(BaseModel):

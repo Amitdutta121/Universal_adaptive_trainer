@@ -55,6 +55,7 @@ import type { StyleRowStyle } from "@/components/question-setup/style-row";
 import type { CurriculumVersionDetail, QuestionSetup, SetupSuggestion } from "@/lib/api/types";
 import { useCoursePath } from "@/lib/use-course";
 import { cn } from "@/lib/utils";
+import { CourseStyles } from "./course-styles";
 import { CustomRules } from "./custom-rules";
 import {
   approvedStyleIds,
@@ -132,6 +133,7 @@ export function QuestionSetupDialog({
             currentSetup={currentSetup}
             suggestion={suggest.data}
             library={styles.data.styles}
+            courseStyleIds={styles.data.course_style_ids ?? []}
             onOpenChange={onOpenChange}
           />
         ) : (
@@ -156,12 +158,15 @@ function SetupSteps({
   currentSetup,
   suggestion,
   library,
+  courseStyleIds,
   onOpenChange,
 }: {
   curriculum: CurriculumVersionDetail;
   currentSetup: QuestionSetup | null;
   suggestion: SetupSuggestion;
   library: readonly QuestionStyle[];
+  /** Which of `library` belong to this course only. */
+  courseStyleIds: readonly string[];
   onOpenChange(open: boolean): void;
 }) {
   const router = useRouter();
@@ -196,6 +201,7 @@ function SetupSteps({
 
   const extras = (
     <>
+      <CourseStyles styles={library} courseStyleIds={courseStyleIds} />
       <CustomRules curriculumVersionId={curriculum.version.id} />
       {save.error ? (
         <div className="mt-4">

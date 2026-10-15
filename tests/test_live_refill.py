@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from test_adaptive_service import _bank, _true_false
 from test_rounds import STYLE_A
 
+import app.styles.library
 from app.adaptive.inventory import StudentBank
 from app.adaptive.service import AdaptiveTrainingEngine
 from app.domain.enums import Difficulty, QuestionStatus, RoundStatus
@@ -33,7 +34,7 @@ def _live(session, monkeypatch, *, questions=1):
     )
     session.add(setup)
     session.commit()
-    monkeypatch.setattr(rounds, "get_library", lambda subject: [STYLE_A])
+    monkeypatch.setattr(app.styles.library, "get_library", lambda subject: [STYLE_A])
     return bank, setup
 
 
