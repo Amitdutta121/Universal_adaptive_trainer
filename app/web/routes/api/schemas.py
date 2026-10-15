@@ -2201,6 +2201,18 @@ class ParsonsBlockOut(BaseModel):
     indent: int = Field(ge=0)
 
 
+class StudentTutorialBlockOut(BaseModel):
+    """A tutorial block as a student sees it: what to draw, nothing about how it was made."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+    renderer: TutorialRenderer
+    payload: dict[str, Any]
+
+
 class ServedQuestionOut(BaseModel):
     """One question as the student sees it.
 
@@ -2235,6 +2247,9 @@ class ServedQuestionOut(BaseModel):
     blocks: list[ParsonsBlockOut] | None = None
     #: How to write the answer, for types that need it (e.g. "a number with its unit").
     answer_hint: str | None = None
+    #: Read before answering: the first question of a topic whose prior mastery is low
+    #: (Phase 6). Empty otherwise.
+    preteach_blocks: list[StudentTutorialBlockOut] = Field(default_factory=list)
 
     @classmethod
     def from_served(cls, served: Any, *, subtopic_name: str | None = None) -> ServedQuestionOut:
@@ -2293,6 +2308,9 @@ class AnsweredOut(BaseModel):
     detail: str | None
     mastery_before: float | None
     mastery_after: float | None
+    #: Composed from the run's frozen tutorial blocks (Phase 6): worked after a wrong answer,
+    #: fading as mastery rises. Empty when the set has none; the card keeps ``detail``.
+    tutorial_blocks: list[StudentTutorialBlockOut] = Field(default_factory=list)
 
     @classmethod
     def from_result(cls, result: Any) -> AnsweredOut:

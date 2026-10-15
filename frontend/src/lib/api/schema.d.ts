@@ -2207,6 +2207,8 @@ export interface components {
             mastery_before: number | null;
             /** Mastery After */
             mastery_after: number | null;
+            /** Tutorial Blocks */
+            tutorial_blocks?: components["schemas"]["StudentTutorialBlockOut"][];
         };
         /**
          * AssessmentCatalogResponse
@@ -5177,6 +5179,8 @@ export interface components {
             blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
             /** Answer Hint */
             answer_hint?: string | null;
+            /** Preteach Blocks */
+            preteach_blocks?: components["schemas"]["StudentTutorialBlockOut"][];
         };
         /** SettingsTestResponse */
         SettingsTestResponse: {
@@ -5384,6 +5388,22 @@ export interface components {
             last_activity_at?: string | null;
             /** Score Series */
             score_series?: number[];
+        };
+        /**
+         * StudentTutorialBlockOut
+         * @description A tutorial block as a student sees it: what to draw, nothing about how it was made.
+         */
+        StudentTutorialBlockOut: {
+            /** Id */
+            id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
         };
         /**
          * StyleListResponse

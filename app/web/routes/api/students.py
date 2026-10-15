@@ -66,6 +66,7 @@ from app.persistence.repositories import (
     StudentStateRepository,
     TrainingSessionRepository,
 )
+from app.tutorials.serving import blocks_after_answer, preteach_blocks
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     AnsweredOut,
@@ -87,6 +88,7 @@ from app.web.routes.api.schemas import (
     StudentProgressOut,
     StudentResumeOut,
     StudentRosterRowOut,
+    StudentTutorialBlockOut,
     SubtopicWeaknessOut,
     TopicMasteryOut,
     TrainingSessionListResponse,
@@ -751,7 +753,12 @@ def _next_or_generate(
     if served.attempt.subtopic_id is not None:
         labels = CurriculumRepository(session).subtopic_labels_for([served.attempt.subtopic_id])
         subtopic_name = labels.get(served.attempt.subtopic_id, (None, None))[0]
-    return ServedQuestionOut.from_served(served, subtopic_name=subtopic_name)
+    out = ServedQuestionOut.from_served(served, subtopic_name=subtopic_name)
+    out.preteach_blocks = [
+        StudentTutorialBlockOut.model_validate(block)
+        for block in preteach_blocks(session, served.attempt)
+    ]
+    return out
 
 
 @router.post("/attempts/{attempt_id}/answer", response_model=AnsweredOut)
@@ -765,8 +772,11 @@ def answer_attempt(
     except Exception:
         session.rollback()
         raise
+    blocks = blocks_after_answer(session, result.attempt, mastery=result.mastery_after)
     session.commit()
-    return AnsweredOut.from_result(result)
+    out = AnsweredOut.from_result(result)
+    out.tutorial_blocks = [StudentTutorialBlockOut.model_validate(block) for block in blocks]
+    return out
 
 
 @router.get("/attempts/{attempt_id}", response_model=AttemptOut)

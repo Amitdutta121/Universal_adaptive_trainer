@@ -23,6 +23,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StudentTutorialBlocks } from "@/components/tutorial/student-tutorial-blocks";
 import { Progress } from "@/components/ui/progress";
 import {
   Sheet,
@@ -429,6 +430,8 @@ function ResultCard({
             </pre>
           </div>
         ) : null}
+
+        <StudentTutorialBlocks blocks={result.tutorial_blocks ?? []} moment="after" />
 
         {result.mastery_before !== null && result.mastery_after !== null ? (
           <div className="space-y-2.5">
@@ -937,6 +940,10 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                   ) : null}
                 </CardHeader>
                 <CardContent className="space-y-5 px-6 py-6 sm:px-7">
+                  <StudentTutorialBlocks
+                    blocks={currentQuestion.data.preteach_blocks ?? []}
+                    moment="before"
+                  />
                   <div className="space-y-4">
                     <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
                       <div className="mb-3 flex items-center justify-between gap-3">
