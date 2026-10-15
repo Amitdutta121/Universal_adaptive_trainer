@@ -577,11 +577,14 @@ through and compare the displayed steps to the trace. Add a Python Playwright de
 approves by recipe after viewing a sample of its blocks.
 
 **Acceptance criteria:**
-- [ ] Approving a recipe approves its blocks; rejecting one hides them
-- [ ] The job reports cost and progress like generation jobs
+- [x] Approving a recipe approves its blocks; rejecting one hides them (2026-10-15: per
+  taxonomy, `tutorial_recipe_decisions`, migration 0028; blocks made later start decided;
+  failed and frozen blocks never change)
+- [x] The job reports cost and progress like generation jobs (`dry_run` prices blocks and
+  calls; `tutorial_pregeneration` job with done/total and made/failed/skipped in Jobs)
 
 **Verification:**
-- [ ] `PYTEST tests/test_tutorial_pregeneration.py`, `FRONTEND`
+- [x] `PYTEST tests/test_tutorial_pregeneration.py`, `FRONTEND`
 
 **Dependencies:** Checkpoint F
 **Files likely touched:** `app/tutorials/jobs.py`, `app/web/routes/api/tutorials.py`, `frontend/src/app/courses/[courseId]/tutorials/*`
@@ -589,10 +592,11 @@ approves by recipe after viewing a sample of its blocks.
 
 ## Task 25: Freeze blocks with the question set
 **Acceptance criteria:**
-- [ ] Freezing a set snapshots its approved blocks; later edits don't change a frozen set
+- [x] Freezing a set snapshots its approved blocks; later edits don't change a frozen set
+  (2026-10-15: copies pinned by `set_version_id`, made in `create_question_set`)
 
 **Verification:**
-- [ ] `PYTEST tests/test_trust_freeze.py tests/test_tutorial_freeze.py`
+- [x] `PYTEST tests/test_trust_freeze.py tests/test_tutorial_freeze.py`
 
 **Dependencies:** T24
 **Files likely touched:** `app/web/routes/api/coverage.py`, `app/tutorials/freeze.py`, `tests/test_tutorial_freeze.py`
@@ -604,11 +608,14 @@ medium → `faded`; high → one `cue` block or none. Formats are chosen by fit 
 blocks only; seeded and deterministic. Live generation is used only when the bank is empty.
 
 **Acceptance criteria:**
-- [ ] The same seed and state give the same blocks
-- [ ] The number of blocks goes down as mastery goes up (property test)
+- [x] The same seed and state give the same blocks
+- [x] The number of blocks goes down as mastery goes up (property test: 25 random banks x
+  mastery 0..1; it found that a sparse bank could show more faded than worked blocks, so a
+  lighter level is capped by the heavier one). Live generation when the bank is empty is NOT
+  built: an empty set shows no blocks and the card keeps its explanation
 
 **Verification:**
-- [ ] `PYTEST tests/test_composer.py`
+- [x] `PYTEST tests/test_composer.py`
 
 **Dependencies:** T25
 **Files likely touched:** `app/tutorials/composer.py`, `app/adaptive/service.py`, `tests/test_composer.py`
@@ -619,11 +626,14 @@ blocks only; seeded and deterministic. Live generation is used only when the ban
 question of a topic, pre-teaching blocks show if prior mastery is low. Blocks fade as mastery rises.
 
 **Acceptance criteria:**
-- [ ] It works in a frozen-set run; with no blocks, the card falls back to today's explanation
+- [x] It works in a frozen-set run; with no blocks, the card falls back to today's explanation
+  (`tests/test_tutorial_serving.py`)
 
 **Verification:**
-- [ ] `FRONTEND`
-- [ ] Manual check: a student run following `student-workflow-test-playbook`
+- [x] `FRONTEND`
+- [x] Manual check: a student run following `student-workflow-test-playbook` (2026-10-15, dev
+  DB, set 4 "Checkpoint G", Agah taxonomy 7: run 36 via API, run 37 in Chrome: pre-teaching
+  and "Work through it" stepper iframes render, no console errors)
 
 **Dependencies:** T26
 **Files likely touched:** `frontend/src/app/students/join/session/[training_session_id]/student-session-screen.tsx`, `app/web/routes/api/students.py`
@@ -631,11 +641,13 @@ question of a topic, pre-teaching blocks show if prior mastery is low. Blocks fa
 
 ## Task 28: Per-recipe stats steer the composer
 **Acceptance criteria:**
-- [ ] Each recipe's approval rate and next-attempt correctness are stored
-- [ ] The composer weights recipes by these stats, and below a threshold a recipe is no longer chosen
+- [x] Each recipe's approval rate and next-attempt correctness are stored (decisions, and
+  `tutorial_block_views` with `next_correct`, migration 0029; per course)
+- [x] The composer weights recipes by these stats, and below a threshold a recipe is no longer
+  chosen (rate < 0.25 with >= 4 decisions or >= 20 outcomes -> weight 0)
 
 **Verification:**
-- [ ] `PYTEST tests/test_recipe_stats.py tests/test_composer.py`
+- [x] `PYTEST tests/test_recipe_stats.py tests/test_composer.py`
 
 **Dependencies:** T27
 **Files likely touched:** `app/tutorials/stats.py`, `app/tutorials/composer.py`, `tests/test_recipe_stats.py`
@@ -643,6 +655,11 @@ question of a topic, pre-teaching blocks show if prior mastery is low. Blocks fa
 
 ## Checkpoint G
 - [ ] A playbook student run shows blocks fading; human review
+  (2026-10-15, run 36 on set 4: attempt 16 on subtopic 255 wrong at mastery 0.10 ->
+  pre-teaching + worked stepper blocks; attempt 19 right at 0.65 -> faded flow blocks; the run
+  then hit the curriculum's existing no_question_available gap before high mastery, so the
+  cue level was not reached live. Set 4 holds 6 blocks: 4-6 real (Checkpoint F), 1-3
+  scripted from Task 22, so each level shows two. Awaiting human review)
 
 ---
 

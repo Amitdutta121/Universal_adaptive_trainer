@@ -94,11 +94,11 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint F: The 3 seed recipes generate and render for one Agah subtopic
 
 ### Phase 6: Composer and student experience (M7)
-- [ ] T24: Pre-generation job + professor approval by recipe
-- [ ] T25: Freeze approved blocks with the question set
-- [ ] T26: Composer (BKT band → guidance level, seeded)
-- [ ] T27: Student UI: worked block after a wrong answer, pre-teaching, fading
-- [ ] T28: Per-recipe stats steer the composer
+- [x] T24: Pre-generation job + professor approval by recipe
+- [x] T25: Freeze approved blocks with the question set
+- [x] T26: Composer (BKT band → guidance level, seeded)
+- [x] T27: Student UI: worked block after a wrong answer, pre-teaching, fading
+- [x] T28: Per-recipe stats steer the composer
 
 ### Checkpoint G: A playbook student run shows blocks fading as mastery rises
 
