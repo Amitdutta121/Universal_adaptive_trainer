@@ -42,6 +42,10 @@ vi.mock("@/lib/api/queries", () => ({
   fetchStyleYaml: () => Promise.resolve(""),
 }));
 
+vi.mock("../generate/use-course-question-types", () => ({
+  useCourseQuestionTypes: () => [],
+}));
+
 import { QuestionSetupButton } from "./question-setup-button";
 
 const example = (prompt: string) => ({

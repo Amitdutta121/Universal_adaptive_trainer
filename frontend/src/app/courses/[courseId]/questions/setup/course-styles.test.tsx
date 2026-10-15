@@ -8,10 +8,14 @@ vi.mock("@/lib/api/queries", () => ({
   useCreateCourseStyle: () => ({ mutateAsync: create, isPending: false, error: null }),
   fetchStyleYaml: fetchYaml,
 }));
+vi.mock("../generate/use-course-question-types", () => ({
+  useCourseQuestionTypes: () => ["output_prediction"],
+}));
 
 const STYLES = [
-  { id: "py.trace_steps", name: "Trace a loop" },
-  { id: "py.my_output", name: "Predict my output" },
+  { id: "py.trace_steps", name: "Trace a loop", question_type: "output_prediction" as const },
+  { id: "py.my_output", name: "Predict my output", question_type: "output_prediction" as const },
+  { id: "py.order_lines", name: "Order the lines", question_type: "parsons" as const },
 ];
 
 beforeEach(() => {
@@ -33,6 +37,14 @@ it("starts a new style from a library style and submits its YAML", async () => {
   await user.click(screen.getByRole("button", { name: "Check and add style" }));
   expect(create).toHaveBeenCalledWith("id: py.trace_steps\nname: Trace a loop\n");
   expect(editor).toHaveValue("");
+});
+
+it("offers only styles of the course's question types to start from", async () => {
+  const user = userEvent.setup();
+  render(<CourseStyles styles={STYLES} courseStyleIds={[]} />);
+  await user.click(screen.getByText("Your course's styles (optional)"));
+  const options = screen.getAllByRole("option").map((option) => option.textContent);
+  expect(options).toEqual(["Start from a style…", "Trace a loop", "Predict my output"]);
 });
 
 it("lists only the course's own styles, each with an export", async () => {

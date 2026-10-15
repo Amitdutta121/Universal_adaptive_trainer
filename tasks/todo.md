@@ -440,9 +440,11 @@ library styles. An "Export to YAML" action downloads a file ready for a PR.
 **Verification:**
 - [x] `PYTEST tests/test_course_styles.py`, `TYPES`, `FRONTEND` (2026-10-15: full backend
   2131 passed, 9 account-isolation failures then fixed and that file rerun green; typecheck, biome lint, vitest 687 passed)
-- [ ] Manual check: create, use and export a style in the UI (2026-10-15: create, list,
-  duplicate refusal and export checked over HTTP on a fresh backend; not clicked through in
-  the browser, and "use" stops short of saving a setup, which spends LLM credit)
+- [x] Manual check: create, use and export a style in the UI (2026-10-15, Chrome, CS115:
+  duplicate id and a question type the course does not use are refused in the dialog;
+  a new style is created, appears in the picker and is selected for a subtopic; Export to
+  YAML yields the style's file. Not done: Approve, which starts a round and spends credit.
+  Fixed from the walkthrough: "Start from a style" offered types the course does not use)
 
 **Dependencies:** T17
 **Files likely touched:** `app/persistence/models.py` (+ migration), `app/web/routes/api/setup.py`, `frontend/.../questions/setup/question-setup-dialog.tsx`, `tests/test_course_styles.py`

@@ -12,8 +12,10 @@ import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchStyleYaml, useCreateCourseStyle } from "@/lib/api/queries";
+import type { QuestionType } from "@/lib/api/types";
+import { useCourseQuestionTypes } from "../generate/use-course-question-types";
 
-type StyleSummary = { id: string; name: string };
+type StyleSummary = { id: string; name: string; question_type: QuestionType };
 
 export function CourseStyles({
   styles,
@@ -26,6 +28,9 @@ export function CourseStyles({
   const [text, setText] = useState("");
   const [loadError, setLoadError] = useState<unknown>(null);
   const own = styles.filter((style) => courseStyleIds.includes(style.id));
+  // The backend refuses a style of a type the course does not use, so offer none to start from.
+  const types = useCourseQuestionTypes();
+  const startable = styles.filter((style) => types.includes(style.question_type));
   const error = create.error ?? loadError;
 
   async function startFrom(styleId: string) {
@@ -101,7 +106,7 @@ export function CourseStyles({
             className="h-9 rounded-md border bg-background px-2 text-sm"
           >
             <option value="">Start from a style…</option>
-            {styles.map((style) => (
+            {startable.map((style) => (
               <option key={style.id} value={style.id}>
                 {style.name}
               </option>
