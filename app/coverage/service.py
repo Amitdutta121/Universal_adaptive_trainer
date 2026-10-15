@@ -25,6 +25,7 @@ from app.domain.enums import Difficulty
 from app.errors import DomainRuleError
 from app.persistence.models import QuestionSetVersionRow
 from app.persistence.repositories import CurriculumRepository, QuestionSetRepository
+from app.tutorials.freeze import freeze_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +162,16 @@ def create_question_set(
         curriculum_version_id=version.id,
         notes=notes,
     )
+    # Its approved tutorial blocks are frozen with it (Phase 6): copies later edits can't touch.
+    blocks = freeze_blocks(session, row)
     session.commit()
-    logger.info("Froze question set %s (%s) with %s questions.", row.id, clean, len(question_ids))
+    logger.info(
+        "Froze question set %s (%s) with %s questions and %s tutorial blocks.",
+        row.id,
+        clean,
+        len(question_ids),
+        blocks,
+    )
     return row
 
 
