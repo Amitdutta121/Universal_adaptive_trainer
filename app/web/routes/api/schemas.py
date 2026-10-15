@@ -56,6 +56,7 @@ from app.domain.enums import (
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidanceLevel,
     GuidelineStatus,
     JudgeBatchStatus,
     JudgeMetricId,
@@ -67,6 +68,8 @@ from app.domain.enums import (
     ReviewDecision,
     RoundStatus,
     SourceFormat,
+    TutorialBlockStatus,
+    TutorialRenderer,
 )
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
@@ -98,6 +101,7 @@ from app.persistence.models import (
 from app.retrieval.chunks import RetrievedChunk
 from app.settings_store import ModelRole
 from app.styles import CellTarget, QuestionStyle, SetupSuggestion
+from app.tutorials.schema import TutorialRecipe
 
 
 class EnumOption(BaseModel):
@@ -2933,3 +2937,41 @@ class GenerationRunPlan(BaseModel):
     kind: str
     planned: list[PlannedRunQuestion]
     totals: GenerationRunTotals
+
+
+# ------------------------------------------------------------------ tutorials (Phase 5)
+
+
+class TutorialRecipeListResponse(BaseModel):
+    """``GET /api/tutorial-recipes``: the recipes of the course's subject."""
+
+    subject: str
+    recipes: list[TutorialRecipe]
+
+
+class GenerateTutorialBlockRequest(BaseModel):
+    """``POST /api/tutorial-blocks``: generate one block of a recipe for a subtopic."""
+
+    subtopic_id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+    #: For a recipe that traces code: this program instead of one the model writes.
+    code: str | None = None
+
+
+class TutorialBlockOut(BaseModel):
+    """One generated tutorial block; ``payload`` follows ``renderer``'s contract."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    subtopic_id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+    renderer: TutorialRenderer
+    payload: dict[str, Any]
+    chunk_ids: list[str]
+    status: TutorialBlockStatus
+    error: str | None
+    model: str
+    created_at: datetime

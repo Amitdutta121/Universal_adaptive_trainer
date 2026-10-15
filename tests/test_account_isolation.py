@@ -74,6 +74,7 @@ from app.web.routes.api.deps import COURSE_HEADER
 from app.web.routes.api.retrieval import get_query_embedder
 from app.web.routes.api.setup import get_setup_client
 from app.web.routes.api.students import STUDENT_HEADER
+from app.web.routes.api.tutorials import get_tutorial_client
 
 #: Written into every text field of A's rows; no response the intruder gets may contain it.
 SECRET = "ALICE-PRIVATE"
@@ -160,6 +161,11 @@ BODIES: dict[tuple[str, str], Any] = {
     ("POST", "/api/training-sessions"): {"student_id": "{student}", "set_version_id": "{qset}"},
     ("POST", "/api/evaluation/batch-runs"): {"question_ids": ["{question}"]},
     ("POST", "/api/question-sets"): {"label": "Taken"},
+    ("POST", "/api/tutorial-blocks"): {
+        "subtopic_id": "{subtopic}",
+        "recipe_id": "py.topic_flow",
+        "guidance_level": "cue",
+    },
 }
 
 #: Ids of A's rows that a query string may carry, by parameter name.
@@ -212,6 +218,7 @@ SHIPPED_LISTS = {
     ("GET", "/api/judges/scorecard"): {"judges"},  # one zeroed row per shipped judge
     ("GET", "/api/instructions"): {"instructions"},
     ("GET", "/api/styles"): {"styles"},
+    ("GET", "/api/tutorial-recipes"): {"recipes"},
     # One zeroed row per shipped judge metric.
     ("GET", "/api/calibration/results"): {"metrics"},
     ("GET", "/api/calibration/quadrant"): {"metrics", "unattributable_metrics"},
@@ -278,6 +285,7 @@ def app(settings: Settings) -> Iterator[FastAPI]:
     application.dependency_overrides[get_generation_client] = lambda: None
     application.dependency_overrides[get_draft_client] = lambda: None
     application.dependency_overrides[get_setup_client] = lambda: None
+    application.dependency_overrides[get_tutorial_client] = lambda: None
     application.dependency_overrides[get_query_embedder] = object
     with TestClient(application):  # runs the lifespan: migrations, schema check
         yield application

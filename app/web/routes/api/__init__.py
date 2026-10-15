@@ -31,6 +31,7 @@ from app.web.routes.api import (
     setup,
     students,
     system,
+    tutorials,
 )
 
 router = APIRouter(prefix="/api")
@@ -60,6 +61,7 @@ _professor_only = [
     custom_judges.router,
     jobs.router,
     settings.router,
+    tutorials.router,
 ]
 for professor_router in _professor_only:
     router.include_router(professor_router, dependencies=[Depends(current_active_user)])
@@ -90,4 +92,5 @@ __all__ = [
     "setup",
     "students",
     "system",
+    "tutorials",
 ]
