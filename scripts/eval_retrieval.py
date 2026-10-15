@@ -8,6 +8,7 @@ section retriever, retired in Task 10; its numbers are in ``docs/RETRIEVAL_BASEL
 
     python -m scripts.eval_retrieval                        # the configured DATABASE_URL
     python -m scripts.eval_retrieval --db data/adaptive_trainer.db
+    python -m scripts.eval_retrieval --mode hybrid           # dense + BM25, fused by RRF
 
 Prints recall, precision, nDCG and MRR at k = 1, 3, 5, 10, scored by page overlap
 (see :mod:`app.retrieval.eval`), then the same at k = 5 split by query kind.
@@ -49,6 +50,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--db", help="SQLite file to read (default: DATABASE_URL)")
     parser.add_argument("--gold", type=Path, default=GOLD)
+    parser.add_argument("--mode", choices=("dense", "hybrid"), default="dense")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -69,7 +71,11 @@ def main() -> None:
         }
         if not index:
             raise SystemExit("The gold set's book has no chunks: re-import it.")
-        retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, get_embedder(settings)))
+        retriever = ChunkRetriever(
+            session,
+            ChunkEmbeddingStore(session, get_embedder(settings)),
+            hybrid=args.mode == "hybrid",
+        )
 
         runs: list[tuple[str, QueryRun]] = []
         for entry in gold["entries"]:
@@ -92,7 +98,8 @@ def main() -> None:
     unanswerable = sum(r.n_relevant_units == 0 for r in all_runs)
     print(
         f"book {book.id} ({book.title}), {len(index)} chunks, {len(all_runs)} queries "
-        f"({unanswerable} with no overlapping unit), embedder {settings.embedding_model}\n"
+        f"({unanswerable} with no overlapping unit), embedder {settings.embedding_model}, "
+        f"mode {args.mode}\n"
     )
     print(table({str(k): overall[k] for k in KS}, "k"))
     kinds = sorted({kind for kind, _ in runs})
