@@ -14,7 +14,7 @@ parse spike (``docs/PARSE_SPIKE.md``).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -89,11 +89,17 @@ class ChunkEmbeddingStore:
         )
         return [row for row in self._session.scalars(stmt) if row.text.strip()]
 
-    def backfill(self, book_ids: Sequence[int] | None = None) -> int:
+    def backfill(
+        self,
+        book_ids: Sequence[int] | None = None,
+        *,
+        on_group: Callable[[int], None] | None = None,
+    ) -> int:
         """Embed every missing chunk; returns how many were embedded.
 
         Commits per group (ADR-032): a provider failure late in a large book keeps the
-        vectors already paid for, and the next call finishes the rest.
+        vectors already paid for, and the next call finishes the rest. ``on_group`` is
+        called with each committed group's size (a re-embedding job's progress, Task 43).
         """
         pending = self.missing(book_ids)
         for start in range(0, len(pending), _COMMIT_EVERY):
@@ -112,6 +118,8 @@ class ChunkEmbeddingStore:
                     )
                 )
             self._session.commit()
+            if on_group is not None:
+                on_group(len(group))
         return len(pending)
 
     def load(self, book_ids: Sequence[int] | None = None) -> ChunkVectors:

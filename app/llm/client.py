@@ -12,9 +12,10 @@ import openai
 from instructor.core import InstructorError
 from pydantic import BaseModel, ValidationError
 
-from app.config import LLMProvider, Settings, get_settings
+from app.config import LLMProvider, Settings
 from app.errors import ConfigurationError, LLMRequestError, MalformedModelOutputError
 from app.llm.availability import require_llm
+from app.settings_store import ModelRole, settings_for
 
 logger = logging.getLogger(__name__)
 
@@ -200,15 +201,19 @@ class InstructorStructuredClient:
 
 
 def get_structured_client(
-    settings: Settings | None = None, *, temperature: float | None = None
+    settings: Settings | None = None,
+    *,
+    role: ModelRole = ModelRole.GENERATION,
+    temperature: float | None = None,
 ) -> StructuredLLMClient:
-    """Return the configured OpenRouter structured-output client.
+    """Return the configured OpenRouter structured-output client for ``role``.
 
+    ``role``'s database settings override ``settings`` (``app.settings_store``).
     ``temperature`` is passed by callers that need a repeatable answer rather
     than a creative one -- the judges. Left ``None`` elsewhere, so generation
     keeps the provider default and stays diverse.
     """
-    settings = require_llm(settings or get_settings())
+    settings = require_llm(settings_for(role, settings))
     if settings.llm_provider is LLMProvider.OPENROUTER:
         return InstructorStructuredClient(settings, temperature=temperature)
     raise ConfigurationError(

@@ -56,6 +56,8 @@ class CurrentUserOut(BaseModel):
     id: uuid.UUID
     email: str
     is_verified: bool
+    #: An admin: may change instance-wide model settings (Task 42).
+    is_superuser: bool = False
 
 
 @router.get("/me", response_model=CurrentUserOut)
@@ -64,4 +66,9 @@ def read_current_user(user: Annotated[UserRow, Depends(current_active_user)]) ->
 
     ``is_verified`` drives the Studio's "verify your email" banner.
     """
-    return CurrentUserOut(id=user.id, email=user.email, is_verified=user.is_verified)
+    return CurrentUserOut(
+        id=user.id,
+        email=user.email,
+        is_verified=user.is_verified,
+        is_superuser=user.is_superuser,
+    )

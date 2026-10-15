@@ -44,6 +44,9 @@ dependencies = [
     # (docs/RETRIEVAL_BASELINE.md). Imported lazily; no LLM or embedding call goes through it.
     "llama-index-core>=0.14.25,<0.15",
     "llama-index-retrievers-bm25>=0.8",
+    # Fernet encryption of API keys saved in model settings (app/settings_store.py, Task 41).
+    # Already installed transitively (paramiko); named because application code uses it.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

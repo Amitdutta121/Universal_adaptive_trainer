@@ -284,8 +284,9 @@ def _retry_label(row: BackgroundJobRow) -> str | None:
     status = RoundStatus(row.status)
     if status in _IN_FLIGHT or (row.request or {}).get("retried_by"):
         return None
-    if JobKind(row.kind) is JobKind.BOOK_IMPORT:
-        # A refused document is refused again; importing it anew is a new upload.
+    if JobKind(row.kind) in (JobKind.BOOK_IMPORT, JobKind.EMBEDDING_SWITCH):
+        # A refused document is refused again; importing it anew is a new upload. A model
+        # switch is started again from Settings.
         return None
     if JobKind(row.kind) is JobKind.BULK_GENERATION:
         remaining = row.total - row.done
@@ -308,6 +309,8 @@ def _link(row: BackgroundJobRow) -> str | None:
     if JobKind(row.kind) is JobKind.BOOK_IMPORT:
         book = (row.result or {}).get("book")
         return f"/books/{book['id']}" if book else None
+    if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH:
+        return None
     return f"/questions?run_id={row.run_id}" if row.run_id else None
 
 
@@ -321,7 +324,9 @@ def _from_background(row: BackgroundJobRow) -> JobOut:
         total=row.total,
         error=row.error,
         link=_link(row),
-        result=row.result,
+        # A model switch's result is not a question or book result; its count says it all.
+        result=None if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH else row.result,
+        counts={"chunks": row.done} if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH else {},
         can_cancel=_can_cancel(row),
         cancel_requested=row.cancel_requested_at is not None,
         retry_label=_retry_label(row),

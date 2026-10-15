@@ -418,6 +418,8 @@ class JobKind(StrEnum):
     BULK_GENERATION = "bulk_generation"
     COVERAGE_FILL = "coverage_fill"
     BOOK_IMPORT = "book_import"
+    #: Re-embedding every chunk in a newly chosen embedding model (Task 43).
+    EMBEDDING_SWITCH = "embedding_switch"
 
 
 class CustomJudgeKind(StrEnum):

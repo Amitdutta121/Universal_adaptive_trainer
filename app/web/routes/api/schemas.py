@@ -96,6 +96,7 @@ from app.persistence.models import (
     TrainingSessionRow,
 )
 from app.retrieval.chunks import RetrievedChunk
+from app.settings_store import ModelRole
 from app.styles import CellTarget, QuestionStyle, SetupSuggestion
 
 
@@ -2770,7 +2771,14 @@ class JobOut(BaseModel):
     """
 
     id: str
-    kind: Literal["bulk_generation", "coverage_fill", "book_import", "question_round", "judge_run"]
+    kind: Literal[
+        "bulk_generation",
+        "coverage_fill",
+        "book_import",
+        "embedding_switch",
+        "question_round",
+        "judge_run",
+    ]
     title: str
     status: Literal["queued", "running", "done", "failed", "cancelled"]
     done: int
@@ -2805,3 +2813,78 @@ class JudgeRerunPreviewOut(BaseModel):
     eligible: int
     #: A run of this course still being judged; a second one is refused until it ends.
     active_run_id: str | None = None
+
+
+# -- Model settings (Task 42) ---------------------------------------------------------------
+
+SettingSource = Literal["db", "env"]
+
+
+class EmbeddingSwitchOut(BaseModel):
+    """The latest embedding model switch (Task 43); the old model serves until it is done."""
+
+    job_id: str
+    model: str
+    status: Literal["queued", "running", "done", "failed", "cancelled"]
+    done: int
+    total: int
+    error: str | None = None
+
+
+class RoleSettingsResponse(BaseModel):
+    """One role's effective model settings. The key is only ever masked."""
+
+    role: ModelRole
+    provider: str
+    model: str
+    base_url: str | None
+    api_key_masked: str | None
+    #: Where each value comes from: a saved setting (``db``) or ``.env``.
+    sources: dict[Literal["provider", "model", "base_url", "api_key"], SettingSource]
+    configured: bool
+    #: False for a role whose Test is not available yet (transcription, until Task 29).
+    testable: bool
+    #: Embeddings only: the latest switch to a new model, until a later one replaces it.
+    switch: EmbeddingSwitchOut | None = None
+
+
+class ModelSettingsResponse(BaseModel):
+    roles: list[RoleSettingsResponse]
+    providers: list[str]
+    #: Whether the current account may test and save (a superuser).
+    can_edit: bool
+
+
+class RoleSettingsUpdate(BaseModel):
+    """A role's settings to test or save. ``null`` means "use .env" for that field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = None
+    model: str | None = Field(default=None, max_length=200)
+    base_url: str | None = Field(default=None, max_length=500)
+    #: A new key. ``null`` keeps the saved key (or ``.env``'s); see ``clear_api_key``.
+    api_key: str | None = Field(default=None, max_length=500)
+    clear_api_key: bool = False
+
+    @field_validator("provider", "model", "base_url", "api_key")
+    @classmethod
+    def _blank_is_none(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class RoleSettingsSave(RoleSettingsUpdate):
+    #: From a passing ``POST /settings/{role}/test`` of exactly this configuration.
+    test_token: str
+
+
+class SettingsTestResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    dimension: int | None = None
+    test_token: str | None = None
+
+
+class ProviderModel(BaseModel):
+    id: str
+    name: str

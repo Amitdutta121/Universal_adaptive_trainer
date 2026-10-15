@@ -40,6 +40,7 @@ from app.evaluation.schema import (
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.repositories import CurriculumRepository
+from app.settings_store import ModelRole
 from app.subjects import profile_for_version
 
 JUDGE_MAX_ATTEMPTS = 3
@@ -162,7 +163,9 @@ class PedagogicalJudge:
         self._session = session
         # Temperature 0: a judge is an instrument, and E1 measured the provider
         # default flipping 20% of verdicts between runs (ADR-042).
-        self._client = client or get_structured_client(temperature=get_settings().judge_temperature)
+        self._client = client or get_structured_client(
+            role=ModelRole.JUDGES, temperature=get_settings().judge_temperature
+        )
         # Resolved once per judge and subject, not per metric: all four answers belong to
         # one panel, and re-reading between them could straddle a professor's edit.
         self._panels: dict[str, tuple[dict[JudgeMetricId, str], str]] = {}

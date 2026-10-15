@@ -20,6 +20,7 @@ from app.config import Settings
 from app.errors import LLMRequestError
 from app.llm.availability import require_llm
 from app.llm.client import OPENROUTER_BASE_URL
+from app.settings_store import ModelRole, settings_for
 
 #: text-embedding-3-small rejects any input over 8192 tokens. A handful of
 #: production sections are longer, so the vector is built from a truncated copy
@@ -128,10 +129,20 @@ class OpenRouterEmbedder:
 def get_embedder(settings: Settings) -> OpenRouterEmbedder:
     """Build the live embedder, raising if no provider/credentials are configured.
 
+    The ``embeddings`` role's database settings override ``settings`` (``app.settings_store``).
+
     Raises:
         ConfigurationError: via :func:`require_llm` when the app has no LLM key.
     """
-    require_llm(settings)
+    return build_embedder(settings_for(ModelRole.EMBEDDINGS, settings))
+
+
+def build_embedder(settings: Settings) -> OpenRouterEmbedder:
+    """The embedder for exactly ``settings``, with no database override applied.
+
+    For a re-embedding job (Task 43), whose model is not the active one yet.
+    """
+    settings = require_llm(settings)
     assert settings.llm_api_key is not None  # require_llm guarantees this
     return OpenRouterEmbedder(
         model=settings.embedding_model,

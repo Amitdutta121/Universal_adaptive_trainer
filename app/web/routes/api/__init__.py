@@ -26,6 +26,7 @@ from app.web.routes.api import (
     questions,
     retrieval,
     rounds,
+    settings,
     setup,
     students,
     system,
@@ -56,6 +57,7 @@ _professor_only = [
     rounds.router,
     custom_judges.router,
     jobs.router,
+    settings.router,
 ]
 for professor_router in _professor_only:
     router.include_router(professor_router, dependencies=[Depends(current_active_user)])
@@ -82,6 +84,7 @@ __all__ = [
     "retrieval",
     "rounds",
     "router",
+    "settings",
     "setup",
     "students",
     "system",

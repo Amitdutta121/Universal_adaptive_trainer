@@ -43,6 +43,13 @@ class EmailNotVerifiedError(AdaptiveTrainerError):
     code = "email_not_verified"
 
 
+class AdminRequiredError(AdaptiveTrainerError):
+    """Only an admin (a superuser account) may change instance-wide settings (Task 42)."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "admin_required"
+
+
 class NotFoundError(AdaptiveTrainerError):
     """A requested entity does not exist."""
 

@@ -89,9 +89,9 @@ def _aware(value: datetime) -> datetime:
 
 
 def _llm_ready() -> bool:
-    from app.config import get_settings
+    from app.settings_store import ModelRole, settings_for
 
-    return get_settings().llm_configured
+    return settings_for(ModelRole.GENERATION).llm_configured
 
 
 # ------------------------------------------------------------------ planning

@@ -375,6 +375,32 @@ class ChunkEmbeddingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ModelSettingRow(Base):
+    """One role's model settings, overriding ``.env`` field by field (``app.settings_store``).
+
+    A null field keeps the ``.env`` value. ``api_key_encrypted`` is Fernet ciphertext; the
+    plaintext key is never stored.
+    """
+
+    __tablename__ = "model_settings"
+
+    role: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider: Mapped[str | None] = mapped_column(String(32), default=None)
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
+    base_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="SET NULL"), default=None
+    )
+    #: On the pending ``embeddings`` row only: the re-embedding job that will activate it.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("background_jobs.id", ondelete="SET NULL"), default=None
+    )
+
+
 class CurriculumVersionRow(TimestampMixin, Base):
     """A proposed or approved Topic -> Subtopic snapshot."""
 

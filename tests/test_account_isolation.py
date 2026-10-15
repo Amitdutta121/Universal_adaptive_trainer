@@ -113,6 +113,13 @@ ALLOWLIST: dict[tuple[str, str], str] = {
         "code; not part of M2)"
     ),
     ("GET", "/api/question-sets/{set_version_id}"): "public join lobby; same known gap as above",
+    # Model settings are instance-wide by design (Task 41-42): no account owns them, keys are
+    # masked, and every write needs a superuser (test_settings_api.py).
+    ("GET", "/api/settings"): "instance-wide model settings; keys masked; no account data",
+    ("GET", "/api/settings/models"): "the provider's public model list; no account data",
+    ("POST", "/api/settings/{role}/test"): "superuser only; role is an enum, not a row id",
+    ("PUT", "/api/settings/{role}"): "superuser only; role is an enum, not a row id",
+    ("DELETE", "/api/settings/{role}"): "superuser only; role is an enum, not a row id",
 }
 
 #: Path parameters that are not row ids: any value works, and the course header decides.

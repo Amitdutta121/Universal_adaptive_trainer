@@ -35,6 +35,7 @@ from app.errors import AdaptiveTrainerError
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import CustomJudgeRow
 from app.persistence.repositories import CustomJudgeRepository
+from app.settings_store import ModelRole
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,9 @@ def run_custom_judges(
             continue
         if llm is None:
             try:
-                llm = get_structured_client(temperature=get_settings().judge_temperature)
+                llm = get_structured_client(
+                    role=ModelRole.JUDGES, temperature=get_settings().judge_temperature
+                )
             except (AdaptiveTrainerError, OSError) as exc:
                 logger.warning("No model for custom rule %s: %s", rule.id, exc)
                 results.append(_unanswered(rule))
