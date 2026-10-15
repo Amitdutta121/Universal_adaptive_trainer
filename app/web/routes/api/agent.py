@@ -27,6 +27,7 @@ from app.web.routes.api.coverage import GenerationClientDep
 from app.web.routes.api.curriculum import get_draft_client
 from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseScope, CurrentUser
 from app.web.routes.api.generation_runs import _query_embedder
+from app.web.routes.api.setup import SetupClientDep
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -45,6 +46,7 @@ async def run_agent(
     model: Annotated[Model, Depends(get_agent_model)],
     draft_client: Annotated[StructuredLLMClient | None, Depends(get_draft_client)],
     generation_client: GenerationClientDep,
+    setup_client: SetupClientDep,
     youtube_fetch: Annotated[TranscriptFetch, Depends(get_youtube_fetch)],
     youtube_check: Annotated[AvailabilityCheck, Depends(get_youtube_check)],
 ) -> Response:
@@ -56,6 +58,7 @@ async def run_agent(
         queue=queue,
         draft_client=draft_client,
         generation_client=generation_client,
+        setup_client=setup_client,
         youtube_fetch=youtube_fetch,
         youtube_check=youtube_check,
         embedder=lambda: _query_embedder(request),

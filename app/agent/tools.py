@@ -22,7 +22,7 @@ from app.agent.approvals import APPROVAL_REQUIRED, SignedPlan, open_plan, sign_p
 from app.curriculum import TaxonomyImportService, TreeUpdate
 from app.curriculum.drafting import DraftBrief, draft_taxonomy
 from app.curriculum.taxonomy_schema import TaxonomyDocument
-from app.errors import AdaptiveTrainerError
+from app.errors import AdaptiveTrainerError, DomainRuleError, NotFoundError
 from app.generation.rounds import plan_targets
 from app.ingestion.youtube import AvailabilityCheck, TranscriptFetch
 from app.jobs.queue import JobQueue
@@ -30,13 +30,22 @@ from app.llm.client import StructuredLLMClient
 from app.persistence.models import QuestionSetupRow
 from app.persistence.repositories import CurriculumRepository
 from app.retrieval.embedder import Embedder
+from app.styles.schema import SetupSuggestion
 from app.subjects import profile_for_course_id
 from app.web.routes.api import books as books_routes
 from app.web.routes.api import coverage as coverage_routes
 from app.web.routes.api import curriculum as curriculum_routes
 from app.web.routes.api import generation_runs as run_routes
+from app.web.routes.api import questions as question_routes
 from app.web.routes.api import setup as setup_routes
-from app.web.routes.api.deps import ensure_in_course
+from app.web.routes.api import students as student_routes
+from app.web.routes.api.deps import (
+    book_in_course,
+    ensure_in_course,
+    question_in_course,
+    subtopics_in_course,
+    version_in_course,
+)
 from app.web.routes.api.retrieval import get_query_embedder
 from app.web.routes.api.schemas import (
     ChunksRunTarget,
@@ -48,6 +57,7 @@ from app.web.routes.api.schemas import (
     RunTarget,
     SaveSetupRequest,
     SetupCellsRunTarget,
+    SuggestSetupRequest,
     YouTubeImportRequest,
 )
 
@@ -66,6 +76,7 @@ class AgentDeps:
     queue: JobQueue
     draft_client: StructuredLLMClient | None = None
     generation_client: StructuredLLMClient | None = None
+    setup_client: StructuredLLMClient | None = None
     youtube_fetch: TranscriptFetch | None = None
     youtube_check: AvailabilityCheck | None = None
     embedder: Callable[[], Embedder] = get_query_embedder
@@ -425,3 +436,250 @@ def run_generation(ctx: RunContext[AgentDeps], plan_id: str, model_calls: int) -
             embedder=deps.embedder,
         )
     return StartedRun(kind=started.kind, job_id=started.job_id)
+
+
+# -- Reading the course: overview, styles, review, students -----------------------------------
+
+
+class CourseOverview(BaseModel):
+    """The ids the other tools take: the course's material and curriculum versions."""
+
+    books: list[dict[str, Any]]
+    curriculum_versions: list[dict[str, Any]]
+    approved_curriculum_version_id: int | None
+
+
+@tool
+def course_overview(ctx: RunContext[AgentDeps]) -> CourseOverview:
+    """The course's imported material and curriculum versions, with their ids."""
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        books = books_routes.list_books(session, deps.course_id)
+        versions = curriculum_routes.list_versions(session, deps.course_id)
+    return CourseOverview(
+        books=[
+            {"id": b.id, "title": b.title, "status": str(b.status), "format": str(b.source_format)}
+            for b in books.books
+        ],
+        curriculum_versions=[
+            {"id": v.id, "label": v.label, "status": str(v.status), "subtopics": v.subtopic_count}
+            for v in versions.versions
+        ],
+        approved_curriculum_version_id=versions.approved_version_id,
+    )
+
+
+class StylePreview(BaseModel):
+    """Styles side by side, each with its worked examples; or the catalogue to pick from."""
+
+    styles: list[dict[str, Any]]
+
+
+@tool
+def preview_styles(
+    ctx: RunContext[AgentDeps],
+    style_ids: Annotated[list[str], Field(max_length=3)] | None = None,
+) -> StylePreview:
+    """Compare up to three question styles side by side, with their sample questions.
+
+    With no ``style_ids``, lists every style this course can use (id, name, what it checks).
+    No model call: the samples are the styles' own worked examples.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        library = setup_routes.list_styles(
+            session, profile_for_course_id(session, deps.course_id)
+        ).styles
+    if not style_ids:
+        return StylePreview(
+            styles=[
+                style.model_dump(
+                    mode="json",
+                    include={"id", "name", "summary", "question_type", "difficulty_range"},
+                )
+                for style in library
+            ]
+        )
+    by_id = {style.id: style for style in library}
+    if unknown := [style_id for style_id in style_ids if style_id not in by_id]:
+        raise NotFoundError(f"No style {', '.join(unknown)} in this course's library.")
+    return StylePreview(styles=[by_id[style_id].model_dump(mode="json") for style_id in style_ids])
+
+
+@tool
+def suggest_setup(ctx: RunContext[AgentDeps], curriculum_version_id: int) -> SetupSuggestion:
+    """Suggest styles per subtopic and a question target per cell, for a ``new_setup`` plan.
+
+    One model call; saves nothing. Pass ``cell_targets`` to ``plan_generation`` unchanged.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        return setup_routes.suggest(
+            session,
+            deps.course_id,
+            SuggestSetupRequest(curriculum_version_id=curriculum_version_id),
+            deps.setup_client,
+        )
+
+
+class ReviewSummary(BaseModel):
+    total: int
+    reviewed: int
+    remaining: int
+    #: The next question waiting for a verdict, if any.
+    next_question_id: int | None
+    next_question_prompt: str | None
+
+
+@tool
+def review_summary(
+    ctx: RunContext[AgentDeps], curriculum_version_id: int | None = None
+) -> ReviewSummary:
+    """How many generated questions still wait for the professor's review, and the next one."""
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        queue = question_routes.review_queue(
+            session, deps.course_id, None, "all", curriculum_version_id
+        )
+    question = queue.question.question if queue.question else None
+    return ReviewSummary(
+        total=queue.total,
+        reviewed=queue.reviewed,
+        remaining=queue.remaining,
+        next_question_id=question.id if question else None,
+        next_question_prompt=question.prompt[:300] if question else None,
+    )
+
+
+#: How many weak subtopics a report lists.
+WEAKEST = 5
+
+
+class ClassReport(BaseModel):
+    student_count: int
+    measured_students: int
+    average_score: float | None
+    #: The subtopics the class is weakest in, weakest first.
+    weakest_subtopics: list[dict[str, Any]]
+
+
+class StudentReport(BaseModel):
+    student_id: int
+    name: str
+    answered: int
+    average_score: float | None
+    topics: list[dict[str, Any]]
+    #: The student's weakest subtopics, weakest first.
+    weakest_subtopics: list[dict[str, Any]]
+
+
+@tool
+def student_report(
+    ctx: RunContext[AgentDeps],
+    student_id: int | None = None,
+    curriculum_version_id: int | None = None,
+) -> ClassReport | StudentReport:
+    """How the class is doing, or with ``student_id`` one student's mastery and weak spots."""
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        if student_id is None:
+            summary = student_routes.class_summary(session, deps.course_id, curriculum_version_id)
+            return ClassReport(
+                student_count=summary.student_count,
+                measured_students=summary.measured_students,
+                average_score=summary.average_score,
+                weakest_subtopics=[
+                    {
+                        "subtopic": cell.subtopic_name,
+                        "topic": cell.topic_name,
+                        "average_weakness": round(cell.average_weakness, 3),
+                        "students": cell.student_count,
+                    }
+                    for cell in summary.weakness_cells[:WEAKEST]
+                ],
+            )
+        progress = student_routes.student_progress(session, deps.course_id, student_id)
+    weakest = sorted(progress.subtopics, key=lambda s: s.weakness, reverse=True)[:WEAKEST]
+    return StudentReport(
+        student_id=progress.student.id,
+        name=progress.student.display_name,
+        answered=progress.answered,
+        average_score=progress.average_score,
+        topics=[
+            topic.model_dump(mode="json", include={"topic_name", "p_known", "band"})
+            for topic in progress.topics
+        ],
+        weakest_subtopics=[
+            s.model_dump(mode="json", include={"subtopic_name", "topic_name", "weakness"})
+            for s in weakest
+        ],
+    )
+
+
+# -- Navigation -------------------------------------------------------------------------------
+
+#: Each Studio view's path inside ``/courses/{course}``; ``{id}`` is ``open_view``'s ``id``.
+VIEW_PATHS: dict[str, str] = {
+    "dashboard": "/dashboard",
+    "library": "/books",
+    "book": "/books/{id}",
+    "curriculum": "/curriculum",
+    "curriculum_version": "/curriculum/versions/{id}",
+    "subtopic": "/curriculum/subtopics/{id}",
+    "questions": "/questions",
+    "question": "/questions/{id}",
+    "generate": "/questions/generate",
+    "review": "/review",
+    "coverage": "/coverage",
+    "students": "/students",
+    "tutorials": "/tutorials",
+    "judges": "/judges",
+}
+View = Literal[
+    "dashboard",
+    "library",
+    "book",
+    "curriculum",
+    "curriculum_version",
+    "subtopic",
+    "questions",
+    "question",
+    "generate",
+    "review",
+    "coverage",
+    "students",
+    "tutorials",
+    "judges",
+]
+
+
+class OpenedView(BaseModel):
+    """The Studio page the chat panel navigates to, inside the current course."""
+
+    view: str
+    path: str
+
+
+@tool
+def open_view(ctx: RunContext[AgentDeps], view: View, id: int | None = None) -> OpenedView:
+    """Open a page of the Studio for the professor.
+
+    ``book``, ``curriculum_version``, ``subtopic`` and ``question`` need that row's ``id``.
+    """
+    template = VIEW_PATHS[view]
+    if "{id}" not in template:
+        return OpenedView(view=view, path=template)
+    if id is None:
+        raise DomainRuleError(f"Opening the {view} page needs its id.")
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        if view == "book":
+            book_in_course(session, id, deps.course_id)
+        elif view == "curriculum_version":
+            version_in_course(session, id, deps.course_id)
+        elif view == "subtopic":
+            CurriculumRepository(session).get_subtopic(id)
+            subtopics_in_course(session, [id], deps.course_id)
+        else:
+            question_in_course(session, id, deps.course_id)
+    return OpenedView(view=view, path=template.format(id=id))

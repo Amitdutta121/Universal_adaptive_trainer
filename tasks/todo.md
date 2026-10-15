@@ -782,10 +782,15 @@ for a human click. `plan_generation` returns a dry-run cost; `run_generation` re
 `student_report`.
 
 **Acceptance criteria:**
-- [ ] About 12 tools in total, each with a typed input and a test
+- [x] About 12 tools in total, each with a typed input and a test -- 15: the 4 of T32, the 5
+  gated/spending ones of T33, and `preview_styles` (up to 3 styles side by side with their own
+  worked examples; no model call), `review_summary`, `open_view` (a Studio path inside the
+  course; ids checked to be in the course), `student_report` (class or one student), plus
+  `course_overview` (the book/curriculum ids the others take) and `suggest_setup` (the setup
+  suggester, whose output `new_setup` plans take unchanged)
 
 **Verification:**
-- [ ] `PYTEST tests/test_agent_tools.py`
+- [x] `PYTEST tests/test_agent_tools.py` (19 passed, 2026-10-15)
 
 **Dependencies:** T33
 **Files likely touched:** `app/agent/tools.py`, `tests/test_agent_tools.py`

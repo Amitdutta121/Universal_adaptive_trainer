@@ -9,22 +9,42 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from pathlib import Path
+from typing import get_args
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from pydantic_ai.messages import ModelRequest, RetryPromptPart
 from sqlalchemy import select
 
 from app.agent.agent import agent_model
-from app.agent.tools import CoverageSummary, CurriculumProposal, CurriculumTree, ToolRefusal
+from app.agent.tools import (
+    VIEW_PATHS,
+    ClassReport,
+    CourseOverview,
+    CoverageSummary,
+    CurriculumProposal,
+    CurriculumTree,
+    OpenedView,
+    ReviewSummary,
+    StudentReport,
+    StylePreview,
+    ToolRefusal,
+    View,
+)
 from app.config import LLMProvider, Settings
 from app.curriculum import TaxonomyImportService
+from app.domain.enums import QuestionStatus
 from app.errors import ConfigurationError
 from app.persistence.database import get_session_factory
 from app.persistence.models import BookRow, CourseRow, CurriculumVersionRow
+from app.styles.schema import SetupSuggestion
 from app.web.routes.api.agent import get_agent_model
 from tests.agent_support import result_of, run, scripted
+from tests.test_coverage import _question
+from tests.test_styles import FakeSuggester
 from tests.test_taxonomy_drafting import _FakeDrafter
 from tests.test_youtube_source import URL, Fakes
 
@@ -241,3 +261,143 @@ def test_the_ag_ui_route_runs_the_agent_with_its_tools(
     assert "Nine cells are empty." in "".join(
         e.get("delta", "") for e in events if e["type"] == "TEXT_MESSAGE_CONTENT"
     )
+
+
+# -- Task 34: course_overview, preview_styles, suggest_setup, review_summary, student_report,
+# -- open_view ---------------------------------------------------------------------------------
+
+
+def test_course_overview_lists_the_ids_the_other_tools_take(db) -> None:
+    version_id = _import_taxonomy()
+    overview = result_of(_run(("course_overview", {})), "course_overview")
+    assert isinstance(overview, CourseOverview)
+    assert overview.approved_curriculum_version_id == version_id
+    assert overview.curriculum_versions[0] == {
+        "id": version_id,
+        "label": "Intro Python",
+        "status": "approved",
+        "subtopics": 3,
+    }
+    assert overview.books == []
+
+
+def test_preview_styles_without_ids_lists_the_course_library(db) -> None:
+    preview = result_of(_run(("preview_styles", {})), "preview_styles")
+    assert isinstance(preview, StylePreview)
+    assert len(preview.styles) == 10
+    assert "examples" not in preview.styles[0]
+
+
+def test_preview_styles_puts_up_to_three_styles_side_by_side_with_their_samples(db) -> None:
+    ids = ["py.predict_output", "py.fix_one_bug"]
+    preview = result_of(_run(("preview_styles", {"style_ids": ids})), "preview_styles")
+    assert [style["id"] for style in preview.styles] == ids
+    assert all(len(style["examples"]) == 2 for style in preview.styles)
+
+    unknown = result_of(_run(("preview_styles", {"style_ids": ["py.nope"]})), "preview_styles")
+    assert isinstance(unknown, ToolRefusal)
+
+
+def test_preview_styles_refuses_more_than_three_as_a_retry_to_the_model(db) -> None:
+    four = ["py.predict_output", "py.fix_one_bug", "py.write_function", "py.order_lines"]
+    messages = _run(("preview_styles", {"style_ids": four}))
+    retries = [
+        part
+        for message in messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, RetryPromptPart)
+    ]
+    assert retries and retries[0].tool_name == "preview_styles"
+
+
+def test_suggest_setup_runs_the_setup_suggester_and_saves_nothing(db) -> None:
+    version_id = _import_taxonomy()
+    with get_session_factory()() as session:
+        subtopic_id = session.get(CurriculumVersionRow, version_id).topics[0].subtopics[0].id
+    fake = FakeSuggester(
+        {
+            "subtopics": [
+                {"subtopic_id": subtopic_id, "style_ids": ["py.predict_output"], "reason": "r"}
+            ]
+        }
+    )
+    suggestion = result_of(
+        _run(("suggest_setup", {"curriculum_version_id": version_id}), setup_client=fake),
+        "suggest_setup",
+    )
+    assert isinstance(suggestion, SetupSuggestion)
+    assert len(fake.calls) == 1
+    # Every subtopic gets styles and every cell a target, as from POST /setup/suggest.
+    assert len(suggestion.subtopics) == 3 and len(suggestion.cell_targets) == 9
+
+
+def test_review_summary_matches_the_review_queue_route(client: TestClient) -> None:
+    version_id = _import_taxonomy()
+    with get_session_factory()() as session:
+        version = session.get(CurriculumVersionRow, version_id)
+        _question(
+            session,
+            version=version,
+            subtopic_id=version.topics[0].subtopics[0].id,
+            status=QuestionStatus.VALIDATION_PASSED,
+        )
+    summary = result_of(_run(("review_summary", {})), "review_summary")
+    route = client.get("/api/questions/review-queue").json()
+    assert isinstance(summary, ReviewSummary)
+    assert (summary.total, summary.reviewed, summary.remaining) == (
+        route["total"],
+        route["reviewed"],
+        route["remaining"],
+    )
+    expected = route["question"]["question"]["id"] if route["question"] else None
+    assert summary.next_question_id == expected
+
+
+def test_student_report_gives_the_class_summary_or_one_student(client: TestClient) -> None:
+    report = result_of(_run(("student_report", {})), "student_report")
+    assert isinstance(report, ClassReport)
+    assert report.student_count == 0 and report.weakest_subtopics == []
+
+    created = client.post("/api/students", json={"display_name": "Ada", "email": "ada@example.com"})
+    assert created.status_code == 201, created.text
+    student_id = created.json()["id"]
+    one = result_of(_run(("student_report", {"student_id": student_id})), "student_report")
+    assert isinstance(one, StudentReport)
+    assert (one.name, one.answered, one.topics) == ("Ada", 0, [])
+
+    missing = result_of(_run(("student_report", {"student_id": 999_999})), "student_report")
+    assert isinstance(missing, ToolRefusal)
+
+
+def test_open_view_returns_the_studio_path_inside_the_course(db) -> None:
+    version_id = _import_taxonomy()
+
+    def opened(args: dict):
+        return result_of(_run(("open_view", args)), "open_view")
+
+    assert opened({"view": "coverage"}) == OpenedView(view="coverage", path="/coverage")
+    assert opened({"view": "curriculum_version", "id": version_id}).path == (
+        f"/curriculum/versions/{version_id}"
+    )
+    assert isinstance(opened({"view": "book"}), ToolRefusal)  # needs an id
+    assert isinstance(opened({"view": "book", "id": 999_999}), ToolRefusal)
+    assert isinstance(opened({"view": "subtopic", "id": 999_999}), ToolRefusal)
+
+
+def test_open_view_cannot_open_a_row_of_another_course(db) -> None:
+    mine, other = _course("Mine"), _course("Other")
+    version_id = _import_taxonomy(course_id=other)
+    refusal = result_of(
+        _run(("open_view", {"view": "curriculum_version", "id": version_id}), course_id=mine),
+        "open_view",
+    )
+    assert isinstance(refusal, ToolRefusal)
+
+
+def test_every_view_has_a_studio_page() -> None:
+    pages = Path(__file__).parents[1] / "frontend" / "src" / "app" / "courses" / "[courseId]"
+    assert set(VIEW_PATHS) == set(get_args(View))
+    for path in VIEW_PATHS.values():
+        folder = path.strip("/").replace("{id}", "*")
+        assert list(pages.glob(f"{folder}/page.tsx")), path
