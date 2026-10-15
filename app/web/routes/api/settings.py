@@ -127,7 +127,7 @@ def _save_or_switch(
         if running is not None and RoundStatus(running.status) in _IN_FLIGHT:
             raise DomainRuleError(
                 "An embedding model switch is running.",
-                detail="Wait for it to finish, or cancel it from the Jobs panel.",
+                detail="Wait for it to finish; its progress is on the Settings screen.",
             )
         base = get_settings()
         new_model = apply_row(base, role, row).embedding_model

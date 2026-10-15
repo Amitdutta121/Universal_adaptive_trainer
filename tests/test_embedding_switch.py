@@ -202,6 +202,8 @@ def test_saving_a_new_embedding_model_runs_the_switch_job(
     assert embeddings["model"] == "new-v2"
     assert embeddings["sources"]["api_key"] == "db"
     assert embeddings["switch"] is None  # the pending row is gone once it is active
+    # The job belongs to no course, so only an unscoped listing (as here, where the suite
+    # lifts the course check) shows it; in the app its progress is on the Settings screen.
     jobs = admin_client.get("/api/jobs").json()["jobs"]
     assert jobs[0]["kind"] == "embedding_switch" and jobs[0]["status"] == "done"
 

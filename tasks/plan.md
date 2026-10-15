@@ -65,7 +65,7 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 - [x] T41: Settings store, with the database overriding environment variables, per role
 - [x] T42: Settings API + test connection + model list
 - [x] T43: Changing the embedding model re-embeds and switches atomically
-- [ ] T44: Settings screen
+- [x] T44: Settings screen
 
 ### Checkpoint C2: Switch the generation model and the embedding model from the UI; retrieval keeps working throughout
 

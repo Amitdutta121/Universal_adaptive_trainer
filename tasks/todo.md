@@ -298,18 +298,22 @@ It follows the existing course-screen design patterns, with no new visual langua
 
 **Acceptance criteria:**
 - [x] A non-admin doesn't see the page in navigation and gets 403 from the API (link in the sidebar footer: settings are instance-wide, the nav is per course)
-- [ ] Switching the generation model and the embedding model works end to end
+- [x] Switching the generation model and the embedding model works end to end
 
 **Verification:**
 - [x] `FRONTEND`
-- [ ] Manual check (`run` skill): switch the generation model, generate one question; switch the embedding model, watch the re-embed, retrieve
+- [x] Manual check (`run` skill): switch the generation model, generate one question; switch the embedding model, watch the re-embed, retrieve
+  (2026-10-14: gpt-4o -> gpt-4o-mini, question 358 made by gpt-4o-mini; 3-small -> 3-large,
+  842 chunks re-embedded while a search every 2 s kept answering on 3-small, then 3-large;
+  both reset to .env, the switch back embedded 0 chunks)
 
 **Dependencies:** T43
 **Files likely touched:** `frontend/src/app/settings/page.tsx`, `frontend/src/app/settings/settings-screen.tsx`, `frontend/src/lib/api/queries.ts`, `frontend/src/lib/navigation.ts`
 **Estimated scope:** M
 
 ## Checkpoint C2
-- [ ] Both switches work in the UI, retrieval never breaks, and keys stay masked everywhere; human review
+- [x] Both switches work in the UI, retrieval never breaks, and keys stay masked everywhere
+- [ ] Human review
 
 ---
 

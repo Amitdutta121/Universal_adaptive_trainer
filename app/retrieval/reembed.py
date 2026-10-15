@@ -51,7 +51,7 @@ def start_switch(session: Session, pending: ModelSettingRow) -> BackgroundJobRow
     if running is not None and RoundStatus(running.status) in _IN_FLIGHT:
         raise DomainRuleError(
             "An embedding model switch is already running.",
-            detail="Wait for it to finish, or cancel it from the Jobs panel.",
+            detail="Wait for it to finish; its progress is on the Settings screen.",
         )
     model = apply_row(get_settings(), ModelRole.EMBEDDINGS, pending).embedding_model
     job = create_job(
