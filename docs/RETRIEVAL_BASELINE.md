@@ -170,3 +170,28 @@ Ablation of the in-house RRF (k = 60, 1:1), toggling LlamaIndex's two differing 
   (0.952 / 0.830) was picked on the gold set and is not adopted.
 - **LlamaIndex adds nothing a dependency would pay for:** the same result is two parameters
   in `app/retrieval/bm25.py` (`PyStemmer`, already what `bm25s` uses) and `chunks.py`.
+
+### Decision: hybrid through LlamaIndex is the default (2026-10-14)
+
+Chosen by the human at Checkpoint C despite the trade above (student questions up, nDCG@10 and
+heading MRR slightly down). `app/retrieval/fusion.py` wraps `QueryFusionRetriever`
+(`reciprocal_rerank`, `num_queries=1`, each side's top 10) around the precomputed cosine ranking
+and LlamaIndex's `BM25Retriever`; the in-house `bm25.py` is gone. `CHUNK_RETRIEVAL_MODE=dense`
+switches back. Re-run through the app:
+
+```
+python -m scripts.eval_retrieval      # mode from CHUNK_RETRIEVAL_MODE, hybrid by default
+```
+
+| k | recall | precision | nDCG | MRR |
+|---|---|---|---|---|
+| 1 | 0.607 | 0.879 | 0.879 | 0.879 |
+| 3 | 0.948 | 0.672 | 0.783 | 0.937 |
+| 5 | 0.964 | 0.494 | 0.769 | 0.937 |
+| 10 | 0.982 | 0.298 | 0.809 | 0.937 |
+
+At k = 5: heading MRR 0.931, student 0.944 (recall 1.000), subtopic 0.944. Matches the spike.
+
+- A query of only stopwords gets every chunk back from LlamaIndex's BM25 at score 0 in
+  arbitrary order, which nudges the dense order. Included in the measured numbers; left as is.
+- Chunks with identical text collapse to one result (LlamaIndex fuses by node hash).

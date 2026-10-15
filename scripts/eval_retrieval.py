@@ -8,7 +8,7 @@ section retriever, retired in Task 10; its numbers are in ``docs/RETRIEVAL_BASEL
 
     python -m scripts.eval_retrieval                        # the configured DATABASE_URL
     python -m scripts.eval_retrieval --db data/adaptive_trainer.db
-    python -m scripts.eval_retrieval --mode hybrid           # dense + BM25, fused by RRF
+    python -m scripts.eval_retrieval --mode hybrid           # dense + BM25 fused by LlamaIndex
 
 Prints recall, precision, nDCG and MRR at k = 1, 3, 5, 10, scored by page overlap
 (see :mod:`app.retrieval.eval`), then the same at k = 5 split by query kind.
@@ -50,10 +50,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--db", help="SQLite file to read (default: DATABASE_URL)")
     parser.add_argument("--gold", type=Path, default=GOLD)
-    parser.add_argument("--mode", choices=("dense", "hybrid"), default="dense")
+    parser.add_argument("--mode", choices=("dense", "hybrid"), help="default: CHUNK_RETRIEVAL_MODE")
     args = parser.parse_args()
-
     settings = get_settings()
+    args.mode = args.mode or settings.chunk_retrieval_mode
+
     url = f"sqlite:///{Path(args.db).as_posix()}" if args.db else settings.database_url
     gold = json.loads(args.gold.read_text(encoding="utf-8"))
 

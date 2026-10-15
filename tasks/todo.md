@@ -216,8 +216,9 @@ vector ranking by reciprocal rank fusion inside `ChunkRetriever`. Compare with L
 
 **Acceptance criteria:**
 - [ ] Hybrid ≥ vector-only on every metric in the harness, with the results in the doc -- NOT met:
-  hybrid is below dense on every metric (MRR@10 0.934 → 0.888); results and diagnosis in
-  `docs/RETRIEVAL_BASELINE.md`. Dense stays the default; hybrid is off in the app
+  in-house RRF was below dense everywhere (MRR@10 0.888). LlamaIndex `QueryFusionRetriever`
+  (MRR@10 0.937, student MRR@5 0.944) trades nDCG@10 −0.015 and heading MRR −0.020; the human
+  chose it as the default at Checkpoint C (`CHUNK_RETRIEVAL_MODE`, `docs/RETRIEVAL_BASELINE.md`)
 - [x] Results are deterministic for a fixed index (stable sort in BM25 and RRF ties)
 
 **Verification:**
@@ -229,7 +230,7 @@ vector ranking by reciprocal rank fusion inside `ChunkRetriever`. Compare with L
 **Estimated scope:** S
 
 ## Checkpoint C
-- [ ] The eval report has been reviewed by the human
+- [x] The eval report has been reviewed by the human (2026-10-14: use LlamaIndex hybrid)
 
 ---
 

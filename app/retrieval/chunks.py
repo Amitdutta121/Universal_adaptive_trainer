@@ -4,9 +4,10 @@
 model), filled lazily for whatever is missing, so switching the embedding model embeds
 afresh and the same model reuses the cache. Only a book's current version is searched.
 
-``ChunkRetriever`` ranks chunks by dense cosine or, with ``hybrid``, by reciprocal rank
-fusion of the cosine ranking and a BM25 ranking over the same text (Task 11). A chunk is
-embedded, and BM25-indexed, with its heading path prepended, which beat raw text in the
+``ChunkRetriever`` ranks chunks by dense cosine or, with ``hybrid`` (the default, from
+``CHUNK_RETRIEVAL_MODE``), by LlamaIndex's fusion of the cosine ranking with BM25 over the
+same text (``app.retrieval.fusion``, Task 11). A chunk is embedded, and BM25-indexed, with
+its heading path prepended, which beat raw text in the
 parse spike (``docs/PARSE_SPIKE.md``).
 """
 
@@ -20,6 +21,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.domain.chunks import HEADING_SEPARATOR
 from app.persistence.models import (
     BookRow,
@@ -29,8 +31,8 @@ from app.persistence.models import (
     SubtopicRow,
 )
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
-from app.retrieval.bm25 import bm25_ranking, reciprocal_rank_fusion
 from app.retrieval.embedder import Embedder
+from app.retrieval.fusion import fused_ranking
 
 #: Chunks embedded and committed together, so a provider failure keeps finished groups.
 _COMMIT_EVERY = 64
@@ -153,11 +155,12 @@ class RetrievedChunk:
 
 class ChunkRetriever:
     def __init__(
-        self, session: Session, store: ChunkEmbeddingStore, *, hybrid: bool = False
+        self, session: Session, store: ChunkEmbeddingStore, *, hybrid: bool | None = None
     ) -> None:
+        """``hybrid`` defaults to ``CHUNK_RETRIEVAL_MODE``."""
         self._session = session
         self._store = store
-        self._hybrid = hybrid
+        self._hybrid = get_settings().chunk_retrieval_mode == "hybrid" if hybrid is None else hybrid
 
     def search(
         self, query: str, *, book_ids: list[int] | None = None, top_k: int = 5
@@ -195,10 +198,10 @@ class ChunkRetriever:
         ids = [chunk_id for chunk_id in loaded.chunk_ids if chunk_id in rows]
         position = {chunk_id: i for i, chunk_id in enumerate(loaded.chunk_ids)}
         dense = sorted(ids, key=lambda chunk_id: -sims[position[chunk_id]])
-        lexical = [ids[i] for i in bm25_ranking([embedding_text(rows[c]) for c in ids], query)]
+        ranked = [(c, embedding_text(rows[c]), float(sims[position[c]])) for c in dense]
         return [
             _to_result(rows[chunk_id], float(sims[position[chunk_id]]))
-            for chunk_id in reciprocal_rank_fusion([dense, lexical])[:top_k]
+            for chunk_id in fused_ranking(query, ranked, top_k=top_k)
         ]
 
     def for_subtopic(

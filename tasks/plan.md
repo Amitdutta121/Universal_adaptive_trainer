@@ -57,7 +57,7 @@ Full task definitions, acceptance criteria and verification are in `tasks/todo.m
 ### Checkpoint B: Full suite green, frozen-set replay unchanged, Agah import + scroll generation work in the UI
 
 ### Phase 2: Hybrid retrieval (M3)
-- [ ] T11: BM25 + RRF, measured against the baseline
+- [x] T11: BM25 + RRF, measured against the baseline (LlamaIndex fusion is the default)
 
 ### Checkpoint C: Eval report shows hybrid ≥ baseline on every metric
 

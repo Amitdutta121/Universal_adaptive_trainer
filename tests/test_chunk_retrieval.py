@@ -19,13 +19,13 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.persistence.repositories import ChunkRepository
-from app.retrieval.bm25 import bm25_ranking, reciprocal_rank_fusion
 from app.retrieval.chunks import (
     ChunkEmbeddingStore,
     ChunkRetriever,
     embedding_text,
     subtopic_query_text,
 )
+from app.retrieval.fusion import fused_ranking
 from app.web.routes.api.retrieval import get_query_embedder
 
 
@@ -204,25 +204,28 @@ def test_subtopic_query_text_shape(session: Session) -> None:
 # --- Hybrid retrieval (Task 11) ---------------------------------------------------------
 
 
-def test_bm25_ranks_exact_code_tokens_and_drops_documents_without_a_query_term() -> None:
-    corpus = [
-        "Strings have strip and rstrip methods.",
-        "random.randint(a, b) picks an integer.",
-        "Lists hold values in order.",
-        "randint is in the random module; randint includes both ends.",
+def test_fusion_lifts_an_exact_code_token_over_the_dense_order() -> None:
+    dense = [
+        ("a", "Strings have strip and rstrip methods.", 0.9),
+        ("b", "random.randint(a, b) picks an integer.", 0.5),
+        ("c", "Lists hold values in order.", 0.4),
+        ("d", "randint is in the random module; randint includes both ends.", 0.1),
     ]
 
-    assert bm25_ranking(corpus, "how does randint work?") == [3, 1]
-    assert bm25_ranking(corpus, "the of and") == []
-    assert bm25_ranking([], "randint") == []
+    ranked = fused_ranking("how does randint work?", dense, top_k=4)
+
+    assert ranked[0] == "b"  # second by cosine, first by BM25
+    assert ranked.index("d") < ranked.index("c")  # last by cosine, lifted by BM25
+    assert ranked == fused_ranking("how does randint work?", dense, top_k=4)
+    assert fused_ranking("how does randint work?", dense, top_k=2) == ranked[:2]
 
 
-def test_rrf_sums_reciprocal_ranks_and_breaks_ties_by_first_seen() -> None:
-    # a: 1/61 + 1/62, b: 1/62 + 1/61 (tie, a seen first), c: 1/63 only.
-    assert reciprocal_rank_fusion([["a", "b", "c"], ["b", "a"]]) == ["a", "b", "c"]
-    # k = 1: y is second in both lists (1/3 + 1/3) and beats each list's top (1/2).
-    assert reciprocal_rank_fusion([["x", "y"], ["z", "y"]], k=1) == ["y", "x", "z"]
-    assert reciprocal_rank_fusion([]) == []
+def test_fusion_edge_cases() -> None:
+    assert fused_ranking("randint", [], top_k=3) == []
+    assert fused_ranking("anything", [("a", "one chunk", 0.2)], top_k=5) == ["a"]
+    # Identical text is one LlamaIndex node hash: the first copy survives.
+    same = [("a", "same text", 0.9), ("b", "same text", 0.8), ("c", "randint", 0.1)]
+    assert fused_ranking("randint", same, top_k=3) == ["a", "c"]
 
 
 def test_hybrid_lifts_a_lexical_match_the_embedder_misses_and_keeps_cosine_scores(
@@ -249,5 +252,5 @@ def test_hybrid_lifts_a_lexical_match_the_embedder_misses_and_keeps_cosine_score
     assert {hit.snippet for hit in hits} == {texts[0], texts[1]}
     assert {hit.snippet: hit.score for hit in hits}[texts[1]] == 0.0  # still the cosine
     assert hybrid.search("randint program", top_k=5) == hybrid.search("randint program", top_k=5)
-    dense = ChunkRetriever(session, store).search("randint program", top_k=1)
+    dense = ChunkRetriever(session, store, hybrid=False).search("randint program", top_k=1)
     assert [hit.snippet for hit in dense] == [texts[0]]

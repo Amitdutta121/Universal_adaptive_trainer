@@ -39,9 +39,11 @@ dependencies = [
     # ADR-048.
     "pymupdf>=1.28",
     "pymupdf4llm>=1.28",
-    # BM25 half of hybrid chunk retrieval (app/retrieval/bm25.py, Task 11). MIT, needs only
-    # numpy; rank_bm25 is unmaintained since 2022.
-    "bm25s>=0.2",
+    # Hybrid chunk retrieval (app/retrieval/fusion.py, Task 11): QueryFusionRetriever + BM25
+    # (bm25s, PyStemmer). MIT. Its stock setup beat our own BM25 + RRF, MRR@10 0.937 vs 0.888
+    # (docs/RETRIEVAL_BASELINE.md). Imported lazily; no LLM or embedding call goes through it.
+    "llama-index-core>=0.14.25,<0.15",
+    "llama-index-retrievers-bm25>=0.8",
 ]
 
 [project.optional-dependencies]

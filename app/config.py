@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     #: output budget thinking. ``low`` keeps generation and judging fast and cheap.
     llm_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     embedding_model: str = "openai/text-embedding-3-small"
+    #: How ``ChunkRetriever`` ranks: ``hybrid`` fuses the cosine ranking with BM25 through
+    #: LlamaIndex (``app.retrieval.fusion``); ``dense`` is cosine alone (Task 11).
+    chunk_retrieval_mode: Literal["dense", "hybrid"] = "hybrid"
     validation_timeout_seconds: float = Field(default=2.0, gt=0)
     # Where student and generated code runs (C6, ADR-055). ``local`` is a plain subprocess and
     # NOT a sandbox -- fine for one researcher's machine, not for real students. ``piston`` sends
