@@ -21,7 +21,9 @@
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { COURSE_HEADER } from "@/lib/api/client";
 import { API_BASE_URL } from "@/lib/env";
+import { useCourseId } from "@/lib/use-course";
 import type { SheetRow } from "../../spec-sheet-types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -129,7 +131,17 @@ export function PdfPageViewer({
     fitMode === "page" ? Math.min(containerWidth, fitByHeight) : containerWidth;
   const pageWidth = Math.max(240, Math.round(basePageWidth * zoom));
 
-  const sourceUrl = useMemo(() => `${API_BASE_URL}/api/books/${bookId}/source`, [bookId]);
+  const courseId = useCourseId();
+  // pdf.js fetches the file itself, outside the API client's middleware, so the course
+  // header every course-scoped route requires (ADR-058) is passed here explicitly.
+  const source = useMemo(
+    () => ({
+      url: `${API_BASE_URL}/api/books/${bookId}/source`,
+      httpHeaders: { [COURSE_HEADER]: String(courseId) },
+      withCredentials: true,
+    }),
+    [bookId, courseId],
+  );
   const anchors = useMemo(() => buildAnchors(rows), [rows]);
   const selectedRow = useMemo(
     () => rows.find((row) => row.chunkId === selectedChunkId) ?? null,
@@ -342,7 +354,7 @@ export function PdfPageViewer({
           </p>
         ) : (
           <Document
-            file={sourceUrl}
+            file={source}
             onLoadSuccess={({ numPages: total }) => setNumPages(total)}
             onLoadError={() => setLoadError(true)}
             loading={<p className="py-8 text-muted-foreground text-sm">Loading document…</p>}
