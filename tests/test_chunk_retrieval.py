@@ -13,6 +13,7 @@ from app.domain.enums import CurriculumStatus
 from app.persistence.models import (
     ChunkEmbeddingRow,
     ChunkRow,
+    CourseRow,
     CurriculumVersionRow,
     SubtopicRow,
     TopicRow,
@@ -129,8 +130,11 @@ def test_search_endpoint(client: TestClient, session: Session) -> None:
     assert neither.status_code in (400, 422)
 
 
-def _subtopic(session: Session, *, source_book_ids: list[int] | None = None) -> SubtopicRow:
+def _subtopic(
+    session: Session, *, source_book_ids: list[int] | None = None, course_id: int | None = None
+) -> SubtopicRow:
     version = CurriculumVersionRow(
+        course_id=course_id,
         label="v1",
         status=CurriculumStatus.APPROVED,
         approved_at=datetime.now(UTC),
@@ -163,6 +167,24 @@ def test_for_subtopic_searches_only_the_taxonomys_source_books(session: Session)
     assert hits
     assert {hit.book_id for hit in hits} == {in_scope.id}
     assert out_of_scope.id not in {hit.book_id for hit in hits}
+
+
+def test_for_subtopic_without_source_books_stays_in_the_taxonomys_course(
+    session: Session,
+) -> None:
+    mine, other = CourseRow(name="Mine"), CourseRow(name="Other")
+    session.add_all([mine, other])
+    session.flush()
+    in_course = _book(session, course_id=mine.id)
+    other_course = _book(session, course_id=other.id)
+    subtopic = _subtopic(session, course_id=mine.id)
+    retriever = ChunkRetriever(session, ChunkEmbeddingStore(session, KeywordEmbedder()))
+
+    hits = retriever.for_subtopic(subtopic.id, top_k=10)
+
+    assert hits
+    assert {hit.book_id for hit in hits} == {in_course.id}
+    assert other_course.id not in {hit.book_id for hit in hits}
 
 
 def test_subtopic_query_text_shape(session: Session) -> None:

@@ -177,10 +177,16 @@ class ChunkRetriever:
     def for_subtopic(
         self, subtopic_id: int, *, top_k: int = 5, book_ids: list[int] | None = None
     ) -> list[RetrievedChunk]:
-        """Chunks for a subtopic, from its taxonomy's source books, else from ``book_ids``."""
+        """Chunks for a subtopic: from its taxonomy's source books, else ``book_ids``, else the
+        books of the taxonomy's own course -- never another course's books (ADR-060)."""
         subtopic = CurriculumRepository(self._session).get_subtopic(subtopic_id)
         version = self._session.get(CurriculumVersionRow, subtopic.topic.curriculum_version_id)
-        scoped = list(version.source_book_ids) if version and version.source_book_ids else book_ids
+        if version and version.source_book_ids:
+            scoped: list[int] | None = list(version.source_book_ids)
+        elif book_ids is not None:
+            scoped = book_ids
+        else:
+            scoped = course_book_ids(self._session, version.course_id if version else None)
         return self.search(subtopic_query_text(subtopic), book_ids=scoped, top_k=top_k)
 
 
