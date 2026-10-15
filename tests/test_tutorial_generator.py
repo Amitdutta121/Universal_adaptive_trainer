@@ -16,6 +16,7 @@ from app.errors import DomainRuleError, MalformedModelOutputError
 from app.persistence.models import CurriculumVersionRow, SubtopicRow, TopicRow
 from app.retrieval.chunks import RetrievedChunk
 from app.tutorials.generator import BlockRequest, generate_block, get_recipes
+from app.tutorials.html_check import HtmlCheckUnavailable
 from app.tutorials.renderers import StepperDraft, payload_problems
 from app.tutorials.tools.python_trace import python_trace
 
@@ -214,3 +215,48 @@ def test_the_seed_recipes_are_offered_for_intro_python() -> None:
         "py.misconception_line",
     }
     assert get_recipes("no_such_subject") == []
+
+
+def test_an_html_block_that_fails_its_check_is_retried_then_failed(
+    session: Session, setting: Any
+) -> None:
+    draft = {"title": "T", "code": PROGRAM, "notes": []}
+    client = QueuedClient(draft, draft)
+    seen: list[list[Any]] = []
+
+    def failing_check(payload: dict[str, Any], checks: list[Any]) -> list[str]:
+        seen.append(checks)
+        return ["console error: boom"]
+
+    subtopic, retriever = setting
+    block = generate_block(
+        session,
+        BlockRequest(subtopic.id, "py.code_trace_stepper", GuidanceLevel.WORKED),
+        client=client,
+        retriever=retriever,
+        html_check=failing_check,
+    )
+    assert len(client.calls) == 2 and len(seen) == 2
+    assert [check.value for check in seen[0]] == ["html_loads", "trace_matches"]
+    assert block.status is TutorialBlockStatus.FAILED
+    assert block.error == "console error: boom"
+
+
+def test_without_a_browser_an_html_block_fails_without_a_retry(
+    session: Session, setting: Any
+) -> None:
+    def unavailable(payload: dict[str, Any], checks: list[Any]) -> list[str]:
+        raise HtmlCheckUnavailable("html blocks cannot be checked: no browser")
+
+    client = QueuedClient({"title": "T", "code": PROGRAM, "notes": []})
+    subtopic, retriever = setting
+    block = generate_block(
+        session,
+        BlockRequest(subtopic.id, "py.code_trace_stepper", GuidanceLevel.WORKED),
+        client=client,
+        retriever=retriever,
+        html_check=unavailable,
+    )
+    assert len(client.calls) == 1
+    assert block.status is TutorialBlockStatus.FAILED
+    assert block.error == "html blocks cannot be checked: no browser"

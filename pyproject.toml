@@ -60,6 +60,13 @@ dependencies = [
 parse = [
     "docling>=2.0",
 ]
+# Headless check of html tutorial blocks at generation time (app/tutorials/html_check.py,
+# Task 23): console errors, network requests, and the stepper clicked through against its
+# recorded trace. Needs its browser too: playwright install chromium. Without it html
+# blocks are saved as failed, never shipped unchecked.
+htmlcheck = [
+    "playwright>=1.48",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.7",

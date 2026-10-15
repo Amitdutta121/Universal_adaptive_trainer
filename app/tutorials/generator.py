@@ -1,6 +1,7 @@
 """Generate one tutorial block: recipe + retrieved chunks + tool output -> one model call (Task 21).
 
-The block's payload is checked against its renderer's contract (``app/tutorials/renderers.py``).
+The block's payload is checked against its renderer's contract (``app/tutorials/renderers.py``),
+and an html block is loaded headless (``app/tutorials/html_check.py``).
 An invalid payload -- or an unreadable reply -- gets one repair retry that shows the model what
 was wrong; a second failure saves the block as ``failed`` with the reason, so a professor sees
 what was tried. There is no groundedness judge: the block stores the ids of the chunks it was
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
@@ -31,6 +33,7 @@ from app.persistence.models import TutorialBlockRow
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.retrieval.chunks import ChunkRetriever
 from app.subjects import profile_for_version
+from app.tutorials.html_check import HtmlCheckUnavailable, check_html_block
 from app.tutorials.loader import load_recipes
 from app.tutorials.renderers import (
     ChartPayload,
@@ -43,7 +46,7 @@ from app.tutorials.renderers import (
     stepper_html,
     stepper_problems,
 )
-from app.tutorials.schema import RecipeInput, RecipeTool, TutorialRecipe
+from app.tutorials.schema import RecipeCheck, RecipeInput, RecipeTool, TutorialRecipe
 from app.tutorials.tools.python_trace import TraceResult, python_trace
 from app.validation.runner import LocalCodeRunner
 
@@ -98,6 +101,10 @@ def get_recipe(subject: str, recipe_id: str) -> TutorialRecipe:
         if recipe.id == recipe_id:
             return recipe
     raise NotFoundError(f"No tutorial recipe {recipe_id!r} for this subject.")
+
+
+#: Loads an html block headless and returns its problems (``app/tutorials/html_check.py``).
+HtmlCheck = Callable[[dict[str, Any], list[RecipeCheck]], list[str]]
 
 
 @dataclass(frozen=True)
@@ -190,6 +197,7 @@ def generate_block(
     client: StructuredLLMClient,
     retriever: ChunkRetriever,
     runner: LocalCodeRunner | None = None,
+    html_check: HtmlCheck = check_html_block,
 ) -> TutorialBlockRow:
     """Generate, check and save one block (flushed, not committed); ``failed`` if still invalid.
 
@@ -251,6 +259,13 @@ def generate_block(
             asking = f"{prompt}\n\n{_correction(problems)}"
             continue
         payload, problems = _payload(recipe, draft, code=request.code, trace=trace, runner=runner)
+        if not problems and recipe.renderer is TutorialRenderer.HTML:
+            try:
+                problems = html_check(payload, list(recipe.checks))
+            except HtmlCheckUnavailable as exc:
+                # Not the model's fault, so no retry; never ship html nobody has loaded.
+                problems = [str(exc)]
+                break
         if not problems:
             break
         logger.info("Tutorial block attempt %s/%s invalid: %s", attempt, MAX_ATTEMPTS, problems)

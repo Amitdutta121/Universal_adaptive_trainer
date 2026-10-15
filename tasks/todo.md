@@ -537,10 +537,13 @@ New dependencies: `mermaid` and `chart.js`, with justification.
 through and compare the displayed steps to the trace. Add a Python Playwright dependency, with justification.
 
 **Acceptance criteria:**
-- [ ] A deliberately broken stepper fixture fails; a correct one passes
+- [x] A deliberately broken stepper fixture fails; a correct one passes (2026-10-15: tampered
+  trace, missing step and broken script each fail; console errors and any network request fail
+  every html block. In `app/tutorials/html_check.py` -- `checks.py` holds the recipe CI checks.
+  Optional `htmlcheck` extra; without a browser the block is saved failed, not unchecked)
 
 **Verification:**
-- [ ] `PYTEST tests/test_html_block_check.py`
+- [x] `PYTEST tests/test_html_block_check.py` (real headless Chromium, nothing skipped)
 
 **Dependencies:** T21
 **Files likely touched:** `app/tutorials/checks.py`, `tests/test_html_block_check.py`, `pyproject.toml`
