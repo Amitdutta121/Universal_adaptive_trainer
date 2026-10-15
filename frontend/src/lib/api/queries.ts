@@ -32,8 +32,11 @@ type ChunkGenerationSpec = Schemas["ChunkGenerationSpec"];
 /** The query key factory. Every key in the app starts here. */
 export const qk = {
   tutorials: {
-    recipes: () => ["tutorials", "recipes"] as const,
+    all: ["tutorials"] as const,
+    recipes: (versionId: number | null) => ["tutorials", "recipes", versionId] as const,
     blocks: (subtopicId: number) => ["tutorials", "blocks", subtopicId] as const,
+    sample: (versionId: number, recipeId: string) =>
+      ["tutorials", "sample", versionId, recipeId] as const,
   },
   system: {
     health: () => ["system", "health"] as const,
@@ -1818,13 +1821,68 @@ export function useResetRoleSettings() {
 
 // ---------------------------------------------------------------- tutorials (Phase 5)
 
-/** The tutorial recipes of the course's subject; shipped with the backend. */
-export const useTutorialRecipes = () =>
+/**
+ * The tutorial recipes of the course's subject (shipped with the backend), with the
+ * taxonomy's approve/reject decisions when a taxonomy is given.
+ */
+export const useTutorialRecipes = (curriculumVersionId: number | null = null) =>
   useQuery({
-    queryKey: qk.tutorials.recipes(),
-    queryFn: () => unwrap(api.GET("/api/tutorial-recipes")),
-    staleTime: Number.POSITIVE_INFINITY,
+    queryKey: qk.tutorials.recipes(curriculumVersionId),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-recipes", {
+          params: {
+            query:
+              curriculumVersionId === null ? {} : { curriculum_version_id: curriculumVersionId },
+          },
+        }),
+      ),
   });
+
+/** A few of a recipe's blocks in the taxonomy, to judge the recipe by. */
+export const useTutorialSample = (versionId: number, recipeId: string | null, limit = 3) =>
+  useQuery({
+    queryKey: qk.tutorials.sample(versionId, recipeId ?? ""),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-blocks", {
+          params: {
+            query: { curriculum_version_id: versionId, recipe_id: recipeId ?? "", limit },
+          },
+        }),
+      ),
+    enabled: recipeId !== null,
+  });
+
+/** Approve or reject a recipe for a taxonomy; its blocks there follow. */
+export function useDecideTutorialRecipe() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      recipeId,
+      ...body
+    }: Schemas["TutorialRecipeDecisionRequest"] & { recipeId: string }) =>
+      unwrap(
+        api.PUT("/api/tutorial-recipes/{recipe_id}/decision", {
+          params: { path: { recipe_id: recipeId } },
+          body,
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.tutorials.all }),
+  });
+}
+
+/** Price (``dry_run``) or queue the taxonomy's missing tutorial blocks as one job. */
+export function usePregenerateTutorials() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["TutorialPregenerationRequest"]) =>
+      unwrap(api.POST("/api/tutorial-pregeneration", { body })),
+    onSuccess: (_result, body) => {
+      if (!body.dry_run) client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
 
 /** A subtopic's generated tutorial blocks, newest first. */
 export const useTutorialBlocks = (subtopicId: number | null) =>

@@ -33,6 +33,7 @@ from app.persistence.models import TutorialBlockRow
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.retrieval.chunks import ChunkRetriever
 from app.subjects import profile_for_version
+from app.tutorials.approval import initial_status
 from app.tutorials.html_check import HtmlCheckUnavailable, check_html_block
 from app.tutorials.loader import load_recipes
 from app.tutorials.renderers import (
@@ -279,7 +280,9 @@ def generate_block(
         renderer=recipe.renderer,
         payload=payload if not problems else {},
         chunk_ids=chunk_ids,
-        status=TutorialBlockStatus.FAILED if problems else TutorialBlockStatus.DRAFT,
+        status=TutorialBlockStatus.FAILED
+        if problems
+        else initial_status(session, subtopic.topic.curriculum_version_id, recipe.id),
         error="; ".join(problems) if problems else None,
         model=client.description,
     )

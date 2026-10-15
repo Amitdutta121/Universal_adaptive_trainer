@@ -125,7 +125,13 @@ ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 #: Path parameters that are not row ids: any value works, and the course header decides.
-NON_ID_PARAMS = {"metric": "issues", "question_type": "true_false", "rule_index": "0"}
+NON_ID_PARAMS = {
+    "metric": "issues",
+    "question_type": "true_false",
+    "rule_index": "0",
+    # A shipped recipe; the taxonomy in the body is what the probe owns or not.
+    "recipe_id": "py.topic_flow",
+}
 
 #: Stands for a file upload: the probe sends a multipart file instead of this JSON.
 UPLOAD = {"file": "book.pdf"}
@@ -165,6 +171,14 @@ BODIES: dict[tuple[str, str], Any] = {
         "subtopic_id": "{subtopic}",
         "recipe_id": "py.topic_flow",
         "guidance_level": "cue",
+    },
+    ("PUT", "/api/tutorial-recipes/{recipe_id}/decision"): {
+        "curriculum_version_id": "{version}",
+        "approved": True,
+    },
+    ("POST", "/api/tutorial-pregeneration"): {
+        "curriculum_version_id": "{version}",
+        "dry_run": True,
     },
 }
 
@@ -229,6 +243,9 @@ SHIPPED_LISTS = {
 NOTHING_YET = {"/api/curriculum/approved": "the course's approved taxonomy; none yet"}
 #: GETs without required parameters that are still not lists.
 NOT_LISTS = {
+    "/api/tutorial-blocks": (
+        "needs subtopic_id or curriculum_version_id; both are probed by the 404 sweep"
+    ),
     "/api/chunks/search": (
         "a search: needs q or subtopic_id; subtopic_id is probed by the 404 sweep"
     ),

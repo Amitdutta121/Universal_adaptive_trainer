@@ -422,6 +422,8 @@ class JobKind(StrEnum):
     EMBEDDING_SWITCH = "embedding_switch"
     #: One new question from an existing one, with instructor feedback (ADR-066).
     REGENERATION = "regeneration"
+    #: A taxonomy's tutorial blocks, every subtopic x recipe x guidance level (Task 24).
+    TUTORIAL_PREGENERATION = "tutorial_pregeneration"
 
 
 class CustomJudgeKind(StrEnum):
@@ -456,8 +458,12 @@ class GuidanceLevel(StrEnum):
 
 
 class TutorialBlockStatus(StrEnum):
-    """A generated tutorial block: ``DRAFT`` until the professor approves it (Phase 6);
+    """A generated tutorial block: ``DRAFT`` until the professor decides its recipe (Phase 6);
     ``FAILED`` when its payload stayed invalid after the one repair retry."""
 
     DRAFT = "draft"
     FAILED = "failed"
+    #: Its recipe was approved for the taxonomy; only approved blocks are frozen and served.
+    APPROVED = "approved"
+    #: Its recipe was rejected for the taxonomy; hidden from lists, never served.
+    REJECTED = "rejected"

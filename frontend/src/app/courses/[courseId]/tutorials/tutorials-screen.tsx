@@ -7,7 +7,8 @@
  * supports, then generate one block (`POST /api/tutorial-blocks`): one model call plus the
  * recipe's tool and checks. The subtopic's blocks (`GET /api/tutorial-blocks`) render below
  * exactly as a student would see them, each with the chunks it was written from; a failed block
- * shows why. Approving blocks and freezing them with a question set come in Phase 6.
+ * shows why. Above it, the taxonomy's blocks are pre-generated as one job and approved by
+ * recipe (`recipe-approval.tsx`, Phase 6).
  */
 
 import { useState } from "react";
@@ -35,6 +36,7 @@ import {
   useTutorialRecipes,
 } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
+import { RecipeApproval } from "./recipe-approval";
 
 type GuidanceLevel = Schemas["GuidanceLevel"];
 
@@ -95,6 +97,7 @@ export function TutorialsScreen() {
 
   return (
     <div className="space-y-6">
+      <RecipeApproval versionId={approved.data.version.id} />
       <Card>
         <CardHeader>
           <CardTitle>Generate a block</CardTitle>

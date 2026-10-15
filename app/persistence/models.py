@@ -1620,6 +1620,28 @@ class TutorialBlockRow(TimestampMixin, Base):
         return list(chunk_ids)
 
 
+class TutorialRecipeDecisionRow(TimestampMixin, Base):
+    """The professor's approval of one recipe for one taxonomy (Phase 6, Task 24).
+
+    Approving or rejecting a recipe sets the status of its blocks in the taxonomy's question
+    bank; a block generated later starts with the decision already made.
+    """
+
+    __tablename__ = "tutorial_recipe_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "curriculum_version_id", "recipe_id", name="uq_tutorial_recipe_decisions_pair"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    curriculum_version_id: Mapped[int] = mapped_column(
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"), index=True
+    )
+    recipe_id: Mapped[str] = mapped_column(String(100))
+    approved: Mapped[bool] = mapped_column(Boolean)
+
+
 class StudentRow(TimestampMixin, Base):
     """A learner the adaptive engine tracks.
 

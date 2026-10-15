@@ -2705,6 +2705,7 @@ class JobOut(BaseModel):
         "book_import",
         "embedding_switch",
         "regeneration",
+        "tutorial_pregeneration",
         "question_round",
         "judge_run",
     ]
@@ -2947,6 +2948,52 @@ class TutorialRecipeListResponse(BaseModel):
 
     subject: str
     recipes: list[TutorialRecipe]
+    #: ``recipe_id -> approved`` in the taxonomy asked about (``curriculum_version_id``);
+    #: a recipe missing here is undecided.
+    decisions: dict[str, bool] = Field(default_factory=dict)
+
+
+class TutorialPregenerationRequest(BaseModel):
+    """``POST /api/tutorial-pregeneration``: every missing block of a taxonomy."""
+
+    curriculum_version_id: int
+    #: Only these recipes; all of the subject's when omitted.
+    recipe_ids: list[str] | None = None
+    #: Plan and price it: no model call, no row written.
+    dry_run: bool = False
+
+
+class PlannedTutorialBlock(BaseModel):
+    subtopic_id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+
+
+class TutorialPregenerationPlan(BaseModel):
+    """``200`` for ``dry_run``. ``generation_calls`` counts first attempts; an invalid block
+    gets one repair retry, so at most ``generation_calls * max_attempts_per_block``."""
+
+    planned: list[PlannedTutorialBlock]
+    blocks_to_create: int
+    #: Blocks of the plan the bank already holds, skipped.
+    already_made: int
+    generation_calls: int
+    max_attempts_per_block: int
+
+
+class TutorialRecipeDecisionRequest(BaseModel):
+    """``PUT /api/tutorial-recipes/{recipe_id}/decision``: approve or reject a recipe."""
+
+    curriculum_version_id: int
+    approved: bool
+
+
+class TutorialRecipeDecisionOut(BaseModel):
+    recipe_id: str
+    curriculum_version_id: int
+    approved: bool
+    #: Bank blocks whose status the decision changed.
+    blocks_changed: int
 
 
 class GenerateTutorialBlockRequest(BaseModel):

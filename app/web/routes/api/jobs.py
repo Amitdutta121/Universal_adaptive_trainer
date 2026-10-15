@@ -284,10 +284,16 @@ def _retry_label(row: BackgroundJobRow) -> str | None:
     status = RoundStatus(row.status)
     if status in _IN_FLIGHT or (row.request or {}).get("retried_by"):
         return None
-    if JobKind(row.kind) in (JobKind.BOOK_IMPORT, JobKind.EMBEDDING_SWITCH, JobKind.REGENERATION):
+    if JobKind(row.kind) in (
+        JobKind.BOOK_IMPORT,
+        JobKind.EMBEDDING_SWITCH,
+        JobKind.REGENERATION,
+        JobKind.TUTORIAL_PREGENERATION,
+    ):
         # A refused document is refused again; importing it anew is a new upload. A model
         # switch is started again from Settings. A regeneration is asked for again from the
-        # question, with feedback the professor may want to change.
+        # question, with feedback the professor may want to change. Pre-generating tutorials
+        # again from the Tutorials page plans only the blocks still missing.
         return None
     if JobKind(row.kind) is JobKind.BULK_GENERATION:
         remaining = row.total - row.done
@@ -312,7 +318,17 @@ def _link(row: BackgroundJobRow) -> str | None:
         return f"/books/{book['id']}" if book else None
     if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH:
         return None
+    if JobKind(row.kind) is JobKind.TUTORIAL_PREGENERATION:
+        return "/tutorials"
     return f"/questions?run_id={row.run_id}" if row.run_id else None
+
+
+def _counts(row: BackgroundJobRow) -> dict[str, int]:
+    if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH:
+        return {"chunks": row.done}
+    if JobKind(row.kind) is JobKind.TUTORIAL_PREGENERATION and row.result:
+        return {key: len(row.result.get(key, [])) for key in ("made", "failed", "skipped")}
+    return {}
 
 
 def _from_background(row: BackgroundJobRow) -> JobOut:
@@ -325,9 +341,12 @@ def _from_background(row: BackgroundJobRow) -> JobOut:
         total=row.total,
         error=row.error,
         link=_link(row),
-        # A model switch's result is not a question or book result; its count says it all.
-        result=None if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH else row.result,
-        counts={"chunks": row.done} if JobKind(row.kind) is JobKind.EMBEDDING_SWITCH else {},
+        # A model switch's or tutorial job's result is not a question or book result; its
+        # counts say it all.
+        result=None
+        if JobKind(row.kind) in (JobKind.EMBEDDING_SWITCH, JobKind.TUTORIAL_PREGENERATION)
+        else row.result,
+        counts=_counts(row),
         can_cancel=_can_cancel(row),
         cancel_requested=row.cancel_requested_at is not None,
         retry_label=_retry_label(row),

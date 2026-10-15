@@ -15,6 +15,7 @@ export const KIND_LABEL: Record<Job["kind"], string> = {
   book_import: "Book import",
   embedding_switch: "Embedding model switch",
   regeneration: "Regeneration",
+  tutorial_pregeneration: "Tutorial blocks",
   question_round: "Question round",
   judge_run: "Judge run",
 };
@@ -98,6 +99,14 @@ export function outcomeText(job: Job): string {
     }
     case "embedding_switch":
       return `${pluralise(counts.chunks ?? job.done, "chunk")} re-embedded`;
+    case "tutorial_pregeneration":
+      return [
+        `${pluralise(counts.made ?? job.done, "block")} made`,
+        counts.failed ? `${counts.failed} failed` : null,
+        counts.skipped ? `${counts.skipped} skipped (no book text)` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
     case "coverage_fill": {
       // `done` counts gap cells handled; a skipped cell made no question.
       const result = job.result;
@@ -120,6 +129,8 @@ export function linkLabel(job: Job): string {
       return "Open judges";
     case "book_import":
       return "Open book";
+    case "tutorial_pregeneration":
+      return "Open tutorials";
     default:
       return "Open these questions";
   }

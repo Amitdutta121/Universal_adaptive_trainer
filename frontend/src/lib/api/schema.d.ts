@@ -1544,10 +1544,32 @@ export interface paths {
         };
         /**
          * List Recipes
-         * @description The tutorial recipes of the course's subject (shipped content, not course data).
+         * @description The tutorial recipes of the course's subject (shipped content, not course data), with
+         *     the taxonomy's decisions when ``curriculum_version_id`` is given.
          */
         get: operations["list_recipes_api_tutorial_recipes_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-recipes/{recipe_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Decide
+         * @description Approve or reject a recipe for a taxonomy: its bank blocks there follow, and so do the
+         *     blocks it makes later. Rejected blocks are hidden; only approved ones are frozen.
+         */
+        put: operations["decide_api_tutorial_recipes__recipe_id__decision_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1564,7 +1586,9 @@ export interface paths {
         };
         /**
          * List Blocks
-         * @description A subtopic's blocks, newest first.
+         * @description A subtopic's or a taxonomy's bank blocks, newest first, optionally of one recipe.
+         *
+         *     Rejected blocks are hidden, and so are the copies frozen with a question set.
          */
         get: operations["list_blocks_api_tutorial_blocks_get"];
         put?: never;
@@ -1573,6 +1597,28 @@ export interface paths {
          * @description Generate one block. A block that stayed invalid comes back ``failed`` with ``error``.
          */
         post: operations["create_block_api_tutorial_blocks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-pregeneration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pregenerate
+         * @description Queue every block the taxonomy's bank is missing, or with ``dry_run`` price it for free.
+         *
+         *     Progress and the outcome are in ``GET /api/jobs``, like a generation run.
+         */
+        post: operations["pregenerate_api_tutorial_pregeneration_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3866,7 +3912,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "regeneration" | "question_round" | "judge_run";
+            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "regeneration" | "tutorial_pregeneration" | "question_round" | "judge_run";
             /** Title */
             title: string;
             /**
@@ -4351,6 +4397,14 @@ export interface components {
             style_id?: string | null;
             /** Question Id */
             question_id?: number | null;
+        };
+        /** PlannedTutorialBlock */
+        PlannedTutorialBlock: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
         };
         /**
          * PollBatchRunResponse
@@ -5859,11 +5913,43 @@ export interface components {
         };
         /**
          * TutorialBlockStatus
-         * @description A generated tutorial block: ``DRAFT`` until the professor approves it (Phase 6);
+         * @description A generated tutorial block: ``DRAFT`` until the professor decides its recipe (Phase 6);
          *     ``FAILED`` when its payload stayed invalid after the one repair retry.
          * @enum {string}
          */
-        TutorialBlockStatus: "draft" | "failed";
+        TutorialBlockStatus: "draft" | "failed" | "approved" | "rejected";
+        /**
+         * TutorialPregenerationPlan
+         * @description ``200`` for ``dry_run``. ``generation_calls`` counts first attempts; an invalid block
+         *     gets one repair retry, so at most ``generation_calls * max_attempts_per_block``.
+         */
+        TutorialPregenerationPlan: {
+            /** Planned */
+            planned: components["schemas"]["PlannedTutorialBlock"][];
+            /** Blocks To Create */
+            blocks_to_create: number;
+            /** Already Made */
+            already_made: number;
+            /** Generation Calls */
+            generation_calls: number;
+            /** Max Attempts Per Block */
+            max_attempts_per_block: number;
+        };
+        /**
+         * TutorialPregenerationRequest
+         * @description ``POST /api/tutorial-pregeneration``: every missing block of a taxonomy.
+         */
+        TutorialPregenerationRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Recipe Ids */
+            recipe_ids?: string[] | null;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+        };
         /**
          * TutorialRecipe
          * @description One recipe in a subject's library.
@@ -5893,6 +5979,27 @@ export interface components {
             /** Checks */
             checks?: components["schemas"]["RecipeCheck"][];
         };
+        /** TutorialRecipeDecisionOut */
+        TutorialRecipeDecisionOut: {
+            /** Recipe Id */
+            recipe_id: string;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved */
+            approved: boolean;
+            /** Blocks Changed */
+            blocks_changed: number;
+        };
+        /**
+         * TutorialRecipeDecisionRequest
+         * @description ``PUT /api/tutorial-recipes/{recipe_id}/decision``: approve or reject a recipe.
+         */
+        TutorialRecipeDecisionRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved */
+            approved: boolean;
+        };
         /**
          * TutorialRecipeListResponse
          * @description ``GET /api/tutorial-recipes``: the recipes of the course's subject.
@@ -5902,6 +6009,10 @@ export interface components {
             subject: string;
             /** Recipes */
             recipes: components["schemas"]["TutorialRecipe"][];
+            /** Decisions */
+            decisions?: {
+                [key: string]: boolean;
+            };
         };
         /**
          * TutorialRenderer
@@ -8862,7 +8973,9 @@ export interface operations {
     };
     list_recipes_api_tutorial_recipes_get: {
         parameters: {
-            query?: never;
+            query?: {
+                curriculum_version_id?: number | null;
+            };
             header?: {
                 "X-Course-Id"?: number | null;
             };
@@ -8891,10 +9004,50 @@ export interface operations {
             };
         };
     };
+    decide_api_tutorial_recipes__recipe_id__decision_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TutorialRecipeDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialRecipeDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_blocks_api_tutorial_blocks_get: {
         parameters: {
-            query: {
-                subtopic_id: number;
+            query?: {
+                subtopic_id?: number | null;
+                curriculum_version_id?: number | null;
+                recipe_id?: string | null;
+                limit?: number;
             };
             header?: {
                 "X-Course-Id"?: number | null;
@@ -8946,6 +9099,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TutorialBlockOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pregenerate_api_tutorial_pregeneration_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TutorialPregenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStartedResponse"] | components["schemas"]["TutorialPregenerationPlan"];
                 };
             };
             /** @description Validation Error */
