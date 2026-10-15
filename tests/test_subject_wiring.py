@@ -15,6 +15,7 @@ from llm_fakes import MetricJudgeClient
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.curriculum import TaxonomyImportService
 from app.domain.enums import Difficulty, GuidelineStatus, JudgeMetricId, QuestionType
 from app.domain.questions import Question
@@ -133,7 +134,10 @@ def test_a_learned_instruction_reaches_only_its_own_subject(session, settings) -
     assert "PHYSICS-ONLY RULE" not in python_client.generation_calls[0]["prompt"]
 
 
-def test_the_judges_use_the_question_courses_panel(session, settings) -> None:
+def test_the_judges_use_the_question_courses_panel(session, settings, monkeypatch) -> None:
+    # The issues judge is off by default; this test is about whose prompt it would use.
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "issues,subtopic,difficulty")
+    get_settings.cache_clear()
     course_id = _course(session, "physics", ["multiple_choice"])
     _, question = _generate(session, settings, course_id)
     physics = profile_for_course_id(session, course_id)

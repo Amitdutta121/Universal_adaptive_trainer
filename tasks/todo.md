@@ -197,7 +197,7 @@ and their tests. Tables stay until the open question about dropping them is answ
 **Estimated scope:** M
 
 ## Checkpoint B: After Tasks 4–10
-- [ ] `BACKEND` + `FRONTEND` green
+- [x] `BACKEND` + `FRONTEND` green (2072 passed, 0 failed; the 4 failures carried from Phase 0 fixed)
 - [x] A frozen-set student run replays exactly as before the migration (seeded): by construction --
   `app/adaptive`, the student routes, `app/assessment` and `graders` have no diff since e60b536 and
   never read chunks, sections or sources

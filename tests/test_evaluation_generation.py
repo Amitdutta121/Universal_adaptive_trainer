@@ -35,9 +35,9 @@ class RecordingClient:
         return "fake/recording"
 
     def complete_structured(
-        self, *, system: str, prompt: str, response_model: type[BaseModel]
+        self, *, system: str, prompt: str, response_model: type[BaseModel], history: Any = ()
     ) -> BaseModel:
-        del system, prompt
+        del system, prompt, history
         if response_model is not OutputPredictionDraft:
             self.judge_calls += 1
             return verdict_for(response_model, self.topic_id, self.subtopic_ids)
@@ -52,9 +52,13 @@ class RecordingClient:
 
 
 class FailingDeterministicClient(RecordingClient):
-    """Its code prints something other than the declared expected output."""
+    """Its code crashes, so no run can supply the answer and the output check fails.
 
-    code = "print(4)"
+    A wrong ``expected_output`` alone no longer fails: the generator stores what the code
+    really prints (``observed_expected_output``).
+    """
+
+    code = "print(1 / 0)"
 
 
 class JudgeFailingClient(RecordingClient):

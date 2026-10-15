@@ -11,12 +11,12 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from app.config import get_settings
 from app.errors import CodeExecutionUnavailableError
-from app.generation.schemas import ExecutableTestCase
 from graders import ExecutorError, get_executor
 from graders.executors import RunResult
 from graders.python import (
@@ -26,6 +26,12 @@ from graders.python import (
     run_python,
     run_tests,
 )
+
+if TYPE_CHECKING:
+    # Imported for annotations only: importing ``app.generation`` at module level runs its
+    # package ``__init__``, which reaches back into this module through ``app.question_types``
+    # and fails half-initialised when ``app.validation`` is imported first.
+    from app.generation.schemas import ExecutableTestCase
 
 #: One captured run: ``stdout``, ``stderr``, ``exit_code``, ``timed_out``.
 ScriptResult = RunResult
@@ -59,6 +65,8 @@ def parse_test_cases(raw: object) -> list[ExecutableTestCase] | None:
             return None
     if not isinstance(raw, list) or not raw:
         return None
+    from app.generation.schemas import ExecutableTestCase
+
     try:
         return [ExecutableTestCase.model_validate(case) for case in raw]
     except (ValidationError, TypeError):

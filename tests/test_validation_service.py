@@ -35,8 +35,9 @@ class FakeClient:
         system: str,
         prompt: str,
         response_model: type[BaseModel],
+        history: Any = (),
     ) -> BaseModel:
-        del system, prompt
+        del system, prompt, history
         if response_model is not OutputPredictionDraft:
             return _verdict(response_model, self.topic_id, self.subtopic_ids)
         return OutputPredictionDraft(
@@ -50,7 +51,11 @@ class FakeClient:
 
 
 class FailingFakeClient:
-    """Return one output-prediction draft that fails deterministic validation."""
+    """Return one output-prediction draft that fails deterministic validation.
+
+    Its code crashes: a wrong ``expected_output`` alone would be replaced by the output of a
+    real run (``observed_expected_output``) and pass.
+    """
 
     def __init__(self, topic_id: int = 1, subtopic_ids: list[int] | None = None) -> None:
         self.topic_id = topic_id
@@ -66,15 +71,16 @@ class FailingFakeClient:
         system: str,
         prompt: str,
         response_model: type[BaseModel],
+        history: Any = (),
     ) -> BaseModel:
-        del system, prompt
+        del system, prompt, history
         if response_model is not OutputPredictionDraft:
             return _verdict(response_model, self.topic_id, self.subtopic_ids)
         return OutputPredictionDraft(
             topic_id=self.topic_id,
             subtopic_ids=self.subtopic_ids,
             prompt="What is printed?",
-            code="print(4)",
+            code="print(1 / 0)",
             expected_output="3",
             explanation="The literal integer is printed.",
         )
