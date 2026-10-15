@@ -31,7 +31,9 @@ export function PageChunks({
   const query = page === null ? selected : onPage;
 
   return (
-    <div className="flex max-h-72 shrink-0 flex-col overflow-hidden rounded-[1rem] border">
+    // A fixed height, not a max: the PDF pane above flexes into what is left, so a panel that
+    // grew with its content would re-fit the pages and scroll the reader onto another page.
+    <div className="flex h-72 shrink-0 flex-col overflow-hidden rounded-[1rem] border">
       <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2.5">
         <span className="font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
           {page === null ? "Selected chunk" : `Chunks on page ${page}`}

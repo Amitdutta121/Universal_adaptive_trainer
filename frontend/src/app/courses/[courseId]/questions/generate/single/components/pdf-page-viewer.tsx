@@ -19,7 +19,7 @@
  */
 
 import { Maximize2, Minimize2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { COURSE_HEADER } from "@/lib/api/client";
 import { API_BASE_URL } from "@/lib/env";
@@ -110,6 +110,9 @@ export function PdfPageViewer({
 
   const [numPages, setNumPages] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  // The page in view, updated the moment it changes -- by the observer, or by a jump -- unlike
+  // `currentPage`, which lags a jump until the observer reports. Re-fitting re-anchors to it.
+  const viewPageRef = useRef(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Aspect ratio of a page (height / width), measured once from the first page
   // that actually renders — used to size the placeholder slots at any zoom.
@@ -208,7 +211,10 @@ export function PdfPageViewer({
             bestPage = page;
           }
         }
-        if (bestPage !== null && bestRatio > 0) setCurrentPage(bestPage);
+        if (bestPage !== null && bestRatio > 0) {
+          viewPageRef.current = bestPage;
+          setCurrentPage(bestPage);
+        }
       },
       { root, threshold: [0, 0.25, 0.5, 0.75, 1] },
     );
@@ -225,17 +231,39 @@ export function PdfPageViewer({
   // PDF) currentPage sits at 1, and re-reporting it whenever the rows refetch -- e.g. after a
   // question is generated -- yanked the outline back to the first section and closed the
   // question dialog.
+  // The selection only moves when the page leaves the selected chunk's pages: a page holds
+  // several chunks, and one picked from the page panel or the URL must survive the scroll that
+  // brought it into view. The first report after loading is page 1 before the jump below has
+  // run, so it never overrides a chunk that is already selected (a deep link).
   const reportedPage = useRef<number | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
     if (numPages === null || reportedPage.current === currentPage) return;
+    const firstReport = reportedPage.current === null;
     reportedPage.current = currentPage;
     onVisiblePageChange(currentPage);
+    if (firstReport && selectedChunkId !== null) return;
+    if (
+      selectedRow?.startPage != null &&
+      selectedRow.startPage <= currentPage &&
+      currentPage <= (selectedRow.endPage ?? selectedRow.startPage)
+    ) {
+      return;
+    }
     const implied = chunkForPage(anchors, currentPage);
     if (implied !== null && implied !== selectedChunkId) onVisibleChunkChange(implied);
   }, [currentPage, anchors, numPages]);
 
+  // Re-fitting the pages (the pane was resized, zoom or fit mode changed) changes every slot's
+  // height, so the same scrollTop now points at another page. Put the page that was in view back
+  // before the browser paints, so the observer never reports a page the reader did not scroll to.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a change of page size re-anchors
+  useLayoutEffect(() => {
+    if (numPages) scrollToPage(viewPageRef.current, "auto");
+  }, [pageWidth]);
+
   const scrollToPage = (page: number, behavior: ScrollBehavior = "smooth") => {
+    viewPageRef.current = page;
     slotRefs.current.get(page)?.scrollIntoView({ behavior, block: "start" });
   };
 

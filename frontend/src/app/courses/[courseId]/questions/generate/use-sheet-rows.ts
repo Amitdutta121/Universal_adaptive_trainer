@@ -112,7 +112,13 @@ export function useSheetRows(filters: SheetFilters): SheetRowsApi {
     chapters,
     allRows,
     rows,
-    isPending: booksQuery.isPending || plans.isPending,
+    // In the render where the books arrive, the plan queries have not been created yet and
+    // report "not pending" with no rows; treating that as loaded made a deep-linked chunk look
+    // stale and get dropped.
+    isPending:
+      booksQuery.isPending ||
+      plans.isPending ||
+      (!plans.isError && plans.plans.length < bookIds.length),
     isError: booksQuery.isError || plans.isError,
     error: booksQuery.error ?? plans.error,
   };
