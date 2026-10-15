@@ -560,6 +560,13 @@ through and compare the displayed steps to the trace. Add a Python Playwright de
 
 ## Checkpoint F
 - [ ] All 3 seed recipes generate and render for one Agah subtopic; human review
+  (2026-10-15, real run, `tutorials` role = openrouter/openai/gpt-4o, Agah subtopic 255
+  "Accumulator patterns", chunks from Agah ch. 4 pp. 28-33: blocks 4-6 all `draft` on the
+  first call, 2.6-12.6 s each, and render on /courses/1/tutorials with no console errors. The
+  stepper (38 recorded steps, prints 275) passed the headless trace check. Quality found:
+  the cue misconception block has a code example (cue asks for none) copied from the book
+  without `n = n + 1`, so it loops forever, and nothing runs markdown code; the faded flow
+  diagram draws a while loop with no edge back. Awaiting human review)
 
 ---
 
