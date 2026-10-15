@@ -267,10 +267,33 @@ def _docling_converter() -> Any:
     )
 
 
+#: ``HybridChunker``'s own default tokenizer, named so it can be loaded from the local cache.
+_CHUNKER_TOKENIZER = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+@functools.cache
+def _docling_chunker() -> Any:
+    """The chunker, with its tokenizer from the local cache when it is there.
+
+    The default ``HybridChunker()`` asks the Hugging Face Hub about the tokenizer every time it
+    is built, so an import failed whenever the Hub was unreachable or the stored HF token was
+    invalid, even with the tokenizer cached. Only a missing tokenizer is downloaded.
+    """
+    from docling.chunking import HybridChunker
+    from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
+
+    try:
+        tokenizer = HuggingFaceTokenizer.from_pretrained(
+            model_name=_CHUNKER_TOKENIZER, local_files_only=True
+        )
+    except OSError:
+        tokenizer = HuggingFaceTokenizer.from_pretrained(model_name=_CHUNKER_TOKENIZER)
+    return HybridChunker(tokenizer=tokenizer)
+
+
 def _docling_chunks(
     data: bytes, filename: str, toc: list[tuple[int, int, str]]
 ) -> tuple[list[ParsedChunk], int | None]:
-    from docling.chunking import HybridChunker
     from docling.datamodel.base_models import DocumentStream
 
     try:
@@ -282,7 +305,7 @@ def _docling_chunks(
     document = result.document
     paths = _outline_paths(toc)
     chunks: list[ParsedChunk] = []
-    for chunk in HybridChunker().chunk(dl_doc=document):
+    for chunk in _docling_chunker().chunk(dl_doc=document):
         pages = sorted({prov.page_no for item in chunk.meta.doc_items for prov in item.prov})
         start, end = (pages[0], pages[-1]) if pages else (None, None)
         headings = list(chunk.meta.headings or [])
