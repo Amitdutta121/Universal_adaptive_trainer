@@ -46,6 +46,11 @@ class LLMProvider(StrEnum):
     NONE = "none"
 
 
+#: The endpoint every role calls unless its own saved settings name another (ADR-020 keeps
+#: OpenRouter the default; Azure is the same OpenAI-style API on the lab's Foundry resource).
+LLMRoute = Literal["openrouter", "azure"]
+
+
 class Settings(BaseSettings):
     """Typed application settings.
 
@@ -83,6 +88,14 @@ class Settings(BaseSettings):
     #: output budget thinking. ``low`` keeps generation and judging fast and cheap.
     llm_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     embedding_model: str = "openai/text-embedding-3-small"
+    #: The default route; the Settings screen's toggle stores a choice over it
+    #: (``app.settings_store``). ``azure`` replaces the base URL, key and both models below.
+    llm_route: LLMRoute = "openrouter"
+    azure_base_url: str | None = None
+    azure_api_key: SecretStr | None = None
+    #: Deployment names on the Azure resource, not OpenRouter route ids.
+    azure_model: str = "gpt-5-mini"
+    azure_embedding_model: str = "text-embedding-3-small"
     #: How ``ChunkRetriever`` ranks: ``hybrid`` fuses the cosine ranking with BM25 through
     #: LlamaIndex (``app.retrieval.fusion``); ``dense`` is cosine alone (Task 11).
     chunk_retrieval_mode: Literal["dense", "hybrid"] = "hybrid"
@@ -220,6 +233,8 @@ class Settings(BaseSettings):
     @field_validator(
         "llm_api_key",
         "llm_base_url",
+        "azure_base_url",
+        "azure_api_key",
         "judge_batch_api_key",
         "judge_batch_model",
         "public_app_url",
@@ -349,13 +364,34 @@ class Settings(BaseSettings):
             return f"{self.judge_batch_route} (no API key configured)"
         return self.judge_batch_route
 
+    @property
+    def azure_configured(self) -> bool:
+        return bool(self.azure_base_url) and self.azure_api_key is not None
+
+    def on_route(self, route: LLMRoute) -> Settings:
+        """These settings on ``route``: ``azure`` swaps in the Azure endpoint, key and models."""
+        if route == "openrouter":
+            return self
+        return self.model_copy(
+            update={
+                "llm_base_url": self.azure_base_url,
+                "llm_api_key": self.azure_api_key,
+                "llm_model": self.azure_model,
+                "embedding_model": self.azure_embedding_model,
+            }
+        )
+
     def describe_llm(self) -> str:
         """Human-readable LLM status for the UI. Never leaks the credential."""
         if self.llm_provider is LLMProvider.NONE:
             return "disabled (LLM_PROVIDER=none)"
+        # The provider value stays "openrouter" on Azure: the client picks the transport from
+        # the base URL (``app.llm.client.is_openrouter``), so the label does the same.
+        on_azure = self.llm_base_url is not None and ".azure.com" in self.llm_base_url
+        label = "azure" if on_azure else self.llm_provider.value
         if self.llm_api_key is None:
-            return f"{self.llm_provider.value}/{self.llm_model} (no API key configured)"
-        return f"{self.llm_provider.value}/{self.llm_model}"
+            return f"{label}/{self.llm_model} (no API key configured)"
+        return f"{label}/{self.llm_model}"
 
 
 @lru_cache(maxsize=1)

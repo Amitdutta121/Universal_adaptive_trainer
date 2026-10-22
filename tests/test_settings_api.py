@@ -220,3 +220,71 @@ def test_probe_turns_provider_failures_into_a_message(
     assert probe(settings, embeddings=True).error == (
         "No API key: enter one, or set LLM_API_KEY in .env."
     )
+
+
+AZURE_URL = "https://lab.services.ai.azure.com/openai/v1/"
+
+
+def _on_azure_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("LLM_API_KEY", "sk-or-env-key-123456")
+    monkeypatch.setenv("AZURE_BASE_URL", AZURE_URL)
+    monkeypatch.setenv("AZURE_API_KEY", "azure-key-abcdef123456")
+    get_settings.cache_clear()
+
+
+def test_the_route_toggle_points_every_unsaved_role_at_azure_and_back(
+    admin_client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.settings_store import ModelRole, settings_for
+
+    _on_azure_env(monkeypatch)
+    before = admin_client.get("/api/settings").json()
+    assert (before["route"], before["route_source"], before["azure_configured"]) == (
+        "openrouter",
+        "env",
+        True,
+    )
+
+    after = admin_client.put("/api/settings/route", json={"route": "azure"}).json()
+
+    assert (after["route"], after["route_source"]) == ("azure", "db")
+    roles = {r["role"]: r for r in after["roles"]}
+    assert roles["generation"]["base_url"] == AZURE_URL
+    assert roles["generation"]["model"] == "gpt-5-mini"
+    assert roles["embeddings"]["model"] == "text-embedding-3-small"
+    assert roles["generation"]["api_key_masked"] == "••••3456"
+    assert settings_for(ModelRole.JUDGES).llm_base_url == AZURE_URL
+    assert admin_client.get("/api/health").json()["llm_status"] == "azure/gpt-5-mini"
+
+    back = admin_client.put("/api/settings/route", json={"route": "openrouter"}).json()
+    assert back["route"] == "openrouter"
+    assert settings_for(ModelRole.JUDGES).llm_base_url is None
+
+
+def test_a_role_saved_on_its_own_keeps_its_settings_on_azure(
+    admin_client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.settings_store import ModelRole, settings_for
+
+    _on_azure_env(monkeypatch)
+    session.add(ModelSettingRow(role="judges", model="anthropic/claude-haiku-4.5"))
+    session.commit()
+
+    admin_client.put("/api/settings/route", json={"route": "azure"})
+
+    judges = settings_for(ModelRole.JUDGES)
+    assert judges.llm_model == "anthropic/claude-haiku-4.5"
+    assert judges.llm_base_url == AZURE_URL  # only the fields the row sets are its own
+
+
+def test_azure_is_refused_until_configured(admin_client: TestClient) -> None:
+    refused = admin_client.put("/api/settings/route", json={"route": "azure"})
+    assert refused.status_code == 422
+    assert admin_client.get("/api/settings").json()["azure_configured"] is False
+
+
+def test_only_an_admin_toggles_the_route(client: TestClient) -> None:
+    assert client.put("/api/settings/route", json={"route": "openrouter"}).status_code == 403

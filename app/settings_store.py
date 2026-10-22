@@ -18,8 +18,10 @@ import hashlib
 import hmac
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import get_args
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -29,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.config import LLMProvider, Settings, get_settings
+from app.config import LLMProvider, LLMRoute, Settings, get_settings
 from app.persistence.models import ModelSettingRow
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,10 @@ class ModelRole(StrEnum):
 #: Row key of an embeddings configuration waiting for its re-embedding job (Task 43). Never
 #: read by :func:`settings_for`: retrieval stays on the active model until the job swaps it in.
 PENDING_EMBEDDINGS = "embeddings.pending"
+
+#: Row key of the instance's route (``provider`` holds ``openrouter`` or ``azure``), set by the
+#: Settings screen's toggle over ``LLM_ROUTE``. Like ``PENDING_EMBEDDINGS``, never a role.
+ROUTE = "route"
 
 _HKDF_INFO = b"adaptive-trainer/model-settings/api-key"
 
@@ -97,21 +103,51 @@ def apply_row(base: Settings, role: ModelRole, row: ModelSettingRow | None) -> S
     return base.model_copy(update=update) if update else base
 
 
+def load_route(session: Session, base: Settings) -> tuple[LLMRoute, bool]:
+    """The route in effect, and whether it was saved here (``True``) or is ``LLM_ROUTE``."""
+    row = session.get(ModelSettingRow, ROUTE)
+    if row is not None and row.provider in get_args(LLMRoute):
+        return row.provider, True  # type: ignore[return-value]
+    return base.llm_route, False
+
+
+def save_route(session: Session, route: LLMRoute, user_id: uuid.UUID | None) -> None:
+    row = session.get(ModelSettingRow, ROUTE) or ModelSettingRow(role=ROUTE)
+    row.provider = route
+    row.updated_by = user_id
+    session.add(row)
+    session.commit()
+
+
+def routed(session: Session, base: Settings | None = None) -> Settings:
+    """``base`` (``get_settings()``) on the instance's route, before any role's own row."""
+    base = base or get_settings()
+    try:
+        route, _ = load_route(session, base)
+    except OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        route = base.llm_route
+    return base.on_route(route)
+
+
 def settings_for(
     role: ModelRole, base: Settings | None = None, *, session: Session | None = None
 ) -> Settings:
-    """The effective settings for ``role``: its database row over ``base`` (``get_settings()``).
+    """The effective settings for ``role``: its database row over ``base`` (``get_settings()``)
+    on the instance's route (:func:`routed`).
 
     Without ``session``, reads through a short session of the app database. A database
     without the table yet (before migrations ran) counts as having no rows.
     """
     base = base or get_settings()
     if session is not None:
-        return apply_row(base, role, load_row(session, role))
+        return apply_row(routed(session, base), role, load_row(session, role))
     from app.persistence.database import get_session_factory
 
     try:
         with get_session_factory()() as own:
+            base = routed(own, base)
             row = load_row(own, role)
     except OperationalError as exc:
         if "no such table" not in str(exc):

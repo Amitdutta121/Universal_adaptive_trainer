@@ -31,8 +31,11 @@ from app.settings_store import (
     check_test_token,
     decrypt_api_key,
     issue_test_token,
+    load_route,
     load_row,
     mask_key,
+    routed,
+    save_route,
     settings_for,
 )
 from app.web.routes.api.deps import CurrentUser, DbSession
@@ -43,6 +46,7 @@ from app.web.routes.api.schemas import (
     RoleSettingsResponse,
     RoleSettingsSave,
     RoleSettingsUpdate,
+    RouteUpdate,
     SettingsTestResponse,
 )
 
@@ -129,7 +133,7 @@ def _save_or_switch(
                 "An embedding model switch is running.",
                 detail="Wait for it to finish; its progress is on the Settings screen.",
             )
-        base = get_settings()
+        base = routed(session)
         new_model = apply_row(base, role, row).embedding_model
         if new_model != settings_for(role, base, session=session).embedding_model:
             job = start_switch(session, row)
@@ -150,7 +154,7 @@ def _effective(
 ) -> tuple[Settings, ModelSettingRow]:
     if body.provider is not None and body.provider not in {p.value for p in LLMProvider}:
         raise DomainRuleError(f"Unknown provider {body.provider!r}.")
-    base = get_settings()
+    base = routed(session)
     row = candidate(
         load_row(session, role),
         provider=body.provider,
@@ -165,12 +169,33 @@ def _effective(
 
 @router.get("", response_model=ModelSettingsResponse)
 def read_settings(session: DbSession, user: CurrentUser) -> ModelSettingsResponse:
-    base = get_settings()
+    env = get_settings()
+    route, saved = load_route(session, env)
+    base = env.on_route(route)
     return ModelSettingsResponse(
         roles=[_describe(session, role, base) for role in ModelRole],
         providers=[p.value for p in LLMProvider if p is not LLMProvider.NONE],
         can_edit=user.is_superuser,
+        route=route,
+        route_source="db" if saved else "env",
+        azure_configured=env.azure_configured,
     )
+
+
+@router.put("/route", response_model=ModelSettingsResponse)
+def set_route(body: RouteUpdate, session: DbSession, user: AdminUser) -> ModelSettingsResponse:
+    """Point every role without its own saved settings at OpenRouter or Azure.
+
+    No Test is asked for, unlike a role save: both routes come from ``.env`` as configured,
+    and switching back is one click. Azure is refused while its URL or key is missing.
+    """
+    if body.route == "azure" and not get_settings().azure_configured:
+        raise DomainRuleError(
+            "Azure is not configured.",
+            detail="Set AZURE_BASE_URL and AZURE_API_KEY in .env, then restart the backend.",
+        )
+    save_route(session, body.route, user.id)
+    return read_settings(session, user)
 
 
 @router.get("/models", response_model=list[ProviderModel])
@@ -234,7 +259,7 @@ def save_settings(
         )
     row.updated_by = user.id
     _save_or_switch(session, role, row, queue)
-    return _describe(session, role, get_settings())
+    return _describe(session, role, routed(session))
 
 
 @router.delete("/{role}", response_model=RoleSettingsResponse)
@@ -243,4 +268,4 @@ def reset_settings(
 ) -> RoleSettingsResponse:
     """Use ``.env`` for every value again. For embeddings on another model, via a switch."""
     _save_or_switch(session, role, ModelSettingRow(role=role.value, updated_by=user.id), queue)
-    return _describe(session, role, get_settings())
+    return _describe(session, role, routed(session))

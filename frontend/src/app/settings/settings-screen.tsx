@@ -10,6 +10,9 @@
  *
  * A new embedding model is not active when saved: every book chunk is re-embedded first,
  * and retrieval keeps using the old model until that finishes.
+ *
+ * The route toggle above the roles points every role that has no saved settings of its own
+ * at OpenRouter or Azure, both configured in `.env`; it needs no Test.
  */
 
 import { CheckCircle2, Pencil, RotateCcw, XCircle } from "lucide-react";
@@ -36,6 +39,7 @@ import {
   useProviderModels,
   useResetRoleSettings,
   useSaveRoleSettings,
+  useSetRoute,
   useTestRoleSettings,
 } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
@@ -43,6 +47,12 @@ import type { Schemas } from "@/lib/api/types";
 type RoleSettings = Schemas["RoleSettingsResponse"];
 type ModelRole = Schemas["ModelRole"];
 type TestResult = Schemas["SettingsTestResponse"];
+type Route = Schemas["RouteUpdate"]["route"];
+
+const ROUTES: { value: Route; label: string }[] = [
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "azure", label: "Azure" },
+];
 
 /** What each role is for, and whether anything uses it yet. */
 const ROLES: Record<ModelRole, { label: string; purpose: string; inUse: boolean }> = {
@@ -394,6 +404,55 @@ function RoleRow({
   );
 }
 
+function RouteToggle({ settings }: { settings: Schemas["ModelSettingsResponse"] }) {
+  const setRoute = useSetRoute();
+  const error = readApiError(setRoute.error);
+
+  return (
+    <section className="space-y-3 border-b pb-5">
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 font-medium">
+            Route
+            <SourceBadge source={settings.route_source} />
+          </h2>
+          <p className="text-muted-foreground text-sm">
+            Every role below without its own saved settings calls this endpoint. Both come from
+            .env. Chunks are embedded again for the new route on their next search.
+          </p>
+        </div>
+        <fieldset className="ml-auto flex rounded-md border p-0.5" aria-label="Route">
+          {ROUTES.map(({ value, label }) => {
+            const unconfigured = value === "azure" && !settings.azure_configured;
+            return (
+              <Button
+                key={value}
+                size="sm"
+                variant={settings.route === value ? "secondary" : "ghost"}
+                aria-pressed={settings.route === value}
+                disabled={!settings.can_edit || setRoute.isPending || unconfigured}
+                title={unconfigured ? "Set AZURE_BASE_URL and AZURE_API_KEY in .env" : undefined}
+                onClick={() => {
+                  if (settings.route !== value) setRoute.mutate(value);
+                }}
+              >
+                {label}
+              </Button>
+            );
+          })}
+        </fieldset>
+      </div>
+      {error ? (
+        <Alert variant="destructive">
+          <XCircle />
+          <AlertTitle>{error.message}</AlertTitle>
+          {error.detail ? <AlertDescription>{error.detail}</AlertDescription> : null}
+        </Alert>
+      ) : null}
+    </section>
+  );
+}
+
 export function SettingsScreen() {
   const settings = useModelSettings();
 
@@ -416,6 +475,7 @@ export function SettingsScreen() {
         <CardContent>
           {settings.isPending ? <TableSkeleton rows={7} /> : null}
           {settings.isError ? <QueryError error={settings.error} /> : null}
+          {settings.isSuccess ? <RouteToggle settings={settings.data} /> : null}
           {settings.isSuccess
             ? ROLE_ORDER.map((name) => {
                 const role = settings.data.roles.find((item) => item.role === name);

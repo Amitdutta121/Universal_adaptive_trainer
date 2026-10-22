@@ -36,6 +36,7 @@ from app.calibration import (
     SubtopicConfusion,
     TypeCalibration,
 )
+from app.config import LLMRoute
 from app.coverage import CoverageReport, SubtopicCoverage, TopicCoverage
 from app.curriculum import (
     DESCRIPTION_MAX_LENGTH,
@@ -2826,6 +2827,18 @@ class ModelSettingsResponse(BaseModel):
     providers: list[str]
     #: Whether the current account may test and save (a superuser).
     can_edit: bool
+    #: The endpoint every role without its own saved settings calls, and where that choice
+    #: comes from: the Settings toggle (``db``) or ``LLM_ROUTE`` (``env``).
+    route: LLMRoute
+    route_source: SettingSource
+    #: Whether ``.env`` has an Azure URL and key, so the toggle can offer Azure.
+    azure_configured: bool
+
+
+class RouteUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route: LLMRoute
 
 
 class RoleSettingsUpdate(BaseModel):

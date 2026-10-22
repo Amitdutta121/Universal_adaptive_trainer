@@ -29,7 +29,14 @@ from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow, ChunkEmbeddingRow, ModelSettingRow
 from app.retrieval.chunks import ChunkEmbeddingStore
 from app.retrieval.embedder import Embedder, build_embedder
-from app.settings_store import PENDING_EMBEDDINGS, ModelRole, apply_row, load_row, settings_for
+from app.settings_store import (
+    PENDING_EMBEDDINGS,
+    ModelRole,
+    apply_row,
+    load_row,
+    routed,
+    settings_for,
+)
 
 _IN_FLIGHT = (RoundStatus.QUEUED, RoundStatus.RUNNING)
 
@@ -53,7 +60,7 @@ def start_switch(session: Session, pending: ModelSettingRow) -> BackgroundJobRow
             "An embedding model switch is already running.",
             detail="Wait for it to finish; its progress is on the Settings screen.",
         )
-    model = apply_row(get_settings(), ModelRole.EMBEDDINGS, pending).embedding_model
+    model = apply_row(routed(session), ModelRole.EMBEDDINGS, pending).embedding_model
     job = create_job(
         session,
         kind=JobKind.EMBEDDING_SWITCH,
@@ -87,7 +94,7 @@ def _switch(session: Session, job: BackgroundJobRow, embedder: Embedder | None) 
     if pending is None or pending.job_id != job.id:
         raise DomainRuleError("A newer embedding switch replaced this one.")
     base = get_settings()
-    target = apply_row(base, ModelRole.EMBEDDINGS, pending)
+    target = apply_row(routed(session, base), ModelRole.EMBEDDINGS, pending)
     embedder = embedder or build_embedder(target)
     store = ChunkEmbeddingStore(session, embedder)
     job.total = len(store.missing())

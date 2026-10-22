@@ -39,6 +39,9 @@ TEST_ENV: dict[str, str] = {
     "LLM_PROVIDER": "none",
     "LLM_API_KEY": "",
     "LLM_BASE_URL": "",
+    "LLM_ROUTE": "openrouter",
+    "AZURE_BASE_URL": "",
+    "AZURE_API_KEY": "",
     # Pinned for the same reason as the LLM variables above: a developer who has
     # enabled batch re-runs in their own ``.env`` must not thereby change what
     # the suite tests -- and must never have a test reach a real provider.

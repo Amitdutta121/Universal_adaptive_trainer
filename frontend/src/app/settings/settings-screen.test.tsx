@@ -6,7 +6,12 @@ import { SettingsScreen } from "./settings-screen";
 const testMutate = vi.fn();
 const saveMutate = vi.fn();
 const resetMutate = vi.fn();
-const state = vi.hoisted(() => ({ canEdit: true, switch: null as unknown }));
+const routeMutate = vi.fn();
+const state = vi.hoisted(() => ({
+  canEdit: true,
+  switch: null as unknown,
+  azureConfigured: true,
+}));
 
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title }: { title: string }) => <h1>{title}</h1>,
@@ -35,6 +40,9 @@ vi.mock("@/lib/api/queries", () => ({
     data: {
       can_edit: state.canEdit,
       providers: ["openrouter"],
+      route: "openrouter",
+      route_source: "env",
+      azure_configured: state.azureConfigured,
       roles: [
         role("generation"),
         role("judges"),
@@ -50,6 +58,7 @@ vi.mock("@/lib/api/queries", () => ({
   useTestRoleSettings: () => ({ mutateAsync: testMutate, isPending: false, error: null }),
   useSaveRoleSettings: () => ({ mutateAsync: saveMutate, isPending: false, error: null }),
   useResetRoleSettings: () => ({ mutate: resetMutate, isPending: false }),
+  useSetRoute: () => ({ mutate: routeMutate, isPending: false, error: null }),
 }));
 
 function section(name: string): HTMLElement {
@@ -60,8 +69,10 @@ function section(name: string): HTMLElement {
 beforeEach(() => {
   testMutate.mockReset();
   saveMutate.mockReset();
+  routeMutate.mockReset();
   state.canEdit = true;
   state.switch = null;
+  state.azureConfigured = true;
 });
 
 describe("SettingsScreen", () => {
@@ -140,5 +151,23 @@ describe("SettingsScreen", () => {
 
     expect(screen.getByText("Only an admin can change these")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("switches the route to Azure, and offers it only once .env configures it", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<SettingsScreen />);
+    const route = within(section("Route")).getByRole("group", { name: "Route" });
+
+    expect(within(route).getByRole("button", { name: "OpenRouter" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(route).getByRole("button", { name: "Azure" }));
+    expect(routeMutate).toHaveBeenCalledWith("azure");
+    unmount();
+
+    state.azureConfigured = false;
+    render(<SettingsScreen />);
+    expect(screen.getByRole("button", { name: "Azure" })).toBeDisabled();
   });
 });

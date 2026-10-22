@@ -1820,6 +1820,19 @@ export function useSaveRoleSettings() {
   });
 }
 
+/** Point every role without its own saved settings at OpenRouter or Azure. */
+export function useSetRoute() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (route: Schemas["RouteUpdate"]["route"]) =>
+      unwrap(api.PUT("/api/settings/route", { body: { route } })),
+    onSuccess: (data) => {
+      client.setQueryData(qk.settings.roles(), data);
+      client.invalidateQueries({ queryKey: qk.system.health() });
+    },
+  });
+}
+
 /** Back to `.env` for every value of the role. */
 export function useResetRoleSettings() {
   const client = useQueryClient();

@@ -122,6 +122,7 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", "/api/settings/{role}/test"): "superuser only; role is an enum, not a row id",
     ("PUT", "/api/settings/{role}"): "superuser only; role is an enum, not a row id",
     ("DELETE", "/api/settings/{role}"): "superuser only; role is an enum, not a row id",
+    ("PUT", "/api/settings/route"): "superuser only; instance-wide route, no row id",
 }
 
 #: Path parameters that are not row ids: any value works, and the course header decides.

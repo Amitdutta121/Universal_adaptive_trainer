@@ -1498,6 +1498,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Route
+         * @description Point every role without its own saved settings at OpenRouter or Azure.
+         *
+         *     No Test is asked for, unlike a role save: both routes come from ``.env`` as configured,
+         *     and switching back is one click. Azure is refused while its URL or key is missing.
+         */
+        put: operations["set_route_api_settings_route_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/models": {
         parameters: {
             query?: never;
@@ -1643,6 +1666,26 @@ export interface paths {
          *     Progress and the outcome are in ``GET /api/jobs``, like a generation run.
          */
         post: operations["pregenerate_api_tutorial_pregeneration_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Agent
+         * @description Run the agent on an AG-UI ``RunAgentInput`` and stream its events back.
+         */
+        post: operations["run_agent_api_agent_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4335,6 +4378,18 @@ export interface components {
             providers: string[];
             /** Can Edit */
             can_edit: boolean;
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "openrouter" | "azure";
+            /**
+             * Route Source
+             * @enum {string}
+             */
+            route_source: "db" | "env";
+            /** Azure Configured */
+            azure_configured: boolean;
         };
         /** MostMissedOut */
         MostMissedOut: {
@@ -5133,6 +5188,14 @@ export interface components {
          * @enum {string}
          */
         RoundStatus: "queued" | "running" | "done" | "failed";
+        /** RouteUpdate */
+        RouteUpdate: {
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "openrouter" | "azure";
+        };
         /**
          * SaveSetupRequest
          * @description ``POST /api/setup``: the professor's approved setup.
@@ -8975,6 +9038,39 @@ export interface operations {
             };
         };
     };
+    set_route_api_settings_route_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     provider_models_api_settings_models_get: {
         parameters: {
             query?: {
@@ -9271,6 +9367,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["JobStartedResponse"] | components["schemas"]["TutorialPregenerationPlan"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_agent_api_agent_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
