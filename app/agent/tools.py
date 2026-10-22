@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import FunctionToolset, RunContext
 from sqlalchemy.orm import Session
 
-from app.agent.approvals import APPROVAL_REQUIRED, SignedPlan, open_plan, sign_plan
+from app.agent.approvals import APPROVAL_REQUIRED, PlannedRun, open_plan, store_plan
 from app.curriculum import TaxonomyImportService, TreeUpdate
 from app.curriculum.drafting import DraftBrief, draft_taxonomy
 from app.curriculum.taxonomy_schema import TaxonomyDocument
@@ -401,10 +401,10 @@ def plan_generation(ctx: RunContext[AgentDeps], target: AgentRunTarget) -> Price
         else:
             plan = run_routes.plan_run(session, deps.course_id, target)
     calls = plan.totals.generation_calls + (plan.totals.judge_calls or 0)
-    signed = SignedPlan(
+    planned = PlannedRun(
         course_id=deps.course_id, target=target.model_dump(mode="json"), model_calls=calls
     )
-    return PricedPlan(plan_id=sign_plan(signed), model_calls=calls, plan=plan)
+    return PricedPlan(plan_id=store_plan(planned), model_calls=calls, plan=plan)
 
 
 class StartedRun(BaseModel):

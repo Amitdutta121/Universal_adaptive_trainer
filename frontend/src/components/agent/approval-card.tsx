@@ -37,7 +37,8 @@ export function describeCall(call: PendingCall): { title: string; lines: string[
   const { args } = call;
   switch (call.name) {
     case "approve_curriculum": {
-      const document = (args.document ?? {}) as { label?: string; topics?: unknown };
+      // The document's own fields: Pydantic AI flattens a tool whose only parameter is a model.
+      const document = args as { label?: string; topics?: unknown };
       return {
         title: `Save the curriculum "${document.label ?? "Untitled"}"`,
         lines: ["It becomes this course's approved curriculum.", ...topicLines(document.topics)],

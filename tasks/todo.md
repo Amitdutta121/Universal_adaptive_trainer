@@ -813,8 +813,8 @@ style-comparison cards render in the chat. New dependency: `@copilotkit/*`, with
 
 **Verification:**
 - [x] `FRONTEND` (typecheck, biome lint, 717 tests passed; `next build` passes)
-- [ ] Manual check: set up the Agah course by chat (import → curriculum → styles → generate → publish)
-  -- not run: needs a real model (spends API credit); waiting for the go-ahead
+- [x] Manual check: set up the Agah course by chat (import → curriculum → styles → generate → publish)
+  (2026-10-22, see Checkpoint I)
 
 **Dependencies:** T34
 **Files likely touched:** `frontend/src/app/courses/[courseId]/layout.tsx`, `frontend/src/components/agent/*`, `frontend/package.json`
@@ -822,6 +822,20 @@ style-comparison cards render in the chat. New dependency: `@copilotkit/*`, with
 
 ## Checkpoint I
 - [ ] The end-to-end chat setup works and every approval is a human click; human review
+  (2026-10-22, DB copy `data/checkpoint_i.db`, Azure Foundry gpt-5-mini, production build in Chrome.
+  New course 4; the Agah PDF uploaded in the Library (book files are not a chat tool, by design).
+  By chat: YouTube kqtD5dpn9C8 imported (book 13) -> curriculum drafted, approval card listed its
+  topics, Approve click saved version 9 (none before the click) -> setup suggested + 3-style
+  side-by-side preview -> first round priced at 6 questions / 6 calls, Approve click started round 5
+  (6/6 produced; no setup or round before the click) -> publish card, Approve click froze set 7 with
+  6 questions; `/students/join?taxonomy=9` serves it. The 6 questions were approved through the
+  review endpoint first: no chat tool approves questions, and publishing with none approved is refused.
+  Three bugs found and fixed: the curriculum card showed "Untitled" (Pydantic AI flattens a lone
+  model parameter, the card read `args.document`); every Approve click saved nothing and hung the
+  chat (CopilotKit also sends the resume answer as the call's `tool` message, so Pydantic AI refused
+  the resume as "already executed"; the route now drops that echo); `run_generation` was refused
+  (the model corrupted the 2.4 KB signed plan id; plan ids are now short and kept server-side).
+  Awaiting human review)
 
 ---
 

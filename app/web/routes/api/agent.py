@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic_ai.models import Model
 from pydantic_ai.ui.ag_ui import AGUIAdapter
+from pydantic_ai.ui.ag_ui._interrupt import interrupt_id_to_tool_call_id
 
 # Modules, not names: ``app.agent.tools`` imports route modules, so either side may load first.
 from app.agent import agent as professor
@@ -30,6 +31,28 @@ from app.web.routes.api.generation_runs import _query_embedder
 from app.web.routes.api.setup import SetupClientDep
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+class CopilotKitAGUIAdapter(AGUIAdapter):
+    """Pydantic AI's AG-UI adapter, minus CopilotKit's echo of an approval.
+
+    On a resume, CopilotKit (1.79) also sends the professor's answer as the paused call's
+    ``tool`` message. Pydantic AI would read that as the call's result and refuse the resume
+    ("already executed"), so the approved tool never ran. Dropping the echo leaves ``resume`` as
+    the only answer, still deny-by-default. A ``tool`` message is never an approval by itself:
+    the gated tool does not run for it.
+    """
+
+    @classmethod
+    def build_run_input(cls, body: bytes):
+        run_input = super().build_run_input(body)
+        resumed = {interrupt_id_to_tool_call_id(e.interrupt_id) for e in run_input.resume or []}
+        if not resumed:
+            return run_input
+        messages = [
+            m for m in run_input.messages if not (m.role == "tool" and m.tool_call_id in resumed)
+        ]
+        return run_input.model_copy(update={"messages": messages})
 
 
 def get_agent_model() -> Model:
@@ -63,6 +86,6 @@ async def run_agent(
         youtube_check=youtube_check,
         embedder=lambda: _query_embedder(request),
     )
-    return await AGUIAdapter.dispatch_request(
+    return await CopilotKitAGUIAdapter.dispatch_request(
         request, agent=professor.professor_agent, model=model, deps=deps
     )

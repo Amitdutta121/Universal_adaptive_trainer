@@ -2,17 +2,17 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApprovalCardView, describeCall, findCall } from "./approval-card";
 
+// Flat, as the model sends it: Pydantic AI uses a lone model parameter's fields as the tool's
+// arguments, so `approve_curriculum(document)` gets no `document` key.
 const CURRICULUM = {
   name: "approve_curriculum",
   args: {
-    document: {
-      schema_version: "1",
-      label: "Intro Python",
-      topics: [
-        { name: "Loops", subtopics: [{ name: "for" }, { name: "while" }] },
-        { name: "Functions", subtopics: [{ name: "Defining" }] },
-      ],
-    },
+    schema_version: "1",
+    label: "Intro Python",
+    topics: [
+      { name: "Loops", subtopics: [{ name: "for" }, { name: "while" }] },
+      { name: "Functions", subtopics: [{ name: "Defining" }] },
+    ],
   },
 };
 
