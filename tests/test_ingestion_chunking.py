@@ -205,3 +205,23 @@ def test_the_version_endpoint_adds_a_version(client: TestClient) -> None:
     job = finished_job(client, response.json()["job_id"])
     assert job["status"] == "done", job
     assert job["result"]["book"]["id"] == book["id"]
+
+
+def test_docling_uses_the_downloaded_models_and_fetches_them_otherwise(
+    tmp_path, monkeypatch
+) -> None:
+    """``models/docling`` filled by ``scripts.download_docling_models`` keeps PDF parsing off
+    the Hugging Face Hub; an empty or missing folder leaves Docling to fetch them itself."""
+    from types import SimpleNamespace
+
+    from app.ingestion import parsing
+
+    folder = tmp_path / "docling"
+    monkeypatch.setattr(
+        parsing, "get_settings", lambda: SimpleNamespace(docling_artifacts_path=folder)
+    )
+    assert parsing._docling_artifacts() is None
+    folder.mkdir()
+    assert parsing._docling_artifacts() is None
+    (folder / "docling-project--docling-layout-heron").mkdir()
+    assert parsing._docling_artifacts() == str(folder)

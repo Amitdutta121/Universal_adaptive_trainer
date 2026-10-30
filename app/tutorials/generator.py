@@ -25,7 +25,9 @@ from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
-from pydantic import BaseModel
+import yaml
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.chunks import HEADING_SEPARATOR
@@ -37,7 +39,7 @@ from app.domain.enums import (
 )
 from app.errors import DomainRuleError, MalformedModelOutputError, NotFoundError
 from app.llm import ChatTurn, StructuredLLMClient
-from app.persistence.models import TutorialBlockRow
+from app.persistence.models import ExperimentalRecipeRow, TutorialBlockRow
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.retrieval.chunks import ChunkRetriever
 from app.subjects import profile_for_version
@@ -111,6 +113,36 @@ def get_recipe(subject: str, recipe_id: str) -> TutorialRecipe:
         if recipe.id == recipe_id:
             return recipe
     raise NotFoundError(f"No tutorial recipe {recipe_id!r} for this subject.")
+
+
+def course_recipes(session: Session, subject: str, course_id: int | None) -> list[TutorialRecipe]:
+    """The subject's library recipes, then the course's own, made in the recipe builder
+    (``app/tutorials/experimental.py``; their ids start ``exp.``). A saved recipe the schema
+    no longer accepts is left out rather than breaking every caller."""
+    recipes = get_recipes(subject)
+    if course_id is None:
+        return recipes
+    rows = session.scalars(
+        select(ExperimentalRecipeRow)
+        .where(ExperimentalRecipeRow.course_id == course_id)
+        .order_by(ExperimentalRecipeRow.id)
+    )
+    for row in rows:
+        try:
+            data = yaml.safe_load(row.yaml)
+            recipes.append(TutorialRecipe.model_validate({**data, "subject": subject}))
+        except (yaml.YAMLError, TypeError, ValidationError) as exc:
+            logger.warning("Course recipe %s no longer validates: %s", row.recipe_id, exc)
+    return recipes
+
+
+def get_course_recipe(
+    session: Session, subject: str, course_id: int | None, recipe_id: str
+) -> TutorialRecipe:
+    for recipe in course_recipes(session, subject, course_id):
+        if recipe.id == recipe_id:
+            return recipe
+    raise NotFoundError(f"No tutorial recipe {recipe_id!r} in this course.")
 
 
 #: Loads an html block headless and returns its problems (``app/tutorials/html_check.py``).
@@ -217,8 +249,39 @@ def generate_block(
             does not trace code, given code does not run, or no chunk was found to write from.
     """
     subtopic = CurriculumRepository(session).get_subtopic(request.subtopic_id)
-    subject = profile_for_version(session, subtopic.topic.curriculum_version_id).storage_key
-    recipe = get_recipe(subject, request.recipe_id)
+    version = subtopic.topic.curriculum_version
+    subject = profile_for_version(session, version.id).storage_key
+    block = write_block(
+        session,
+        request,
+        get_course_recipe(session, subject, version.course_id, request.recipe_id),
+        client=client,
+        retriever=retriever,
+        runner=runner,
+        html_check=html_check,
+    )
+    session.add(block)
+    session.flush()
+    return block
+
+
+def write_block(
+    session: Session,
+    request: BlockRequest,
+    recipe: TutorialRecipe,
+    *,
+    client: StructuredLLMClient,
+    retriever: ChunkRetriever,
+    runner: LocalCodeRunner | None = None,
+    html_check: HtmlCheck = check_html_block,
+) -> TutorialBlockRow:
+    """One block of ``recipe`` for the request's subtopic, not added to the session.
+
+    ``recipe`` need not be in the library: the experimental recipe builder tries a recipe
+    before it is saved anywhere (``app/tutorials/experimental.py``). Raises as
+    :func:`generate_block` does.
+    """
+    subtopic = CurriculumRepository(session).get_subtopic(request.subtopic_id)
     if request.guidance_level not in recipe.guidance_levels:
         allowed = ", ".join(level.value for level in recipe.guidance_levels)
         raise DomainRuleError(
@@ -297,8 +360,6 @@ def generate_block(
         error="; ".join(problems) if problems else None,
         model=client.description,
     )
-    session.add(block)
-    session.flush()
     return block
 
 
@@ -309,7 +370,8 @@ def _clip_block(
     request: BlockRequest,
     retriever: ChunkRetriever,
 ) -> TutorialBlockRow:
-    """The block of a ``video_clip`` recipe: the best-matching video chunk, no model call."""
+    """The block of a ``video_clip`` recipe: the best-matching video chunk, no model call.
+    Not added to the session."""
     found = retriever.for_subtopic(request.subtopic_id, top_k=1, source_kind=ChunkSourceKind.VIDEO)
     if not found:
         raise DomainRuleError(
@@ -332,8 +394,6 @@ def _clip_block(
         error="; ".join(problems) if problems else None,
         model="",
     )
-    session.add(block)
-    session.flush()
     return block
 
 

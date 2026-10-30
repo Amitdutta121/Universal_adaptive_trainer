@@ -32,22 +32,29 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
-import { useCoursesOverview, useCurrentUser, useLogout, useUpdateCourse } from "@/lib/api/queries";
+import {
+  useAssessmentCatalog,
+  useCoursesOverview,
+  useCurrentUser,
+  useLogout,
+  useUpdateCourse,
+} from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 import { coursePath } from "@/lib/course";
 import { NewCourseDialog } from "./new-course-dialog";
+import { GradingNote, TypeGroups } from "./question-type-picker";
 
 type CourseProgress = Schemas["CourseProgressOut"];
 type ActivityEvent = Schemas["ActivityEventOut"];
 
 /** Each setup step: its label, and the screen that completes it. */
 const STEPS: Record<string, { label: string; action: string; path: string }> = {
-  materials: { label: "Materials", action: "Add a book", path: "/books" },
-  taxonomy: { label: "Taxonomy", action: "Define the taxonomy", path: "/curriculum" },
-  coverage: { label: "Coverage", action: "Fill coverage gaps", path: "/coverage" },
+  // The required steps of the dashboard checklist (`lib/course-setup.ts`), in the same order.
+  materials: { label: "Content", action: "Add content", path: "/books" },
+  taxonomy: { label: "Curriculum", action: "Approve the curriculum", path: "/curriculum" },
+  questions: { label: "Question types", action: "Set up questions", path: "/questions" },
   review: { label: "Review", action: "Review questions", path: "/review" },
-  question_set: { label: "Question set", action: "Freeze a question set", path: "/coverage" },
-  classes: { label: "Classes", action: "Open a classroom", path: "/students" },
+  share: { label: "Share", action: "Create the student link", path: "/dashboard" },
 };
 
 function openCourse(courseId: number, path = "/books") {
@@ -156,7 +163,7 @@ function CourseCard({
   const owner = progress.owned_by_you ? null : (progress.owner_email ?? null);
 
   const stats: Array<[string, string]> = [
-    ["Books", String(course.book_count)],
+    ["Contents", String(course.book_count)],
     ["Taxonomies", String(course.curriculum_version_count)],
     ["Questions", course.question_count.toLocaleString()],
     ["Coverage", percent(progress.coverage)],
@@ -269,7 +276,10 @@ function RecentActivity({ events }: { events: ActivityEvent[] }) {
 
 // -------------------------------------------------------------------- dialogs
 
-/** Rename a course or change its description. Creating one is the New course page. */
+/**
+ * Rename a course, change its description, or change the question types it allows (ADR-054).
+ * Creating one is the New course dialog, which starts from the subject's default types.
+ */
 function CourseFormDialog({
   course,
   onOpenChange,
@@ -283,11 +293,31 @@ function CourseFormDialog({
   const descriptionId = useId();
   const [name, setName] = useState(course.name);
   const [description, setDescription] = useState(course.description ?? "");
+  const catalog = useAssessmentCatalog();
+  const [types, setTypes] = useState<Set<string>>(() => new Set(course.question_types));
+  const subject =
+    catalog.data?.subjects.find((entry) => entry.id === (course.subject ?? "intro_python")) ?? null;
+  const typesChanged =
+    types.size !== course.question_types.length ||
+    course.question_types.some((id) => !types.has(id));
+
+  function setType(id: string, on: boolean) {
+    setTypes((previous) => {
+      const next = new Set(previous);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!name.trim()) return;
-    const body = { name: name.trim(), description: description.trim() };
+    if (!name.trim() || types.size === 0) return;
+    const body = {
+      name: name.trim(),
+      description: description.trim(),
+      ...(typesChanged ? { question_types: [...types] } : {}),
+    };
     try {
       await updateCourse.mutateAsync({ courseId: course.id, body });
       onOpenChange(false);
@@ -298,11 +328,13 @@ function CourseFormDialog({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
             <DialogTitle>Course settings</DialogTitle>
-            <DialogDescription>Rename the course or change its description.</DialogDescription>
+            <DialogDescription>
+              Rename the course, change its description, or change the question types it allows.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2">
@@ -331,13 +363,38 @@ function CourseFormDialog({
             />
           </div>
 
+          <section className="space-y-3">
+            <div>
+              <h3 className="font-medium text-sm">Question types</h3>
+              <p className="text-muted-foreground text-xs">
+                The AI writes only these types, and question setup offers only their styles.
+                Questions already written keep their type.
+              </p>
+            </div>
+            {catalog.isError ? <QueryError error={catalog.error} /> : null}
+            {catalog.data && subject ? (
+              <>
+                <TypeGroups
+                  catalog={catalog.data}
+                  subject={subject}
+                  chosen={types}
+                  setType={setType}
+                />
+                <GradingNote catalog={catalog.data} chosen={types} />
+              </>
+            ) : null}
+            {types.size === 0 ? (
+              <p className="text-destructive text-xs">Keep at least one question type.</p>
+            ) : null}
+          </section>
+
           {mutation.error ? <QueryError error={mutation.error} /> : null}
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || mutation.isPending}>
+            <Button type="submit" disabled={!name.trim() || types.size === 0 || mutation.isPending}>
               {mutation.isPending ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>

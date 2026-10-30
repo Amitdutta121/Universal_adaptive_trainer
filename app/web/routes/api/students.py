@@ -31,10 +31,11 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from app.adaptive import AdaptiveTrainingEngine
@@ -52,6 +53,7 @@ from app.errors import (
 )
 from app.generation.live import next_for_session, run_live_job
 from app.generation.refill import plan_refill, schedule_refill
+from app.jobs.queue import JobQueue, JobQueueDep
 from app.persistence.models import (
     LiveQuestionJobRow,
     StudentAttemptRow,
@@ -66,6 +68,7 @@ from app.persistence.repositories import (
     StudentStateRepository,
     TrainingSessionRepository,
 )
+from app.tutorials.live import LiveQueue
 from app.tutorials.serving import blocks_after_answer, preteach_blocks
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
@@ -384,12 +387,13 @@ def class_summary(
 
     allowed_ids = _student_ids_in(session, course, curriculum_version_id)
     roster = [row for row in students.search("") if allowed_ids is None or row.id in allowed_ids]
-    stats = attempts.stats_by_student()
     scored = attempts.scored_attempts_all(curriculum_version_id, course_id=course)
     weakness_rows = state.list_weakness_all(curriculum_version_id, course_id=course)
 
     names = {row.id: row.display_name for row in roster}
-    answered_by_student = {student_id: stat.answered_count for student_id, stat in stats.items()}
+    # Scored answers in this scope only, like the trend: a student's answers in another course
+    # are not "answered" here.
+    answered_by_student = Counter(attempt.student_id for attempt in scored)
     labels = curriculum.subtopic_labels_for([row.subtopic_id for row in weakness_rows])
 
     buckets: dict[int, list[tuple[int, float]]] = {}
@@ -426,6 +430,8 @@ def class_summary(
 
     measured = {student_id for student_id, count in answered_by_student.items() if count}
     measured.update(row.student_id for row in weakness_rows)
+    # The answer counts span every course; only this roster's students are measured here.
+    measured &= {row.id for row in roster}
     all_scores = [attempt.score for attempt in scored]
 
     return ClassSummaryOut(
@@ -673,6 +679,8 @@ def next_question(
     learner: Learner,
     training_session_id: int,
     background_tasks: BackgroundTasks,
+    request: Request = None,  # type: ignore[assignment]  # None only when called directly
+    queue: JobQueueDep = None,  # type: ignore[assignment]
 ) -> ServedQuestionOut | JSONResponse:
     """Serve the next question.
 
@@ -687,7 +695,9 @@ def next_question(
     the client keeps polling.
     """
     _own_run(session, learner, training_session_id)
-    return _next_or_generate(session, training_session_id, background_tasks, force=False)
+    return _next_or_generate(
+        session, training_session_id, background_tasks, _live(request, queue), force=False
+    )
 
 
 @router.post(
@@ -698,10 +708,14 @@ def request_live_question(
     learner: Learner,
     training_session_id: int,
     background_tasks: BackgroundTasks,
+    request: Request = None,  # type: ignore[assignment]  # None only when called directly
+    queue: JobQueueDep = None,  # type: ignore[assignment]
 ) -> ServedQuestionOut | JSONResponse:
     """``/next``, but generate even right after a failed attempt: the student asked to retry."""
     _own_run(session, learner, training_session_id)
-    return _next_or_generate(session, training_session_id, background_tasks, force=True)
+    return _next_or_generate(
+        session, training_session_id, background_tasks, _live(request, queue), force=True
+    )
 
 
 def _error_response(exc: AdaptiveTrainerError, background_tasks: BackgroundTasks) -> JSONResponse:
@@ -717,10 +731,28 @@ def _error_response(exc: AdaptiveTrainerError, background_tasks: BackgroundTasks
     )
 
 
+def _live(request: Request | None, queue: JobQueue | None) -> LiveQueue | None:
+    """Where a missing tutorial block's job goes (``app/tutorials/live.py``); ``None`` (write
+    nothing) when the route is called directly, as some tests do."""
+    if request is None or queue is None:
+        return None
+    from app.web.routes.api.retrieval import get_query_embedder
+    from app.web.routes.api.tutorials import get_tutorial_client
+
+    overrides = request.app.dependency_overrides
+    return LiveQueue(
+        queue,
+        # Test overrides only; in production the job builds both when it runs.
+        client=overrides[get_tutorial_client]() if get_tutorial_client in overrides else None,
+        embedder=overrides[get_query_embedder]() if get_query_embedder in overrides else None,
+    )
+
+
 def _next_or_generate(
     session: DbSession,
     training_session_id: int,
     background_tasks: BackgroundTasks,
+    live: LiveQueue | None,
     *,
     force: bool,
 ) -> ServedQuestionOut | JSONResponse:
@@ -749,7 +781,7 @@ def _next_or_generate(
     if plan_refill(session, training_session_id) is not None:
         background_tasks.add_task(schedule_refill, training_session_id)
     # Composed before the commit: showing them is logged for per-recipe stats (Task 28).
-    preteach = preteach_blocks(session, served.attempt)
+    preteach = preteach_blocks(session, served.attempt, live=live)
     session.commit()
     subtopic_name = None
     if served.attempt.subtopic_id is not None:
@@ -762,7 +794,12 @@ def _next_or_generate(
 
 @router.post("/attempts/{attempt_id}/answer", response_model=AnsweredOut)
 def answer_attempt(
-    session: DbSession, learner: Learner, attempt_id: int, payload: AnswerRequest
+    session: DbSession,
+    learner: Learner,
+    attempt_id: int,
+    payload: AnswerRequest,
+    request: Request = None,  # type: ignore[assignment]  # None only when called directly
+    queue: JobQueueDep = None,  # type: ignore[assignment]
 ) -> AnsweredOut:
     """Score a submitted answer and fold it into the student's state."""
     _own_attempt(session, learner, attempt_id)
@@ -771,7 +808,9 @@ def answer_attempt(
     except Exception:
         session.rollback()
         raise
-    blocks = blocks_after_answer(session, result.attempt, mastery=result.mastery_after)
+    blocks = blocks_after_answer(
+        session, result.attempt, mastery=result.mastery_after, live=_live(request, queue)
+    )
     session.commit()
     out = AnsweredOut.from_result(result)
     out.tutorial_blocks = [StudentTutorialBlockOut.model_validate(block) for block in blocks]

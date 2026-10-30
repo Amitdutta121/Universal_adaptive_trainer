@@ -54,9 +54,10 @@ export interface NavSection {
 export const NAV_SECTIONS: readonly NavSection[] = [
   {
     key: "books",
-    label: "Books",
+    label: "Contents",
     path: "/books",
-    summary: "Upload textbooks and inspect their extracted structure.",
+    summary:
+      "The course's books and lecture videos: upload more, filter by type, and inspect what was extracted from each.",
     icon: BookOpen,
   },
   {
@@ -79,7 +80,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Tutorials",
     path: "/tutorials",
     summary:
-      "Generate short tutorial blocks for a subtopic from the course's recipes, and preview them as students will see them.",
+      "The ways tutorials teach in this course: approve or stop each recipe, preview its blocks as students see them, and create your own.",
     icon: Presentation,
   },
   {
@@ -131,3 +132,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
 export const SECTIONS_BY_KEY: Record<string, NavSection> = Object.fromEntries(
   NAV_SECTIONS.map((section) => [section.key, section]),
 );
+
+/**
+ * The student classroom: no account, its own light-only shell (`StudentChrome`), so
+ * both the chrome and the theme provider branch on it.
+ */
+export const isStudentPath = (pathname: string) => pathname.startsWith("/students/join");

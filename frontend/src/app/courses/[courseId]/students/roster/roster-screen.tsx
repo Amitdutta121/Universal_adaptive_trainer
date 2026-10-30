@@ -5,9 +5,7 @@ import type { Route } from "next";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Bar,
   CartesianGrid,
-  ComposedChart,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -22,12 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import {
-  Tooltip as HoverTooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { pluralise } from "@/lib/display";
 import {
   Select,
   SelectContent,
@@ -51,6 +44,7 @@ import {
   useStudents,
 } from "@/lib/api/queries";
 import type { ClassSummary } from "@/lib/api/types";
+import { ClassWeaknessCard } from "../class-weakness-card";
 import { buildClassScoreTrend, buildScoreTrend, type ClassTrendAttempt } from "../score-trend";
 
 const PAGE_SIZE = 20;
@@ -116,8 +110,8 @@ function MiniAverageTrend({ values }: { values: number[] }) {
   );
 }
 
-function chartLabel(timestamp: string, ordinal: number) {
-  return `${formatDate(timestamp, true)} · Attempt ${ordinal}`;
+function chartLabel(timestamp: string, sequence: number, total: number) {
+  return `Attempt ${sequence} of ${total} · ${formatDate(timestamp, true)}`;
 }
 
 function masteryPercent(value: number) {
@@ -141,15 +135,6 @@ function topicBandStyles(band: "low" | "medium" | "high") {
     badgeClassName: "border-rose-200 bg-rose-50 text-rose-700",
     progressClassName: "bg-rose-500",
   };
-}
-
-function weaknessColor(value: number) {
-  const clamped = Math.max(0, Math.min(1, value));
-  if (clamped >= 0.8) return "bg-rose-600";
-  if (clamped >= 0.6) return "bg-rose-500";
-  if (clamped >= 0.4) return "bg-amber-500";
-  if (clamped >= 0.2) return "bg-lime-500";
-  return "bg-emerald-500";
 }
 
 /** Regroup the flat class-summary attempt list into the per-student shape the
@@ -177,7 +162,6 @@ export function RosterScreen() {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [curriculumFilter, setCurriculumFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
-  const [selectedSubtopicId, setSelectedSubtopicId] = useState<number | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
 
   // Debounce the search box so a keystroke is not a request. A settled search
@@ -251,10 +235,6 @@ export function RosterScreen() {
   );
   const classSolvedQuestions = classScoreTrend.at(-1)?.totalSolved ?? 0;
   const classStudentsIncluded = classScoreTrend.at(-1)?.studentsIncluded ?? 0;
-  const weaknessCells = summary.data?.weakness_cells ?? [];
-  const selectedCell =
-    weaknessCells.find((cell) => cell.subtopic_id === selectedSubtopicId) ?? null;
-  const affectedStudents = selectedCell?.affected ?? [];
 
   const progress = useStudentProgress(selectedStudentId, {
     enabled: selectedStudentId !== null,
@@ -470,7 +450,7 @@ export function RosterScreen() {
                 <CardTitle className="text-xl">Average across all students</CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">{classStudentsIncluded} students</Badge>
-                  <Badge variant="outline">{classSolvedQuestions} questions solved</Badge>
+                  <Badge variant="outline">{classSolvedQuestions} answers</Badge>
                 </div>
               </div>
             </CardHeader>
@@ -481,43 +461,39 @@ export function RosterScreen() {
                 <QueryError error={summary.error} />
               ) : classScoreTrend.length === 0 ? (
                 <EmptyState
-                  title="No solved questions yet"
+                  title="No answers yet"
                   hint="This class graph appears after students answer questions."
                 />
               ) : (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap gap-4 text-muted-foreground text-xs">
-                    <span className="inline-flex items-center gap-2">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{
-                          background:
-                            "color-mix(in oklab, var(--primary) 35%, white)",
-                        }}
-                      />
-                      Total questions solved
-                    </span>
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-foreground" />
-                      Running average
-                    </span>
-                  </div>
+                  {/* Every answer counts once, so a student who answers more weighs more,
+                      and the first points are whoever answered first. */}
+                  <p className="text-muted-foreground text-xs">
+                    The average score of every answer given so far, in the order they were
+                    given.
+                  </p>
                   <div className="h-72 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart
+                      <LineChart
                         data={classScoreTrend}
                         margin={{ top: 12, right: 12, left: 24, bottom: 28 }}
                       >
                         <CartesianGrid stroke="currentColor" strokeOpacity={0.08} />
+                        {/* x is the running count of answers, unique per point (a day label
+                            repeats, and the hover would find only the day's first answer). */}
                         <XAxis
-                          dataKey="label"
+                          dataKey="totalSolved"
+                          type="number"
+                          domain={["dataMin", "dataMax"]}
+                          allowDecimals={false}
+                          padding={{ left: 10, right: 10 }}
                           tickLine={false}
                           axisLine={false}
                           minTickGap={24}
                           stroke="currentColor"
                           tick={{ fill: "currentColor", fontSize: 12, opacity: 0.75 }}
                           label={{
-                            value: "Questions solved over time",
+                            value: "Answers so far, oldest to newest",
                             position: "insideBottom",
                             offset: -6,
                             fill: "currentColor",
@@ -525,7 +501,6 @@ export function RosterScreen() {
                           }}
                         />
                         <YAxis
-                          yAxisId="score"
                           domain={[0, 100]}
                           tickCount={6}
                           tickFormatter={(value: number) => `${value}`}
@@ -542,34 +517,38 @@ export function RosterScreen() {
                             fontSize: 12,
                           }}
                         />
-                        <YAxis
-                          yAxisId="volume"
-                          orientation="right"
-                          allowDecimals={false}
-                          tickLine={false}
-                          axisLine={false}
-                          stroke="currentColor"
-                          tick={{ fill: "currentColor", fontSize: 12, opacity: 0.45 }}
-                        />
-                        <Bar
-                          yAxisId="volume"
-                          dataKey="totalSolved"
-                          name="Total questions solved"
-                          fill="color-mix(in oklab, var(--primary) 35%, white)"
-                          radius={[4, 4, 0, 0]}
-                          barSize={10}
+                        <Tooltip
+                          contentStyle={{
+                            background: "var(--card)",
+                            border: "1px solid color-mix(in oklab, var(--border) 80%, transparent)",
+                            borderRadius: "12px",
+                            color: "var(--card-foreground)",
+                          }}
+                          formatter={(value) => [
+                            scoreLabel(typeof value === "number" ? value : 0),
+                            "Class average",
+                          ]}
+                          labelFormatter={(_label, payload) => {
+                            const point = payload?.[0]?.payload;
+                            if (!point) return "";
+                            const answers = pluralise(point.totalSolved, "answer");
+                            const students = pluralise(point.studentsIncluded, "student");
+                            return `After ${answers} from ${students} · ${formatDate(point.timestamp, true)}`;
+                          }}
                         />
                         <Line
-                          yAxisId="score"
-                          type="monotone"
+                          type="linear"
                           dataKey="averageScore"
                           name="Class average"
                           stroke="var(--foreground)"
                           strokeWidth={2.5}
-                          dot={{ r: 3, fill: "var(--foreground)" }}
+                          // Past ~40 answers the dots merge into a bar; the hover still marks one.
+                          dot={
+                            classScoreTrend.length > 40 ? false : { r: 3, fill: "var(--foreground)" }
+                          }
                           activeDot={{ r: 5 }}
                         />
-                      </ComposedChart>
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
@@ -577,114 +556,10 @@ export function RosterScreen() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70">
-            <CardHeader className="gap-3">
-              <div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.18em]">
-                <GraduationCap className="size-3.5" />
-                Class weakness
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle className="text-xl">Class weakness</CardTitle>
-                <Badge variant="outline">{weaknessCells.length} subtopics</Badge>
-              </div>
-              <CardDescription>
-                Darker cells mark weaker areas across the class. Hover a cell to see the topic
-                and subtopic.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {summary.isPending ? (
-                <TableSkeleton rows={3} />
-              ) : summary.isError ? (
-                <QueryError error={summary.error} />
-              ) : weaknessCells.length === 0 ? (
-                <EmptyState
-                  title="No weakness data yet"
-                  hint="The heatmap appears after students answer enough questions to build weakness data."
-                />
-              ) : (
-                <div className="space-y-3">
-                  <TooltipProvider>
-                    <div className="grid grid-cols-8 gap-1 sm:grid-cols-10 xl:grid-cols-12">
-                      {weaknessCells.map((cell) => (
-                        <HoverTooltip key={cell.subtopic_id}>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedSubtopicId(cell.subtopic_id)}
-                              className={`aspect-square rounded-md transition-transform hover:scale-105 ${
-                                weaknessColor(cell.average_weakness)
-                              } ${
-                                cell.subtopic_id === selectedSubtopicId
-                                  ? "ring-2 ring-foreground/60 ring-offset-1"
-                                  : ""
-                              }`}
-                              aria-label={`${cell.topic_name} ${cell.subtopic_name}`}
-                            />
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={8} className="max-w-[220px]">
-                            <div className="space-y-1">
-                              <div className="font-medium text-background">
-                                {cell.subtopic_name}
-                              </div>
-                              <div className="text-background/80">{cell.topic_name}</div>
-                              <div className="text-background/80">
-                                Weakness {cell.average_weakness.toFixed(2)} · {cell.student_count}{" "}
-                                student(s)
-                              </div>
-                              <div className="text-background/80">Click to view affected students</div>
-                            </div>
-                          </TooltipContent>
-                        </HoverTooltip>
-                      ))}
-                    </div>
-                  </TooltipProvider>
-                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>Lower</span>
-                    <div className="flex gap-1">
-                      <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />
-                      <span className="h-2.5 w-2.5 rounded-sm bg-lime-500" />
-                      <span className="h-2.5 w-2.5 rounded-sm bg-amber-500" />
-                      <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" />
-                      <span className="h-2.5 w-2.5 rounded-sm bg-rose-600" />
-                    </div>
-                    <span>Higher weakness</span>
-                  </div>
-                  {selectedCell ? (
-                    <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-                      <div>
-                        <div className="font-medium">{selectedCell.subtopic_name}</div>
-                        <div className="text-muted-foreground text-sm">
-                          {selectedCell.topic_name} · weakness{" "}
-                          {selectedCell.average_weakness.toFixed(2)} ·{" "}
-                          {selectedCell.student_count} student(s)
-                        </div>
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        {affectedStudents.slice(0, 6).map((student) => (
-                          <button
-                            key={student.id}
-                            type="button"
-                            onClick={() => setSelectedStudentId(student.id)}
-                            className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2 text-left hover:bg-muted/30"
-                          >
-                            <span className="font-medium">{student.name}</span>
-                            <span className="text-muted-foreground text-sm">
-                              weakness {student.weakness.toFixed(2)} · {student.answered} answered
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border/70 border-dashed px-3 py-2 text-muted-foreground text-sm">
-                      Click a heatmap cell to see the students with weakness recorded in that area.
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <ClassWeaknessCard
+            curriculumVersionId={curriculumVersionId}
+            onSelectStudent={setSelectedStudentId}
+          />
 
           <Card className="border-border/70">
             <CardHeader className="gap-3">
@@ -772,15 +647,21 @@ export function RosterScreen() {
                             margin={{ top: 12, right: 12, left: 24, bottom: 28 }}
                           >
                             <CartesianGrid stroke="currentColor" strokeOpacity={0.08} />
+                            {/* x is the attempt's place in the learner's history: unique per
+                                point, so hovering finds that point (a day label repeats). */}
                             <XAxis
-                              dataKey="label"
+                              dataKey="sequence"
+                              type="number"
+                              domain={["dataMin", "dataMax"]}
+                              allowDecimals={false}
+                              padding={{ left: 10, right: 10 }}
                               tickLine={false}
                               axisLine={false}
                               minTickGap={24}
                               stroke="currentColor"
                               tick={{ fill: "currentColor", fontSize: 12, opacity: 0.75 }}
                               label={{
-                                value: "Attempts over time",
+                                value: "Attempt, oldest to newest",
                                 position: "insideBottom",
                                 offset: -6,
                                 fill: "currentColor",
@@ -819,11 +700,13 @@ export function RosterScreen() {
                               labelFormatter={(_label, payload) => {
                                 const point = payload?.[0]?.payload;
                                 if (!point) return "";
-                                return chartLabel(point.timestamp, point.ordinal);
+                                return chartLabel(point.timestamp, point.sequence, scoreTrend.length);
                               }}
                             />
+                            {/* Straight segments: a curve between a 0 and a 100 passes through
+                                scores no attempt had, and overshoots the 0–100 range. */}
                             <Line
-                              type="monotone"
+                              type="linear"
                               dataKey="score"
                               stroke="var(--primary)"
                               strokeWidth={2.5}
@@ -831,7 +714,7 @@ export function RosterScreen() {
                               activeDot={{ r: 5 }}
                             />
                             <Line
-                              type="monotone"
+                              type="linear"
                               dataKey="averageScore"
                               stroke="var(--foreground)"
                               strokeWidth={2.5}

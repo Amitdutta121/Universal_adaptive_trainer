@@ -58,6 +58,11 @@ const LABELS: Record<string, string> = {
   suggest_setup: "Suggest a setup",
   review_summary: "Check the review queue",
   student_report: "Read student progress",
+  list_recipes: "Read the tutorial recipes",
+  draft_recipe: "Draft a recipe",
+  try_recipe: "Try a recipe",
+  save_recipe: "Save a recipe",
+  decide_recipe: "Approve or stop a recipe",
   open_view: "Open a page",
 };
 

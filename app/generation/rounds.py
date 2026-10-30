@@ -200,11 +200,16 @@ def plan_targets(
     rng: random.Random | None = None,
     cell_deficits: dict[Cell, int] | None = None,
     saturated: list[Cell] | None = None,
+    spread_styles: bool = False,
 ) -> list[dict[str, object]]:
     """Up to ``size`` targets ``{"subtopic_id", "difficulty", "style_id"}`` for one round.
 
     A cell whose subtopic's facets are already listed gets at most one target per facet its
     questions do not cover; with none left it is appended to ``saturated`` and gets none.
+
+    ``spread_styles`` (round 1) first gives every approved style one target, then prefers the
+    least-used style in each cell, so the professor's first reviews reach every style: judge
+    trust is earned per style.
     """
     rng = rng or random.Random()
     version = require_approved_version(session, setup.curriculum_version_id)
@@ -243,6 +248,24 @@ def plan_targets(
         styles[cell] = candidates
 
     targets: list[dict[str, object]] = []
+    used: dict[str, int] = {}
+
+    def usable(cell: Cell) -> dict[str, float]:
+        weights = style_weights(styles[cell], {s: rejects.get((cell, s), 0) for s in styles[cell]})
+        return {s: w for s, w in weights.items() if w > 0}
+
+    def add(cell: Cell, style_id: str) -> None:
+        targets.append({"subtopic_id": cell[0], "difficulty": cell[1].value, "style_id": style_id})
+        deficit[cell] -= 1
+        used[style_id] = used.get(style_id, 0) + 1
+
+    if spread_styles:
+        for style_id in sorted({s for cell in order for s in usable(cell)}):
+            cells = [c for c in order if deficit[c] > 0 and style_id in usable(c)]
+            if len(targets) >= size or not cells:
+                continue
+            add(max(cells, key=lambda c: (deficit[c], -order.index(c))), style_id)
+
     # One target per cell per pass, neediest first, so a round spreads across cells rather
     # than filling the first ones in taxonomy order.
     while len(targets) < size and any(deficit.values()):
@@ -251,15 +274,12 @@ def plan_targets(
         ):
             if len(targets) >= size:
                 break
-            weights = style_weights(
-                styles[cell], {s: rejects.get((cell, s), 0) for s in styles[cell]}
-            )
-            pool = [s for s in styles[cell] if weights[s] > 0]
-            style_id = rng.choices(pool, weights=[weights[s] for s in pool])[0]
-            targets.append(
-                {"subtopic_id": cell[0], "difficulty": cell[1].value, "style_id": style_id}
-            )
-            deficit[cell] -= 1
+            weights = usable(cell)
+            pool = list(weights)
+            if spread_styles:
+                fewest = min(used.get(s, 0) for s in pool)
+                pool = [s for s in pool if used.get(s, 0) == fewest]
+            add(cell, rng.choices(pool, weights=[weights[s] for s in pool])[0])
     return targets
 
 
@@ -351,11 +371,18 @@ def _cell_labels(session: Session, cells: list[Cell]) -> str | None:
 
 
 def _create_round(
-    session: Session, setup: QuestionSetupRow, *, size: int, rng: random.Random | None
+    session: Session,
+    setup: QuestionSetupRow,
+    *,
+    size: int,
+    rng: random.Random | None,
+    spread_styles: bool = False,
 ) -> GenerationRoundRow:
     rounds = GenerationRoundRepository(session)
     saturated: list[Cell] = []
-    targets = plan_targets(session, setup, size=size, rng=rng, saturated=saturated)
+    targets = plan_targets(
+        session, setup, size=size, rng=rng, saturated=saturated, spread_styles=spread_styles
+    )
     row = GenerationRoundRow(
         setup_id=setup.id,
         number=rounds.next_number(setup.id),
@@ -395,7 +422,7 @@ def start_round(
         )
     if active_round(session, setup.curriculum_version_id) is not None:
         raise DomainRuleError("A round of this taxonomy is still generating.")
-    return _create_round(session, setup, size=size, rng=rng)
+    return _create_round(session, setup, size=size, rng=rng, spread_styles=True)
 
 
 def next_round(

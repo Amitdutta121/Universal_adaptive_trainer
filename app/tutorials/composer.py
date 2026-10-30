@@ -71,6 +71,12 @@ def guidance_for(mastery: float, last_correct: bool | None) -> GuidanceLevel | N
     return None if mastery >= NOTHING_ABOVE else GuidanceLevel.CUE
 
 
+def fit_rank(recipe: TutorialRecipe, kinds: Sequence[ContentKind]) -> int:
+    """How early the recipe's ``fits`` come in ``kinds``; lower is a better fit."""
+    ranks = [list(kinds).index(kind) for kind in recipe.fits if kind in kinds]
+    return min(ranks, default=len(kinds))
+
+
 def compose(
     blocks: Sequence[TutorialBlockRow],
     recipes: Mapping[str, TutorialRecipe],
@@ -123,17 +129,15 @@ def _pick(
         by_recipe[block.recipe_id].append(block)
     for group in by_recipe.values():
         rng.shuffle(group)
-    kinds = list(state.content_kinds)
-
-    def fit_rank(recipe_id: str) -> int:
-        ranks = [kinds.index(kind) for kind in recipes[recipe_id].fits if kind in kinds]
-        return min(ranks, default=len(kinds))
-
     # Better fit first, then heavier weight; the seeded tiebreak keeps it deterministic.
     tiebreak = {recipe_id: rng.random() for recipe_id in sorted(by_recipe)}
     order = sorted(
         by_recipe,
-        key=lambda r: (fit_rank(r), -state.weights.get(r, 1.0), tiebreak[r]),
+        key=lambda r: (
+            fit_rank(recipes[r], state.content_kinds),
+            -state.weights.get(r, 1.0),
+            tiebreak[r],
+        ),
     )
     picked: list[TutorialBlockRow] = []
     while len(picked) < count and any(by_recipe[r] for r in order):

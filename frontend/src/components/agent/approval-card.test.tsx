@@ -61,6 +61,34 @@ describe("describeCall", () => {
     const { lines } = describeCall({ name: "publish_set", args: { curriculum_version_id: 7 } });
     expect(lines[0]).toContain("curriculum version 7");
   });
+
+  it("names a recipe from its YAML and says students wait for approval", () => {
+    const { title, lines } = describeCall({
+      name: "save_recipe",
+      args: { yaml: "id: exp.analogy\nname: Everyday analogy\n" },
+    });
+    expect(title).toBe('Save the recipe "Everyday analogy"');
+    expect(lines.join(" ")).toContain("only once it is approved");
+  });
+
+  it("tells approving a recipe from stopping it", () => {
+    const args = { recipe_id: "exp.analogy", curriculum_version_id: 9 };
+    expect(describeCall({ name: "decide_recipe", args: { ...args, approved: true } }).title).toBe(
+      "Approve the recipe exp.analogy for students",
+    );
+    expect(describeCall({ name: "decide_recipe", args: { ...args, approved: false } }).title).toBe(
+      "Stop using the recipe exp.analogy",
+    );
+  });
+
+  it("shows the link a YouTube import would fetch", () => {
+    const { title, lines } = describeCall({
+      name: "import_material",
+      args: { url: "https://youtu.be/AbCdEfGhIjK" },
+    });
+    expect(title).toBe("Import a YouTube video");
+    expect(lines[0]).toBe("https://youtu.be/AbCdEfGhIjK");
+  });
 });
 
 describe("findCall", () => {

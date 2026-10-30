@@ -11,6 +11,7 @@ import { CourseGate } from "@/components/course-gate";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
 import { courseIdFromPath } from "@/lib/course";
+import { isStudentPath } from "@/lib/navigation";
 
 function ProfessorChrome({
   children,
@@ -47,11 +48,15 @@ function ProfessorChrome({
   );
 }
 
-function StudentChrome({ children }: { children: React.ReactNode }) {
+function StudentChrome({ children, wide }: { children: React.ReactNode; wide: boolean }) {
   return (
     <main className="student-shell min-h-screen">
       <div className="student-shell__backdrop" />
-      <div className="student-shell__frame">
+      <div
+        className={
+          wide ? "student-shell__frame student-shell__frame--wide" : "student-shell__frame"
+        }
+      >
         <header className="student-shell__header">
           <Link href={"/students/join" as Route} className="student-shell__brand">
             <span className="student-shell__brand-mark">
@@ -79,7 +84,10 @@ const SIGNED_OUT_ROUTES = new Set([
 
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isStudentRoute = pathname.startsWith("/students/join");
+  const isStudentRoute = isStudentPath(pathname);
+  // A running session puts the tutorial and the question side by side, which
+  // needs more than the join form's width.
+  const isStudentSession = pathname.startsWith("/students/join/session/");
   // The login page and the other signed-out account screens (sign up, verify email,
   // forgot/reset password) render full-page (`AuthCard`) and must never sit behind
   // AuthGate itself, or a logged-out visitor could never reach them.
@@ -101,7 +109,7 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   if (isSignedOutRoute || isExperimentRoute || isLandingRoute) return <>{children}</>;
   if (isCoursePicker) return <AuthGate>{children}</AuthGate>;
   return isStudentRoute ? (
-    <StudentChrome>{children}</StudentChrome>
+    <StudentChrome wide={isStudentSession}>{children}</StudentChrome>
   ) : (
     <ProfessorChrome isWideRoute={isWideRoute}>{children}</ProfessorChrome>
   );

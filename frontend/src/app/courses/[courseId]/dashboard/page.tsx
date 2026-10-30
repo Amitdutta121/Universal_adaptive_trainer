@@ -8,6 +8,7 @@
  */
 
 import Link from "next/link";
+import { SetupChecklist } from "@/components/course-setup/setup-checklist";
 import { PageHeader } from "@/components/page-header";
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
@@ -17,9 +18,13 @@ import type { Counts, Health } from "@/lib/api/types";
 import { courseRequestHeaders } from "@/lib/api/server-request";
 import { coursePath } from "@/lib/course";
 import { NAV_SECTIONS } from "@/lib/navigation";
+import { ClassWeaknessCard } from "../students/class-weakness-card";
 
 // Counts change whenever a question is generated or reviewed; never cache them.
 export const dynamic = "force-dynamic";
+
+/** Sections without a dashboard card: the sidebar still reaches them. */
+const NOT_ON_DASHBOARD = new Set(["roster", "coverage", "judges"]);
 
 /** Which dashboard card each count belongs to. Sections with no count show none. */
 const COUNT_KEYS: Partial<Record<string, keyof Counts>> = {
@@ -68,8 +73,10 @@ export default async function DashboardPage(props: PageProps<"/courses/[courseId
 
       {error ? <QueryError error={error} /> : null}
 
+      <SetupChecklist courseId={Number(courseId)} />
+
       <div className="dashboard-grid">
-        {NAV_SECTIONS.map((section) => {
+        {NAV_SECTIONS.filter((section) => !NOT_ON_DASHBOARD.has(section.key)).map((section) => {
           const countKey = COUNT_KEYS[section.key];
           const count = counts && countKey ? counts[countKey] : null;
           const Icon = section.icon;
@@ -96,6 +103,13 @@ export default async function DashboardPage(props: PageProps<"/courses/[courseId
             </Link>
           );
         })}
+        {/* One card's slot, every student of the course (no taxonomy filter). The
+            affected-students list stays on the Roster. */}
+        <ClassWeaknessCard
+          showAffected={false}
+          compact
+          seeMoreHref={coursePath(courseId, "/students/roster")}
+        />
       </div>
     </>
   );

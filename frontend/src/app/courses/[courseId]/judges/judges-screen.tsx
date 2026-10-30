@@ -53,9 +53,9 @@ import type {
   JudgeScorecard,
   JudgeStat,
   JudgeStats,
-  StyleTrust,
 } from "@/lib/api/types";
 import { questionTypeLabel } from "@/lib/question-types/registry";
+import { styleStatus } from "@/lib/style-trust";
 
 const SHOWN_METRICS = ["difficulty", "subtopic"] as const;
 
@@ -169,17 +169,6 @@ function learningText(stats: JudgeStats | undefined): string | null {
   return "Learns from your reviews at the start of each round";
 }
 
-// Every window, custom rules included, must be trusted before a style skips review,
-// so the shortest one is what the style is still waiting on.
-function styleStatus(style: StyleTrust, minimum: number): string {
-  const windows = Object.values(style.metrics);
-  if (style.trusted) return "Skips review";
-  if (windows.some((metric) => metric.audit_revoked)) return "Audit failed";
-  const fewest = Math.min(...windows.map((metric) => metric.observations));
-  if (fewest < minimum) return `Building trust: ${fewest} of ${minimum} reviews`;
-  return "Below 90% agreement";
-}
-
 function ScorecardCard() {
   const { data, error, isPending } = useJudgeScorecard();
 
@@ -254,8 +243,10 @@ function StyleTrustCard({ stats }: { stats: JudgeStats }) {
         <div className="review-eyebrow">Trust by style</div>
         <CardTitle className="text-lg">Which styles skip your review</CardTitle>
         <CardDescription>
-          A style skips review once, over its last {stats.min_observations} reviewed questions, the
-          judges agreed with you and you accepted at least {percent(stats.min_acceptance)} of them.
+          A style skips review once, over its last {stats.min_observations} reviewed questions in
+          this course, the judges agreed with you and you accepted at least{" "}
+          {percent(stats.min_acceptance)} of them. Each taxonomy also needs{" "}
+          {stats.min_topic_local} topic reviews of its own.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -289,7 +280,7 @@ function StyleTrustCard({ stats }: { stats: JudgeStats }) {
                   })}
                   <td>
                     <Badge variant={style.trusted ? "secondary" : "outline"}>
-                      {styleStatus(style, stats.min_observations)}
+                      {styleStatus(style, stats.min_observations, stats.min_topic_local)}
                     </Badge>
                   </td>
                 </tr>

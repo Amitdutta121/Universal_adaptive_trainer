@@ -19,6 +19,9 @@ dist/
 # Runtime data (SQLite database, uploaded books, generated artifacts)
 data/
 
+# Downloaded model weights: `python -m scripts.download_docling_models` fills models/docling
+models/
+
 # Editors / OS
 .vscode/
 .idea/

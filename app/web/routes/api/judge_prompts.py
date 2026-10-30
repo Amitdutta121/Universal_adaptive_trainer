@@ -119,12 +119,16 @@ def judge_stats(
         scoped if version_ids is None else style_trust_under_current_panel(session, profile)
     )
     names = {style.id: style.name for style in styles_for(session, profile)}
+    # A style's reviews pool across the course's versions, so each version's row repeats the
+    # same window: count one row per style (the newest version's) in the totals.
+    per_style = {item.style_id: item for item in scoped}
+    subject_per_style = {item.style_id: item for item in subject_wide}
 
     judges = []
     for metric in SHOWN_JUDGES:
         windows = [
             item.report.metrics[metric.value]
-            for item in scoped
+            for item in per_style.values()
             if metric.value in item.report.metrics
         ]
         observations = sum(window.observations for window in windows)
@@ -137,7 +141,10 @@ def judge_stats(
                 agreement_rate=agreements / observations if observations else None,
             )
         )
-    trusted_count = sum(item.report.trusted for item in subject_wide)
+    trusted_count = sum(
+        any(item.report.trusted for item in subject_wide if item.style_id == style_id)
+        for style_id in subject_per_style
+    )
     return JudgeStatsResponse(
         rubric_version=effective_rubric_version(session, profile=profile),
         judges=judges,
@@ -154,6 +161,7 @@ def judge_stats(
                         agreement_rate=value.agreement_rate,
                         trusted=value.trusted,
                         audit_revoked=value.audit_revoked,
+                        local_observations=value.local_observations,
                     )
                     for name, value in item.report.metrics.items()
                 },
@@ -168,6 +176,7 @@ def judge_stats(
         min_observations=settings.judge_trust_min_observations,
         min_agreement=settings.judge_trust_min_agreement,
         min_acceptance=settings.judge_trust_min_acceptance,
+        min_topic_local=settings.judge_trust_min_topic_local,
     )
 
 

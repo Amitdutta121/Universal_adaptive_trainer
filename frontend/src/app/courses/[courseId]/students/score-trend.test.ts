@@ -35,6 +35,17 @@ describe("buildScoreTrend", () => {
     expect(points.map((point) => point.averageScore)).toEqual([90, 65]);
   });
 
+  it("numbers attempts across sessions, so each point has its own x even on one day", () => {
+    const points = buildScoreTrend([
+      attempt({ id: 1, session_id: 2, ordinal: 1, answered_at: "2026-08-20T10:01:00Z" }),
+      attempt({ id: 2, session_id: 2, ordinal: 2, answered_at: "2026-08-20T10:02:00Z" }),
+      attempt({ id: 3, session_id: 3, ordinal: 1, answered_at: "2026-08-20T11:00:00Z" }),
+    ]);
+
+    expect(points.map((point) => point.sequence)).toEqual([1, 2, 3]);
+    expect(new Set(points.map((point) => point.label)).size).toBe(1);
+  });
+
   it("turns question type codes into readable labels", () => {
     const points = buildScoreTrend([
       attempt({ question_type: "coding" }),

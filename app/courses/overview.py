@@ -16,6 +16,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.coverage import build_coverage_report
+from app.coverage.service import taxonomy_alias
 from app.domain.enums import CurriculumStatus, QuestionStatus, ReviewDecision
 from app.persistence.models import (
     BookRow,
@@ -36,6 +37,8 @@ from app.persistence.repositories import (
     CourseRepository,
     CurriculumRepository,
     QuestionRepository,
+    QuestionSetRepository,
+    QuestionSetupRepository,
     questions_in_course,
 )
 
@@ -46,8 +49,12 @@ MAX_SCORE = 100.0
 #: How many events the activity feed shows.
 ACTIVITY_LIMIT = 8
 
-#: The order a course is built in. Each step is done when the data says so.
-SETUP_STEPS = ("materials", "taxonomy", "coverage", "review", "question_set", "classes")
+#: The order a course is built in, for the selected taxonomy. Each step is done when the data
+#: says so, and each matches a required step of the dashboard checklist
+#: (``frontend/src/lib/course-setup.ts``): content, an approved taxonomy, a saved question setup,
+#: an approved question (a classroom link refuses an empty set) and the classroom link itself.
+#: Full coverage is not a step: live questions fill gaps once students arrive.
+SETUP_STEPS = ("materials", "taxonomy", "questions", "review", "share")
 
 
 @dataclass
@@ -156,13 +163,15 @@ def _progress(session: Session, course: CourseRow, owner_email: str | None) -> C
         session, select(func.count()).select_from(BookRow).where(BookRow.course_id == course_id)
     )
     question_set_count = _count(session, select(func.count()).select_from(set_ids.subquery()))
+    sets = QuestionSetRepository(session)
     setup = {
         "materials": book_count > 0,
         "taxonomy": approved is not None,
-        "coverage": coverage is not None and coverage >= 1.0,
-        "review": approved_questions > 0,
-        "question_set": question_set_count > 0,
-        "classes": student_count > 0,
+        "questions": approved is not None
+        and QuestionSetupRepository(session).current(approved.id) is not None,
+        "review": approved is not None
+        and bool(sets.approved_question_ids(curriculum_version_id=approved.id)),
+        "share": approved is not None and sets.get_alias(taxonomy_alias(approved.id)) is not None,
     }
     return CourseProgress(
         course=course,

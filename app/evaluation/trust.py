@@ -37,6 +37,10 @@ class MetricTrust:
     agreement_rate: float
     trusted: bool
     audit_revoked: bool = False
+    #: Topic only: reviews from the question's own Curriculum version. Trust pools a style's
+    #: reviews across the course, but whether the topic judge picks the right subtopic depends
+    #: on that version's subtopic list, so a few reviews there are needed too.
+    local_observations: int | None = None
 
 
 @dataclass(frozen=True)
@@ -170,7 +174,11 @@ def _historical_snapshot(
 def judge_trust(
     session: Session, question_row: QuestionRow, custom_results: Any = None
 ) -> TrustReport:
-    """Query trust for the current judge/rules and course/taxonomy/style scope.
+    """Query trust for the current judge/rules and course/style scope.
+
+    A style's reviews count across every Curriculum version of the course, so editing the
+    Curriculum or teaching a second taxonomy keeps the trust already earned. The topic metric
+    also needs ``judge_trust_min_topic_local`` reviews in the question's own version.
 
     Null corrections are absent observations. Each metric uses its own most
     recent window of explicit observations. An audit disagreement blocks that
@@ -183,10 +191,10 @@ def judge_trust(
     evaluation = snapshot["evaluation"]
     rules = _rules(session, question_row)
     version = session.get(CurriculumVersionRow, question_row.curriculum_version_id)
+    course_id = version.course_id if version else None
     scope_key = _hash(
         [
-            version.course_id if version else None,
-            question_row.curriculum_version_id,
+            course_id,
             question_row.style_id,
             evaluation.get("judge_model"),
             evaluation.get("rubric_version"),
@@ -195,8 +203,15 @@ def judge_trust(
     )
     names = ["difficulty", "subtopic", ACCEPTANCE, *(f"custom:{rule.id}" for rule in rules)]
     observations: dict[str, list[tuple[bool, int]]] = {name: [] for name in names}
+    local_topic: list[tuple[bool, int]] = []
     seen: dict[str, set[int]] = {name: set() for name in names}
     failed_audit: dict[str, int] = dict.fromkeys(names, -1)
+    # A course-less (legacy) version pools nothing beyond itself.
+    in_scope = (
+        CurriculumVersionRow.course_id == course_id
+        if course_id is not None
+        else QuestionRow.curriculum_version_id == question_row.curriculum_version_id
+    )
     # Ascending order selects the first explicit observation of each artifact.
     pairs = session.execute(
         select(ProfessorReviewRow, QuestionRow)
@@ -204,10 +219,8 @@ def judge_trust(
             QuestionRow,
             QuestionRow.id == ProfessorReviewRow.question_id,
         )
-        .where(
-            QuestionRow.curriculum_version_id == question_row.curriculum_version_id,
-            QuestionRow.style_id == question_row.style_id,
-        )
+        .join(CurriculumVersionRow, CurriculumVersionRow.id == QuestionRow.curriculum_version_id)
+        .where(in_scope, QuestionRow.style_id == question_row.style_id)
         .order_by(ProfessorReviewRow.created_at, ProfessorReviewRow.id)
     )
     for event, (review, question) in enumerate(pairs):
@@ -228,6 +241,11 @@ def judge_trust(
             if answer is not None and question.id not in seen[name]:
                 observations[name].append((answer, event))
                 seen[name].add(question.id)
+                if (
+                    name == "subtopic"
+                    and question.curriculum_version_id == question_row.curriculum_version_id
+                ):
+                    local_topic.append((answer, event))
         if question.id not in seen[ACCEPTANCE]:
             observations[ACCEPTANCE].append((review.decision == ReviewDecision.APPROVE, event))
             seen[ACCEPTANCE].add(question.id)
@@ -277,15 +295,17 @@ def judge_trust(
             and sum(event > failed_audit[name] for _, event in values)
             < settings.judge_trust_min_observations
         )
-        metrics[name] = MetricTrust(
-            count,
-            agrees,
-            rate,
-            count >= settings.judge_trust_min_observations
-            and rate >= minimum
-            and not revoked,
-            revoked,
-        )
+        trusted = count >= settings.judge_trust_min_observations and rate >= minimum and not revoked
+        local = None
+        if name == "subtopic":
+            here = list(reversed(local_topic))[:window]
+            local = len(here)
+            trusted = (
+                trusted
+                and local >= settings.judge_trust_min_topic_local
+                and sum(value[0] for value in here) / local >= minimum
+            )
+        metrics[name] = MetricTrust(count, agrees, rate, trusted, revoked, local)
     current = _metric_map(evaluation)
     results = {item.get("judge_id"): item for item in snapshot["custom_results"]}
     panel = set(settings.judge_metrics_enabled) | {"difficulty", "subtopic"}

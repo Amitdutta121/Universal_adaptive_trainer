@@ -273,6 +273,10 @@ class TestRosterPagination:
             "/api/students/class-summary", params={"curriculum_version_id": version_a}
         ).json()
         assert [attempt["student_id"] for attempt in scoped["scored_attempts"]] == [student_a]
+        # Bea answered in the other taxonomy only: not this roster's, so not measured here.
+        assert (scoped["student_count"], scoped["measured_students"]) == (1, 1)
+        # Ada's answer count is this taxonomy's alone.
+        assert scoped["weakness_cells"][0]["affected"][0]["answered"] == 1
         assert len(scoped["weakness_cells"]) == 1
         assert [row["name"] for row in scoped["weakness_cells"][0]["affected"]] == ["Ada"]
 

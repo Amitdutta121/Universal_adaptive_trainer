@@ -48,6 +48,8 @@ TEST_ENV: dict[str, str] = {
     "JUDGE_BATCH_ENABLED": "false",
     "JUDGE_BATCH_API_KEY": "",
     "JUDGE_BATCH_MODEL": "",
+    # Live tutorials queue model calls from student answers; tests that want them opt in.
+    "TUTORIALS_LIVE": "false",
     "CORS_ALLOW_ORIGINS": "http://localhost:5173",
     # A developer's SMTP settings must never make the suite send real email.
     "EMAIL_BACKEND": "console",

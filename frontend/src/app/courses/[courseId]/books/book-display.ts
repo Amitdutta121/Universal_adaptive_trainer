@@ -32,6 +32,24 @@ export function defects(warnings: readonly ExtractionWarning[]): ExtractionWarni
   return warnings.filter((warning) => warning.severity === "defect");
 }
 
+/** What kind of content an upload is, as the Contents page shows and filters it. */
+export type ContentType = "book" | "video";
+
+export const CONTENT_TYPES: readonly ContentType[] = ["book", "video"];
+
+export const CONTENT_TYPE_LABEL: Record<ContentType, string> = {
+  book: "Book",
+  video: "Video",
+};
+
+/**
+ * Read off how the content was uploaded, so every upload is labelled with no input: a
+ * YouTube link is a video; a PDF, DOCX or PPTX file is a book.
+ */
+export function contentTypeOf(book: Pick<BookSummary, "source_format">): ContentType {
+  return book.source_format === "youtube" ? "video" : "book";
+}
+
 /** A book's author line, or an em dash — never a guess. */
 export function authorLabel(book: Pick<BookSummary, "author">): string {
   return book.author?.trim() || "—";

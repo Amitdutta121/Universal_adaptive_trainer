@@ -286,7 +286,7 @@ export interface paths {
         head?: never;
         /**
          * Update Course
-         * @description Rename a course or change its description.
+         * @description Rename a course, change its description, or change the question types it allows.
          */
         patch: operations["update_course_api_courses__course_id__patch"];
         trace?: never;
@@ -1591,8 +1591,8 @@ export interface paths {
         };
         /**
          * List Recipes
-         * @description The tutorial recipes of the course's subject (shipped content, not course data), with
-         *     the taxonomy's decisions when ``curriculum_version_id`` is given.
+         * @description The course subject's library recipes, then the course's own (recipe builder, ids
+         *     ``exp.``), with the taxonomy's decisions when ``curriculum_version_id`` is given.
          */
         get: operations["list_recipes_api_tutorial_recipes_get"];
         put?: never;
@@ -1667,6 +1667,104 @@ export interface paths {
          */
         post: operations["pregenerate_api_tutorial_pregeneration_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-blocks/{block_id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Retire Block
+         * @description Stop showing one bank block: it is rejected and hidden, and its recipe is not written
+         *     again for that subtopic and level by live generation. Copies frozen with a set and failed
+         *     blocks cannot be retired.
+         */
+        put: operations["retire_block_api_tutorial_blocks__block_id__retire_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recipes */
+        get: operations["list_recipes_api_experimental_recipes_get"];
+        put?: never;
+        /** Create */
+        post: operations["create_api_experimental_recipes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft
+         * @description Draft a recipe from the professor's words, or revise ``current_yaml``. Saves nothing.
+         */
+        post: operations["draft_api_experimental_recipes_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes/try": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try Recipe
+         * @description Write one block of the recipe for a subtopic, without saving the block or the recipe.
+         */
+        post: operations["try_recipe_api_experimental_recipes_try_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes/{row_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update */
+        put: operations["update_api_experimental_recipes__row_id__put"];
+        post?: never;
+        /** Delete */
+        delete: operations["delete_api_experimental_recipes__row_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2989,6 +3087,8 @@ export interface components {
             name?: string | null;
             /** Description */
             description?: string | null;
+            /** Question Types */
+            question_types?: string[] | null;
         };
         /** CoursesOverviewResponse */
         CoursesOverviewResponse: {
@@ -3556,6 +3656,78 @@ export interface components {
             stdout?: string | null;
             /** Assert */
             assert?: string | null;
+        };
+        /** ExperimentalRecipeDraftOut */
+        ExperimentalRecipeDraftOut: {
+            /** Yaml */
+            yaml: string;
+            /** Problems */
+            problems: string[];
+            recipe: components["schemas"]["TutorialRecipe"] | null;
+        };
+        /**
+         * ExperimentalRecipeDraftRequest
+         * @description What the professor asks for; with ``current_yaml``, a revision of that recipe.
+         */
+        ExperimentalRecipeDraftRequest: {
+            /** Description */
+            description: string;
+            /** Current Yaml */
+            current_yaml?: string | null;
+        };
+        /**
+         * ExperimentalRecipeOut
+         * @description A recipe from the experimental recipe builder: its YAML and the fields a list shows.
+         */
+        ExperimentalRecipeOut: {
+            /** Id */
+            id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Yaml */
+            yaml: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            recipe: components["schemas"]["TutorialRecipe"];
+        };
+        /**
+         * ExperimentalRecipeTryOut
+         * @description One block written from the recipe, never saved. ``error`` when it stayed invalid.
+         */
+        ExperimentalRecipeTryOut: {
+            renderer: components["schemas"]["TutorialRenderer"];
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Chunk Ids */
+            chunk_ids: string[];
+            /** Error */
+            error: string | null;
+            /** Model */
+            model: string;
+        };
+        /** ExperimentalRecipeTryRequest */
+        ExperimentalRecipeTryRequest: {
+            /** Yaml */
+            yaml: string;
+            /** Subtopic Id */
+            subtopic_id: number;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+        };
+        /** ExperimentalRecipeYaml */
+        ExperimentalRecipeYaml: {
+            /** Yaml */
+            yaml: string;
         };
         /**
          * ExtractionWarning
@@ -4261,6 +4433,8 @@ export interface components {
             min_agreement: number;
             /** Min Acceptance */
             min_acceptance: number;
+            /** Min Topic Local */
+            min_topic_local: number;
         };
         /**
          * MasteryBand
@@ -4350,6 +4524,8 @@ export interface components {
              * @default false
              */
             audit_revoked: boolean;
+            /** Local Observations */
+            local_observations?: number | null;
         };
         /** MetricTrustOut */
         MetricTrustOut: {
@@ -4363,6 +4539,8 @@ export interface components {
             trusted: boolean;
             /** Audit Revoked */
             audit_revoked: boolean;
+            /** Local Observations */
+            local_observations?: number | null;
         };
         /**
          * ModelRole
@@ -5545,6 +5723,11 @@ export interface components {
             examples: {
                 [key: string]: string;
             };
+            /**
+             * Ready
+             * @default true
+             */
+            ready: boolean;
         };
         /**
          * SubmitBatchRunRequest
@@ -5777,6 +5960,10 @@ export interface components {
              * @enum {string}
              */
             size: "compact" | "standard" | "detailed";
+            /** Topic Count */
+            topic_count?: number | null;
+            /** Subtopic Count */
+            subtopic_count?: number | null;
         };
         /**
          * TaxonomyDraftResponse
@@ -6132,6 +6319,11 @@ export interface components {
             stats?: {
                 [key: string]: components["schemas"]["TutorialRecipeStatsOut"];
             };
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
         };
         /**
          * TutorialRecipeStatsOut
@@ -9367,6 +9559,243 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["JobStartedResponse"] | components["schemas"]["TutorialPregenerationPlan"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_block_api_tutorial_blocks__block_id__retire_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                block_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialBlockOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recipes_api_experimental_recipes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_experimental_recipes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeYaml"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_api_experimental_recipes_draft_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeDraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    try_recipe_api_experimental_recipes_try_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeTryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeTryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_api_experimental_recipes__row_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeYaml"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_api_experimental_recipes__row_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

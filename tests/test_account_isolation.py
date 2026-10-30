@@ -34,10 +34,12 @@ from app.config import Settings
 from app.domain.enums import (
     CurriculumStatus,
     Difficulty,
+    GuidanceLevel,
     GuidelineStatus,
     QuestionStatus,
     QuestionType,
     ReviewDecision,
+    TutorialRenderer,
 )
 from app.persistence.models import (
     BookRow,
@@ -47,6 +49,7 @@ from app.persistence.models import (
     CourseStyleRow,
     CurriculumVersionRow,
     CustomJudgeRow,
+    ExperimentalRecipeRow,
     GenerationRoundRow,
     JudgeBatchRunRow,
     MemoryGuidelineRow,
@@ -63,6 +66,7 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
     TrainingSessionRow,
+    TutorialBlockRow,
     UserRow,
 )
 from app.persistence.repositories import ChunkRepository, QuestionSetRepository
@@ -79,6 +83,11 @@ from app.web.routes.api.tutorials import get_tutorial_client
 #: Written into every text field of A's rows; no response the intruder gets may contain it.
 SECRET = "ALICE-PRIVATE"
 PASSWORD = "a-long-enough-passphrase"
+#: A valid experimental tutorial recipe, so a probe gets past validation to the ownership check.
+EXPERIMENTAL_RECIPE = (
+    "id: exp.secret\nname: Secret\nsummary: One line.\nrenderer: markdown\n"
+    "prompt: Write one line.\nfits: [concept]\nguidance_levels: [cue]\n"
+)
 ALICE_EMAIL = "alice@example.edu"
 
 #: Routes the sweep leaves out on purpose, each with the reason.
@@ -181,6 +190,12 @@ BODIES: dict[tuple[str, str], Any] = {
         "curriculum_version_id": "{version}",
         "dry_run": True,
     },
+    ("PUT", "/api/experimental/recipes/{row_id}"): {"yaml": EXPERIMENTAL_RECIPE},
+    ("POST", "/api/experimental/recipes/try"): {
+        "yaml": EXPERIMENTAL_RECIPE,
+        "subtopic_id": "{subtopic}",
+        "guidance_level": "cue",
+    },
 }
 
 #: Ids of A's rows that a query string may carry, by parameter name.
@@ -222,6 +237,8 @@ PATH_IDS = {
     "set_version_id": "qset",
     "guideline_id": "guideline",
     "style_id": "style",
+    "row_id": "experimental_recipe",
+    "block_id": "tutorial_block",
     # ``round-<id>``: A's question round, as the Jobs panel addresses it.
     "job_id": "job",
 }
@@ -276,6 +293,10 @@ class Seed:
     guideline: int = 0
     #: A's course-only question style ("" for content that belongs to no course).
     style: str = ""
+    #: A's experimental tutorial recipe (0 for content that belongs to no course).
+    experimental_recipe: int = 0
+    #: A's tutorial bank block.
+    tutorial_block: int = 0
 
 
 # ---------------------------------------------------------------- accounts and seed
@@ -437,12 +458,25 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
     batch = JudgeBatchRunRow(run_id=f"run-{uuid.uuid4().hex[:12]}", course_id=course_id)
     setup = QuestionSetupRow(curriculum_version_id=version.id)
     judge = CustomJudgeRow(curriculum_version_id=version.id, rule_text=f"{label} rule")
-    session.add_all([batch, setup, judge])
+    block = TutorialBlockRow(
+        subtopic_id=subtopic.id,
+        recipe_id="py.topic_flow",
+        guidance_level=GuidanceLevel.CUE,
+        renderer=TutorialRenderer.MARKDOWN,
+        payload={"markdown": f"{label} block"},
+        chunk_ids=[book.chunks[0].id],
+    )
+    session.add_all([batch, setup, judge, block])
     session.flush()
     generation_round = GenerationRoundRow(setup_id=setup.id, number=1)
     session.add(generation_round)
     style_id = ""
+    experimental = None
     if course_id is not None:
+        experimental = ExperimentalRecipeRow(
+            course_id=course_id, recipe_id="exp.secret", yaml=EXPERIMENTAL_RECIPE
+        )
+        session.add(experimental)
         style_id = f"py.secret_{course_id}"
         session.add(
             CourseStyleRow(
@@ -473,6 +507,8 @@ def _content(session: Session, course_id: int | None, *, label: str) -> Seed:
         custom_judge=judge.id,
         job=f"round-{generation_round.id}",
         style=style_id,
+        experimental_recipe=experimental.id if experimental else 0,
+        tutorial_block=block.id,
     )
 
 

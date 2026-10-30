@@ -19,6 +19,7 @@ from app.web.routes.api import (
     curriculum,
     custom_judges,
     evaluation,
+    experimental_recipes,
     feedback,
     generation_runs,
     instructions,
@@ -63,6 +64,7 @@ _professor_only = [
     jobs.router,
     settings.router,
     tutorials.router,
+    experimental_recipes.router,
     agent.router,
 ]
 for professor_router in _professor_only:

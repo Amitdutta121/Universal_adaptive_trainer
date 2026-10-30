@@ -19,7 +19,7 @@ from pydantic import SecretStr
 from pydantic_ai.messages import ModelRequest, RetryPromptPart
 from sqlalchemy import select
 
-from app.agent.agent import agent_model
+from app.agent.agent import INSTRUCTIONS, agent_model
 from app.agent.tools import (
     VIEW_PATHS,
     ClassReport,
@@ -33,6 +33,9 @@ from app.agent.tools import (
     StylePreview,
     ToolRefusal,
     View,
+    _student_lines,
+    open_view,
+    student_report,
 )
 from app.config import LLMProvider, Settings
 from app.curriculum import TaxonomyImportService
@@ -369,6 +372,26 @@ def test_student_report_gives_the_class_summary_or_one_student(client: TestClien
     missing = result_of(_run(("student_report", {"student_id": 999_999})), "student_report")
     assert isinstance(missing, ToolRefusal)
 
+    # The class report names every student with the id the one-student report takes.
+    report = result_of(_run(("student_report", {})), "student_report")
+    assert [(line.student_id, line.name, line.answered) for line in report.students] == [
+        (student_id, "Ada", 0)
+    ]
+
+
+def test_class_report_lists_students_weakest_first_from_this_course_only() -> None:
+    lines = _student_lines(
+        [(1, "Ada"), (2, "Bea"), (3, "Cy"), (4, "Eve")],
+        # Only the course's scored answers come in; Eve has none.
+        [(1, 100.0), (1, 0.0), (2, 0.0), (2, 100.0), (2, 0.0), (3, 50.0)],
+    )
+    assert [(line.name, line.answered, line.average_score) for line in lines] == [
+        ("Bea", 3, 33.3),
+        ("Ada", 2, 50.0),  # the same average as Cy over more answers: listed first
+        ("Cy", 1, 50.0),
+        ("Eve", 0, None),  # no scored answer yet: last
+    ]
+
 
 def test_open_view_returns_the_studio_path_inside_the_course(db) -> None:
     version_id = _import_taxonomy()
@@ -393,6 +416,14 @@ def test_open_view_cannot_open_a_row_of_another_course(db) -> None:
         "open_view",
     )
     assert isinstance(refusal, ToolRefusal)
+
+
+def test_the_agent_is_told_to_answer_questions_rather_than_open_pages() -> None:
+    # A professor's "how many students do I have?" opened the Students page instead of an answer.
+    assert "answer it in the chat" in INSTRUCTIONS
+    assert "student_report" in INSTRUCTIONS
+    assert "how many there are" in (student_report.__doc__ or "")
+    assert "Not a way to answer a question" in (open_view.__doc__ or "")
 
 
 def test_every_view_has_a_studio_page() -> None:

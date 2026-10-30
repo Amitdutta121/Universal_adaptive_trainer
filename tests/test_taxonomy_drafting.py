@@ -97,3 +97,59 @@ def test_the_prompt_is_subject_neutral_and_omits_empty_sections() -> None:
     assert "# Audience and level" not in prompt
     assert "# Must cover" not in prompt
     assert prompt.endswith(SIZE_TARGETS["standard"])
+
+
+def test_the_professors_numbers_are_asked_for_and_retried_once_when_missed(
+    client: TestClient, drafter: _FakeDrafter
+) -> None:
+    # The fake always answers 1 topic with 2 subtopics after repair.
+    response = client.post(
+        "/api/curriculum/drafts",
+        json={
+            "title": "Intro Biology",
+            "description": "Cells.",
+            "size": "detailed",
+            "topic_count": 3,
+            "subtopic_count": 9,
+        },
+    )
+    assert response.status_code == 200, response.text
+    # The numbers replace the preset, and a miss is named in one retry.
+    first, second = (prompt for _, prompt in drafter.calls)
+    assert "# Size\nExactly 3 topics and exactly 9 subtopics in all." in first
+    assert "45 subtopics" not in first
+    assert "Your last draft had 1 topics instead of 3 and 2 subtopics instead of 9." in second
+    # The second answer is returned as it is: the builder is where counts get fixed by hand.
+    assert len(response.json()["document"]["topics"]) == 1
+
+
+def test_a_draft_that_matches_the_numbers_is_not_retried(
+    client: TestClient, drafter: _FakeDrafter
+) -> None:
+    response = client.post(
+        "/api/curriculum/drafts",
+        json={"title": "Bio", "description": "Cells.", "topic_count": 1, "subtopic_count": 2},
+    )
+    assert response.status_code == 200, response.text
+    assert len(drafter.calls) == 1
+
+
+def test_fewer_subtopics_than_topics_is_refused(client: TestClient, drafter: _FakeDrafter) -> None:
+    response = client.post(
+        "/api/curriculum/drafts",
+        json={"title": "Bio", "description": "Cells.", "topic_count": 5, "subtopic_count": 3},
+    )
+    assert response.status_code == 422
+    assert drafter.calls == []
+
+
+def test_one_number_alone_shapes_the_size_line() -> None:
+    from app.curriculum.drafting import DraftBrief, size_target
+
+    assert size_target(DraftBrief(title="t", description="d", topic_count=4)) == (
+        "Exactly 4 topics, with 2 to 5 subtopics each."
+    )
+    assert size_target(DraftBrief(title="t", description="d", subtopic_count=12)) == (
+        "Exactly 12 subtopics in all, grouped into topics of 2 to 5 subtopics."
+    )
+    assert "about 30 subtopics" in size_target(DraftBrief(title="t", description="d"))

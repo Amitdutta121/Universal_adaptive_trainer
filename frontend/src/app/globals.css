@@ -263,6 +263,15 @@ html.dark [data-copilotkit] {
   --ring: color-mix(in oklch, var(--accent-solid) 55%, black);
 }
 
+/* CopilotKit's own menus and tooltips (the chat input's "+" menu) portal out at z-50, under
+   its sidebar (z-1200), so they opened unseen behind the panel. Radix copies the content's
+   z-index onto its positioning wrapper, so raising the content is enough. */
+[class*="cpk:"][data-slot="dropdown-menu-content"],
+[class*="cpk:"][data-slot="dropdown-menu-sub-content"],
+[class*="cpk:"][data-slot="tooltip-content"] {
+  z-index: 1300;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -324,6 +333,10 @@ html.dark [data-copilotkit] {
     max-width: 1120px;
     margin: 0 auto;
     padding: 1.25rem;
+  }
+
+  .student-shell__frame--wide {
+    max-width: 1600px;
   }
 
   .student-shell__header {

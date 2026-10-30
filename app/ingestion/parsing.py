@@ -24,6 +24,7 @@ from __future__ import annotations
 import functools
 import importlib.util
 import io
+import json
 import logging
 import re
 import zipfile
@@ -32,6 +33,7 @@ from typing import Any
 
 import pymupdf
 
+from app.config import get_settings
 from app.domain.enums import SourceFormat
 from app.errors import InvalidBookDocumentError, UnsupportedFileError
 
@@ -253,6 +255,19 @@ def _page_chunks(doc: pymupdf.Document, toc: list[tuple[int, int, str]]) -> list
     return chunks
 
 
+def _docling_artifacts() -> str | None:
+    """The local model folder when it has been downloaded, else ``None`` (Docling fetches them)."""
+    path = get_settings().docling_artifacts_path
+    if path.is_dir() and any(path.iterdir()):
+        return str(path)
+    logger.warning(
+        "Docling models are not in %s; downloading them from the Hugging Face Hub. "
+        "Run `python -m scripts.download_docling_models` to keep them locally.",
+        path,
+    )
+    return None
+
+
 @functools.cache
 def _docling_converter() -> Any:
     """One converter per process: building it loads the layout models."""
@@ -261,7 +276,9 @@ def _docling_converter() -> Any:
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
     # OCR off: textbooks are born-digital, and OCR only adds time (PARSE_SPIKE.md).
-    options = PdfPipelineOptions(do_ocr=False, do_table_structure=True)
+    options = PdfPipelineOptions(
+        do_ocr=False, do_table_structure=True, artifacts_path=_docling_artifacts()
+    )
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
     )
@@ -273,15 +290,24 @@ _CHUNKER_TOKENIZER = "sentence-transformers/all-MiniLM-L6-v2"
 
 @functools.cache
 def _docling_chunker() -> Any:
-    """The chunker, with its tokenizer from the local cache when it is there.
+    """The chunker, with its tokenizer from the local model folder or cache when it is there.
 
     The default ``HybridChunker()`` asks the Hugging Face Hub about the tokenizer every time it
     is built, so an import failed whenever the Hub was unreachable or the stored HF token was
-    invalid, even with the tokenizer cached. Only a missing tokenizer is downloaded.
+    invalid, even with the tokenizer cached. ``scripts.download_docling_models`` saves it under
+    ``Settings.docling_artifacts_path``; otherwise only a missing tokenizer is downloaded.
     """
     from docling.chunking import HybridChunker
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
+    local = get_settings().docling_artifacts_path / _CHUNKER_TOKENIZER.replace("/", "--")
+    if local.is_dir():
+        # Docling reads the limit from this file on the Hub; read the local copy instead.
+        config = json.loads((local / "sentence_bert_config.json").read_text(encoding="utf-8"))
+        tokenizer = HuggingFaceTokenizer.from_pretrained(
+            model_name=str(local), max_tokens=int(config["max_seq_length"])
+        )
+        return HybridChunker(tokenizer=tokenizer)
     try:
         tokenizer = HuggingFaceTokenizer.from_pretrained(
             model_name=_CHUNKER_TOKENIZER, local_files_only=True

@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * The books library: manage what is already imported, and import more through
- * the "Import book" modal in the header.
+ * Contents: the course's books and videos. Manage what is already imported, and
+ * upload more through the "Upload content" modal in the header. Each row's type
+ * (book or video) is read off how it was uploaded (`contentTypeOf`). The route and
+ * API still call every source a book.
  *
  * Server state — the list, the guide, every mutation — belongs to TanStack Query
  * in `lib/api/queries.ts`. What this component owns is what the browser owns: the
- * search box, the status filter, and which row a dialog is open for.
+ * search box, the type and status filters, and which row a dialog is open for.
  *
- * The filter lives in the URL so a filtered view can be reloaded or shared.
+ * The filters live in the URL so a filtered view can be reloaded or shared.
  */
 
-import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { Upload } from "lucide-react";
+import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
@@ -30,10 +32,19 @@ import { useBooks } from "@/lib/api/queries";
 import type { BookSummary } from "@/lib/api/types";
 import { pluralise } from "@/lib/display";
 import { SECTIONS_BY_KEY } from "@/lib/navigation";
+import { CONTENT_TYPES, contentTypeOf } from "./book-display";
 import { BookDeleteDialog } from "./components/book-delete-dialog";
 import { BookEditDialog } from "./components/book-edit-dialog";
 import { BookImportDialog } from "./components/book-import-dialog";
 import { BooksTable } from "./components/books-table";
+
+const TYPE_FILTERS = ["all", ...CONTENT_TYPES] as const;
+
+const TYPE_FILTER_LABEL: Record<(typeof TYPE_FILTERS)[number], string> = {
+  all: "All types",
+  book: "Books",
+  video: "Videos",
+};
 
 const STATUS_FILTERS = ["all", "imported", "partial"] as const;
 
@@ -56,6 +67,10 @@ export function BooksScreen() {
     "status",
     parseAsStringLiteral(STATUS_FILTERS).withDefault("all"),
   );
+  const [type, setType] = useQueryState(
+    "type",
+    parseAsStringLiteral(TYPE_FILTERS).withDefault("all"),
+  );
   const [search, setSearch] = useQueryState("q", parseAsString.withDefault(""));
 
   const [editing, setEditing] = useState<BookSummary | null>(null);
@@ -67,9 +82,12 @@ export function BooksScreen() {
   const visible = useMemo(() => {
     const all = books.data?.books ?? [];
     return all.filter(
-      (book) => (status === "all" || book.status === status) && matches(book, search),
+      (book) =>
+        (type === "all" || contentTypeOf(book) === type) &&
+        (status === "all" || book.status === status) &&
+        matches(book, search),
     );
-  }, [books.data, status, search]);
+  }, [books.data, type, status, search]);
 
   const section = SECTIONS_BY_KEY.books;
   const total = books.data?.total ?? 0;
@@ -82,7 +100,7 @@ export function BooksScreen() {
         actions={
           <Button size="sm" onClick={() => setImportOpen(true)}>
             <Upload />
-            Import book
+            Upload content
           </Button>
         }
       />
@@ -95,8 +113,25 @@ export function BooksScreen() {
               onChange={(event) => setSearch(event.target.value || null)}
               placeholder="Search title, author, producer or filename"
               className="max-w-xs"
-              aria-label="Search books"
+              aria-label="Search contents"
             />
+            <Select
+              value={type}
+              onValueChange={(value) =>
+                setType(value === "all" ? null : (value as (typeof TYPE_FILTERS)[number]))
+              }
+            >
+              <SelectTrigger className="w-36" aria-label="Filter by type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TYPE_FILTERS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {TYPE_FILTER_LABEL[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Select
               value={status}
               onValueChange={(value) =>
@@ -116,8 +151,8 @@ export function BooksScreen() {
             </Select>
             <p className="ml-auto text-muted-foreground text-sm">
               {visible.length === total
-                ? pluralise(total, "book")
-                : `${visible.length} of ${pluralise(total, "book")}`}
+                ? pluralise(total, "item")
+                : `${visible.length} of ${pluralise(total, "item")}`}
             </p>
           </div>
 
@@ -127,12 +162,12 @@ export function BooksScreen() {
           {books.isSuccess && visible.length === 0 ? (
             total === 0 ? (
               <EmptyState
-                title="No books have been imported yet"
-                hint="Use Import book to add a PDF or a book document."
+                title="Nothing has been uploaded yet"
+                hint="Use Upload content to add a PDF, a Word or PowerPoint file, or a YouTube video."
               />
             ) : (
               <EmptyState
-                title="No book matches this filter"
+                title="Nothing matches this filter"
                 hint="Clear the search or choose a different status."
               />
             )

@@ -161,6 +161,13 @@ export const qk = {
     catalog: () => ["courses", "catalog"] as const,
     detail: (courseId: number) => ["courses", "detail", courseId] as const,
   },
+  experimentalRecipes: {
+    all: ["experimental-recipes"] as const,
+    list: (courseId: number) => ["experimental-recipes", "list", courseId] as const,
+    curriculum: (courseId: number) => ["experimental-recipes", "curriculum", courseId] as const,
+    example: (courseId: number, run: number, body: Schemas["ExperimentalRecipeTryRequest"]) =>
+      ["experimental-recipes", "example", courseId, run, body] as const,
+  },
 } as const;
 
 // --- Auth ---------------------------------------------------------------------
@@ -454,6 +461,8 @@ export function useSubmitReview() {
       client.invalidateQueries({ queryKey: ["calibration"] });
       client.invalidateQueries({ queryKey: ["instructions"] });
       client.invalidateQueries({ queryKey: qk.judgePrompts.all });
+      // The approved count per taxonomy: course setup's review and share steps read it.
+      client.invalidateQueries({ queryKey: qk.questionSets.taxonomyLinks() });
     },
   });
 }
@@ -1483,8 +1492,9 @@ export function useEndTrainingSession() {
         }),
       ),
     onSuccess: (result) => {
+      // Not /next: asking an ended run for a question is a 422. The refreshed detail
+      // (ended_at set) switches that query off instead.
       client.invalidateQueries({ queryKey: qk.trainingSessions.detail(result.id) });
-      client.invalidateQueries({ queryKey: qk.trainingSessions.next(result.id) });
       client.invalidateQueries({ queryKey: qk.students.progress(result.student_id) });
       client.invalidateQueries({ queryKey: qk.students.all });
     },
@@ -1900,6 +1910,20 @@ export function useDecideTutorialRecipe() {
   });
 }
 
+/** Stop showing one bank block to students (live tutorials' review after publishing). */
+export function useRetireTutorialBlock() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (blockId: number) =>
+      unwrap(
+        api.PUT("/api/tutorial-blocks/{block_id}/retire", {
+          params: { path: { block_id: blockId } },
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.tutorials.all }),
+  });
+}
+
 /** Price (``dry_run``) or queue the taxonomy's missing tutorial blocks as one job. */
 export function usePregenerateTutorials() {
   const client = useQueryClient();
@@ -1931,5 +1955,111 @@ export function useGenerateTutorialBlock() {
       unwrap(api.POST("/api/tutorial-blocks", { body })),
     onSuccess: (block) =>
       client.invalidateQueries({ queryKey: qk.tutorials.blocks(block.subtopic_id) }),
+  });
+}
+
+// ------------------------------------------- experimental recipe builder (/experimental_tutorial)
+
+// The page lives outside /courses/{id}, so the course header is passed explicitly.
+const inCourse = (courseId: number) => ({ headers: { [COURSE_HEADER]: String(courseId) } });
+
+export const useExperimentalRecipes = (courseId: number | null) =>
+  useQuery({
+    queryKey: qk.experimentalRecipes.list(courseId ?? 0),
+    queryFn: () => unwrap(api.GET("/api/experimental/recipes", inCourse(courseId ?? 0))),
+    enabled: courseId !== null,
+  });
+
+/** The course's approved taxonomy, for picking a subtopic to try a recipe on. */
+export const useExperimentalCurriculum = (courseId: number | null) =>
+  useQuery({
+    queryKey: qk.experimentalRecipes.curriculum(courseId ?? 0),
+    queryFn: () => unwrap(api.GET("/api/curriculum/approved", inCourse(courseId ?? 0))),
+    enabled: courseId !== null,
+    retry: false,
+  });
+
+export function useDraftExperimentalRecipe() {
+  return useMutation({
+    mutationFn: ({
+      courseId,
+      body,
+    }: {
+      courseId: number;
+      body: Schemas["ExperimentalRecipeDraftRequest"];
+    }) => unwrap(api.POST("/api/experimental/recipes/draft", { ...inCourse(courseId), body })),
+  });
+}
+
+/**
+ * One example block of a recipe, written once per `run` (a model call, so never refetched).
+ *
+ * A query, not a mutation: an example starts when its card mounts, and a mutation fired from an
+ * effect loses its result when StrictMode remounts the card -- the spinner never stops.
+ */
+export const useExperimentalExample = (
+  courseId: number,
+  run: number,
+  body: Schemas["ExperimentalRecipeTryRequest"],
+) =>
+  useQuery({
+    queryKey: qk.experimentalRecipes.example(courseId, run, body),
+    queryFn: () =>
+      unwrap(api.POST("/api/experimental/recipes/try", { ...inCourse(courseId), body })),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 10 * 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+export function useTryExperimentalRecipe() {
+  return useMutation({
+    mutationFn: ({
+      courseId,
+      body,
+    }: {
+      courseId: number;
+      body: Schemas["ExperimentalRecipeTryRequest"];
+    }) => unwrap(api.POST("/api/experimental/recipes/try", { ...inCourse(courseId), body })),
+  });
+}
+
+/** Create (`id` null) or replace a recipe. */
+export function useSaveExperimentalRecipe() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, id, yaml }: { courseId: number; id: number | null; yaml: string }) =>
+      id === null
+        ? unwrap(api.POST("/api/experimental/recipes", { ...inCourse(courseId), body: { yaml } }))
+        : unwrap(
+            api.PUT("/api/experimental/recipes/{row_id}", {
+              ...inCourse(courseId),
+              params: { path: { row_id: id } },
+              body: { yaml },
+            }),
+          ),
+    // A saved recipe joins the course's tutorial recipes, and an edit hides its old blocks.
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.experimentalRecipes.all });
+      client.invalidateQueries({ queryKey: qk.tutorials.all });
+    },
+  });
+}
+
+export function useDeleteExperimentalRecipe() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, id }: { courseId: number; id: number }) =>
+      unwrap(
+        api.DELETE("/api/experimental/recipes/{row_id}", {
+          ...inCourse(courseId),
+          params: { path: { row_id: id } },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.experimentalRecipes.all });
+      client.invalidateQueries({ queryKey: qk.tutorials.all });
+    },
   });
 }

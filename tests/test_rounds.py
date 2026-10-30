@@ -593,6 +593,37 @@ def test_targets_spread_across_cells_before_repeating_one(
     assert len(everything) == 6
 
 
+def test_round_one_reaches_every_approved_style_and_balances_them(
+    session: Session, env: SimpleNamespace
+) -> None:
+    # Style B is approved only for while loops, which the slicing cell's bigger deficit would
+    # otherwise crowd out of a small round.
+    setup = _setup(
+        session,
+        env,
+        [(env.while_loops.id, "easy", 1), (env.slicing.id, "easy", 5)],
+    )
+    for seed in range(10):
+        targets = plan_targets(session, setup, size=2, rng=random.Random(seed), spread_styles=True)
+        assert {t["style_id"] for t in targets} == {STYLE_A.id, STYLE_B.id}
+
+    setup = _setup(session, env, [(env.while_loops.id, "easy", 4)])
+    for seed in range(10):
+        targets = plan_targets(session, setup, size=4, rng=random.Random(seed), spread_styles=True)
+        styles = [t["style_id"] for t in targets]
+        assert styles.count(STYLE_A.id) == styles.count(STYLE_B.id) == 2
+
+
+def test_start_round_spreads_styles(session: Session, env: SimpleNamespace) -> None:
+    setup = _setup(
+        session,
+        env,
+        [(env.while_loops.id, "easy", 1), (env.slicing.id, "easy", 5)],
+    )
+    row = start_round(session, setup.id, size=2, rng=random.Random(3))
+    assert {t["style_id"] for t in row.targets} == {STYLE_A.id, STYLE_B.id}
+
+
 def test_a_subtopic_without_approved_styles_gets_no_targets(
     session: Session, env: SimpleNamespace
 ) -> None:

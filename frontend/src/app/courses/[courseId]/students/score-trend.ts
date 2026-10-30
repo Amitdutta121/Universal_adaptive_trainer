@@ -5,6 +5,9 @@ export interface ScoreTrendPoint {
   attemptId: number;
   label: string;
   ordinal: number;
+  /** 1 for the learner's oldest scored attempt, counting up across sessions. The chart's x:
+   * unique per point, unlike `label` (a day) or `ordinal` (restarts every session). */
+  sequence: number;
   questionType: string;
   score: number;
   timestamp: string;
@@ -41,6 +44,7 @@ export function buildScoreTrend(attempts: AttemptOut[]): ScoreTrendPoint[] {
         ordinal: attempt.ordinal,
         questionType: questionTypeLabel(attempt.question_type),
         score: attempt.score,
+        sequence: index + 1,
         timestamp,
       };
     });

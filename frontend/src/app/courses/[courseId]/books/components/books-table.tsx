@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The imported books, newest first.
+ * The course's contents (books and videos), newest first, each with its type.
  *
  * Status carries a tooltip rather than an explanation in a column: `partial` is
  * the one value a professor has to interpret, and it means "validated, with
@@ -33,6 +33,8 @@ import {
   BOOK_STATUS_LABEL,
   BOOK_STATUS_MEANING,
   BOOK_STATUS_VARIANT,
+  CONTENT_TYPE_LABEL,
+  contentTypeOf,
 } from "../book-display";
 import { CourseLink } from "@/components/course-link";
 
@@ -50,6 +52,7 @@ export function BooksTable({
       <TableHeader>
         <TableRow>
           <TableHead>Title</TableHead>
+          <TableHead>Type</TableHead>
           <TableHead>Author</TableHead>
           <TableHead>Status</TableHead>
           <TableHead className="text-right">Pages</TableHead>
@@ -62,13 +65,17 @@ export function BooksTable({
       <TableBody>
         {books.map((book) => (
           <TableRow key={book.id}>
-            <TableCell className="font-medium">
+            {/* Long titles wrap, so the type and dates stay in view. */}
+            <TableCell className="min-w-56 whitespace-normal font-medium">
               <CourseLink href={`/books/${book.id}`} className="hover:underline">
                 {book.title}
               </CourseLink>
               {book.notes ? (
                 <p className="mt-0.5 line-clamp-1 text-muted-foreground text-xs">{book.notes}</p>
               ) : null}
+            </TableCell>
+            <TableCell>
+              <Badge variant="outline">{CONTENT_TYPE_LABEL[contentTypeOf(book)]}</Badge>
             </TableCell>
             <TableCell className="text-muted-foreground">{authorLabel(book)}</TableCell>
             <TableCell>

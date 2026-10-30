@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QuestionStatus
-from app.persistence.models import QuestionRow
+from app.persistence.models import QuestionRow, QuestionSetupRow
 
 TAXONOMY = (
     b'{"schema_version":"1","label":"%s","topics":['
@@ -163,10 +163,9 @@ def test_the_overview_reports_progress_and_activity_per_course(client: TestClien
     assert {step["key"]: step["done"] for step in python["setup"]} == {
         "materials": True,
         "taxonomy": True,
-        "coverage": False,
+        "questions": False,
         "review": False,
-        "question_set": False,
-        "classes": False,
+        "share": False,
     }
     # A taxonomy with no approved questions is measurable coverage: zero.
     assert python["coverage"] == 0.0
@@ -183,6 +182,53 @@ def test_the_overview_reports_progress_and_activity_per_course(client: TestClien
     assert ("book", "Python") in kinds
     assert "Imported Think Python (4 chunks)" in [event["text"] for event in overview["activity"]]
     assert ("taxonomy", "Python") in kinds
+
+
+def test_setup_steps_follow_the_selected_taxonomy_to_its_classroom_link(
+    client: TestClient, session: Session
+) -> None:
+    course_id = _course(client, "Python")
+    _import_book(client, course_id, "Think Python")
+    version = _import_taxonomy(client, course_id, "Python taxonomy")["version"]["id"]
+
+    def steps() -> dict[str, bool]:
+        [card] = [
+            card
+            for card in client.get("/api/courses/overview").json()["courses"]
+            if card["course"]["id"] == course_id
+        ]
+        return {step["key"]: step["done"] for step in card["setup"]}
+
+    session.add(
+        QuestionSetupRow(curriculum_version_id=version, approved_styles={}, cell_targets=[])
+    )
+    session.commit()
+    assert steps() == {
+        "materials": True,
+        "taxonomy": True,
+        "questions": True,
+        "review": False,
+        "share": False,
+    }
+    # One approved question is enough to create the link; full coverage is not required.
+    session.add(
+        QuestionRow(
+            prompt="q",
+            original_prompt="q",
+            curriculum_version_id=version,
+            status=QuestionStatus.APPROVED,
+        )
+    )
+    session.commit()
+    assert steps()["review"] is True
+    assert steps()["share"] is False
+    assert (
+        client.post(
+            f"/api/question-sets/taxonomy/{version}/sync", headers=_in(course_id)
+        ).status_code
+        == 201
+    )
+    assert all(steps().values())
 
 
 def test_every_taxonomy_has_its_own_classroom_link(client: TestClient, session: Session) -> None:
@@ -376,3 +422,31 @@ def test_an_ml_course_starts_from_concepts_numbers_and_formulas(client: TestClie
         "structured.choice",
         "symbolic.expression_equivalence",
     }
+
+
+def test_only_subjects_with_a_style_library_are_ready(client: TestClient) -> None:
+    subjects = {item["id"]: item for item in client.get("/api/courses/catalog").json()["subjects"]}
+    # Question setup offers library styles only, so these are the subjects a course can finish.
+    assert subjects["intro_python"]["ready"] is True
+    assert subjects["physics"]["ready"] is False
+    assert subjects["custom"]["ready"] is False
+
+
+def test_a_course_can_change_its_question_types_after_creation(client: TestClient) -> None:
+    course_id = _course(client, "Python")
+    changed = client.patch(
+        f"/api/courses/{course_id}", json={"question_types": ["multiple_choice", "coding"]}
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["question_types"] == ["multiple_choice", "coding"]
+    assert "code.python.execute" in changed.json()["capabilities"]
+
+    narrowed = client.patch(f"/api/courses/{course_id}", json={"question_types": ["true_false"]})
+    assert "code.python.execute" not in narrowed.json()["capabilities"]
+
+    for refused in ([], ["short_explanation"]):
+        response = client.patch(f"/api/courses/{course_id}", json={"question_types": refused})
+        assert response.status_code == 422, response.text
+    # A rename leaves the types alone.
+    renamed = client.patch(f"/api/courses/{course_id}", json={"name": "Renamed"}).json()
+    assert renamed["question_types"] == ["true_false"]

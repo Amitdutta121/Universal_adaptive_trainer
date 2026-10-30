@@ -22,6 +22,7 @@ from app.agent.approvals import APPROVAL_REQUIRED, PlannedRun, open_plan, store_
 from app.curriculum import TaxonomyImportService, TreeUpdate
 from app.curriculum.drafting import DraftBrief, draft_taxonomy
 from app.curriculum.taxonomy_schema import TaxonomyDocument
+from app.domain.enums import GuidanceLevel
 from app.errors import AdaptiveTrainerError, DomainRuleError, NotFoundError
 from app.generation.rounds import plan_targets
 from app.ingestion.youtube import AvailabilityCheck, TranscriptFetch
@@ -29,9 +30,11 @@ from app.jobs.queue import JobQueue
 from app.llm.client import StructuredLLMClient
 from app.persistence.models import QuestionSetupRow
 from app.persistence.repositories import CurriculumRepository
+from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
 from app.styles.schema import SetupSuggestion
 from app.subjects import profile_for_course_id
+from app.tutorials import experimental
 from app.web.routes.api import books as books_routes
 from app.web.routes.api import coverage as coverage_routes
 from app.web.routes.api import curriculum as curriculum_routes
@@ -39,6 +42,7 @@ from app.web.routes.api import generation_runs as run_routes
 from app.web.routes.api import questions as question_routes
 from app.web.routes.api import setup as setup_routes
 from app.web.routes.api import students as student_routes
+from app.web.routes.api import tutorials as tutorial_routes
 from app.web.routes.api.deps import (
     book_in_course,
     ensure_in_course,
@@ -58,6 +62,8 @@ from app.web.routes.api.schemas import (
     SaveSetupRequest,
     SetupCellsRunTarget,
     SuggestSetupRequest,
+    TutorialRecipeDecisionOut,
+    TutorialRecipeDecisionRequest,
     YouTubeImportRequest,
 )
 
@@ -79,6 +85,9 @@ class AgentDeps:
     setup_client: StructuredLLMClient | None = None
     youtube_fetch: TranscriptFetch | None = None
     youtube_check: AvailabilityCheck | None = None
+    #: Writes tutorial recipes and blocks (the ``tutorials`` model role). Built only when a
+    #: recipe tool runs, so an unconfigured role never breaks the chat; tests pass a fake.
+    tutorial_client: StructuredLLMClient | None = None
     embedder: Callable[[], Embedder] = get_query_embedder
 
 
@@ -553,14 +562,88 @@ def review_summary(
 
 #: How many weak subtopics a report lists.
 WEAKEST = 5
+#: How many students a class report lists, weakest first.
+STUDENTS_LISTED = 50
+
+
+class StudentLine(BaseModel):
+    """One student, from this course's scored answers only."""
+
+    student_id: int
+    name: str
+    answered: int
+    #: 0 to 100; None before a first scored answer.
+    average_score: float | None
 
 
 class ClassReport(BaseModel):
+    #: Students who have joined this course (or this taxonomy, when one was named).
     student_count: int
+    #: Of those, students with at least one answer or mastery estimate.
     measured_students: int
+    #: Average score of every scored answer, 0 to 100.
     average_score: float | None
     #: The subtopics the class is weakest in, weakest first.
     weakest_subtopics: list[dict[str, Any]]
+    #: Every student (up to ``STUDENTS_LISTED``), lowest average first; ties go to the one with
+    #: more answers, and students with no scored answer come last. An average over one or two
+    #: answers says little: weigh ``answered`` before calling anyone weakest.
+    students: list[StudentLine]
+
+
+def _roster(
+    session: Session, course: int | None, curriculum_version_id: int | None
+) -> list[tuple[int, str]]:
+    """(id, name) of every student on the course's roster, through the roster route."""
+    found: list[tuple[int, str]] = []
+    page = 1
+    while True:
+        listing = student_routes.list_students(
+            session,
+            course,
+            search="",
+            score="all",
+            answered="all",
+            activity="all",
+            curriculum_version_id=curriculum_version_id,
+            page=page,
+            page_size=100,
+            sort=None,
+            order="asc",
+        )
+        found += [(row.id, row.display_name) for row in listing.students]
+        if len(found) >= listing.total or not listing.students:
+            return found
+        page += 1
+
+
+def _student_lines(
+    roster: list[tuple[int, str]], scores: list[tuple[int, float]]
+) -> list[StudentLine]:
+    by_student: dict[int, list[float]] = {}
+    for student_id, score in scores:
+        by_student.setdefault(student_id, []).append(score)
+    lines = [
+        StudentLine(
+            student_id=student_id,
+            name=name,
+            answered=len(by_student.get(student_id, [])),
+            average_score=(
+                round(sum(by_student[student_id]) / len(by_student[student_id]), 1)
+                if by_student.get(student_id)
+                else None
+            ),
+        )
+        for student_id, name in roster
+    ]
+    return sorted(
+        lines,
+        key=lambda line: (
+            line.average_score is None,
+            line.average_score if line.average_score is not None else 0.0,
+            -line.answered,
+        ),
+    )
 
 
 class StudentReport(BaseModel):
@@ -579,12 +662,20 @@ def student_report(
     student_id: int | None = None,
     curriculum_version_id: int | None = None,
 ) -> ClassReport | StudentReport:
-    """How the class is doing, or with ``student_id`` one student's mastery and weak spots."""
+    """Answer questions about students: how many there are, who they are, who is weakest or
+    strongest (every student with their answers and average, lowest first), the class average
+    and its weakest subtopics. With ``student_id`` (an id from this report): one student's
+    answers, average, topic mastery and weak spots."""
     deps = ctx.deps
     with deps.session_factory() as session:
         if student_id is None:
             summary = student_routes.class_summary(session, deps.course_id, curriculum_version_id)
+            lines = _student_lines(
+                _roster(session, deps.course_id, curriculum_version_id),
+                [(attempt.student_id, attempt.score) for attempt in summary.scored_attempts],
+            )
             return ClassReport(
+                students=lines[:STUDENTS_LISTED],
                 student_count=summary.student_count,
                 measured_students=summary.measured_students,
                 average_score=summary.average_score,
@@ -614,6 +705,182 @@ def student_report(
             for s in weakest
         ],
     )
+
+
+# -- Tutorial recipes: list, draft, try, then save and approve ---------------------------------
+
+
+def _tutorial_client(deps: AgentDeps) -> StructuredLLMClient:
+    return deps.tutorial_client or tutorial_routes.get_tutorial_client()
+
+
+class RecipeSummary(BaseModel):
+    recipe_id: str
+    name: str
+    summary: str
+    renderer: str
+    guidance_levels: list[str]
+    #: Made in the recipe builder for this course, rather than shipped with the subject.
+    made_for_course: bool
+    #: For this taxonomy: approved, rejected, or not decided yet.
+    decision: Literal["approved", "rejected", "undecided"]
+
+
+class RecipeList(BaseModel):
+    #: With live tutorials, a library recipe is used until rejected; a course's own recipe only
+    #: once approved. Without, only approved recipes reach students.
+    live: bool
+    recipes: list[RecipeSummary]
+
+
+@tool
+def list_recipes(ctx: RunContext[AgentDeps], curriculum_version_id: int) -> RecipeList:
+    """The tutorial recipes students can get in this taxonomy, and each one's decision."""
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        listing = tutorial_routes.list_recipes(
+            session,
+            deps.course_id,
+            profile_for_course_id(session, deps.course_id),
+            curriculum_version_id,
+        )
+    decisions = listing.decisions or {}
+    return RecipeList(
+        live=listing.live,
+        recipes=[
+            RecipeSummary(
+                recipe_id=recipe.id,
+                name=recipe.name,
+                summary=recipe.summary,
+                renderer=recipe.renderer.value,
+                guidance_levels=[level.value for level in recipe.guidance_levels],
+                made_for_course=recipe.id.startswith(experimental.PREFIX),
+                decision=(
+                    "undecided"
+                    if recipe.id not in decisions
+                    else "approved"
+                    if decisions[recipe.id]
+                    else "rejected"
+                ),
+            )
+            for recipe in listing.recipes
+        ],
+    )
+
+
+class RecipeDraftOut(BaseModel):
+    """A drafted recipe. Nothing is saved: show it, try it, then ``save_recipe`` it."""
+
+    yaml: str
+    #: Empty when the draft is valid; otherwise why it is not, after one repair.
+    problems: list[str]
+
+
+@tool
+def draft_recipe(
+    ctx: RunContext[AgentDeps], description: str, current_yaml: str = ""
+) -> RecipeDraftOut:
+    """Draft a tutorial recipe from the professor's words, or revise ``current_yaml`` with them.
+
+    One model call on the tutorials model. Saves nothing.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        subject = profile_for_course_id(session, deps.course_id).storage_key
+    result = experimental.draft_recipe(
+        _tutorial_client(deps), subject, description, current_yaml or None
+    )
+    return RecipeDraftOut(yaml=result.yaml, problems=result.problems)
+
+
+class TriedBlock(BaseModel):
+    """One block the recipe wrote for a real subtopic, as a student would see it. Never saved."""
+
+    renderer: str
+    guidance_level: str
+    payload: dict[str, Any]
+    #: Why the block failed its checks, if it did.
+    error: str | None
+
+
+@tool
+def try_recipe(
+    ctx: RunContext[AgentDeps],
+    yaml: str,
+    subtopic_id: int,
+    guidance_level: Literal["worked", "faded", "cue"] = "worked",
+) -> TriedBlock:
+    """Write one block of a recipe (saved or not) for a subtopic, to judge it. Saves nothing.
+
+    One model call on the tutorials model, written and checked like any tutorial block.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        subtopics_in_course(session, [subtopic_id], deps.course_id)
+        block = experimental.try_recipe(
+            session,
+            profile_for_course_id(session, deps.course_id),
+            yaml,
+            subtopic_id=subtopic_id,
+            guidance_level=GuidanceLevel(guidance_level),
+            client=_tutorial_client(deps),
+            retriever=ChunkRetriever(session, ChunkEmbeddingStore(session, deps.embedder())),
+        )
+        # Chunks embedded on the way are worth keeping; the block never entered the session.
+        session.commit()
+    return TriedBlock(
+        renderer=block.renderer.value,
+        guidance_level=block.guidance_level.value,
+        payload=block.payload,
+        error=block.error,
+    )
+
+
+class SavedRecipe(BaseModel):
+    recipe_id: str
+    name: str
+    #: Students get it only after ``decide_recipe`` approves it for a taxonomy.
+    next_step: str = "Approve it for the taxonomy with decide_recipe before students see it."
+
+
+@tool
+def save_recipe(ctx: RunContext[AgentDeps], yaml: str) -> SavedRecipe:
+    """Save a recipe to this course, or replace the saved one with the same id. Waits for
+    approval. Replacing it hides the blocks written from its old wording."""
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        profile = profile_for_course_id(session, deps.course_id)
+        recipe = experimental.parse_recipe(yaml, profile.storage_key)
+        existing = next(
+            (
+                row
+                for row in experimental.list_recipes(session, profile)
+                if row.recipe_id == recipe.id
+            ),
+            None,
+        )
+        row = experimental.save_recipe(session, profile, yaml, existing.id if existing else None)
+        session.commit()
+        return SavedRecipe(recipe_id=row.recipe_id, name=recipe.name)
+
+
+@tool
+def decide_recipe(
+    ctx: RunContext[AgentDeps], recipe_id: str, curriculum_version_id: int, approved: bool
+) -> TutorialRecipeDecisionOut:
+    """Approve a recipe for the taxonomy's students, or stop it (``approved`` false). Waits for
+    approval. A recipe made for the course reaches students only once approved."""
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        return tutorial_routes.decide(
+            session,
+            deps.course_id,
+            profile_for_course_id(session, deps.course_id),
+            recipe_id,
+            TutorialRecipeDecisionRequest(
+                curriculum_version_id=curriculum_version_id, approved=approved
+            ),
+        )
 
 
 # -- Navigation -------------------------------------------------------------------------------
@@ -662,8 +929,9 @@ class OpenedView(BaseModel):
 
 @tool
 def open_view(ctx: RunContext[AgentDeps], view: View, id: int | None = None) -> OpenedView:
-    """Open a page of the Studio for the professor.
+    """Open a page of the Studio, only when the professor asks to see or go to one.
 
+    Not a way to answer a question: read the answer with the matching tool and say it.
     ``book``, ``curriculum_version``, ``subtopic`` and ``question`` need that row's ``id``.
     """
     template = VIEW_PATHS[view]

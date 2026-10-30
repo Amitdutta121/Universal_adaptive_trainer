@@ -89,6 +89,7 @@ function makeDetail(): QuestionDetail {
 }
 
 let detail: QuestionDetail | null;
+let judgeStats: unknown;
 let remaining: number;
 
 vi.mock("@/lib/api/queries", () => ({
@@ -116,6 +117,7 @@ vi.mock("@/lib/api/queries", () => ({
   useSubmitReview: () => ({ mutateAsync: submitReview, isPending: submitPending }),
   useCurrentSetup: () => ({ data: currentSetup, isError: false, error: null }),
   useStartNextRound: () => ({ mutateAsync: startNextRound, isPending: false }),
+  useJudgeStats: () => ({ data: judgeStats }),
   useRound: (roundId: number | null) => ({
     data: roundId == null ? undefined : roundData,
     isError: false,
@@ -520,5 +522,66 @@ describe("Questions arriving during a round", () => {
     render(<ReviewScreen />);
 
     expect(screen.getByText("Nothing left to review")).toBeInTheDocument();
+  });
+});
+
+const metricWindow = (observations: number, extra: Record<string, unknown> = {}) => ({
+  observations,
+  agreements: observations,
+  agreement_rate: 1,
+  trusted: observations >= 10,
+  audit_revoked: false,
+  ...extra,
+});
+
+describe("ReviewScreen judge trust strip", () => {
+  beforeEach(() => {
+    detail = null;
+    remaining = 0;
+    roundData = undefined;
+  });
+
+  it("shows how far each style of this taxonomy is from skipping review", () => {
+    judgeStats = {
+      min_observations: 10,
+      min_topic_local: 3,
+      styles: [
+        {
+          curriculum_version_id: 5,
+          style_id: "py.trace_output",
+          style_name: "Predict the output",
+          trusted: false,
+          metrics: {
+            difficulty: metricWindow(4),
+            subtopic: metricWindow(4, { local_observations: 4 }),
+            acceptance: metricWindow(4),
+          },
+        },
+        {
+          curriculum_version_id: 5,
+          style_id: "py.fix_bug",
+          style_name: "Fix the bug",
+          trusted: false,
+          metrics: {
+            difficulty: metricWindow(12),
+            subtopic: metricWindow(12, { trusted: false, local_observations: 1 }),
+            acceptance: metricWindow(12),
+          },
+        },
+        {
+          curriculum_version_id: 9,
+          style_id: "py.mcq",
+          style_name: "Other taxonomy",
+          trusted: true,
+          metrics: { difficulty: metricWindow(10) },
+        },
+      ],
+    };
+    render(<ReviewScreen />);
+
+    const strip = screen.getByTestId("judge-trust-strip");
+    expect(within(strip).getByText("Building trust: 4 of 10 reviews")).toBeInTheDocument();
+    expect(within(strip).getByText("Topic check: 1 of 3 in this taxonomy")).toBeInTheDocument();
+    expect(within(strip).queryByText("Other taxonomy")).not.toBeInTheDocument();
   });
 });

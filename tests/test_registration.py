@@ -51,6 +51,8 @@ LLM_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/judge-prompts/{metric}/refresh"): "/api/judge-prompts/issues/refresh",
     ("POST", "/api/tutorial-blocks"): "/api/tutorial-blocks",
     ("POST", "/api/tutorial-pregeneration"): "/api/tutorial-pregeneration",
+    ("POST", "/api/experimental/recipes/draft"): "/api/experimental/recipes/draft",
+    ("POST", "/api/experimental/recipes/try"): "/api/experimental/recipes/try",
     ("POST", "/api/agent"): "/api/agent",
 }
 

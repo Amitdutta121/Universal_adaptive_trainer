@@ -75,6 +75,39 @@ export function describeCall(call: PendingCall): { title: string; lines: string[
           `Spends about ${String(args.model_calls)} model calls, as priced in the plan above.`,
         ],
       };
+    case "import_material":
+      return {
+        title: "Import a YouTube video",
+        lines: [
+          String(args.url ?? ""),
+          args.transcript
+            ? "From the transcript you pasted."
+            : "Its transcript becomes course material; the video stays on YouTube.",
+        ],
+      };
+    case "save_recipe":
+      return {
+        title: `Save the recipe "${yamlField(args.yaml, "name") ?? yamlField(args.yaml, "id") ?? "?"}"`,
+        lines: [
+          `Id: ${yamlField(args.yaml, "id") ?? "?"}`,
+          "Saved to this course. Students see it only once it is approved for a taxonomy.",
+          "Saving over a recipe hides the blocks written from its old wording.",
+        ],
+      };
+    case "decide_recipe":
+      return args.approved
+        ? {
+            title: `Approve the recipe ${String(args.recipe_id)} for students`,
+            lines: [
+              `Curriculum version ${String(args.curriculum_version_id)}: its blocks are shown, and missing ones written as students need them.`,
+            ],
+          }
+        : {
+            title: `Stop using the recipe ${String(args.recipe_id)}`,
+            lines: [
+              `Curriculum version ${String(args.curriculum_version_id)}: its blocks are hidden from students.`,
+            ],
+          };
     default:
       return { title: `Run ${call.name}`, lines: [JSON.stringify(args)] };
   }

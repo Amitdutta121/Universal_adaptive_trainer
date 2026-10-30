@@ -129,13 +129,17 @@ class Settings(BaseSettings):
     judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
     # Trust is learned only from explicit professor observations, never approvals
-    # performed by the router. A rolling window makes recent errors visible.
-    judge_trust_min_observations: int = Field(default=20, ge=20)
+    # performed by the router. A rolling window makes recent errors visible. Counted per
+    # question style across the course; the one-in-ten audits keep checking after trust.
+    judge_trust_min_observations: int = Field(default=10, ge=10)
     judge_trust_min_agreement: float = Field(default=0.9, ge=0.9, le=1.0)
     #: Share of the window's questions the professor approved unedited. Judges can agree on
     #: difficulty and topic while the questions are still not worth keeping.
     judge_trust_min_acceptance: float = Field(default=0.9, ge=0.9, le=1.0)
-    judge_trust_window: int = Field(default=20, ge=20)
+    judge_trust_window: int = Field(default=10, ge=10)
+    #: Topic reviews a style also needs in the question's own Curriculum version: its subtopic
+    #: list is what the topic judge chooses from, so trust earned on another version is not enough.
+    judge_trust_min_topic_local: int = Field(default=3, ge=1)
 
     #: Which of the four metric judges run on newly generated questions
     #: (docs/QUESTION_SETUP_PLAN.md). ``JudgeMetricId`` itself is not shrunk -- stored rows and
@@ -157,6 +161,15 @@ class Settings(BaseSettings):
     # measurement, and no agreement change can be attributed to either.
     judge_learning_enabled: bool = True
     generator_learning_enabled: bool = True
+
+    # -- Live tutorials (app/tutorials/live.py) ------------------------------
+    #: Serve tutorial blocks from the course's bank with no approval step, and write a block
+    #: a student needs but the bank lacks in the background. Off: only blocks approved and
+    #: frozen with the run's question set are served.
+    tutorials_live: bool = True
+    #: Live blocks one course may have written per 24 hours; past it, students get only what
+    #: the bank already holds.
+    tutorials_live_daily_cap: int = Field(default=50, ge=0)
 
     #: Disagreements naming one judge before its prompt may be rewritten.
     #: Rewriting on a single case was measured to produce a rule about that one
@@ -182,6 +195,11 @@ class Settings(BaseSettings):
     #: Which parser turns an upload into chunks (``app.ingestion.parsing``): ``auto`` uses
     #: Docling when the ``parse`` extra is installed, else page-text chunks.
     book_parser: Literal["auto", "docling", "pages"] = "auto"
+    #: Docling's layout and table models, downloaded once by
+    #: ``python -m scripts.download_docling_models`` (the folder is gitignored). When it is there,
+    #: PDF parsing never asks the Hugging Face Hub, so a missing network or a bad stored HF token
+    #: cannot fail an import. Without it Docling downloads the models itself on first use.
+    docling_artifacts_path: Path = PROJECT_ROOT / "models" / "docling"
 
     # -- Auth (app/auth/) -----------------------------------------------------
     #: Signs the email-verification and password-reset links (ADR-061).

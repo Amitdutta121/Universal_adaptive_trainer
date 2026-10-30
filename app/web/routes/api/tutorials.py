@@ -15,8 +15,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.domain.enums import TutorialBlockStatus
-from app.errors import DomainRuleError
+from app.errors import DomainRuleError, NotFoundError
 from app.jobs.queue import JobQueueDep
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.models import TutorialBlockRow
@@ -27,9 +28,9 @@ from app.tutorials.approval import decide_recipe, decisions, subtopic_ids_of
 from app.tutorials.generator import (
     MAX_ATTEMPTS,
     BlockRequest,
+    course_recipes,
     generate_block,
-    get_recipe,
-    get_recipes,
+    get_course_recipe,
 )
 from app.tutorials.jobs import plan_pregeneration, queue_pregeneration
 from app.tutorials.schema import RecipeTool
@@ -83,15 +84,16 @@ def list_recipes(
     profile: CourseProfile,
     curriculum_version_id: int | None = None,
 ) -> TutorialRecipeListResponse:
-    """The tutorial recipes of the course's subject (shipped content, not course data), with
-    the taxonomy's decisions when ``curriculum_version_id`` is given."""
+    """The course subject's library recipes, then the course's own (recipe builder, ids
+    ``exp.``), with the taxonomy's decisions when ``curriculum_version_id`` is given."""
     decided: dict[str, bool] = {}
     if curriculum_version_id is not None:
         _version_in_course(session, curriculum_version_id, course)
         decided = decisions(session, curriculum_version_id)
-    recipes = get_recipes(profile.storage_key)
+    recipes = course_recipes(session, profile.storage_key, course)
     ids = {recipe.id for recipe in recipes}
     return TutorialRecipeListResponse(
+        live=get_settings().tutorials_live,
         subject=profile.storage_key,
         recipes=recipes,
         decisions=decided,
@@ -119,7 +121,7 @@ def decide(
 ) -> TutorialRecipeDecisionOut:
     """Approve or reject a recipe for a taxonomy: its bank blocks there follow, and so do the
     blocks it makes later. Rejected blocks are hidden; only approved ones are frozen."""
-    get_recipe(profile.storage_key, recipe_id)
+    get_course_recipe(session, profile.storage_key, course, recipe_id)
     _version_in_course(session, body.curriculum_version_id, course)
     changed = decide_recipe(
         session,
@@ -186,8 +188,10 @@ def pregenerate(
     Progress and the outcome are in ``GET /api/jobs``, like a generation run.
     """
     _version_in_course(session, body.curriculum_version_id, course)
+    recipes = {r.id: r for r in course_recipes(session, profile.storage_key, course)}
     for recipe_id in body.recipe_ids or []:
-        get_recipe(profile.storage_key, recipe_id)
+        if recipe_id not in recipes:
+            raise NotFoundError(f"No tutorial recipe {recipe_id!r} in this course.")
     planned, existing = plan_pregeneration(session, body.curriculum_version_id, body.recipe_ids)
     if body.dry_run:
         response.status_code = status.HTTP_200_OK
@@ -197,8 +201,7 @@ def pregenerate(
             already_made=existing,
             # A video_clip recipe picks a transcript chunk and calls no model.
             generation_calls=sum(
-                get_recipe(profile.storage_key, p.recipe_id).tool is not RecipeTool.VIDEO_CLIP
-                for p in planned
+                recipes[p.recipe_id].tool is not RecipeTool.VIDEO_CLIP for p in planned
             ),
             max_attempts_per_block=MAX_ATTEMPTS,
         )
@@ -219,6 +222,22 @@ def pregenerate(
         embedder=overrides[get_query_embedder]() if get_query_embedder in overrides else None,
     )
     return JobStartedResponse(job_id=f"job-{job.id}")
+
+
+@router.put("/tutorial-blocks/{block_id}/retire", response_model=TutorialBlockOut)
+def retire_block(session: DbSession, course: CourseScope, block_id: int) -> TutorialBlockRow:
+    """Stop showing one bank block: it is rejected and hidden, and its recipe is not written
+    again for that subtopic and level by live generation. Copies frozen with a set and failed
+    blocks cannot be retired."""
+    block = session.get(TutorialBlockRow, block_id)
+    if block is None or block.set_version_id is not None:
+        raise NotFoundError("Tutorial block not found.")
+    _subtopic_in_course(session, block.subtopic_id, course)
+    if block.status is TutorialBlockStatus.FAILED:
+        raise DomainRuleError("A failed block is never shown, so there is nothing to retire.")
+    block.status = TutorialBlockStatus.REJECTED
+    session.commit()
+    return block
 
 
 @router.get("/tutorial-blocks", response_model=list[TutorialBlockOut])

@@ -271,7 +271,7 @@ function PastQuestionSheet({
                     ? ` - ${detail.taxonomy.subtopics.join(", ")}`
                     : ""}
                 </div>
-                <div className="whitespace-pre-wrap rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-foreground text-sm leading-7">
+                <div className="wrap-anywhere whitespace-pre-wrap rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-foreground text-sm leading-7">
                   {detail.question.prompt}
                 </div>
               </div>
@@ -430,8 +430,6 @@ function ResultCard({
             </pre>
           </div>
         ) : null}
-
-        <StudentTutorialBlocks blocks={result.tutorial_blocks ?? []} moment="after" />
 
         {result.mastery_before !== null && result.mastery_after !== null ? (
           <div className="space-y-2.5">
@@ -695,15 +693,21 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     return streak;
   }, [revisitAttempts]);
 
+  // `data` outlives a later failed fetch: after an answer, /next can say
+  // "being written" while still holding the question just answered. Only a
+  // question the server is serving right now, in a run still open, is shown.
+  const openQuestion =
+    currentQuestion.isError || session.data?.ended_at ? undefined : currentQuestion.data;
+
   const submitAnswer = async () => {
-    if (!currentQuestion.data || answer.trim().length === 0) return;
+    if (!openQuestion || answer.trim().length === 0) return;
     // Capture before the mutation resolves: `answer` gets cleared for the
     // next question as soon as this succeeds, but the result card still
     // needs to know what was actually typed.
     const submitted = answer;
     try {
       const scored = await answerAttempt.mutateAsync({
-        attemptId: currentQuestion.data.attempt_id,
+        attemptId: openQuestion.attempt_id,
         body: { answer: submitted },
       });
       setResult(scored);
@@ -722,6 +726,21 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     void currentQuestion.refetch();
   };
 
+  // The tutorial column follows the loop: pre-teaching while a question is
+  // open, the result card's blocks once it is answered.
+  const tutorialBlocks = result
+    ? (result.tutorial_blocks ?? [])
+    : (openQuestion?.preteach_blocks ?? []);
+  const hasTutorial = tutorialBlocks.length > 0 && !session.data?.ended_at;
+  const tutorialPanel = hasTutorial ? (
+    <div className="min-w-0 rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6 xl:col-start-1 xl:row-span-2 xl:row-start-2">
+      <StudentTutorialBlocks blocks={tutorialBlocks} moment={result ? "after" : "before"} />
+    </div>
+  ) : null;
+  const rightColumn = hasTutorial
+    ? "xl:col-start-2"
+    : "xl:col-span-2 xl:mx-auto xl:w-full xl:max-w-3xl";
+
   const endRun = async () => {
     try {
       await endTrainingSession.mutateAsync(trainingSessionId);
@@ -737,10 +756,14 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
       {session.isError ? <QueryError error={session.error} /> : null}
 
       {session.data ? (
-        // Two columns at xl+ (question flow left, progress sidebar right,
-        // sticky so it stays visible while scrolling a long prompt); a
-        // single stacked column below that.
-        <div className="mx-auto grid w-full max-w-6xl gap-5 pb-8 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
+        // At xl+ the run header spans the top, the tutorial takes the wide
+        // middle column and the question flow, then progress, sits on the
+        // right. With no tutorial to show, the question flow is centred alone.
+        // Below xl everything stacks in DOM order, which follows the loop:
+        // pre-teaching above the question, but the verdict above the tutorial
+        // it unlocked. Order is by DOM, not CSS `order`, so focus and screen
+        // readers follow what is on screen.
+        <div className="grid w-full gap-5 pb-8 xl:grid-cols-[minmax(0,1fr)_minmax(26rem,32rem)] xl:grid-rows-[auto_auto_1fr] xl:items-start">
           <PastQuestionSheet
             attempt={selectedPastAttempt}
             detail={selectedPastQuestion.data ?? null}
@@ -756,73 +779,75 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             hasNext={selectedPastIndex >= 0 && selectedPastIndex < sessionAttempts.length - 1}
           />
 
-          {/* Main column: run header, alerts, result, then the live question. */}
-          <div className="flex min-w-0 flex-col gap-5">
-            <section className="rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 flex-1 space-y-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
-                      Run #{session.data.id}
+          <section className="rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6 xl:col-span-2 xl:row-start-1">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 flex-1 space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
+                    Run #{session.data.id}
+                  </Badge>
+                  {currentStreak >= 2 ? (
+                    <Badge className="gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-900 hover:bg-amber-100">
+                      <Flame className="size-3.5" />
+                      {currentStreak} in a row
                     </Badge>
-                    {currentStreak >= 2 ? (
-                      <Badge className="gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-900 hover:bg-amber-100">
-                        <Flame className="size-3.5" />
-                        {currentStreak} in a row
-                      </Badge>
-                    ) : null}
-                    <span className="text-muted-foreground text-sm">
-                      Started {learnerDate(session.data.created_at)}
-                    </span>
+                  ) : null}
+                  <span className="text-muted-foreground text-sm">
+                    Started {learnerDate(session.data.created_at)}
+                  </span>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] md:items-end">
+                  <div className="space-y-1">
+                    <div className="font-medium text-muted-foreground text-sm">
+                      {session.data.student_name
+                        ? `${session.data.student_name} — progress`
+                        : "Session progress"}
+                    </div>
+                    <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
+                      {session.data.answered_count}
+                      <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
+                        solved
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] md:items-end">
-                    <div className="space-y-1">
-                      <div className="font-medium text-muted-foreground text-sm">
-                        {session.data.student_name
-                          ? `${session.data.student_name} — progress`
-                          : "Session progress"}
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="font-medium text-foreground text-sm">
+                        {session.data.set_label ?? `Set #${session.data.set_version_id ?? "?"}`}
                       </div>
-                      <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
-                        {session.data.answered_count}
-                        <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
-                          solved
-                        </span>
+                      <div className="text-muted-foreground text-sm">
+                        {session.data.answered_count} solved
+                        {pendingCount > 0
+                          ? `, ${pendingCount} in progress`
+                          : ", no pending question"}
                       </div>
                     </div>
-
-                    <div className="space-y-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="font-medium text-foreground text-sm">
-                          {session.data.set_label ?? `Set #${session.data.set_version_id ?? "?"}`}
-                        </div>
-                        <div className="text-muted-foreground text-sm">
-                          {session.data.answered_count} solved
-                          {pendingCount > 0
-                            ? `, ${pendingCount} in progress`
-                            : ", no pending question"}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
-                        <span>{session.data.served_count} served total</span>
-                        <span>{session.data.answered_count} solved</span>
-                        {pendingCount > 0 ? <span>{pendingCount} pending</span> : null}
-                      </div>
+                    <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
+                      <span>{session.data.served_count} served total</span>
+                      <span>{session.data.answered_count} solved</span>
+                      {pendingCount > 0 ? <span>{pendingCount} pending</span> : null}
                     </div>
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void endRun()}
-                  disabled={endTrainingSession.isPending || session.data.ended_at !== null}
-                  className="rounded-full bg-white px-4 lg:self-start"
-                >
-                  End session
-                </Button>
               </div>
-            </section>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void endRun()}
+                disabled={endTrainingSession.isPending || session.data.ended_at !== null}
+                className="rounded-full bg-white px-4 lg:self-start"
+              >
+                End session
+              </Button>
+            </div>
+          </section>
 
+          {result ? null : tutorialPanel}
+
+          {/* Question column: alerts, the result, then the live question. */}
+          <div className={`flex min-w-0 flex-col gap-5 xl:row-start-2 ${rightColumn}`}>
             {endTrainingSession.isError ? <QueryError error={endTrainingSession.error} /> : null}
 
             {session.data.ended_at ? (
@@ -900,22 +925,22 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
               <QueryError error={currentQuestion.error} />
             ) : null}
 
-            {currentQuestion.data && result === null ? (
+            {openQuestion && result === null ? (
               <Card className="overflow-hidden rounded-[2rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,250,249,0.92))] shadow-[0_30px_80px_-48px_rgb(19_26_28_/_0.45)]">
                 <CardHeader className="gap-4 border-border/60 border-b px-6 py-6 sm:px-7">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <CardTitle className="text-[1.9rem] leading-none tracking-[-0.03em]">
-                      Question {currentQuestion.data.ordinal}
+                      Question {openQuestion.ordinal}
                     </CardTitle>
                     <Badge variant="outline" className="rounded-full bg-background/80 px-3 py-1">
-                      {currentQuestion.data.served_difficulty}
+                      {openQuestion.served_difficulty}
                     </Badge>
-                    {currentQuestion.data.question_type ? (
+                    {openQuestion.question_type ? (
                       <Badge variant="outline" className="rounded-full bg-background/80 px-3 py-1">
-                        {questionTypeLabel(currentQuestion.data.question_type)}
+                        {questionTypeLabel(openQuestion.question_type)}
                       </Badge>
                     ) : null}
-                    {currentQuestion.data.resumed ? (
+                    {openQuestion.resumed ? (
                       <Badge
                         variant="outline"
                         className="rounded-full bg-amber-50 px-3 py-1 text-amber-900"
@@ -923,7 +948,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                         Resumed
                       </Badge>
                     ) : null}
-                    {currentQuestion.data.live ? (
+                    {openQuestion.live ? (
                       <Badge
                         variant="outline"
                         className="rounded-full bg-sky-50 px-3 py-1 text-sky-900"
@@ -933,17 +958,13 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                       </Badge>
                     ) : null}
                   </div>
-                  {currentQuestion.data.subtopic_name ? (
-                    <div className="font-medium text-muted-foreground text-sm">
-                      {currentQuestion.data.subtopic_name}
+                  {openQuestion.subtopic_name ? (
+                    <div className="wrap-anywhere font-medium text-muted-foreground text-sm">
+                      {openQuestion.subtopic_name}
                     </div>
                   ) : null}
                 </CardHeader>
                 <CardContent className="space-y-5 px-6 py-6 sm:px-7">
-                  <StudentTutorialBlocks
-                    blocks={currentQuestion.data.preteach_blocks ?? []}
-                    moment="before"
-                  />
                   <div className="space-y-4">
                     <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
                       <div className="mb-3 flex items-center justify-between gap-3">
@@ -952,12 +973,12 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                         </div>
                         <ArrowUpRight className="size-4 text-muted-foreground" />
                       </div>
-                      <div className="whitespace-pre-wrap text-[0.98rem] text-foreground leading-8">
-                        {currentQuestion.data.prompt}
+                      <div className="wrap-anywhere whitespace-pre-wrap text-[0.98rem] text-foreground leading-8">
+                        {openQuestion.prompt}
                       </div>
                     </div>
 
-                    {currentQuestion.data.code ? (
+                    {openQuestion.code ? (
                       <div className="overflow-hidden rounded-[1.5rem] border border-slate-900/85 bg-slate-950 shadow-[0_28px_60px_-36px_rgb(2_6_23_/_0.9)]">
                         <div className="flex items-center justify-between border-slate-800 border-b px-4 py-3">
                           <div className="font-medium text-[11px] text-slate-400 uppercase tracking-[0.18em]">
@@ -970,14 +991,14 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                           </div>
                         </div>
                         <pre className="overflow-x-auto p-4 font-mono text-slate-50 text-sm leading-7">
-                          {currentQuestion.data.code}
+                          {openQuestion.code}
                         </pre>
                       </div>
                     ) : null}
                   </div>
 
                   <AnswerForm
-                    question={currentQuestion.data}
+                    question={openQuestion}
                     answer={answer}
                     onAnswerChange={setAnswer}
                     onSubmit={() => void submitAnswer()}
@@ -988,10 +1009,12 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             ) : null}
           </div>
 
-          {/* Sidebar column: omitted entirely until progress has loaded, rather
-              than reserving its width with a skeleton. */}
+          {result ? tutorialPanel : null}
+
+          {/* Omitted until progress has loaded, rather than reserving space
+              with a skeleton. */}
           {progress.data ? (
-            <div className="flex flex-col gap-4 xl:sticky xl:top-6">
+            <div className={`flex min-w-0 flex-col gap-5 xl:row-start-3 ${rightColumn}`}>
               <RecentQuestionsPanel attempts={sessionAttempts} onSelect={setSelectedPastAttempt} />
               <ProgressSidebar progress={progress.data} />
             </div>

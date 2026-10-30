@@ -87,14 +87,14 @@ def review(session, row, *, agrees=True, explicit=True, decision=ReviewDecision.
     return row_review
 
 
-def seed(session, taxonomy, n=20, disagreements=0, custom=None, explicit=True):
+def seed(session, taxonomy, n=10, disagreements=0, custom=None, explicit=True):
     for index in range(n):
         row = question(session, taxonomy)
         route_generated_question(session, row, custom)
         review(session, row, agrees=index >= disagreements, explicit=explicit)
 
 
-@pytest.mark.parametrize("n,errors,trusted", [(19, 0, False), (20, 2, True), (20, 3, False)])
+@pytest.mark.parametrize("n,errors,trusted", [(9, 0, False), (10, 1, True), (10, 2, False)])
 def test_threshold_boundaries(session, taxonomy, n, errors, trusted):
     seed(session, taxonomy, n=n, disagreements=errors)
     report = judge_trust(session, question(session, taxonomy), [])
@@ -109,17 +109,20 @@ def test_null_corrections_are_not_implicit_confirmations(session, taxonomy):
     assert all(
         metric.observations == 0 for name, metric in report.metrics.items() if name != "acceptance"
     )
-    assert report.metrics["acceptance"].observations == 20
+    assert report.metrics["acceptance"].observations == 10
 
 
-@pytest.mark.parametrize("change", ["style", "taxonomy", "model", "rubric"])
+@pytest.mark.parametrize("change", ["style", "course", "model", "rubric"])
 def test_scope_isolation(session, taxonomy, change):
     seed(session, taxonomy)
     options = {}
     if change == "style":
         options["style"] = "py.fix_bug"
-    elif change == "taxonomy":
-        other = CurriculumVersionRow(label="v2", course_id=taxonomy.course_id)
+    elif change == "course":
+        course = CourseRow(name="Other course", owner_id=TEST_PROFESSOR_ID)
+        session.add(course)
+        session.flush()
+        other = CurriculumVersionRow(label="v2", course_id=course.id)
         other.topics.append(TopicRow(name="Other", subtopics=[SubtopicRow(name="other")]))
         session.add(other)
         session.flush()
@@ -149,8 +152,8 @@ def test_exact_tenth_audits_persist_and_auto_approvals_add_no_evidence(session, 
         assert reopened.get(QuestionRow, ids[9]).trust_provenance == "audit"
         assert reopened.scalar(select(JudgeTrustCounterRow.eligible_count)) == 21
         report = judge_trust(reopened, reopened.get(QuestionRow, ids[-1]), [])
-        assert report.metrics["difficulty"].observations == 20
-        assert len(list(reopened.scalars(select(ProfessorReviewRow)))) == 20
+        assert report.metrics["difficulty"].observations == 10
+        assert len(list(reopened.scalars(select(ProfessorReviewRow)))) == 10
 
 
 def test_a_question_held_for_review_is_pending_even_in_a_trusted_scope(session, taxonomy):
@@ -174,13 +177,13 @@ def test_audit_disagreement_revokes_immediately_and_agreement_recovers(session, 
     review(session, audit, agrees=False)
     row = question(session, taxonomy)
     report = judge_trust(session, row, [])
-    assert report.metrics["difficulty"].agreement_rate == 0.95
+    assert report.metrics["difficulty"].agreement_rate == 0.9
     assert report.metrics["difficulty"].audit_revoked
     assert not report.trusted
     assert route_generated_question(session, row, []) == "pending"
     review(session, row)
     assert not judge_trust(session, question(session, taxonomy), []).trusted
-    seed(session, taxonomy, n=18)
+    seed(session, taxonomy, n=8)
     assert not judge_trust(session, question(session, taxonomy), []).trusted
     seed(session, taxonomy, n=1)
     assert judge_trust(session, question(session, taxonomy), []).trusted
@@ -190,8 +193,8 @@ def test_recent_errors_replace_old_evidence(session, taxonomy):
     seed(session, taxonomy, n=40)
     seed(session, taxonomy, n=3, disagreements=3)
     report = judge_trust(session, question(session, taxonomy), [])
-    assert report.metrics["difficulty"].observations == 20
-    assert report.metrics["difficulty"].agreement_rate == 0.85
+    assert report.metrics["difficulty"].observations == 10
+    assert report.metrics["difficulty"].agreement_rate == 0.7
     assert not report.trusted
 
 
@@ -206,13 +209,13 @@ def test_audit_rejection_without_corrections_revokes_without_inventing_observati
     review(session, audit, explicit=False, decision=ReviewDecision.REJECT)
     candidate = question(session, taxonomy)
     report = judge_trust(session, candidate, [])
-    assert report.metrics["difficulty"].observations == 20
+    assert report.metrics["difficulty"].observations == 10
     assert report.metrics["difficulty"].agreement_rate == 1.0
     assert not report.trusted
     route_generated_question(session, candidate, [])
     review(session, candidate)
     assert not judge_trust(session, question(session, taxonomy), []).trusted
-    seed(session, taxonomy, n=19)
+    seed(session, taxonomy, n=9)
     assert judge_trust(session, question(session, taxonomy), []).trusted
 
 
@@ -400,7 +403,7 @@ def test_custom_rules_need_answered_explicit_reviews_and_new_versions(session, t
         judge_trust(session, question(session, taxonomy), results)
         .metrics[f"custom:{rule.id}"]
         .agreements
-        == 19
+        == 9
     )
     rule.pattern = "ast:Nonlocal"
     assert not judge_trust(session, question(session, taxonomy), results).trusted
@@ -490,7 +493,7 @@ def test_sqlite_0005_upgrade_preserves_rows_and_adds_only_trust_schema(engine):
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0030_youtube_sources"
+            == "0031_experimental_recipes"
         )
         assert connection.execute(text("SELECT prompt,trust_provenance FROM questions")).one() == (
             "Old",
@@ -505,28 +508,89 @@ def seed_decisions(session, taxonomy, decisions):
         review(session, row, decision=decision)
 
 
-@pytest.mark.parametrize("rejects,trusted", [(2, True), (3, False)])
+@pytest.mark.parametrize("rejects,trusted", [(1, True), (2, False)])
 def test_rejects_block_trust_even_when_judges_agree(session, taxonomy, rejects, trusted):
     seed_decisions(
         session,
         taxonomy,
-        [ReviewDecision.REJECT] * rejects + [ReviewDecision.APPROVE] * (20 - rejects),
+        [ReviewDecision.REJECT] * rejects + [ReviewDecision.APPROVE] * (10 - rejects),
     )
     report = judge_trust(session, question(session, taxonomy), [])
     assert report.metrics["difficulty"].agreement_rate == 1.0
-    assert report.metrics["acceptance"].observations == 20
-    assert report.metrics["acceptance"].agreements == 20 - rejects
+    assert report.metrics["acceptance"].observations == 10
+    assert report.metrics["acceptance"].agreements == 10 - rejects
     assert report.trusted is trusted
 
 
 def test_an_edit_is_not_an_acceptance(session, taxonomy):
-    seed_decisions(session, taxonomy, [ReviewDecision.EDIT] * 3 + [ReviewDecision.APPROVE] * 17)
+    seed_decisions(session, taxonomy, [ReviewDecision.APPROVE] * 8 + [ReviewDecision.EDIT] * 2)
     report = judge_trust(session, question(session, taxonomy), [])
-    assert report.metrics["acceptance"].agreements == 17
+    assert report.metrics["acceptance"].agreements == 8
     assert not report.trusted
 
 
 def test_acceptance_window_needs_the_minimum_observations(session, taxonomy):
-    seed_decisions(session, taxonomy, [ReviewDecision.APPROVE] * 19)
+    seed_decisions(session, taxonomy, [ReviewDecision.APPROVE] * 9)
     report = judge_trust(session, question(session, taxonomy), [])
     assert not report.metrics["acceptance"].trusted
+
+
+def _second_version(session, taxonomy):
+    other = CurriculumVersionRow(label="v2", course_id=taxonomy.course_id)
+    other.topics.append(TopicRow(name="Loops again", subtopics=[SubtopicRow(name="while")]))
+    session.add(other)
+    session.flush()
+    return other
+
+
+def test_a_new_curriculum_version_keeps_the_styles_trust_but_rechecks_the_topic(session, taxonomy):
+    seed(session, taxonomy)
+    assert judge_trust(session, question(session, taxonomy), []).trusted
+    other = _second_version(session, taxonomy)
+    report = judge_trust(session, question(session, other), [])
+    # Difficulty and acceptance carry over; the topic judge picks from a new subtopic list.
+    assert report.metrics["difficulty"].trusted
+    assert report.metrics["acceptance"].trusted
+    assert report.metrics["subtopic"].observations == 10
+    assert report.metrics["subtopic"].local_observations == 0
+    assert not report.trusted
+    seed(session, other, n=2)
+    assert not judge_trust(session, question(session, other), []).trusted
+    seed(session, other, n=1)
+    report = judge_trust(session, question(session, other), [])
+    assert report.metrics["subtopic"].local_observations == 3
+    assert report.trusted
+
+
+def test_topic_disagreements_in_the_new_version_block_trust(session, taxonomy):
+    seed(session, taxonomy)
+    other = _second_version(session, taxonomy)
+    for agrees in (True, True, False):
+        row = question(session, other)
+        route_generated_question(session, row, [])
+        session.add(
+            ProfessorReviewRow(
+                question_id=row.id,
+                decision=ReviewDecision.APPROVE,
+                corrected_difficulty=Difficulty.EASY,
+                corrected_subtopic_ids=(
+                    list(row.subtopic_ids) if agrees else [taxonomy.topics[0].subtopics[0].id]
+                ),
+            )
+        )
+        session.flush()
+    report = judge_trust(session, question(session, other), [])
+    assert report.metrics["subtopic"].local_observations == 3
+    assert not report.metrics["subtopic"].trusted
+
+
+def test_audits_count_per_course_and_style_across_versions(session, taxonomy):
+    seed(session, taxonomy)
+    other = _second_version(session, taxonomy)
+    seed(session, other, n=3)
+    first = question(session, taxonomy)
+    second = question(session, other)
+    route_generated_question(session, first, [])
+    route_generated_question(session, second, [])
+    assert first.trust_scope_key == second.trust_scope_key
+    assert (first.trust_sequence, second.trust_sequence) == (1, 2)

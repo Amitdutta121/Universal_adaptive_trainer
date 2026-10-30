@@ -409,4 +409,7 @@ def test_approval_card_arguments_are_the_wire_shape() -> None:
         "save_style": ["yaml"],
         "publish_set": ["curriculum_version_id"],
         "run_generation": ["plan_id", "model_calls"],
+        "import_material": ["url", "title", "transcript"],
+        "save_recipe": ["yaml"],
+        "decide_recipe": ["recipe_id", "curriculum_version_id", "approved"],
     }

@@ -1589,6 +1589,30 @@ class CourseStyleRow(TimestampMixin, Base):
     style: Mapped[dict] = mapped_column("style_json", JsonObject)
 
 
+class ExperimentalRecipeRow(TimestampMixin, Base):
+    """A tutorial recipe made in the experimental recipe builder, kept in its course only.
+
+    ``yaml`` is the recipe as written, validated as a ``TutorialRecipe`` on every save
+    (``app/tutorials/experimental.py``). Once approved for a taxonomy it is served like a library
+    recipe, so blocks do store its id; editing or deleting it hides those blocks.
+    """
+
+    __tablename__ = "experimental_recipes"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id", "recipe_id", name="uq_experimental_recipes_course_id_recipe_id"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    recipe_id: Mapped[str] = mapped_column(String(100))
+    yaml: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class TutorialBlockRow(TimestampMixin, Base):
     """One generated tutorial block for a subtopic (Phase 5, Task 19).
 

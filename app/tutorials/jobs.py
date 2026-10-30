@@ -19,12 +19,18 @@ from app.errors import AdaptiveTrainerError
 from app.jobs.queue import JobQueue
 from app.jobs.runner import Progress, create_job, execute
 from app.llm import StructuredLLMClient
-from app.persistence.models import BackgroundJobRow, SubtopicRow, TopicRow, TutorialBlockRow
+from app.persistence.models import (
+    BackgroundJobRow,
+    CurriculumVersionRow,
+    SubtopicRow,
+    TopicRow,
+    TutorialBlockRow,
+)
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
 from app.subjects import profile_for_version
 from app.tutorials.approval import subtopic_ids_of
-from app.tutorials.generator import BlockRequest, generate_block, get_recipes
+from app.tutorials.generator import BlockRequest, course_recipes, generate_block
 
 
 @dataclass(frozen=True)
@@ -39,7 +45,12 @@ def plan_pregeneration(
 ) -> tuple[list[PlannedBlock], int]:
     """The blocks still missing from the taxonomy's bank, and how many already exist."""
     subject = profile_for_version(session, curriculum_version_id).storage_key
-    recipes = [r for r in get_recipes(subject) if recipe_ids is None or r.id in recipe_ids]
+    version = session.get(CurriculumVersionRow, curriculum_version_id)
+    recipes = [
+        r
+        for r in course_recipes(session, subject, version.course_id if version else None)
+        if recipe_ids is None or r.id in recipe_ids
+    ]
     subtopics = session.scalars(
         select(SubtopicRow.id)
         .join(TopicRow, TopicRow.id == SubtopicRow.topic_id)

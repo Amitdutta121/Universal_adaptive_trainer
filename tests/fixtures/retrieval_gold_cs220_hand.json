@@ -1,0 +1,358 @@
+{
+ "course_id": 9,
+ "curriculum_version_id": 14,
+ "labelled_by": "hand: a chunk is correct when a quiz question on this subtopic could be written from it alone",
+ "books": {
+  "14": {
+   "title": "Data Structures and Algorithms in Python - Full Course for Beginners",
+   "checksum": "8367b4da4fccc73146ea381bdb2e32bbd13f37be523b6ad715ed5da6b3338fc5"
+  },
+  "15": {
+   "title": "Dsa",
+   "checksum": "7411267b7e20b7681c61cdc0360942b53a649d895d1e2edf6f4e5669fcb339f5"
+  }
+ },
+ "entries": [
+  {
+   "subtopic_id": 318,
+   "name": "Asymptotic notation",
+   "correct": [
+    "727ee0b0e4194a891411734dbd458df5",
+    "70bd1048d5430b0e24a9eb5bb8520371",
+    "2e47fc6d215c9b8f414e856774789335",
+    "a7c4cdc708d7e654e5270d1df314e3b7"
+   ]
+  },
+  {
+   "subtopic_id": 319,
+   "name": "Best, worst, and average-case analysis",
+   "correct": [
+    "7e96044325d9293face66fbb14315324",
+    "92cd52501925b0163745b1c7fa05472e",
+    "b0ba80dc3c4a0cd12d90d141d1278a8b",
+    "826ca20058c35eb162a4cc2312dfc9c2"
+   ]
+  },
+  {
+   "subtopic_id": 320,
+   "name": "Loop invariants and proof of correctness",
+   "correct": []
+  },
+  {
+   "subtopic_id": 321,
+   "name": "Python lists and slicing semantics",
+   "correct": [
+    "ff28928b5d1c304669d58dbc281501c0"
+   ]
+  },
+  {
+   "subtopic_id": 322,
+   "name": "Mutability, references, and aliasing",
+   "correct": [
+    "c6c138e7b36b9e89d91de6af2151da0c"
+   ]
+  },
+  {
+   "subtopic_id": 323,
+   "name": "Iterators, generators, and comprehension patterns",
+   "correct": [
+    "4c37b6a84f34a27f9132216320cef3af",
+    "19a6c261a8fc0130cc18700fd3a7704d",
+    "5aec97b01f25e0d03b9f993f26984657",
+    "d3740381bf89ab8ac238f00f20069058",
+    "9db01f2536b09f172776d03cf24dde3c"
+   ]
+  },
+  {
+   "subtopic_id": 324,
+   "name": "Static arrays and indexing",
+   "correct": []
+  },
+  {
+   "subtopic_id": 325,
+   "name": "Dynamic array growth and amortized analysis",
+   "correct": []
+  },
+  {
+   "subtopic_id": 326,
+   "name": "Singly linked list operations",
+   "correct": [
+    "24f85c10b339c52d65925fe07bdc2636",
+    "168a2a1144a9007e38890e5d3beff16b",
+    "4bf95adc47b68e16135a531959fbe3ea",
+    "d825384e7016af54e2ee094980e6afdd",
+    "ceea0403cb7c8f1530e48affd6998a79",
+    "0a7a26e1d069c29f066501292bf96abc"
+   ]
+  },
+  {
+   "subtopic_id": 327,
+   "name": "Doubly linked lists and sentinels",
+   "correct": [
+    "07043b90a4146a35a2b60920349effb8",
+    "8b8f7cf497bf00aa1561f646c77aa135",
+    "cca1f88ec2405c942ad822212adffcc8",
+    "535ed81db8af8e2ac4024b092b965136"
+   ]
+  },
+  {
+   "subtopic_id": 328,
+   "name": "Linked list invariants and node-level manipulation",
+   "correct": [
+    "d825384e7016af54e2ee094980e6afdd",
+    "8b8f7cf497bf00aa1561f646c77aa135",
+    "168a2a1144a9007e38890e5d3beff16b",
+    "cca1f88ec2405c942ad822212adffcc8"
+   ]
+  },
+  {
+   "subtopic_id": 329,
+   "name": "Stack implementation and applications",
+   "correct": [
+    "646efe0245143148819990704dee29c0",
+    "448d0bd70eb41468dedf13aa946b6b68",
+    "2b948e2489c53e56c2f1c3894553f63e",
+    "9ce479549cff8aee8195def63a60842d",
+    "80b3325647f1dd2da0073cc0ff0603e6"
+   ]
+  },
+  {
+   "subtopic_id": 330,
+   "name": "Queue and deque implementations",
+   "correct": [
+    "62b784cdeb4f87fa239ab30e4befe349",
+    "f2dbd549c8eff717c2ec1a211d0991e1",
+    "f6bf3c805bf9171004cd33d3161753f1",
+    "cb33fb43151e3668cbbf9f9e003628fe",
+    "d60685c851ff02c5aacffdd58d537f7f",
+    "ef1890767b45fde04254193fc69f8705",
+    "e93184dd851923cebe550c958db53897",
+    "050274f99d6dd4f31063570bc3b44be7",
+    "6ab85222ad403b6ac4bb8bf22e3b06b8",
+    "ff28928b5d1c304669d58dbc281501c0"
+   ]
+  },
+  {
+   "subtopic_id": 331,
+   "name": "Designing recursive algorithms",
+   "correct": [
+    "9e87897628368f921c6e1003c902281b",
+    "4d69177c73473aa8aa999f3296fd2432",
+    "2501061395014210b8837fd103765594",
+    "5d872b3cbb285c962d77b9e1416f8c76",
+    "173f975f455689ee680bbf403198f0d3",
+    "e51d8430ab28f2774fa246d0e17b47c2",
+    "fddaaeae4c251a7e795c63b2a55845b3"
+   ]
+  },
+  {
+   "subtopic_id": 332,
+   "name": "Solving recurrences",
+   "correct": [
+    "99b8674496a341ae1ad3bc4a424795ef",
+    "a1cfd2cdfe748bed616e9e794018fe98",
+    "ed40f80bb14592fc3235a75063d7010b"
+   ]
+  },
+  {
+   "subtopic_id": 333,
+   "name": "Merge sort and stability",
+   "correct": [
+    "ef94903309774c1ac892ac67c3ec7c53",
+    "58c2f778ba798e15235a3633f011d562",
+    "9c233ce926c727406d480434398f6bad",
+    "7551977696146ad44a5ace3ade4896cd",
+    "38751e44c63a7d74b42739860f46dd50",
+    "350c8294be2d15407d8966b3a16ba7e7",
+    "a5c3801a5321dac7c0b44e3afdc3d398",
+    "ed40f80bb14592fc3235a75063d7010b"
+   ]
+  },
+  {
+   "subtopic_id": 334,
+   "name": "Quick sort and partitioning",
+   "correct": [
+    "97e32c076cf08a61a3cc0c54fdca884a",
+    "5ff4ac442f668b957497d287c0973e61",
+    "125caae8bef79621c75b850ce23cb8f1",
+    "e399b5a6d948349d46ec5e3579f5ec22",
+    "92cd52501925b0163745b1c7fa05472e",
+    "0c19f6c672d6f20633ac7037b82c828a",
+    "a5b1d2952f93920a689fa0c06a1257a0",
+    "f71157f99b53856a53c78b1aff4f06bc",
+    "d56f212895705b667d582756c1eac6be"
+   ]
+  },
+  {
+   "subtopic_id": 335,
+   "name": "Insertion and selection sorts",
+   "correct": [
+    "fe0f43f57b6710acb712506c86a32540",
+    "a130f00a8e378c7b0d4dac0ddd2ec71b"
+   ]
+  },
+  {
+   "subtopic_id": 336,
+   "name": "Binary search on sorted arrays",
+   "correct": [
+    "99b8674496a341ae1ad3bc4a424795ef",
+    "f0c65c8f7f9d6fd02bde937c031826da",
+    "529553a22e5a19aaf495d27595dbeed7",
+    "88f6efd2d124102a30f43fd3ace53cce",
+    "d46320b05ec0957c2cf0edc69debba2c",
+    "2df436a5bbec0ea70831a5ac3c711a87"
+   ]
+  },
+  {
+   "subtopic_id": 337,
+   "name": "Binary tree traversals",
+   "correct": [
+    "2ff744b833b58445d43fa7713dbcf921",
+    "6a9c2e0d9ba66891d92f03df8478d5bf",
+    "6ea9e2b9cfb0d8c8018a5872e9f81bed",
+    "3954e3dc82c4b20aefcdcc3f26bf08a6",
+    "bc7b06a17e671c4062fbbde219d381f7",
+    "ee480bce6eec8366d7490c5c16f26daa",
+    "bd29a751ce5895c518223d2b32720296"
+   ]
+  },
+  {
+   "subtopic_id": 338,
+   "name": "Binary search tree operations",
+   "correct": [
+    "56b77769259edb5b558c7483b5cd4a34",
+    "6c6a485f0b7cd4f00484b1bd0f0acacc",
+    "5054c1d88125baf51f38e52b74aa4752",
+    "332451c3ecc5716e95286525185b878f",
+    "3c9afc723a3139402dc6fc3d62f6d37e",
+    "3a28d640fdc0612dba4c438500f95c50",
+    "69652edbf772556b1bc5a1f637e95b84",
+    "53c8bd5849b66d86580f813d7d879872",
+    "103c1dd289a28491697904b337f873ad",
+    "fddaaeae4c251a7e795c63b2a55845b3"
+   ]
+  },
+  {
+   "subtopic_id": 339,
+   "name": "Tree height, balance basics, and implications",
+   "correct": [
+    "d476326c1aa57fc8513140fe15bedd23",
+    "34f0b3a0d2a3c15c40e46f05086fbe9c",
+    "9bf93f1a4e6647bd87e58c8983d0035d",
+    "33b86e4a247766e1901c73d1bbcd0967",
+    "b910b46fd0abc0d4fc0c96c9fab80772",
+    "21a1ed929fa938de6bb9f9ef98840a85",
+    "cfd0ad1e78cb533ad4a504a4c02dbae4",
+    "5a3085c416d4478a35059178b005d3a4",
+    "fa44e5a3b49a78c6c5a4a20f0c9afde3",
+    "647a4b9b59f456bf3b4b7dc970e59b18",
+    "2b7faa4c28a43b04aa367e6bb3dc3007"
+   ]
+  },
+  {
+   "subtopic_id": 340,
+   "name": "Binary heap structure and heapify",
+   "correct": [
+    "992c1c09ebfdaebfdcb54a9e75e718a7",
+    "8e93a518615a68d67e34ff20bafac3f1",
+    "4c70eae1fd2ffe1d4a2f98efd882620f",
+    "3ccf2d7b9db8611b1fdc43b89e5640a6",
+    "cdffbc62178570d7c8a28f86e2e95865",
+    "7e836b263126e2fbb07151aba6cec437",
+    "5e95d267e42ea6dc084542c5170c35e9"
+   ]
+  },
+  {
+   "subtopic_id": 341,
+   "name": "Priority queue operations and applications",
+   "correct": [
+    "f076e8309d086ec0ff56d1d9efd1763b",
+    "8b0255bd222ccc6bd5f63cd44415ca4a",
+    "d25d8ff634ddbcfe387e845eaa365f50",
+    "5e95d267e42ea6dc084542c5170c35e9",
+    "3ccf2d7b9db8611b1fdc43b89e5640a6",
+    "4c70eae1fd2ffe1d4a2f98efd882620f",
+    "cdffbc62178570d7c8a28f86e2e95865"
+   ]
+  },
+  {
+   "subtopic_id": 342,
+   "name": "Hash functions and load factor",
+   "correct": [
+    "d76be425297137b0e2a241a836ed4b6e",
+    "f84571fb4c2a3daa1b2aa594961c5726",
+    "d4934b8b82d4db0f9f03d94fea6c1d4b",
+    "c617603c66073a0c3edddca136db0a14"
+   ]
+  },
+  {
+   "subtopic_id": 343,
+   "name": "Collision resolution strategies",
+   "correct": [
+    "623d58df6ac82f7d91208966d9999537",
+    "89910c1dbf2fde71565ddc4d828667ee",
+    "9c9a7614fe3f8d3a398f65c3a6142884",
+    "750bacc4464608b8f9e9bc6fec1a09d6"
+   ]
+  },
+  {
+   "subtopic_id": 344,
+   "name": "Graph representations",
+   "correct": [
+    "0a65df8c5089cc27b05b710c58295fb6",
+    "2ab4968bafeb8e563e502de48f999ea0",
+    "a953a190dc00ba4a712e2348584b06f2",
+    "65c258cee468d97d57e209952ae76f1d",
+    "e2b50c72d18f010833e29070a23eff9b",
+    "05da91f61a2f59a31a72c195de70544b",
+    "30b5c1658bab090faf008c870dcddfec",
+    "7d40ff9c753f55c30c9d29e72fb69f3d",
+    "4591947103fdd45b6fc073ed268df7ac"
+   ]
+  },
+  {
+   "subtopic_id": 345,
+   "name": "Depth-first search (DFS)",
+   "correct": [
+    "fcb8a431b17040a2048b0dfdbcaf9f00",
+    "448d0bd70eb41468dedf13aa946b6b68",
+    "703e04a26312b69ac29bd622132a62e0",
+    "80b3325647f1dd2da0073cc0ff0603e6",
+    "2b948e2489c53e56c2f1c3894553f63e",
+    "9ce479549cff8aee8195def63a60842d"
+   ]
+  },
+  {
+   "subtopic_id": 346,
+   "name": "Breadth-first search (BFS) and shortest paths in unweighted graphs",
+   "correct": [
+    "2fc1e1e57cedeaf78444143e44f38e05",
+    "ed1d264af4b5deb7b047b239eb78571e",
+    "640ea5de405230a4a676837aaa89ab62",
+    "9ea74bd69f5333d1fd47bd817308c9c4",
+    "91fc6fb0ffa0acfbea83f3af813e9e4d",
+    "846b5d1991ad9e275dadbb14687408e1",
+    "79739151ee0a331094d11be0c7da8a88",
+    "75b9bface4d9c9ba8e0b29f1f98b5563",
+    "989f8cb108aecfa4c682e1a518c10eac",
+    "7ee6d41a69ed58c8e5864dbf012de6ca"
+   ]
+  },
+  {
+   "subtopic_id": 347,
+   "name": "Memoization and tabulation",
+   "correct": [
+    "3345cb78d565d4ec1406b59124e2468a",
+    "daf6c17df3c97a9c7696e3c1d3c872da",
+    "e684a2fa0807d362a606c85b80263697",
+    "34109cb1246c3010f234cc41b3936ca5",
+    "88a227375b57ca695e0bf36ab491a326",
+    "c337ae08d4e4e953a4c0fcc15e557b8b",
+    "646e8b5cdb7e74366c6cf9d14845bcdb",
+    "c5c6ce1de548ed79a452e64616e32332",
+    "098afd47eea3fbe7413123cd40b574a3",
+    "477226bf865db45835b591858f5ea166"
+   ]
+  }
+ ]
+}

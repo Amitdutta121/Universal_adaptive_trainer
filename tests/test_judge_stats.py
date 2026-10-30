@@ -1,6 +1,6 @@
 """The Judges page numbers: per-judge agreement, trust per style."""
 
-from app.persistence.models import CourseRow
+from app.persistence.models import CourseRow, CurriculumVersionRow, SubtopicRow, TopicRow
 from tests import test_trust_freeze
 from tests.conftest import TEST_PROFESSOR_ID
 
@@ -19,7 +19,7 @@ def test_stats_on_an_empty_bank(client):
 
 
 def test_stats_report_a_trusted_style_and_the_pause(client, session, taxonomy):
-    seed_current_panel(session, taxonomy, disagreements=1)
+    seed_current_panel(session, taxonomy, n=10, disagreements=1)
     session.commit()
     body = client.get(
         "/api/judge-prompts/stats", headers={"X-Course-Id": str(taxonomy.course_id)}
@@ -29,11 +29,14 @@ def test_stats_report_a_trusted_style_and_the_pause(client, session, taxonomy):
     # Not a library style, so there is no display name to show.
     assert style["style_name"] is None
     assert style["trusted"] is True
-    assert style["metrics"]["difficulty"]["agreements"] == 19
-    assert style["metrics"]["acceptance"]["observations"] == 20
+    assert style["metrics"]["difficulty"]["agreements"] == 9
+    assert style["metrics"]["acceptance"]["observations"] == 10
+    assert style["metrics"]["subtopic"]["local_observations"] == 10
     difficulty = body["judges"][0]
-    assert (difficulty["observations"], difficulty["agreements"]) == (20, 19)
-    assert difficulty["agreement_rate"] == 0.95
+    assert (difficulty["observations"], difficulty["agreements"]) == (10, 9)
+    assert difficulty["agreement_rate"] == 0.9
+    assert body["min_observations"] == 10
+    assert body["min_topic_local"] == 3
     assert body["learning_paused"] is True
     assert body["trusted_style_count"] == 1
 
@@ -48,3 +51,22 @@ def test_stats_are_scoped_to_the_course(client, session, taxonomy):
     assert body["styles"] == []
     # The pause is subject-wide: the other course shares the judges.
     assert body["learning_paused"] is True
+
+
+def test_a_style_pooled_over_two_versions_counts_once(client, session, taxonomy):
+    seed_current_panel(session, taxonomy, n=10)
+    other = CurriculumVersionRow(label="v2", course_id=taxonomy.course_id)
+    other.topics.append(TopicRow(name="More loops", subtopics=[SubtopicRow(name="while")]))
+    session.add(other)
+    session.flush()
+    seed_current_panel(session, other, n=3)
+    session.commit()
+    body = client.get(
+        "/api/judge-prompts/stats", headers={"X-Course-Id": str(taxonomy.course_id)}
+    ).json()
+    rows = {style["curriculum_version_id"]: style for style in body["styles"]}
+    assert rows[other.id]["trusted"] is True
+    assert rows[other.id]["metrics"]["subtopic"]["local_observations"] == 3
+    # Both rows share one 10-review window; the judge totals count it once.
+    assert body["judges"][0]["observations"] == 10
+    assert body["trusted_style_count"] == 1

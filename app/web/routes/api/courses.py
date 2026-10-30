@@ -15,6 +15,7 @@ from app.courses.overview import SETUP_STEPS, build_overview
 from app.errors import DomainRuleError
 from app.persistence.models import CourseRow
 from app.persistence.repositories import CourseRepository
+from app.styles.library import get_library
 from app.web.routes.api.deps import CurrentUser, DbSession
 from app.web.routes.api.schemas import (
     ActivityEventOut,
@@ -110,6 +111,7 @@ def assessment_catalog() -> AssessmentCatalogResponse:
                 label=preset.label,
                 description=preset.description,
                 default_types=catalog.default_types_for(preset.id),
+                ready=bool(get_library(preset.id)),
                 coming_soon_types=[
                     type_id for type_id in preset.default_types if not catalog.is_offerable(type_id)
                 ],
@@ -131,7 +133,12 @@ def _chosen_types(body: CourseCreate) -> tuple[str, list[str]]:
         raise DomainRuleError(f"Unknown subject {subject!r}.")
     if body.question_types is None:
         return subject, catalog.default_types_for(subject)
-    chosen = list(dict.fromkeys(body.question_types))
+    return subject, _offerable(body.question_types)
+
+
+def _offerable(question_types: list[str]) -> list[str]:
+    """The types as stored, refusing an empty list or any type that cannot be generated."""
+    chosen = list(dict.fromkeys(question_types))
     refused = [type_id for type_id in chosen if not catalog.is_offerable(type_id)]
     if refused:
         raise DomainRuleError(
@@ -140,7 +147,7 @@ def _chosen_types(body: CourseCreate) -> tuple[str, list[str]]:
         )
     if not chosen:
         raise DomainRuleError("A course needs at least one question type.")
-    return subject, chosen
+    return chosen
 
 
 @router.post("", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
@@ -176,12 +183,15 @@ def get_course(session: DbSession, user: CurrentUser, course_id: int) -> CourseO
 def update_course(
     session: DbSession, user: CurrentUser, course_id: int, body: CourseUpdate
 ) -> CourseOut:
-    """Rename a course or change its description."""
+    """Rename a course, change its description, or change the question types it allows."""
     repo = CourseRepository(session)
     course = repo.get_owned(course_id, user.id)
     if body.name is not None and body.name.strip():
         course.name = body.name.strip()
     if body.description is not None:
         course.description = body.description.strip() or None
+    if body.question_types is not None:
+        course.question_types = _offerable(body.question_types)
+        course.capabilities = catalog.capabilities_for(course.question_types)
     session.commit()
     return CourseOut.from_row(course, repo.content_counts().get(course_id, (0, 0, 0)))

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { useApprovedCurriculum, useReviewQueue, useSubmitReview } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
+import { JudgeTrustStrip } from "./components/judge-trust-strip";
 import { JudgeRail, ValidationSummary } from "./components/review-feedback";
 import { ReviewQuestionContent, ReviewQuestionSurface } from "./components/review-question-content";
 import { ReviewVerdictBar } from "./components/review-verdict-bar";
@@ -214,6 +215,7 @@ export function ReviewScreen() {
               value={data.total ? (data.reviewed / data.total) * 100 : 0}
               className="review-progress"
             />
+            <JudgeTrustStrip curriculumVersionId={curriculumVersionId} />
           </CardContent>
         </Card>
       ) : null}

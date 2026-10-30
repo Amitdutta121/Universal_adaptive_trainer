@@ -226,7 +226,21 @@ class TaxonomyDraftRequest(BaseModel):
     #: Topics or outcomes that must appear, one per line; a pasted syllabus works.
     must_cover: str = Field(default="", max_length=8000)
     leave_out: str = Field(default="", max_length=2000)
+    #: A preset, used when neither count below is given.
     size: Literal["compact", "standard", "detailed"] = "standard"
+    #: The professor's own numbers; the AI is asked to match them exactly.
+    topic_count: int | None = Field(default=None, ge=1, le=20)
+    subtopic_count: int | None = Field(default=None, ge=1, le=80)
+
+    @model_validator(mode="after")
+    def _counts_fit(self) -> TaxonomyDraftRequest:
+        if (
+            self.topic_count is not None
+            and self.subtopic_count is not None
+            and self.subtopic_count < self.topic_count
+        ):
+            raise ValueError("Every topic needs at least one subtopic.")
+        return self
 
 
 class TaxonomyDraftResponse(BaseModel):
@@ -356,6 +370,9 @@ class SubjectPresetOut(BaseModel):
     primary_groups: list[str]
     #: An example question per type id, in this subject's terms.
     examples: dict[str, str]
+    #: Whether the subject has a question style library. Question setup offers only library
+    #: (and course-added) styles, so a course of a subject without one cannot set up questions.
+    ready: bool = True
 
 
 class AssessmentCatalogResponse(BaseModel):
@@ -393,6 +410,8 @@ class CourseUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
+    #: The question types to allow; each must be offerable. The capabilities follow (ADR-054).
+    question_types: list[str] | None = None
 
 
 class BookSummary(BaseModel):
@@ -1365,6 +1384,9 @@ class MetricTrustOut(BaseModel):
     agreement_rate: float
     trusted: bool
     audit_revoked: bool
+    #: Topic only: the reviews from this row's own Curriculum version (the window above pools
+    #: the whole course). Trust needs ``min_topic_local`` of them.
+    local_observations: int | None = None
 
 
 class StyleTrustOut(BaseModel):
@@ -1400,6 +1422,7 @@ class JudgeStatsResponse(BaseModel):
     min_observations: int
     min_agreement: float
     min_acceptance: float
+    min_topic_local: int
 
 
 class JudgeScorecardOut(BaseModel):
@@ -3003,6 +3026,9 @@ class TutorialRecipeListResponse(BaseModel):
     decisions: dict[str, bool] = Field(default_factory=dict)
     #: Per-recipe stats in this course (Task 28); a recipe missing here has none yet.
     stats: dict[str, TutorialRecipeStatsOut] = Field(default_factory=dict)
+    #: Live tutorials (``app/tutorials/live.py``): students get bank blocks as soon as they
+    #: pass their checks, with no approval step, and missing ones are written on demand.
+    live: bool = False
 
 
 class TutorialRecipeStatsOut(BaseModel):
@@ -3068,6 +3094,64 @@ class GenerateTutorialBlockRequest(BaseModel):
     guidance_level: GuidanceLevel
     #: For a recipe that traces code: this program instead of one the model writes.
     code: str | None = None
+
+
+class ExperimentalRecipeOut(BaseModel):
+    """A recipe from the experimental recipe builder: its YAML and the fields a list shows."""
+
+    id: int
+    recipe_id: str
+    name: str
+    summary: str
+    renderer: TutorialRenderer
+    yaml: str
+    updated_at: datetime
+    #: The parsed recipe, so the page can show it without reading YAML.
+    recipe: TutorialRecipe
+
+
+class ExperimentalRecipeYaml(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    yaml: str = Field(min_length=1, max_length=20_000)
+
+
+class ExperimentalRecipeDraftRequest(BaseModel):
+    """What the professor asks for; with ``current_yaml``, a revision of that recipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=3, max_length=4_000)
+    current_yaml: str | None = Field(default=None, max_length=20_000)
+
+
+class ExperimentalRecipeDraftOut(BaseModel):
+    yaml: str
+    #: Empty when the draft is valid; otherwise what is still wrong after the repair retry.
+    problems: list[str]
+    #: The parsed recipe; ``None`` while the draft is invalid.
+    recipe: TutorialRecipe | None
+
+
+class ExperimentalRecipeTryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    yaml: str = Field(min_length=1, max_length=20_000)
+    subtopic_id: int
+    guidance_level: GuidanceLevel
+
+
+class ExperimentalRecipeTryOut(BaseModel):
+    """One block written from the recipe, never saved. ``error`` when it stayed invalid."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    renderer: TutorialRenderer
+    guidance_level: GuidanceLevel
+    payload: dict[str, Any]
+    chunk_ids: list[str]
+    error: str | None
+    model: str
 
 
 class TutorialBlockOut(BaseModel):

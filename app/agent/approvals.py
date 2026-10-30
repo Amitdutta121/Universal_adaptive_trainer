@@ -33,7 +33,16 @@ PLAN_TTL_SECONDS = 30 * 60
 #: The tools that wait for the professor's click. ``test_agent_approvals`` checks this set
 #: against the toolset, so a new tool that writes or spends cannot slip in ungated.
 APPROVAL_REQUIRED = frozenset(
-    {"approve_curriculum", "edit_curriculum", "save_style", "publish_set", "run_generation"}
+    {
+        "import_material",
+        "approve_curriculum",
+        "edit_curriculum",
+        "save_style",
+        "publish_set",
+        "run_generation",
+        "save_recipe",
+        "decide_recipe",
+    }
 )
 
 

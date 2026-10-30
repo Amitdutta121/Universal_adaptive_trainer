@@ -61,8 +61,9 @@ First fill in `analysis`, before writing any topic. Note, briefly:
 
 Then write the taxonomy:
 1. Topics in learning order: prerequisites first.
-2. Keep to the size the instructor asked for (given with the request). Prefer fewer, \
-solid skills to many thin ones.
+2. Keep to the size the instructor asked for (given with the request). When it gives an \
+exact number of topics or subtopics, match that number exactly. Prefer fewer, solid skills \
+to many thin ones.
 3. A subtopic names one skill the student can demonstrate ("Interpreting a p-value"), \
 not a broad theme ("Statistics basics").
 4. Every item under "Must cover" appears, as a topic or a subtopic, in the instructor's \
@@ -98,6 +99,9 @@ class DraftBrief(BaseModel):
     must_cover: str = ""
     leave_out: str = ""
     size: DraftSize = "standard"
+    #: The professor's own numbers, which override ``size``.
+    topic_count: int | None = None
+    subtopic_count: int | None = None
 
 
 class _DraftSubtopic(BaseModel):
@@ -145,12 +149,21 @@ def draft_taxonomy(
         LLMRequestError, MalformedModelOutputError: the provider call failed.
     """
     client = client or get_structured_client()
+    prompt = draft_user_prompt(brief)
     raw = client.complete_structured(
-        system=DRAFT_SYSTEM_PROMPT,
-        prompt=draft_user_prompt(brief),
-        response_model=_DraftTaxonomy,
+        system=DRAFT_SYSTEM_PROMPT, prompt=prompt, response_model=_DraftTaxonomy
     )
     document = _repair(raw, fallback_label=brief.title)
+    # The professor's own numbers are a requirement: one retry that says what was missed.
+    # Whatever comes back opens in the builder, where the counts can still be fixed by hand.
+    miss = _count_miss(document, brief)
+    if miss:
+        raw = client.complete_structured(
+            system=DRAFT_SYSTEM_PROMPT,
+            prompt=f"{prompt}\n\n# Correction\n{miss} Redo the taxonomy to match.",
+            response_model=_DraftTaxonomy,
+        )
+        document = _repair(raw, fallback_label=brief.title)
     logger.info(
         "Drafted taxonomy %r: %d topic(s), %d subtopic(s)",
         document.label,
@@ -160,6 +173,30 @@ def draft_taxonomy(
     return TaxonomyDraft(
         document=document, analysis=raw.analysis.strip(), drafted_by=client.description
     )
+
+
+def size_target(brief: DraftBrief) -> str:
+    """The size line the model is given: the professor's own numbers, else the preset's."""
+    topics, subtopics = brief.topic_count, brief.subtopic_count
+    if topics is None and subtopics is None:
+        return SIZE_TARGETS[brief.size]
+    if topics is not None and subtopics is not None:
+        return f"Exactly {topics} topics and exactly {subtopics} subtopics in all."
+    if topics is not None:
+        return f"Exactly {topics} topics, with 2 to 5 subtopics each."
+    return f"Exactly {subtopics} subtopics in all, grouped into topics of 2 to 5 subtopics."
+
+
+def _count_miss(document: TaxonomyDocument, brief: DraftBrief) -> str | None:
+    """What the draft got wrong about the professor's numbers, or ``None`` when it matched."""
+    topics = len(document.topics)
+    subtopics = sum(len(topic.subtopics) for topic in document.topics)
+    wrong = []
+    if brief.topic_count is not None and topics != brief.topic_count:
+        wrong.append(f"{topics} topics instead of {brief.topic_count}")
+    if brief.subtopic_count is not None and subtopics != brief.subtopic_count:
+        wrong.append(f"{subtopics} subtopics instead of {brief.subtopic_count}")
+    return f"Your last draft had {' and '.join(wrong)}." if wrong else None
 
 
 def draft_user_prompt(brief: DraftBrief) -> str:
@@ -172,7 +209,7 @@ def draft_user_prompt(brief: DraftBrief) -> str:
         ("Leave out", brief.leave_out),
     ]
     parts = [f"# {heading}\n{text.strip()}" for heading, text in sections if text.strip()]
-    parts.append(f"# Size\n{SIZE_TARGETS[brief.size]}")
+    parts.append(f"# Size\n{size_target(brief)}")
     return "\n\n".join(parts)
 
 

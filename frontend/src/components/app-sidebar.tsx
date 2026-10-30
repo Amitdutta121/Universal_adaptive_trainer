@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ChevronRight,
   ChevronsUpDown,
+  LayoutDashboard,
   LogOut,
   Moon,
   SlidersHorizontal,
@@ -47,15 +48,19 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { useCourse, useCourses, useCurrentUser, useHealth, useLogout } from "@/lib/api/queries";
+import { SetupProgress } from "@/components/course-setup/setup-progress";
 import { courseIdFromPath, coursePath } from "@/lib/course";
 import { NAV_SECTIONS, type NavSection } from "@/lib/navigation";
 
 type AppTheme = "light" | "dark" | "system";
 
+/** The course dashboard, relative to the open course (`app/courses/[courseId]/dashboard`). */
+const DASHBOARD_PATH = "/dashboard";
+
 /** Presentational grouping only — every key still comes from the single `NAV_SECTIONS` source of truth. */
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
-  { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "review", "tutorials"] },
-  { label: "Calibration", keys: ["judges", "coverage"] },
+  { label: "Content Pipeline", keys: ["books", "curriculum", "tutorials", "questions"] },
+  { label: "Calibration", keys: ["review", "coverage", "judges"] },
   { label: "Adaptive Training", keys: ["classrooms", "roster", "students"] },
 ];
 
@@ -308,6 +313,33 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* The course's dashboard, on its own above the groups: it is not a NAV_SECTIONS entry,
+            because the dashboard draws its cards from that list and would show itself. */}
+        {courseId === null ? null : (
+          <>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === DASHBOARD_PATH}
+                      tooltip="Dashboard"
+                      className="text-[13px]"
+                    >
+                      <Link href={href(DASHBOARD_PATH)}>
+                        <LayoutDashboard />
+                        <span>Dashboard</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+              <SetupProgress courseId={courseId} />
+            </SidebarGroup>
+            <SidebarSeparator />
+          </>
+        )}
         {NAV_GROUPS.map((group, index) => {
           const sections = sectionsFor(group.keys);
           if (sections.length === 0) return null;
