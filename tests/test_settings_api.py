@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.backend import current_active_user
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.llm import probe as probe_module
 from app.llm.probe import ProbeResult, probe
 from app.persistence.models import ModelSettingRow, UserRow
@@ -61,9 +61,23 @@ def _rows(session: Session) -> list[ModelSettingRow]:
     return list(session.scalars(select(ModelSettingRow)))
 
 
-def test_anyone_signed_in_reads_env_settings_and_only_an_admin_edits(
+def test_any_signed_in_account_edits_by_default(
     client: TestClient, session: Session, probes: list[Any]
 ) -> None:
+    assert client.get("/api/settings").json()["can_edit"] is True
+    token = client.post("/api/settings/generation/test", json=BODY).json()["test_token"]
+    saved = client.put("/api/settings/generation", json={**BODY, "test_token": token})
+
+    assert saved.status_code == 200
+    assert [row.model for row in _rows(session)] == [BODY["model"]]
+    assert client.delete("/api/settings/generation").status_code == 200
+
+
+def test_anyone_signed_in_reads_env_settings_and_only_an_admin_edits(
+    client: TestClient, session: Session, probes: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MODEL_SETTINGS_ADMIN_ONLY", "true")
+    get_settings.cache_clear()
     response = client.get("/api/settings")
 
     assert response.status_code == 200
@@ -286,5 +300,10 @@ def test_azure_is_refused_until_configured(admin_client: TestClient) -> None:
     assert admin_client.get("/api/settings").json()["azure_configured"] is False
 
 
-def test_only_an_admin_toggles_the_route(client: TestClient) -> None:
+def test_only_an_admin_toggles_the_route_when_admin_only(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert client.put("/api/settings/route", json={"route": "openrouter"}).status_code == 200
+    monkeypatch.setenv("MODEL_SETTINGS_ADMIN_ONLY", "true")
+    get_settings.cache_clear()
     assert client.put("/api/settings/route", json={"route": "openrouter"}).status_code == 403

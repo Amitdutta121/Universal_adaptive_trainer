@@ -1,7 +1,8 @@
 """Model settings per role: read, test, save, reset, and the provider's model list (Task 42).
 
-Any signed-in professor can read the settings (keys masked). Testing, saving and resetting
-change what the whole instance spends money on, so they need an admin (a superuser).
+Any signed-in professor can read the settings (keys masked), and by default test, save and
+reset them too (ADR-067). With ``MODEL_SETTINGS_ADMIN_ONLY`` on, those three need an admin (a
+superuser), since they change what the whole instance spends money on.
 Saving needs the token from a passing Test of exactly the configuration being saved.
 """
 
@@ -60,8 +61,12 @@ _MODEL_CACHE: dict[str, tuple[float, list[ProviderModel]]] = {}
 _MODEL_CACHE_SECONDS = 3600
 
 
+def can_edit(user: UserRow) -> bool:
+    return user.is_superuser or not get_settings().model_settings_admin_only
+
+
 def require_admin(user: CurrentUser) -> UserRow:
-    if not user.is_superuser:
+    if not can_edit(user):
         raise AdminRequiredError(
             "Only an admin can change model settings.",
             detail="Ask an admin, or create one with `python -m app.auth.create_user --superuser`.",
@@ -175,7 +180,7 @@ def read_settings(session: DbSession, user: CurrentUser) -> ModelSettingsRespons
     return ModelSettingsResponse(
         roles=[_describe(session, role, base) for role in ModelRole],
         providers=[p.value for p in LLMProvider if p is not LLMProvider.NONE],
-        can_edit=user.is_superuser,
+        can_edit=can_edit(user),
         route=route,
         route_source="db" if saved else "env",
         azure_configured=env.azure_configured,

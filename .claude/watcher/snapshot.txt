@@ -1,0 +1,235 @@
+# watcher snapshot  2026-08-31 07:51:14
+branch: dev   head: 8426a02
+
+## conflict markers in tracked files
+(none)
+
+## git status (porcelain)
+ M .env.example
+ M README.md
+ M app/auth/__init__.py
+ M app/config.py
+ M app/domain/enums.py
+ M app/domain/questions.py
+ M app/evaluation/judge_learning.py
+ M app/generation/base.py
+ M app/generation/prompts.py
+ M app/generation/service.py
+ M app/main.py
+ M app/persistence/models.py
+ M app/persistence/repositories.py
+ M app/web/routes/api/auth.py
+ M app/web/routes/api/judge_prompts.py
+ M app/web/routes/api/questions.py
+ M app/web/routes/api/schemas.py
+ M docs/LOCAL_DEVELOPMENT.md
+ M frontend/README.md
+ M frontend/package.json
+ M frontend/src/app/books/[book_id]/sections/[section_id]/page.tsx
+ M frontend/src/app/coverage/page.tsx
+ M frontend/src/app/judges/page.tsx
+ M frontend/src/app/layout.tsx
+ M frontend/src/app/login/login-screen.tsx
+ M frontend/src/app/page.tsx
+ M frontend/src/app/questions/[question_id]/page.tsx
+ M frontend/src/app/questions/generate/single/components/generate-controls.tsx
+ M frontend/src/app/questions/generate/single/components/outline-panel.tsx
+ M frontend/src/app/questions/generate/single/components/pdf-page-viewer.tsx
+ M frontend/src/app/questions/generate/single/components/question-review.tsx
+ M frontend/src/app/questions/generate/single/components/questions-for-chunk.tsx
+ M frontend/src/app/questions/generate/single/generate-single-screen.tsx
+ M frontend/src/app/questions/generate/single/page.tsx
+ M frontend/src/app/questions/generate/spec-sheet-types.test.ts
+ M frontend/src/app/questions/generate/spec-sheet-types.ts
+ M frontend/src/app/questions/generate/use-sheet-rows.ts
+ M frontend/src/app/questions/questions-browser.tsx
+ M frontend/src/app/review/components/review-action-bar.tsx
+ M frontend/src/app/review/components/review-question-content.tsx
+ M frontend/src/app/review/review-utils.ts
+ M frontend/src/app/students/join/join-classroom-screen.tsx
+ M frontend/src/app/students/join/session/[training_session_id]/student-session-screen.tsx
+ M frontend/src/components/app-chrome.tsx
+ M frontend/src/components/app-sidebar.tsx
+ M frontend/src/components/auth-gate.tsx
+ M frontend/src/components/query-state.tsx
+ M frontend/src/lib/api/client.ts
+ M frontend/src/lib/api/queries.ts
+ M frontend/src/lib/api/schema.d.ts
+ M frontend/src/lib/api/types.ts
+ M frontend/src/lib/navigation.ts
+ M pyproject.toml
+ M tests/conftest.py
+ M tests/test_api.py
+ M tests/test_judge_learning.py
+?? .claude/
+?? app/evaluation/judge_relearn_worker.py
+?? backend_fresh_err.log
+?? backend_fresh_err2.log
+?? backend_fresh_out.log
+?? backend_fresh_out2.log
+?? docs/adaptive_architecture.html
+?? docs/question_studio_mockup.html
+?? frontend/frontend_fresh_err.log
+?? frontend/frontend_fresh_out.log
+?? frontend/src/app/coverage/components/
+?? frontend/src/app/coverage/coverage-display.test.ts
+?? frontend/src/app/coverage/coverage-display.ts
+?? frontend/src/app/coverage/coverage-screen.tsx
+?? frontend/src/app/experiments/
+?? frontend/src/app/judges/judges-screen.tsx
+?? frontend/src/lib/api/server-request.ts
+?? frontend_fresh_err.log
+?? frontend_fresh_err2.log
+?? frontend_fresh_err3.log
+?? frontend_fresh_err4.log
+?? frontend_fresh_err5.log
+?? frontend_fresh_out.log
+?? frontend_fresh_out2.log
+?? frontend_fresh_out3.log
+?? frontend_fresh_out4.log
+?? frontend_fresh_out5.log
+
+## diff stat (working tree vs HEAD)
+ .env.example                                       |   2 +-
+ README.md                                          |   8 +-
+ app/auth/__init__.py                               |   2 +-
+ app/config.py                                      |   5 +
+ app/domain/enums.py                                |  23 ++
+ app/domain/questions.py                            |   4 +
+ app/evaluation/judge_learning.py                   | 269 +++++++++++++++----
+ app/generation/base.py                             |  12 +-
+ app/generation/prompts.py                          |  23 +-
+ app/generation/service.py                          |  85 +++++-
+ app/main.py                                        |  31 ++-
+ app/persistence/models.py                          |  55 +++-
+ app/persistence/repositories.py                    | 115 ++++++++
+ app/web/routes/api/auth.py                         |   2 +-
+ app/web/routes/api/judge_prompts.py                | 200 +++++++++++++-
+ app/web/routes/api/questions.py                    |  34 +++
+ app/web/routes/api/schemas.py                      | 174 ++++++++++++
+ docs/LOCAL_DEVELOPMENT.md                          |   4 +-
+ frontend/README.md                                 |   2 +-
+ .../books/[book_id]/sections/[section_id]/page.tsx |   6 +-
+ frontend/src/app/coverage/page.tsx                 |  35 ++-
+ frontend/src/app/judges/page.tsx                   |  30 +--
+ frontend/src/app/layout.tsx                        |   2 +-
+ frontend/src/app/login/login-screen.tsx            |   2 +-
+ frontend/src/app/page.tsx                          |   8 +-
+ frontend/src/app/questions/[question_id]/page.tsx  |  10 +-
+ .../generate/single/components/outline-panel.tsx   |  36 ++-
+ .../generate/single/components/pdf-page-viewer.tsx | 146 ++++++++++-
+ .../generate/single/components/question-review.tsx |  67 ++++-
+ .../generate/single/generate-single-screen.tsx     |  57 +++-
+ frontend/src/app/questions/questions-browser.tsx   |  90 ++++---
+ .../app/review/components/review-action-bar.tsx    |  12 +-
+ .../review/components/review-question-content.tsx  |   6 +-
+ frontend/src/app/review/review-utils.ts            |  31 +++
+ .../app/students/join/join-classroom-screen.tsx    |   2 +-
+ frontend/src/components/app-chrome.tsx             |   8 +-
+ frontend/src/components/app-sidebar.tsx            |   2 +-
+ frontend/src/components/auth-gate.tsx              |   2 +-
+ frontend/src/components/query-state.tsx            |   6 +-
+ frontend/src/lib/api/client.ts                     |  59 +++++
+ frontend/src/lib/api/queries.ts                    | 184 +++++++++++++
+ frontend/src/lib/api/schema.d.ts                   | 291 +++++++++++++++++++++
+ frontend/src/lib/api/types.ts                      |  10 +
+ pyproject.toml                                     |   2 +-
+ tests/conftest.py                                  |   2 +
+ tests/test_api.py                                  |   2 +-
+ tests/test_judge_learning.py                       | 137 ++++++++++
+ 47 files changed, 2094 insertions(+), 201 deletions(-)
+
+## divergence vs origin/dev
+local ahead: 10   behind: 0
+
+## files modified in the last 15 min
+2026-08-31 07:43  ./frontend/src/app/coverage/components/coverage-grid.tsx
+2026-08-31 07:44  ./.idea/workspace.xml
+2026-08-31 07:44  ./app/domain/questions.py
+2026-08-31 07:44  ./app/generation/prompts.py
+2026-08-31 07:44  ./frontend/src/app/coverage/components/freeze-set-card.tsx
+2026-08-31 07:44  ./frontend/src/app/coverage/components/readiness-summary-card.tsx
+2026-08-31 07:44  ./frontend/src/app/coverage/coverage-display.ts
+2026-08-31 07:45  ./app/generation/base.py
+2026-08-31 07:45  ./app/generation/service.py
+2026-08-31 07:45  ./frontend/src/app/coverage/components/frozen-sets-table.tsx
+2026-08-31 07:45  ./frontend/src/app/coverage/coverage-display.test.ts
+2026-08-31 07:46  ./app/web/routes/api/questions.py
+2026-08-31 07:46  ./frontend/src/app/coverage/coverage-screen.tsx
+2026-08-31 07:48  ./app/domain/enums.py
+2026-08-31 07:48  ./app/persistence/models.py
+2026-08-31 07:48  ./app/persistence/repositories.py
+2026-08-31 07:49  ./app/config.py
+2026-08-31 07:49  ./app/evaluation/judge_relearn_worker.py
+2026-08-31 07:49  ./app/main.py
+2026-08-31 07:49  ./frontend/src/app/review/components/review-action-bar.tsx
+2026-08-31 07:49  ./frontend/src/lib/api/queries.ts
+2026-08-31 07:49  ./tests/conftest.py
+2026-08-31 07:50  ./.pytest_cache/v/cache/nodeids
+2026-08-31 07:50  ./app/web/routes/api/schemas.py
+2026-08-31 07:50  ./frontend/src/app/questions/generate/single/components/pdf-page-viewer.tsx
+2026-08-31 07:50  ./frontend/src/app/questions/generate/single/components/question-review.tsx
+2026-08-31 07:50  ./frontend/src/app/questions/generate/single/generate-single-screen.tsx
+2026-08-31 07:50  ./frontend/src/app/questions/questions-browser.tsx
+2026-08-31 07:50  ./frontend/tsconfig.tsbuildinfo
+2026-08-31 07:51  ./app/web/routes/api/judge_prompts.py
+
+## changed python files
+app/auth/__init__.py
+app/config.py
+app/domain/enums.py
+app/domain/questions.py
+app/evaluation/judge_learning.py
+app/generation/base.py
+app/generation/prompts.py
+app/generation/service.py
+app/main.py
+app/persistence/models.py
+app/persistence/repositories.py
+app/web/routes/api/auth.py
+app/web/routes/api/judge_prompts.py
+app/web/routes/api/questions.py
+app/web/routes/api/schemas.py
+tests/conftest.py
+tests/test_api.py
+tests/test_judge_learning.py
+
+## changed frontend files
+frontend/src/app/books/[book_id]/sections/[section_id]/page.tsx
+frontend/src/app/coverage/page.tsx
+frontend/src/app/judges/page.tsx
+frontend/src/app/layout.tsx
+frontend/src/app/login/login-screen.tsx
+frontend/src/app/page.tsx
+frontend/src/app/questions/[question_id]/page.tsx
+frontend/src/app/questions/generate/single/components/outline-panel.tsx
+frontend/src/app/questions/generate/single/components/pdf-page-viewer.tsx
+frontend/src/app/questions/generate/single/components/question-review.tsx
+frontend/src/app/questions/generate/single/generate-single-screen.tsx
+frontend/src/app/questions/questions-browser.tsx
+frontend/src/app/review/components/review-action-bar.tsx
+frontend/src/app/review/components/review-question-content.tsx
+frontend/src/app/review/review-utils.ts
+frontend/src/app/students/join/join-classroom-screen.tsx
+frontend/src/components/app-chrome.tsx
+frontend/src/components/app-sidebar.tsx
+frontend/src/components/auth-gate.tsx
+frontend/src/components/query-state.tsx
+frontend/src/lib/api/client.ts
+frontend/src/lib/api/queries.ts
+frontend/src/lib/api/schema.d.ts
+frontend/src/lib/api/types.ts
+
+## last 12 commits
+8426a02 Open a question in a modal instead of an inline panel
+7ce282c Give the studio full window width instead of the reading-width cap
+c40c192 Fix PDF scroll-jump landing on the wrong page
+2e288c7 Serve the retained PDF for in-browser rendering, and merge dev
+0906e16 Merge branch 'dev' into worktree-chunk-studio-3col
+8a20dd7 Redesign single-chunk generation into a 3-column studio layout
+879d2cd Support real PDF book import via automated structural inference (ADR-048)
+f741cda judge design
+8fae0b6 Merge pull request #2 from Amitdutta121/dev
+39cc2d5 Fix horizontal page overflow on tablet-width viewports
+93471e0 Merge pull request #1 from Amitdutta121/dev
+779f8a6 Progress topics sequentially in the adaptive engine (ADR-047)

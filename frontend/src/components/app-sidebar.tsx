@@ -230,10 +230,8 @@ function ThemeSwitcher() {
   );
 }
 
-/** Instance-wide model settings; only an admin can change them, so only an admin sees it. */
+/** Instance-wide model settings, open to every account; the page itself says when editing is admin-only. */
 function SettingsLink() {
-  const currentUser = useCurrentUser();
-  if (!currentUser.data?.is_superuser) return null;
   return (
     <Link
       href={"/settings" as Route}

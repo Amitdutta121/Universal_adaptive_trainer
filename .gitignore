@@ -42,3 +42,6 @@ desktop.ini
 # Anchored to the repository root: unanchored, this also swallowed the console's
 # /books route, which then went untracked and unscanned by Tailwind.
 /books/
+
+# Dev-server PIDs and logs (scripts/dev.ps1)
+.dev/

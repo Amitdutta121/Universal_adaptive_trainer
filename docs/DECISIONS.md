@@ -2773,3 +2773,22 @@ Other differences the new endpoint must keep:
 **Consequences.** The single and regenerate screens must poll a job instead of reading a 201 body
 (Task 14). Test scenarios of the five old generation routes are rerun through the new one
 (Task 13). The two pipelines remain, so a fix to judging still has to land in the right one.
+
+## ADR-067 — Every signed-in account can change model settings, unless the instance says otherwise
+
+**Status:** accepted 2026-10-30. Supersedes Task 42's admin-only rule for test, save and reset.
+
+**Context.** Task 42 let any professor read the model settings but kept Test, Save, Reset and the
+route toggle for superusers, because they change what the whole instance spends money on. Locally
+there is one professor, the seeded `dev@local.test` account is not a superuser, and so the
+Settings link was hidden from the only person using the app.
+
+**Decision.** `MODEL_SETTINGS_ADMIN_ONLY` (default `false`) decides it. Off, any signed-in account
+can test, save and reset every role and switch the route, and the sidebar shows the Settings link
+to everyone. On, Task 42's rule returns: `require_admin` answers 403 `admin_required` and
+`GET /api/settings` reports `can_edit: false`, which the page already shows as a read-only notice.
+The test-before-save token is unchanged either way.
+
+**Consequences.** With open registration (ADR-058's untrusted accounts) and the flag off, a
+stranger's account could repoint a role's base URL and key, sending course content to their
+endpoint and spending on the instance. Production must set `MODEL_SETTINGS_ADMIN_ONLY=true`.

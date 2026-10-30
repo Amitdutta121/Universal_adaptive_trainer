@@ -210,6 +210,10 @@ class Settings(BaseSettings):
     #: ENVIRONMENT=development -- a production run never seeds a credential.
     dev_user_email: str = "dev@local.test"
     dev_user_password: SecretStr = SecretStr("devpassword123")
+    #: Off: any signed-in account can test, save and reset the instance's model settings
+    #: (ADR-067). Set it true on an instance with open registration, where a stranger's
+    #: account could otherwise repoint every role's base URL and key.
+    model_settings_admin_only: bool = False
 
     # -- Account email (app/auth/email.py, ADR-061) ---------------------------
     #: Off for now: a registered account is verified on creation and no verification link is
