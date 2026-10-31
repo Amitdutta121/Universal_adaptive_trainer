@@ -13,7 +13,7 @@
  * previous course's cached books; a fresh document starts from an empty cache.
  */
 
-import { LogOut, Plus } from "lucide-react";
+import { LogOut, Plus, Settings } from "lucide-react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
@@ -41,6 +41,7 @@ import {
 } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
 import { coursePath } from "@/lib/course";
+import { SettingsDialog } from "../settings/settings-screen";
 import { NewCourseDialog } from "./new-course-dialog";
 import { GradingNote, TypeGroups } from "./question-type-picker";
 
@@ -435,6 +436,7 @@ export function CoursesScreen() {
   // The course whose settings are open, if any.
   const [editing, setEditing] = useState<Schemas["CourseOut"] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const courses = overview.data?.courses ?? [];
   const questions = courses.reduce((sum, c) => sum + c.course.question_count, 0);
@@ -454,8 +456,18 @@ export function CoursesScreen() {
           <Plus />
           New course
         </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings />
+        </Button>
         <SignOutButton />
       </header>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       <VerifyEmailBanner />
 

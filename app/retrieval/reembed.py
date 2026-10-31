@@ -34,6 +34,7 @@ from app.settings_store import (
     ModelRole,
     apply_row,
     load_row,
+    provider_configs,
     routed,
     settings_for,
 )
@@ -60,7 +61,9 @@ def start_switch(session: Session, pending: ModelSettingRow) -> BackgroundJobRow
             "An embedding model switch is already running.",
             detail="Wait for it to finish; its progress is on the Settings screen.",
         )
-    model = apply_row(routed(session), ModelRole.EMBEDDINGS, pending).embedding_model
+    embeddings = ModelRole.EMBEDDINGS
+    base = routed(session, role=embeddings)
+    model = apply_row(base, embeddings, pending, provider_configs(session)).embedding_model
     job = create_job(
         session,
         kind=JobKind.EMBEDDING_SWITCH,
@@ -94,7 +97,12 @@ def _switch(session: Session, job: BackgroundJobRow, embedder: Embedder | None) 
     if pending is None or pending.job_id != job.id:
         raise DomainRuleError("A newer embedding switch replaced this one.")
     base = get_settings()
-    target = apply_row(routed(session, base), ModelRole.EMBEDDINGS, pending)
+    target = apply_row(
+        routed(session, base, ModelRole.EMBEDDINGS),
+        ModelRole.EMBEDDINGS,
+        pending,
+        provider_configs(session, base),
+    )
     embedder = embedder or build_embedder(target)
     store = ChunkEmbeddingStore(session, embedder)
     job.total = len(store.missing())

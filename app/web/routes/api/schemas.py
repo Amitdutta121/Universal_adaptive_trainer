@@ -2845,17 +2845,47 @@ class RoleSettingsResponse(BaseModel):
     switch: EmbeddingSwitchOut | None = None
 
 
+class ProviderOut(BaseModel):
+    """One provider as the app calls it (ADR-068). The key is only ever masked."""
+
+    id: LLMRoute
+    label: str
+    base_url: str | None
+    #: True for Azure and custom: the endpoint is the account's own and has to be entered.
+    base_url_required: bool
+    api_key_masked: str | None
+    #: The chat model a role on this provider uses when it names none.
+    chat_model: str | None
+    #: The embedding model it offers by default, if any.
+    embedding_model: str | None
+    #: Whether a role can embed with it at all.
+    embeds: bool
+    lists_models: bool
+    #: Has a URL and key, so roles can use it and it can be the default.
+    configured: bool
+    #: Which values were saved on the Settings screen rather than coming from ``.env``.
+    saved: list[Literal["base_url", "api_key", "chat_model"]]
+
+
+class ProviderUpdate(BaseModel):
+    """A provider's values to test and save. Empty or ``null`` keeps what is there."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=500)
+    chat_model: str | None = Field(default=None, max_length=200)
+
+
 class ModelSettingsResponse(BaseModel):
     roles: list[RoleSettingsResponse]
-    providers: list[str]
+    providers: list[ProviderOut]
     #: Whether the current account may test and save (a superuser).
     can_edit: bool
-    #: The endpoint every role without its own saved settings calls, and where that choice
-    #: comes from: the Settings toggle (``db``) or ``LLM_ROUTE`` (``env``).
+    #: The default provider every role without its own saved settings calls, and where that
+    #: choice comes from: the Settings screen (``db``) or ``LLM_ROUTE`` (``env``).
     route: LLMRoute
     route_source: SettingSource
-    #: Whether ``.env`` has an Azure URL and key, so the toggle can offer Azure.
-    azure_configured: bool
 
 
 class RouteUpdate(BaseModel):
@@ -2897,6 +2927,10 @@ class SettingsTestResponse(BaseModel):
 class ProviderModel(BaseModel):
     id: str
     name: str
+    # What the picker shows beside each model; None when the provider does not say.
+    context_length: int | None = None
+    prompt_price: float | None = None  # USD per million input tokens
+    completion_price: float | None = None  # USD per million output tokens
 
 
 # --------------------------------------------------------------- generation runs (ADR-066)

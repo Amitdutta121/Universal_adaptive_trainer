@@ -1,4 +1,4 @@
-"""The structured-output LLM client (Instructor over OpenRouter)."""
+"""The structured-output LLM client: Instructor over any OpenAI-compatible provider (ADR-068)."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from pydantic import BaseModel, ValidationError
 from app.config import LLMProvider, Settings
 from app.errors import ConfigurationError, LLMRequestError, MalformedModelOutputError
 from app.llm.availability import require_llm
+from app.llm_providers import OPENROUTER_BASE_URL, provider_spec
 from app.settings_store import ModelRole, settings_for
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 #: Reasoning models (OpenAI's gpt-5 family and o-series) reject ``max_tokens`` and a
 #: non-default ``temperature``; their hidden reasoning also spends the output budget.
 _REASONING_MODEL = re.compile(r"^(gpt-5|o\d)", re.IGNORECASE)
@@ -28,7 +28,9 @@ REASONING_OUTPUT_TOKENS = 16_000
 
 
 def is_openrouter(settings: Settings) -> bool:
-    """Whether calls go to OpenRouter (the default) rather than another OpenAI-style API."""
+    """Whether calls go to OpenRouter (the default) rather than another provider's API."""
+    if settings.llm_provider is not LLMProvider.OPENROUTER:
+        return False
     return not settings.llm_base_url or "openrouter.ai" in settings.llm_base_url
 
 
@@ -79,7 +81,7 @@ def _as_request_error(exc: openai.OpenAIError) -> LLMRequestError:
             detail=detail or "The provider sent an empty response body.",
         )
     return LLMRequestError(
-        "Could not reach the OpenRouter API.",
+        "Could not reach the LLM provider.",
         detail=f"{type(exc).__name__}: {detail}",
     )
 
@@ -113,9 +115,7 @@ def _malformed_output_detail(exc: BaseException) -> str:
 
 
 class InstructorStructuredClient:
-    """Structured Pydantic completion through Instructor and OpenRouter."""
-
-    provider_label = "openrouter"
+    """Structured Pydantic completion through Instructor and an OpenAI-compatible API."""
 
     def __init__(
         self,
@@ -147,8 +147,11 @@ class InstructorStructuredClient:
 
     @property
     def description(self) -> str:
-        """Return provenance for the configured route."""
-        label = self.provider_label if is_openrouter(self._settings) else "azure"
+        """Return provenance: the provider and the model it was asked for."""
+        url = self._settings.llm_base_url or ""
+        # A role saved before ADR-068 says "openrouter" with an Azure URL; label it by the URL.
+        legacy_azure = self._settings.llm_provider is LLMProvider.OPENROUTER and ".azure.com" in url
+        label = "azure" if legacy_azure else self._settings.llm_provider.value
         return f"{label}/{self._settings.llm_model}"
 
     def _request_options(self) -> dict[str, object]:
@@ -206,7 +209,7 @@ def get_structured_client(
     role: ModelRole = ModelRole.GENERATION,
     temperature: float | None = None,
 ) -> StructuredLLMClient:
-    """Return the configured OpenRouter structured-output client for ``role``.
+    """Return the structured-output client for ``role``'s provider and model.
 
     ``role``'s database settings override ``settings`` (``app.settings_store``).
     ``temperature`` is passed by callers that need a repeatable answer rather
@@ -214,8 +217,8 @@ def get_structured_client(
     keeps the provider default and stays diverse.
     """
     settings = require_llm(settings_for(role, settings))
-    if settings.llm_provider is LLMProvider.OPENROUTER:
-        return InstructorStructuredClient(settings, temperature=temperature)
-    raise ConfigurationError(
-        f"No structured client exists for provider {settings.llm_provider.value!r}."
-    )
+    if settings.llm_provider is LLMProvider.NONE:  # pragma: no cover - require_llm refuses it
+        raise ConfigurationError("No LLM provider is configured.")
+    fenced = provider_spec(settings.llm_provider, settings).fenced_json
+    mode = instructor.Mode.MD_JSON if fenced else instructor.Mode.JSON
+    return InstructorStructuredClient(settings, temperature=temperature, mode=mode)

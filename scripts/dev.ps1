@@ -43,9 +43,34 @@ function Get-SavedPid($name) {
     return $null
 }
 
+# A server on our port that this checkout runs but has no PID file for (started by hand, or
+# orphaned when its cmd wrapper died). It is ours when the listener or an ancestor runs from this
+# checkout's .venv / frontend; returns the topmost such process so taskkill /T takes the tree.
+# Another worktree's server has a different path and is never matched.
+function Get-OwnedListener($name) {
+    $marker = if ($name -eq 'backend') { "$repo\.venv\" } else { "$repo\frontend\" }
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $servers[$name].Port -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $conn) { return $null }
+    $id = $conn.OwningProcess
+    $owned = $null
+    for ($i = 0; $i -lt 5 -and $id; $i++) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
+        if (-not $proc) { break }
+        $ours = $proc.CommandLine -and $proc.CommandLine.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        if ($ours) { $owned = $proc.ProcessId } elseif ($owned) { break }
+        $id = $proc.ParentProcessId
+    }
+    return $owned
+}
+
 function Stop-Server($name) {
     $id = Get-SavedPid $name
-    if ($id) {
+    $adopted = Get-OwnedListener $name
+    if (-not $id -and $adopted) {
+        taskkill /PID $adopted /T /F | Out-Null
+        Write-Host "$name stopped (PID $adopted, this checkout's server started outside dev.ps1)"
+    } elseif ($id) {
         # /T takes the reloader's and pnpm's child processes with it.
         taskkill /PID $id /T /F | Out-Null
         Remove-Item (Join-Path $state "$name.pid")
@@ -54,7 +79,11 @@ function Stop-Server($name) {
         Write-Host "${name}: not started by this checkout"
     }
     $port = $servers[$name].Port
-    $holder = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
+    for ($i = 0; $i -lt 10; $i++) {
+        $holder = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
+        if (-not $holder) { break }
+        Start-Sleep -Milliseconds 500
+    }
     if ($holder) {
         Write-Host "  port $port is still held by PID $($holder.OwningProcess -join ',') (not ours; left alone)"
     }
@@ -63,6 +92,8 @@ function Stop-Server($name) {
 function Start-Server($name) {
     $port = $servers[$name].Port
     if (Get-SavedPid $name) { Write-Host "$name already running; use restart"; return }
+    $adopted = Get-OwnedListener $name
+    if ($adopted) { Write-Host "$name already running (PID $adopted, started outside dev.ps1); use restart"; return }
     if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
         throw "$name port $port is taken by another process. Pick a free port in .env / frontend\.env.local; do not kill it."
     }
@@ -101,6 +132,7 @@ foreach ($name in $targets) {
         'restart' { Stop-Server $name; Start-Server $name }
         'status' {
             $id = Get-SavedPid $name
+            if (-not $id) { $id = Get-OwnedListener $name }
             $up = if (Test-Up $servers[$name].Url) { 'UP' } else { 'DOWN' }
             Write-Host ("{0,-8} {1,-4} port {2}  pid {3}  {4}" -f $name, $up, $servers[$name].Port, $(if ($id) { $id } else { '-' }), $servers[$name].Url)
         }

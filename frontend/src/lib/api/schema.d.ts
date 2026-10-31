@@ -1508,14 +1508,40 @@ export interface paths {
         get?: never;
         /**
          * Set Route
-         * @description Point every role without its own saved settings at OpenRouter or Azure.
+         * @description Make a provider the default every role follows unless it names its own.
          *
-         *     No Test is asked for, unlike a role save: both routes come from ``.env`` as configured,
-         *     and switching back is one click. Azure is refused while its URL or key is missing.
+         *     No Test is asked for, unlike a role save: the provider was tested when it was set up, and
+         *     switching back is one click. A provider without a URL and key is refused, OpenRouter aside.
          */
         put: operations["set_route_api_settings_route_put"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Provider Settings
+         * @description Save a provider's URL, key and default model, after one test call proves they work.
+         *
+         *     Nothing is saved when the call fails; the provider's own message comes back instead.
+         */
+        put: operations["save_provider_settings_api_settings_providers__provider__put"];
+        post?: never;
+        /**
+         * Reset Provider Settings
+         * @description Forget a provider's saved values; whatever ``.env`` has for it applies again.
+         */
+        delete: operations["reset_provider_settings_api_settings_providers__provider__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1531,6 +1557,8 @@ export interface paths {
         /**
          * Provider Models
          * @description The provider's model ids for the picker; any other id can still be typed.
+         *
+         *     Azure lists deployments only through its management API, so it has no list here.
          */
         get: operations["provider_models_api_settings_models_get"];
         put?: never;
@@ -4437,6 +4465,15 @@ export interface components {
             min_topic_local: number;
         };
         /**
+         * LLMProvider
+         * @description Supported LLM providers (ADR-068; their endpoints and defaults: ``app.llm_providers``).
+         *
+         *     ``NONE`` keeps the UI runnable without credentials (ADR-010). Every other provider is
+         *     called through the same OpenAI-compatible client; ``CUSTOM`` is any such endpoint.
+         * @enum {string}
+         */
+        LLMProvider: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom" | "none";
+        /**
          * MasteryBand
          * @description Coarse band derived from a BKT mastery probability.
          * @enum {string}
@@ -4553,21 +4590,19 @@ export interface components {
             /** Roles */
             roles: components["schemas"]["RoleSettingsResponse"][];
             /** Providers */
-            providers: string[];
+            providers: components["schemas"]["ProviderOut"][];
             /** Can Edit */
             can_edit: boolean;
             /**
              * Route
              * @enum {string}
              */
-            route: "openrouter" | "azure";
+            route: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom";
             /**
              * Route Source
              * @enum {string}
              */
             route_source: "db" | "env";
-            /** Azure Configured */
-            azure_configured: boolean;
         };
         /** MostMissedOut */
         MostMissedOut: {
@@ -4706,6 +4741,55 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /** Context Length */
+            context_length?: number | null;
+            /** Prompt Price */
+            prompt_price?: number | null;
+            /** Completion Price */
+            completion_price?: number | null;
+        };
+        /**
+         * ProviderOut
+         * @description One provider as the app calls it (ADR-068). The key is only ever masked.
+         */
+        ProviderOut: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom";
+            /** Label */
+            label: string;
+            /** Base Url */
+            base_url: string | null;
+            /** Base Url Required */
+            base_url_required: boolean;
+            /** Api Key Masked */
+            api_key_masked: string | null;
+            /** Chat Model */
+            chat_model: string | null;
+            /** Embedding Model */
+            embedding_model: string | null;
+            /** Embeds */
+            embeds: boolean;
+            /** Lists Models */
+            lists_models: boolean;
+            /** Configured */
+            configured: boolean;
+            /** Saved */
+            saved: ("base_url" | "api_key" | "chat_model")[];
+        };
+        /**
+         * ProviderUpdate
+         * @description A provider's values to test and save. Empty or ``null`` keeps what is there.
+         */
+        ProviderUpdate: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Chat Model */
+            chat_model?: string | null;
         };
         /**
          * QuadrantCell
@@ -5372,7 +5456,7 @@ export interface components {
              * Route
              * @enum {string}
              */
-            route: "openrouter" | "azure";
+            route: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom";
         };
         /**
          * SaveSetupRequest
@@ -9263,10 +9347,76 @@ export interface operations {
             };
         };
     };
+    save_provider_settings_api_settings_providers__provider__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["LLMProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_provider_settings_api_settings_providers__provider__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["LLMProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     provider_models_api_settings_models_get: {
         parameters: {
             query?: {
-                provider?: string;
+                provider?: components["schemas"]["LLMProvider"];
             };
             header?: never;
             path?: never;

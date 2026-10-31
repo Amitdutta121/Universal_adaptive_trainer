@@ -13,7 +13,7 @@ import openai
 
 from app.config import Settings
 from app.errors import AdaptiveTrainerError
-from app.llm.client import OPENROUTER_BASE_URL, _as_request_error
+from app.llm.client import OPENROUTER_BASE_URL, _as_request_error, is_reasoning_model
 
 
 @dataclass(frozen=True)
@@ -38,10 +38,12 @@ def probe(settings: Settings, *, embeddings: bool) -> ProbeResult:
         if embeddings:
             response = client.embeddings.create(model=settings.embedding_model, input=["ping"])
             return ProbeResult(ok=True, dimension=len(response.data[0].embedding))
+        # Reasoning models (gpt-5-mini, o4-mini) refuse ``max_tokens``, as in the real client.
+        limit = "max_completion_tokens" if is_reasoning_model(settings.llm_model) else "max_tokens"
         client.chat.completions.create(
             model=settings.llm_model,
             messages=[{"role": "user", "content": "Reply with OK."}],
-            max_tokens=16,
+            **{limit: 16},
         )
         return ProbeResult(ok=True)
     except openai.OpenAIError as exc:

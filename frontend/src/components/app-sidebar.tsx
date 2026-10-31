@@ -18,6 +18,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, useEffect, useState } from "react";
+import { SettingsDialog } from "@/app/settings/settings-screen";
 import { LogoGlyph } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -230,18 +231,23 @@ function ThemeSwitcher() {
   );
 }
 
-/** Instance-wide model settings, open to every account; the page itself says when editing is admin-only. */
+/** App settings (models, providers, appearance), open to every account; model edits are admin-only. */
 function SettingsLink() {
+  const [open, setOpen] = useState(false);
   return (
-    <Link
-      href={"/settings" as Route}
-      className="app-sidebar-footer-row text-[13px] hover:underline"
-    >
-      <span className="flex items-center gap-2">
-        <SlidersHorizontal className="size-3.5" />
-        Model settings
-      </span>
-    </Link>
+    <>
+      <button
+        type="button"
+        className="app-sidebar-footer-row text-left text-[13px] hover:underline"
+        onClick={() => setOpen(true)}
+      >
+        <span className="flex items-center gap-2">
+          <SlidersHorizontal className="size-3.5" />
+          Settings
+        </span>
+      </button>
+      <SettingsDialog open={open} onOpenChange={setOpen} />
+    </>
   );
 }
 

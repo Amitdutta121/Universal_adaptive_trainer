@@ -2792,3 +2792,27 @@ The test-before-save token is unchanged either way.
 **Consequences.** With open registration (ADR-058's untrusted accounts) and the flag off, a
 stranger's account could repoint a role's base URL and key, sending course content to their
 endpoint and spending on the instance. Production must set `MODEL_SETTINGS_ADMIN_ONLY=true`.
+
+## ADR-068 — Seven providers behind one OpenAI-compatible client, with a default and per-role overrides
+
+**Status:** accepted 2026-10-30. Supersedes the OpenRouter/Azure route toggle (Task 44 follow-up).
+
+**Context.** The route toggle offered two endpoints, both configured only in `.env`. Professors
+want to use the key they already have (OpenAI, Anthropic, xAI, DeepSeek) or a local endpoint,
+and to set it up on the Settings screen rather than by editing `.env`.
+
+**Decision.** `app/llm_providers.py` lists OpenRouter, Azure OpenAI, OpenAI, Anthropic, xAI,
+DeepSeek and `custom` (any OpenAI-compatible URL). All speak the OpenAI chat API, so the existing
+client serves them; Claude goes through Anthropic's OpenAI-compatible endpoint and asks for fenced
+JSON because that endpoint ignores `response_format`. Each provider's URL, key and default chat
+model come from `.env` and can be saved on the Providers pane (row `provider.<id>`, key encrypted
+like a role's), after one test call. `LLM_ROUTE` / the saved route names the default provider:
+every role without its own provider uses it and its default model. A role that picks a provider
+uses that provider's URL and key; it chooses only the provider and model. Embeddings fall back to
+OpenRouter when the default provider has no embedding model.
+
+**Consequences.** Providers without a native OpenAI-compatible API (Gemini, Bedrock) need `custom`
+or a gateway. Azure's model list is not read (deployments are only listed by its management API),
+so its model is typed. Per-role URL and key fields left the UI; a role that stored them before
+keeps using them until it is saved again (which clears both) or reset.
+

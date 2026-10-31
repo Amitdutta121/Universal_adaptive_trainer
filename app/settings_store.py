@@ -32,6 +32,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.config import LLMProvider, LLMRoute, Settings, get_settings
+from app.llm_providers import OPENROUTER_BASE_URL, ProviderSpec, env_credentials, provider_spec
 from app.persistence.models import ModelSettingRow
 
 logger = logging.getLogger(__name__)
@@ -53,9 +54,13 @@ class ModelRole(StrEnum):
 #: read by :func:`settings_for`: retrieval stays on the active model until the job swaps it in.
 PENDING_EMBEDDINGS = "embeddings.pending"
 
-#: Row key of the instance's route (``provider`` holds ``openrouter`` or ``azure``), set by the
-#: Settings screen's toggle over ``LLM_ROUTE``. Like ``PENDING_EMBEDDINGS``, never a role.
+#: Row key of the instance's default provider (``provider`` holds its id), chosen on the
+#: Settings screen over ``LLM_ROUTE``. Like ``PENDING_EMBEDDINGS``, never a role.
 ROUTE = "route"
+
+#: Row key prefix of a provider's saved URL, key and default chat model (ADR-068):
+#: ``provider.openai`` and so on. Never a role either.
+PROVIDER_PREFIX = "provider."
 
 _HKDF_INFO = b"adaptive-trainer/model-settings/api-key"
 
@@ -80,13 +85,142 @@ def load_row(session: Session, role: ModelRole) -> ModelSettingRow | None:
     return session.scalars(select(ModelSettingRow).where(ModelSettingRow.role == role)).first()
 
 
-def apply_row(base: Settings, role: ModelRole, row: ModelSettingRow | None) -> Settings:
-    """``base`` with the fields ``row`` sets replacing the ones it overrides for ``role``."""
+# -- Providers (ADR-068) ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    """One provider as the app will call it: ``.env`` values with any saved ones on top."""
+
+    spec: ProviderSpec
+    base_url: str | None
+    api_key: SecretStr | None
+    #: The chat model a role on this provider uses when it names none.
+    chat_model: str | None
+    #: Which of base_url, api_key and chat_model were saved on the Settings screen.
+    saved: frozenset[str]
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.base_url) and self.api_key is not None
+
+
+def _provider_row(session: Session, provider: LLMProvider) -> ModelSettingRow | None:
+    return session.get(ModelSettingRow, PROVIDER_PREFIX + provider.value)
+
+
+def provider_config(
+    env: Settings, provider: LLMProvider, row: ModelSettingRow | None
+) -> ProviderConfig:
+    spec = provider_spec(provider, env)
+    base_url, api_key = env_credentials(provider, env)
+    model = spec.chat_model
+    saved: set[str] = set()
+    if row is not None:
+        if row.base_url:
+            base_url = row.base_url
+            saved.add("base_url")
+        if row.api_key_encrypted:
+            try:
+                api_key = decrypt_api_key(row.api_key_encrypted, env)
+                saved.add("api_key")
+            except InvalidToken:
+                logger.warning(
+                    "The stored %s key can't be decrypted (AUTH_SECRET_KEY changed?); using "
+                    "the .env key until it is saved again.",
+                    provider.value,
+                )
+        if row.model:
+            model = row.model
+            saved.add("chat_model")
+    return ProviderConfig(spec, base_url, api_key, model, frozenset(saved))
+
+
+def provider_configs(
+    session: Session, env: Settings | None = None
+) -> dict[LLMProvider, ProviderConfig]:
+    """Every provider, ``.env`` values with saved ones on top. No table yet means none saved."""
+    env = env or get_settings()
+    providers = [p for p in LLMProvider if p is not LLMProvider.NONE]
+    try:
+        rows = {p: _provider_row(session, p) for p in providers}
+    except OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        rows = dict.fromkeys(providers)
+    return {p: provider_config(env, p, rows[p]) for p in providers}
+
+
+def save_provider(
+    session: Session,
+    provider: LLMProvider,
+    *,
+    base_url: str | None,
+    api_key: SecretStr | None,
+    chat_model: str | None,
+    user_id: uuid.UUID | None,
+    settings: Settings | None = None,
+) -> None:
+    """Store a provider's values. ``api_key=None`` keeps the stored key; empty values keep .env."""
+    key = PROVIDER_PREFIX + provider.value
+    row = session.get(ModelSettingRow, key) or ModelSettingRow(role=key)
+    row.provider = provider.value
+    row.base_url = base_url
+    row.model = chat_model
+    if api_key is not None:
+        row.api_key_encrypted = encrypt_api_key(api_key, settings)
+    row.updated_by = user_id
+    session.add(row)
+    session.commit()
+
+
+def clear_provider(session: Session, provider: LLMProvider) -> None:
+    """Forget a provider's saved values: it is back to whatever ``.env`` has."""
+    row = _provider_row(session, provider)
+    if row is not None:
+        session.delete(row)
+        session.commit()
+
+
+def on_provider(base: Settings, config: ProviderConfig) -> Settings:
+    """``base`` calling ``config``'s provider: its endpoint, key and default models."""
+    update: dict[str, object] = {
+        "llm_provider": config.spec.id,
+        "llm_base_url": config.base_url,
+        "llm_api_key": config.api_key,
+    }
+    if config.chat_model:
+        update["llm_model"] = config.chat_model
+    if config.spec.embedding_model:
+        update["embedding_model"] = config.spec.embedding_model
+    # OpenRouter's own URL is what an unset LLM_BASE_URL already means.
+    if base.llm_base_url is None and config.base_url == OPENROUTER_BASE_URL:
+        update["llm_base_url"] = None
+    changed = {k: v for k, v in update.items() if getattr(base, k) != v}
+    # Unchanged settings stay the very same object: no provider saved means exactly ``.env``.
+    return base.model_copy(update=changed) if changed else base
+
+
+def apply_row(
+    base: Settings,
+    role: ModelRole,
+    row: ModelSettingRow | None,
+    configs: dict[LLMProvider, ProviderConfig] | None = None,
+) -> Settings:
+    """``base`` with the fields ``row`` sets replacing the ones it overrides for ``role``.
+
+    A row naming a provider moves the role onto it (given ``configs``: that provider's URL,
+    key and default models); the row's model then replaces the provider's default.
+    """
     if row is None:
         return base
     update: dict[str, object] = {}
     if row.provider:
-        update["llm_provider"] = LLMProvider(row.provider)
+        provider = LLMProvider(row.provider)
+        if configs is not None and provider in configs:
+            base = on_provider(base, configs[provider])
+        else:
+            update["llm_provider"] = provider
     if row.model:
         update["embedding_model" if role is ModelRole.EMBEDDINGS else "llm_model"] = row.model
     if row.base_url:
@@ -119,8 +253,19 @@ def save_route(session: Session, route: LLMRoute, user_id: uuid.UUID | None) -> 
     session.commit()
 
 
-def routed(session: Session, base: Settings | None = None) -> Settings:
-    """``base`` (``get_settings()``) on the instance's route, before any role's own row."""
+def default_provider_for(route: LLMRoute, role: ModelRole | None, env: Settings) -> LLMProvider:
+    """The provider a role follows by default. Embeddings stay on OpenRouter when the default
+    provider has no embedding model to offer (Claude, Grok, DeepSeek, custom)."""
+    provider = LLMProvider(route)
+    if role is ModelRole.EMBEDDINGS and provider_spec(provider, env).embedding_model is None:
+        return LLMProvider.OPENROUTER
+    return provider
+
+
+def routed(
+    session: Session, base: Settings | None = None, role: ModelRole | None = None
+) -> Settings:
+    """``base`` (``get_settings()``) on the default provider, before any role's own row."""
     base = base or get_settings()
     try:
         route, _ = load_route(session, base)
@@ -128,32 +273,32 @@ def routed(session: Session, base: Settings | None = None) -> Settings:
         if "no such table" not in str(exc):
             raise
         route = base.llm_route
-    return base.on_route(route)
+    provider = default_provider_for(route, role, base)
+    return on_provider(base, provider_configs(session, base)[provider])
 
 
 def settings_for(
     role: ModelRole, base: Settings | None = None, *, session: Session | None = None
 ) -> Settings:
     """The effective settings for ``role``: its database row over ``base`` (``get_settings()``)
-    on the instance's route (:func:`routed`).
+    on the default provider (:func:`routed`).
 
     Without ``session``, reads through a short session of the app database. A database
     without the table yet (before migrations ran) counts as having no rows.
     """
     base = base or get_settings()
-    if session is not None:
-        return apply_row(routed(session, base), role, load_row(session, role))
-    from app.persistence.database import get_session_factory
+    if session is None:
+        from app.persistence.database import get_session_factory
 
-    try:
         with get_session_factory()() as own:
-            base = routed(own, base)
-            row = load_row(own, role)
+            return settings_for(role, base, session=own)
+    try:
+        row = load_row(session, role)
     except OperationalError as exc:
         if "no such table" not in str(exc):
             raise
         row = None
-    return apply_row(base, role, row)
+    return apply_row(routed(session, base, role), role, row, provider_configs(session, base))
 
 
 # -- Settings API support (Task 42) -----------------------------------------------------------

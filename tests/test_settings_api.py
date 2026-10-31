@@ -200,7 +200,17 @@ def test_model_list_is_fetched_once_and_cached(
 
     def fake_get(url: str, timeout: float) -> httpx.Response:
         calls.append(url)
-        payload = {"data": [{"id": "z/model", "name": "Z"}, {"id": "a/model"}]}
+        payload = {
+            "data": [
+                {
+                    "id": "z/model",
+                    "name": "Z",
+                    "context_length": 128000,
+                    "pricing": {"prompt": "0.0000025", "completion": "0.00001"},
+                },
+                {"id": "a/model", "pricing": {"prompt": "n/a"}},
+            ]
+        }
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(settings_routes.httpx, "get", fake_get)
@@ -208,7 +218,18 @@ def test_model_list_is_fetched_once_and_cached(
     first = client.get("/api/settings/models?provider=openrouter")
     second = client.get("/api/settings/models")
 
-    assert first.json() == [{"id": "a/model", "name": "a/model"}, {"id": "z/model", "name": "Z"}]
+    # Prices become USD per million tokens; anything missing or malformed is left out.
+    unknown = {"context_length": None, "prompt_price": None, "completion_price": None}
+    assert first.json() == [
+        {"id": "a/model", "name": "a/model", **unknown},
+        {
+            "id": "z/model",
+            "name": "Z",
+            "context_length": 128000,
+            "prompt_price": 2.5,
+            "completion_price": 10.0,
+        },
+    ]
     assert second.json() == first.json()
     assert calls == ["https://openrouter.ai/api/v1/models"]
     settings_routes._MODEL_CACHE.clear()
@@ -236,6 +257,29 @@ def test_probe_turns_provider_failures_into_a_message(
     )
 
 
+
+@pytest.mark.parametrize(
+    ("model", "limit"),
+    [("gpt-5-mini", "max_completion_tokens"), ("deepseek/deepseek-chat", "max_tokens")],
+)
+def test_probe_uses_the_token_limit_the_model_accepts(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, model: str, limit: str
+) -> None:
+    """Azure's gpt-5-mini answers HTTP 400 to ``max_tokens``; the probe must not send it."""
+    sent: dict[str, object] = {}
+
+    class Recording:
+        def __init__(self, **_: object) -> None:
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=sent.update))
+
+    monkeypatch.setattr(probe_module.openai, "OpenAI", Recording)
+    keyed = settings.model_copy(update={"llm_api_key": SecretStr(NEW_KEY), "llm_model": model})
+
+    assert probe(keyed, embeddings=False).ok
+    assert sent[limit] == 16
+    assert ({"max_tokens", "max_completion_tokens"} - {limit}).isdisjoint(sent)
+
+
 AZURE_URL = "https://lab.services.ai.azure.com/openai/v1/"
 
 
@@ -256,7 +300,8 @@ def test_the_route_toggle_points_every_unsaved_role_at_azure_and_back(
 
     _on_azure_env(monkeypatch)
     before = admin_client.get("/api/settings").json()
-    assert (before["route"], before["route_source"], before["azure_configured"]) == (
+    azure = next(p for p in before["providers"] if p["id"] == "azure")
+    assert (before["route"], before["route_source"], azure["configured"]) == (
         "openrouter",
         "env",
         True,
@@ -297,7 +342,8 @@ def test_a_role_saved_on_its_own_keeps_its_settings_on_azure(
 def test_azure_is_refused_until_configured(admin_client: TestClient) -> None:
     refused = admin_client.put("/api/settings/route", json={"route": "azure"})
     assert refused.status_code == 422
-    assert admin_client.get("/api/settings").json()["azure_configured"] is False
+    providers = admin_client.get("/api/settings").json()["providers"]
+    assert next(p for p in providers if p["id"] == "azure")["configured"] is False
 
 
 def test_only_an_admin_toggles_the_route_when_admin_only(
@@ -307,3 +353,150 @@ def test_only_an_admin_toggles_the_route_when_admin_only(
     monkeypatch.setenv("MODEL_SETTINGS_ADMIN_ONLY", "true")
     get_settings.cache_clear()
     assert client.put("/api/settings/route", json={"route": "openrouter"}).status_code == 403
+
+
+# -- Providers (ADR-068) ----------------------------------------------------------------------
+
+ANTHROPIC_KEY = "sk-ant-test-key-987654"
+
+
+def test_saving_a_provider_tests_it_first_and_stores_the_key_encrypted(
+    admin_client: TestClient, session: Session, probes: list[Any]
+) -> None:
+    saved = admin_client.put(
+        "/api/settings/providers/anthropic", json={"api_key": ANTHROPIC_KEY}
+    )
+
+    assert saved.status_code == 200
+    tested, embeddings = probes[-1]
+    assert not embeddings
+    assert tested.llm_base_url == "https://api.anthropic.com/v1/"
+    assert tested.llm_model == "claude-haiku-4-5"
+    assert tested.llm_api_key is not None
+    assert tested.llm_api_key.get_secret_value() == ANTHROPIC_KEY
+    anthropic = next(p for p in saved.json()["providers"] if p["id"] == "anthropic")
+    assert anthropic["configured"] is True
+    assert anthropic["api_key_masked"] == "••••7654"
+    assert anthropic["saved"] == ["api_key"]
+    row = next(r for r in _rows(session) if r.role == "provider.anthropic")
+    assert row.api_key_encrypted and ANTHROPIC_KEY.encode() not in row.api_key_encrypted
+
+
+def test_a_provider_that_fails_its_test_call_is_not_saved(
+    admin_client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        settings_routes,
+        "probe",
+        lambda settings, *, embeddings: ProbeResult(ok=False, error="HTTP 401: bad key"),
+    )
+
+    refused = admin_client.put("/api/settings/providers/xai", json={"api_key": "xai-bad-key-1"})
+
+    assert refused.status_code == 422
+    assert "HTTP 401: bad key" in refused.text
+    assert not [r for r in _rows(session) if r.role == "provider.xai"]
+
+
+def test_the_default_provider_moves_every_role_but_embeddings_stay_where_they_can_embed(
+    admin_client: TestClient, probes: list[Any]
+) -> None:
+    from app.settings_store import ModelRole, settings_for
+
+    assert admin_client.put("/api/settings/route", json={"route": "anthropic"}).status_code == 422
+    admin_client.put("/api/settings/providers/anthropic", json={"api_key": ANTHROPIC_KEY})
+
+    after = admin_client.put("/api/settings/route", json={"route": "anthropic"}).json()
+
+    roles = {r["role"]: r for r in after["roles"]}
+    assert (roles["generation"]["provider"], roles["generation"]["model"]) == (
+        "anthropic",
+        "claude-haiku-4-5",
+    )
+    assert roles["judges"]["provider"] == "anthropic"
+    # Claude has no embedding models, so retrieval keeps OpenRouter's.
+    assert roles["embeddings"]["provider"] == "openrouter"
+    judges = settings_for(ModelRole.JUDGES)
+    assert judges.llm_base_url == "https://api.anthropic.com/v1/"
+    assert judges.llm_api_key is not None
+    assert judges.llm_api_key.get_secret_value() == ANTHROPIC_KEY
+
+
+def test_a_role_can_use_its_own_provider_with_that_providers_key(
+    admin_client: TestClient, probes: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.settings_store import ModelRole, settings_for
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-env-4321")
+    get_settings.cache_clear()
+    body = {"provider": "deepseek", "model": "deepseek-reasoner", "clear_api_key": True}
+    token = admin_client.post("/api/settings/judges/test", json=body).json()["test_token"]
+
+    saved = admin_client.put("/api/settings/judges", json={**body, "test_token": token})
+
+    assert (saved.json()["provider"], saved.json()["model"]) == ("deepseek", "deepseek-reasoner")
+    judges = settings_for(ModelRole.JUDGES)
+    assert judges.llm_base_url == "https://api.deepseek.com/v1"
+    assert judges.llm_api_key is not None
+    assert judges.llm_api_key.get_secret_value() == "sk-deepseek-env-4321"
+    assert settings_for(ModelRole.GENERATION).llm_base_url is None  # still OpenRouter
+
+
+def test_embeddings_refuse_a_provider_without_embedding_models(
+    admin_client: TestClient, probes: list[Any]
+) -> None:
+    refused = admin_client.post("/api/settings/embeddings/test", json={"provider": "anthropic"})
+    assert refused.status_code == 422
+
+
+def test_each_provider_lists_its_models_with_its_own_auth(
+    admin_client: TestClient, probes: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_routes._MODEL_CACHE.clear()
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def fake_get(url: str, timeout: float, headers=None, params=None) -> httpx.Response:
+        calls.append((url, headers or {}))
+        if "anthropic" in url:
+            payload = {"data": [{"id": "claude-haiku-4-5", "display_name": "Claude Haiku 4.5"}]}
+        else:
+            payload = {"data": [{"id": "deepseek-chat"}]}
+        return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(settings_routes.httpx, "get", fake_get)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-env-4321")
+    get_settings.cache_clear()
+    admin_client.put("/api/settings/providers/anthropic", json={"api_key": ANTHROPIC_KEY})
+
+    claude = admin_client.get("/api/settings/models?provider=anthropic").json()
+    deepseek = admin_client.get("/api/settings/models?provider=deepseek").json()
+
+    assert claude[0]["name"] == "Claude Haiku 4.5"
+    assert deepseek[0]["id"] == "deepseek-chat"
+    assert calls[0] == (
+        "https://api.anthropic.com/v1/models",
+        {"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01"},
+    )
+    assert calls[1] == (
+        "https://api.deepseek.com/v1/models",
+        {"Authorization": "Bearer sk-deepseek-env-4321"},
+    )
+    assert admin_client.get("/api/settings/models?provider=azure").json() == []
+    settings_routes._MODEL_CACHE.clear()
+
+
+def test_claude_is_asked_for_fenced_json(
+    configured_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import instructor
+
+    from app.llm.client import get_structured_client
+
+    monkeypatch.setenv("LLM_ROUTE", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", ANTHROPIC_KEY)
+    get_settings.cache_clear()
+
+    client = get_structured_client()
+
+    assert client.description == "anthropic/claude-haiku-4-5"
+    assert client._client.mode is instructor.Mode.MD_JSON  # type: ignore[attr-defined]

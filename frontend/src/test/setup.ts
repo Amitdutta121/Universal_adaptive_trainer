@@ -19,3 +19,10 @@ class ResizeObserverStub {
   disconnect() {}
 }
 globalThis.ResizeObserver ??= ResizeObserverStub;
+
+/** cmdk (the model picker's search list) scrolls the highlighted item into view; jsdom lacks it. */
+Element.prototype.scrollIntoView ??= () => {};
+
+/** Radix Select captures the pointer when it opens; jsdom has no pointer capture. */
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => {};

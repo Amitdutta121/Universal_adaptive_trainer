@@ -1801,13 +1801,46 @@ export const useModelSettings = () =>
   });
 
 /** The provider's model ids for the picker; cached by the backend for an hour. */
-export const useProviderModels = (provider: string, enabled: boolean) =>
+export const useProviderModels = (provider: ProviderId, enabled: boolean) =>
   useQuery({
     queryKey: qk.settings.models(provider),
     queryFn: () => unwrap(api.GET("/api/settings/models", { params: { query: { provider } } })),
     enabled,
     staleTime: 60 * 60 * 1000,
+    retry: false,
   });
+
+type ProviderId = Schemas["ProviderOut"]["id"];
+
+/** Test a provider's URL, key and default model with one call, and save them if it passes. */
+export function useSaveProvider() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ provider, body }: { provider: ProviderId; body: Schemas["ProviderUpdate"] }) =>
+      unwrap(
+        api.PUT("/api/settings/providers/{provider}", { params: { path: { provider } }, body }),
+      ),
+    onSuccess: (data, { provider }) => {
+      client.setQueryData(qk.settings.roles(), data);
+      client.removeQueries({ queryKey: qk.settings.models(provider) });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+    },
+  });
+}
+
+/** Forget a provider's saved values; `.env` applies again. */
+export function useResetProvider() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: ProviderId) =>
+      unwrap(api.DELETE("/api/settings/providers/{provider}", { params: { path: { provider } } })),
+    onSuccess: (data, provider) => {
+      client.setQueryData(qk.settings.roles(), data);
+      client.removeQueries({ queryKey: qk.settings.models(provider) });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+    },
+  });
+}
 
 /** One minimal provider call with the edited values; nothing is saved. */
 export function useTestRoleSettings() {

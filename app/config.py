@@ -35,20 +35,25 @@ class Environment(StrEnum):
 
 
 class LLMProvider(StrEnum):
-    """Supported LLM providers.
+    """Supported LLM providers (ADR-068; their endpoints and defaults: ``app.llm_providers``).
 
-    ``NONE`` keeps the UI runnable without credentials (ADR-010).
-    ``OPENROUTER`` is the only live transport (ADR-020): DeepSeek and other
-    routes are selected with ``LLM_MODEL``, not with extra provider values.
+    ``NONE`` keeps the UI runnable without credentials (ADR-010). Every other provider is
+    called through the same OpenAI-compatible client; ``CUSTOM`` is any such endpoint.
     """
 
     OPENROUTER = "openrouter"
+    AZURE = "azure"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    XAI = "xai"
+    DEEPSEEK = "deepseek"
+    CUSTOM = "custom"
     NONE = "none"
 
 
-#: The endpoint every role calls unless its own saved settings name another (ADR-020 keeps
-#: OpenRouter the default; Azure is the same OpenAI-style API on the lab's Foundry resource).
-LLMRoute = Literal["openrouter", "azure"]
+#: The default provider: every role calls it unless its own saved settings name another.
+#: OpenRouter stays the out-of-the-box default (ADR-020, ADR-068).
+LLMRoute = Literal["openrouter", "azure", "openai", "anthropic", "xai", "deepseek", "custom"]
 
 
 class Settings(BaseSettings):
@@ -88,14 +93,23 @@ class Settings(BaseSettings):
     #: output budget thinking. ``low`` keeps generation and judging fast and cheap.
     llm_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     embedding_model: str = "openai/text-embedding-3-small"
-    #: The default route; the Settings screen's toggle stores a choice over it
-    #: (``app.settings_store``). ``azure`` replaces the base URL, key and both models below.
+    #: The default provider; the Settings screen stores a choice over it (``app.settings_store``).
+    #: Each provider's URL, key and models come from the fields below (``app.llm_providers``).
     llm_route: LLMRoute = "openrouter"
     azure_base_url: str | None = None
     azure_api_key: SecretStr | None = None
     #: Deployment names on the Azure resource, not OpenRouter route ids.
     azure_model: str = "gpt-5-mini"
     azure_embedding_model: str = "text-embedding-3-small"
+    #: Keys for the other providers (ADR-068). The Settings screen can store them instead;
+    #: a stored value wins. ``custom`` is any OpenAI-compatible endpoint.
+    openai_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
+    xai_api_key: SecretStr | None = None
+    deepseek_api_key: SecretStr | None = None
+    custom_base_url: str | None = None
+    custom_api_key: SecretStr | None = None
+    custom_model: str | None = None
     #: How ``ChunkRetriever`` ranks: ``hybrid`` fuses the cosine ranking with BM25 through
     #: LlamaIndex (``app.retrieval.fusion``); ``dense`` is cosine alone (Task 11).
     chunk_retrieval_mode: Literal["dense", "hybrid"] = "hybrid"
@@ -257,6 +271,13 @@ class Settings(BaseSettings):
         "llm_base_url",
         "azure_base_url",
         "azure_api_key",
+        "openai_api_key",
+        "anthropic_api_key",
+        "xai_api_key",
+        "deepseek_api_key",
+        "custom_base_url",
+        "custom_api_key",
+        "custom_model",
         "judge_batch_api_key",
         "judge_batch_model",
         "public_app_url",
@@ -386,29 +407,11 @@ class Settings(BaseSettings):
             return f"{self.judge_batch_route} (no API key configured)"
         return self.judge_batch_route
 
-    @property
-    def azure_configured(self) -> bool:
-        return bool(self.azure_base_url) and self.azure_api_key is not None
-
-    def on_route(self, route: LLMRoute) -> Settings:
-        """These settings on ``route``: ``azure`` swaps in the Azure endpoint, key and models."""
-        if route == "openrouter":
-            return self
-        return self.model_copy(
-            update={
-                "llm_base_url": self.azure_base_url,
-                "llm_api_key": self.azure_api_key,
-                "llm_model": self.azure_model,
-                "embedding_model": self.azure_embedding_model,
-            }
-        )
-
     def describe_llm(self) -> str:
         """Human-readable LLM status for the UI. Never leaks the credential."""
         if self.llm_provider is LLMProvider.NONE:
             return "disabled (LLM_PROVIDER=none)"
-        # The provider value stays "openrouter" on Azure: the client picks the transport from
-        # the base URL (``app.llm.client.is_openrouter``), so the label does the same.
+        # A role saved before ADR-068 says "openrouter" with an Azure URL; label it by the URL.
         on_azure = self.llm_base_url is not None and ".azure.com" in self.llm_base_url
         label = "azure" if on_azure else self.llm_provider.value
         if self.llm_api_key is None:
