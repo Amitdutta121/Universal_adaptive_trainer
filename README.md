@@ -11,6 +11,8 @@
 
 <p align="center">
   <a href="#getting-started">Getting started</a> ·
+  <a href="docs/SETUP.md">Setup</a> ·
+  <a href="docs/DEPLOYMENT.md">Deployment</a> ·
   <a href="docs/LOCAL_DEVELOPMENT.md">Local development</a> ·
   <a href="../../issues">Issues</a>
 </p>
@@ -41,50 +43,32 @@
 
 ## Getting started
 
-You need Python 3.11 or newer, Node.js with [pnpm](https://pnpm.io), and an API key for one
-model provider. The commands below are for PowerShell.
+The quickest way to run it is with Docker:
 
-```powershell
+```bash
 git clone https://github.com/Amitdutta121/Universal_adaptive_trainer.git
 cd Universal_adaptive_trainer
-
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-
-cd frontend
-pnpm install
-Copy-Item .env.example .env.local
-cd ..
-```
-
-Start the backend and the frontend in two terminals:
-
-```powershell
-.\.venv\Scripts\python.exe -m app
-```
-
-```powershell
-cd frontend
-pnpm run dev
+docker compose up --build
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and sign in with `dev@local.test` /
-`devpassword123`. This account exists only in development. The first page load compiles the
-app and can take a few minutes.
+`devpassword123`. This account exists only in development.
 
-### Model providers
+To run it without Docker, install the backend and the frontend once (see
+[docs/SETUP.md](docs/SETUP.md)), then start each in its own terminal:
 
-Add your key to `.env`, or paste it later under **Settings → Providers** in the app.
-OpenRouter, OpenAI, Anthropic, Azure OpenAI, xAI and DeepSeek are supported, as is any
-OpenAI-compatible server such as vLLM or Ollama. Every other setting is described in
-[`.env.example`](.env.example).
+```bash
+python -m app          # backend, from the activated .venv
+cd frontend && pnpm dev   # frontend
+```
 
-### Running student code safely
+[docs/SETUP.md](docs/SETUP.md) has step-by-step instructions for Windows, Linux, macOS and
+Docker, the list of supported model providers (OpenRouter, OpenAI, Anthropic, Azure OpenAI,
+xAI, DeepSeek, or any OpenAI-compatible server such as vLLM or Ollama), and how to run student
+code in a sandbox before you open the app to a class.
 
-By default, code from questions and student answers runs in a local process. Before you
-open the app to students, start the [Piston sandbox](docker/piston/README.md) and set
-`EXECUTOR=piston`.
+To put it on a server for a class, follow [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): one Linux
+machine, Docker, and automatic HTTPS.
 
 ## Development
 
