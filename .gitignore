@@ -50,4 +50,4 @@ desktop.ini
 *_fresh_*.log
 raganything_eval/rag_storage/
 raganything_eval/*.log
-spikes/.rag_*/
+spikes/
