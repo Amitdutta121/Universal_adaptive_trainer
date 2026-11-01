@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 545" width="1240" height="545" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <title>Deployment architecture: one Linux server running Caddy, the Next.js frontend, the FastAPI backend, a SQLite volume and the Piston sandbox</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#4b5563"/>
+    </marker>
+    <style>
+      .box { fill: #ffffff; stroke: #9ca3af; stroke-width: 1.5; }
+      .ext { fill: #f9fafb; stroke: #9ca3af; stroke-width: 1.5; stroke-dasharray: 5 4; }
+      .title { font-size: 17px; font-weight: 600; fill: #111827; }
+      .sub { font-size: 13px; fill: #4b5563; }
+      .mono { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 12.5px; fill: #4b5563; }
+      .edge { stroke: #4b5563; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+      .label { font-size: 12.5px; fill: #374151; }
+      .group { font-size: 14px; font-weight: 600; fill: #2e6f6a; }
+    </style>
+  </defs>
+
+  <rect width="1240" height="545" fill="#ffffff"/>
+  <g transform="translate(0 -110)">
+
+  <!-- Server boundary -->
+  <rect x="235" y="140" width="690" height="378" rx="14" fill="#f3f8f7" stroke="#2e6f6a" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="257" y="170" class="group">Linux server · Docker Compose</text>
+  <text x="257" y="190" class="mono">docker-compose.yml + docker-compose.prod.yml</text>
+
+  <!-- Browser -->
+  <rect x="15" y="235" width="150" height="100" rx="10" class="box"/>
+  <text x="90" y="273" text-anchor="middle" class="title">Browser</text>
+  <text x="90" y="295" text-anchor="middle" class="sub">professors</text>
+  <text x="90" y="313" text-anchor="middle" class="sub">and students</text>
+
+  <!-- Caddy (the only published service) -->
+  <rect x="265" y="235" width="160" height="100" rx="10" fill="#2e6f6a"/>
+  <text x="345" y="268" text-anchor="middle" class="title" fill="#ffffff" style="fill:#ffffff">Caddy</text>
+  <text x="345" y="290" text-anchor="middle" class="sub" style="fill:#d7ebe8">reverse proxy, TLS</text>
+  <text x="345" y="314" text-anchor="middle" class="mono" style="fill:#ffffff">:80  :443</text>
+
+  <!-- Frontend -->
+  <rect x="465" y="235" width="160" height="100" rx="10" class="box"/>
+  <text x="545" y="268" text-anchor="middle" class="title">frontend</text>
+  <text x="545" y="290" text-anchor="middle" class="sub">Next.js</text>
+  <text x="545" y="314" text-anchor="middle" class="mono">:3000</text>
+
+  <!-- Backend -->
+  <rect x="670" y="235" width="225" height="100" rx="10" class="box"/>
+  <text x="782" y="268" text-anchor="middle" class="title">backend</text>
+  <text x="782" y="290" text-anchor="middle" class="sub">FastAPI, migrations on start</text>
+  <text x="782" y="314" text-anchor="middle" class="mono">:8000</text>
+
+  <!-- Data volume -->
+  <path d="M670 398 a52 11 0 0 0 104 0 v74 a52 11 0 0 1 -104 0 z" class="box"/>
+  <ellipse cx="722" cy="398" rx="52" ry="11" class="box"/>
+  <text x="722" y="433" text-anchor="middle" class="title" style="font-size:15px">SQLite</text>
+  <text x="722" y="452" text-anchor="middle" class="sub">and uploaded</text>
+  <text x="722" y="468" text-anchor="middle" class="sub">books</text>
+  <text x="722" y="505" text-anchor="middle" class="mono" style="font-size:11.5px">backend-data</text>
+
+  <!-- Piston -->
+  <rect x="790" y="390" width="105" height="92" rx="10" class="box"/>
+  <text x="842" y="420" text-anchor="middle" class="title" style="font-size:15px">Piston</text>
+  <text x="842" y="440" text-anchor="middle" class="sub">code sandbox</text>
+  <text x="842" y="458" text-anchor="middle" class="sub">no network</text>
+
+  <!-- External services -->
+  <rect x="1030" y="150" width="195" height="92" rx="10" class="ext"/>
+  <text x="1127" y="182" text-anchor="middle" class="title">Model provider</text>
+  <text x="1127" y="203" text-anchor="middle" class="sub">OpenRouter, OpenAI,</text>
+  <text x="1127" y="221" text-anchor="middle" class="sub">Anthropic, Azure …</text>
+
+  <rect x="1030" y="300" width="195" height="72" rx="10" class="ext"/>
+  <text x="1127" y="331" text-anchor="middle" class="title">SMTP server</text>
+  <text x="1127" y="352" text-anchor="middle" class="sub">password-reset email</text>
+
+  <rect x="265" y="545" width="160" height="72" rx="10" class="ext"/>
+  <text x="345" y="576" text-anchor="middle" class="title">Let's Encrypt</text>
+  <text x="345" y="597" text-anchor="middle" class="sub">TLS certificates</text>
+
+  <!-- Edges -->
+  <line x1="165" y1="285" x2="263" y2="285" class="edge"/>
+  <text x="200" y="275" text-anchor="middle" class="label">HTTPS</text>
+
+  <line x1="425" y1="285" x2="463" y2="285" class="edge"/>
+  <text x="444" y="275" text-anchor="middle" class="label">http</text>
+
+  <line x1="625" y1="285" x2="668" y2="285" class="edge"/>
+  <text x="647" y="275" text-anchor="middle" class="label">/api/*</text>
+
+  <line x1="722" y1="335" x2="722" y2="384" class="edge"/>
+  <text x="714" y="364" text-anchor="end" class="label">SQL</text>
+
+  <line x1="842" y1="335" x2="842" y2="388" class="edge"/>
+  <text x="850" y="364" class="label">run code</text>
+
+  <path d="M895 262 L950 262 L950 196 L1028 196" class="edge"/>
+  <text x="989" y="186" text-anchor="middle" class="label">LLM calls</text>
+
+  <path d="M895 308 L950 308 L950 336 L1028 336" class="edge"/>
+  <text x="989" y="326" text-anchor="middle" class="label">email</text>
+
+  <line x1="345" y1="335" x2="345" y2="543" class="edge"/>
+  <text x="353" y="460" class="label">ACME</text>
+
+  <!-- Legend -->
+  <rect x="30" y="560" width="16" height="16" rx="3" fill="#2e6f6a"/>
+  <text x="54" y="573" class="label">published to the internet</text>
+  <rect x="30" y="588" width="16" height="16" rx="3" fill="#ffffff" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="54" y="601" class="label">internal Docker network only</text>
+  <rect x="30" y="616" width="16" height="16" rx="3" fill="#f9fafb" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="54" y="629" class="label">outside service</text>
+  </g>
+</svg>

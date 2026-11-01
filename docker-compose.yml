@@ -3,6 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Model keys and other settings from your .env, if you have one. The values under
+    # `environment` below win over the file, so its local HOST and paths don't leak in.
+    env_file:
+      - path: .env
+        required: false
     environment:
       ENVIRONMENT: development
       HOST: 0.0.0.0
