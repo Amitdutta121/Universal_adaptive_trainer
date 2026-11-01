@@ -5,8 +5,8 @@
 <h1 align="center">Universal Adaptive Trainer</h1>
 
 <p align="center">
-  Turn your course material into reviewed practice questions,<br>
-  and give every student the question they need next.
+  Build an adaptive course from your own material. AI drafts the curriculum, tutorials<br>
+  and questions, learns your standards from your reviews, and adapts practice to each student.
 </p>
 
 <p align="center">
