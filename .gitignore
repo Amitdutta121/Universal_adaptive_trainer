@@ -45,3 +45,9 @@ desktop.ini
 
 # Dev-server PIDs and logs (scripts/dev.ps1)
 .dev/
+
+# Generated dev/eval artifacts (never commit)
+*_fresh_*.log
+raganything_eval/rag_storage/
+raganything_eval/*.log
+spikes/.rag_*/
