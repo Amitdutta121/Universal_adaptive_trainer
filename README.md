@@ -21,6 +21,13 @@
   <img src="docs/images/review-queue.png" alt="Review queue showing a generated question next to the judges' verdicts" width="900">
 </p>
 
+Universal Adaptive Trainer is a self-hosted adaptive learning platform for professors and
+instructors. It uses large language models (LLMs) to generate practice questions and tutorials
+from your textbooks, lecture slides and videos. Every question is checked by automated graders
+and LLM-as-a-judge evaluation before you review it. Students then practice in an adaptive
+sequence driven by their mastery of each topic. It works with OpenAI, Anthropic, OpenRouter,
+Azure OpenAI or a local model.
+
 ## Features
 
 - Import books, PDFs, slides and YouTube lectures, and organize them into topics and subtopics.
