@@ -1,7 +1,7 @@
 [project]
 name = "adaptive-trainer"
 version = "0.1.0"
-description = "Adaptive Python training platform: professor content generation + student adaptive training."
+description = "Build an adaptive course from your own material: AI-drafted curriculum, tutorials and questions, judged to your standards, adapted to each student."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
