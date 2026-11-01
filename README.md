@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/review-queue.png" alt="Review queue showing a generated question next to the judges' verdicts" width="900">
+  <img src="docs/images/social-preview.png" alt="Universal Adaptive Trainer: build an adaptive course from your own material, shown beside the review queue" width="900">
 </p>
 
 Universal Adaptive Trainer is a self-hosted adaptive learning platform for professors and
