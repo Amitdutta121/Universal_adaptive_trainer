@@ -11,12 +11,19 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr, computed_field, field_validator
+from pydantic import Field, SecretStr, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+#: The ``AUTH_SECRET_KEY`` default. Safe on one developer's machine only, so a
+#: production run refuses to start with it (``Settings._require_real_auth_secret``).
+DEV_AUTH_SECRET_KEY = "dev-only-insecure-secret-change-me"
+#: Shortest ``AUTH_SECRET_KEY`` a production run accepts -- 32 characters is
+#: what ``secrets.token_urlsafe(24)`` produces.
+MIN_PRODUCTION_SECRET_LENGTH = 32
 
 
 class Environment(StrEnum):
@@ -28,15 +35,25 @@ class Environment(StrEnum):
 
 
 class LLMProvider(StrEnum):
-    """Supported LLM providers.
+    """Supported LLM providers (ADR-068; their endpoints and defaults: ``app.llm_providers``).
 
-    ``NONE`` keeps the UI runnable without credentials (ADR-010).
-    ``OPENROUTER`` is the only live transport (ADR-020): DeepSeek and other
-    routes are selected with ``LLM_MODEL``, not with extra provider values.
+    ``NONE`` keeps the UI runnable without credentials (ADR-010). Every other provider is
+    called through the same OpenAI-compatible client; ``CUSTOM`` is any such endpoint.
     """
 
     OPENROUTER = "openrouter"
+    AZURE = "azure"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    XAI = "xai"
+    DEEPSEEK = "deepseek"
+    CUSTOM = "custom"
     NONE = "none"
+
+
+#: The default provider: every role calls it unless its own saved settings name another.
+#: OpenRouter stays the out-of-the-box default (ADR-020, ADR-068).
+LLMRoute = Literal["openrouter", "azure", "openai", "anthropic", "xai", "deepseek", "custom"]
 
 
 class Settings(BaseSettings):
@@ -72,8 +89,36 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_output_tokens: int = Field(default=4096, gt=0)
+    #: Sent only to reasoning models (gpt-5 family, o-series), which spend part of their
+    #: output budget thinking. ``low`` keeps generation and judging fast and cheap.
+    llm_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     embedding_model: str = "openai/text-embedding-3-small"
+    #: The default provider; the Settings screen stores a choice over it (``app.settings_store``).
+    #: Each provider's URL, key and models come from the fields below (``app.llm_providers``).
+    llm_route: LLMRoute = "openrouter"
+    azure_base_url: str | None = None
+    azure_api_key: SecretStr | None = None
+    #: Deployment names on the Azure resource, not OpenRouter route ids.
+    azure_model: str = "gpt-5-mini"
+    azure_embedding_model: str = "text-embedding-3-small"
+    #: Keys for the other providers (ADR-068). The Settings screen can store them instead;
+    #: a stored value wins. ``custom`` is any OpenAI-compatible endpoint.
+    openai_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
+    xai_api_key: SecretStr | None = None
+    deepseek_api_key: SecretStr | None = None
+    custom_base_url: str | None = None
+    custom_api_key: SecretStr | None = None
+    custom_model: str | None = None
+    #: How ``ChunkRetriever`` ranks: ``hybrid`` fuses the cosine ranking with BM25 through
+    #: LlamaIndex (``app.retrieval.fusion``); ``dense`` is cosine alone (Task 11).
+    chunk_retrieval_mode: Literal["dense", "hybrid"] = "hybrid"
     validation_timeout_seconds: float = Field(default=2.0, gt=0)
+    # Where student and generated code runs (C6, ADR-055). ``local`` is a plain subprocess and
+    # NOT a sandbox -- fine for one researcher's machine, not for real students. ``piston`` sends
+    # every run to the Piston sandbox at ``piston_url`` (see docker/piston/README.md).
+    executor: Literal["local", "piston"] = "local"
+    piston_url: str = "http://127.0.0.1:2000"
 
     # -- Bulk judge re-run (ADR-030) ----------------------------------------
     # OpenRouter's batch jobs are asynchronous and live under /api/beta, not
@@ -97,12 +142,48 @@ class Settings(BaseSettings):
     #: question -- enough to manufacture the disagreements that trigger a repair.
     judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
+    # Trust is learned only from explicit professor observations, never approvals
+    # performed by the router. A rolling window makes recent errors visible. Counted per
+    # question style across the course; the one-in-ten audits keep checking after trust.
+    judge_trust_min_observations: int = Field(default=10, ge=10)
+    judge_trust_min_agreement: float = Field(default=0.9, ge=0.9, le=1.0)
+    #: Share of the window's questions the professor approved unedited. Judges can agree on
+    #: difficulty and topic while the questions are still not worth keeping.
+    judge_trust_min_acceptance: float = Field(default=0.9, ge=0.9, le=1.0)
+    judge_trust_window: int = Field(default=10, ge=10)
+    #: Topic reviews a style also needs in the question's own Curriculum version: its subtopic
+    #: list is what the topic judge chooses from, so trust earned on another version is not enough.
+    judge_trust_min_topic_local: int = Field(default=3, ge=1)
+
+    #: Which of the four metric judges run on newly generated questions
+    #: (docs/QUESTION_SETUP_PLAN.md). ``JudgeMetricId`` itself is not shrunk -- stored rows and
+    #: calibration depend on it -- and calibration already skips a metric a judge did not
+    #: answer. Values are ``JudgeMetricId`` values; ``JUDGE_METRICS_ENABLED=difficulty,subtopic``
+    #: in a ``.env`` file. Not yet read by the judge service (Phase 1, agent C).
+    judge_metrics_enabled: Annotated[list[str], NoDecode] = ["difficulty", "subtopic"]
+    #: Models that answer each round multiple-choice / true-false question without its key
+    #: (app/generation/solve.py). Any disagreement is retried, then flagged. Empty turns it
+    #: off: ``BLIND_SOLVE_MODELS=`` in a ``.env`` file.
+    blind_solve_models: Annotated[list[str], NoDecode] = [
+        "anthropic/claude-haiku-4.5",
+        "deepseek/deepseek-chat",
+    ]
+
     # -- Learning loops (ADR-042) -------------------------------------------
     # Both loops can be frozen independently. A judge cannot be measured while
     # the generator is also adapting: the question population moves under the
     # measurement, and no agreement change can be attributed to either.
     judge_learning_enabled: bool = True
     generator_learning_enabled: bool = True
+
+    # -- Live tutorials (app/tutorials/live.py) ------------------------------
+    #: Serve tutorial blocks from the course's bank with no approval step, and write a block
+    #: a student needs but the bank lacks in the background. Off: only blocks approved and
+    #: frozen with the run's question set are served.
+    tutorials_live: bool = True
+    #: Live blocks one course may have written per 24 hours; past it, students get only what
+    #: the bank already holds.
+    tutorials_live_daily_cap: int = Field(default=50, ge=0)
 
     #: Disagreements naming one judge before its prompt may be rewritten.
     #: Rewriting on a single case was measured to produce a rule about that one
@@ -125,16 +206,48 @@ class Settings(BaseSettings):
     # -- Book ingestion -----------------------------------------------------
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
     max_book_upload_mb: int = Field(default=100, gt=0)
+    #: Which parser turns an upload into chunks (``app.ingestion.parsing``): ``auto`` uses
+    #: Docling when the ``parse`` extra is installed, else page-text chunks.
+    book_parser: Literal["auto", "docling", "pages"] = "auto"
+    #: Docling's layout and table models, downloaded once by
+    #: ``python -m scripts.download_docling_models`` (the folder is gitignored). When it is there,
+    #: PDF parsing never asks the Hugging Face Hub, so a missing network or a bad stored HF token
+    #: cannot fail an import. Without it Docling downloads the models itself on first use.
+    docling_artifacts_path: Path = PROJECT_ROOT / "models" / "docling"
 
     # -- Auth (app/auth/) -----------------------------------------------------
-    #: Signs password-reset/verification tokens. Neither flow is exposed by any
-    #: route yet, but fastapi-users requires the secret to exist regardless.
-    #: Generate a real value for anything beyond a single developer's machine.
-    auth_secret_key: SecretStr = SecretStr("dev-only-insecure-secret-change-me")
+    #: Signs the email-verification and password-reset links (ADR-061).
+    #: Generate a real value for anything beyond a single developer's machine;
+    #: ENVIRONMENT=production refuses to start without one.
+    auth_secret_key: SecretStr = SecretStr(DEV_AUTH_SECRET_KEY)
     #: The one seeded professor account (app/auth/seed.py). Only created when
     #: ENVIRONMENT=development -- a production run never seeds a credential.
     dev_user_email: str = "dev@local.test"
     dev_user_password: SecretStr = SecretStr("devpassword123")
+    #: Off: any signed-in account can test, save and reset the instance's model settings
+    #: (ADR-067). Set it true on an instance with open registration, where a stranger's
+    #: account could otherwise repoint every role's base URL and key.
+    model_settings_admin_only: bool = False
+
+    # -- Account email (app/auth/email.py, ADR-061) ---------------------------
+    #: Off for now: a registered account is verified on creation and no verification link is
+    #: sent, and routes that spend LLM credit do not check verification. Set it true to make a
+    #: new account confirm its email first (ADR-061's original behaviour).
+    require_email_verification: bool = False
+    #: Where the Studio is served; verification and reset links point here. Required in
+    #: production, where a localhost link in a real inbox would be useless.
+    public_app_url: str | None = None
+    #: ``console`` logs each email (with its link) instead of sending it; ``smtp`` sends it.
+    #: Unset means ``console`` in development and test and ``smtp`` in production, so a
+    #: deployment never writes password-reset links into its logs by default.
+    email_backend: Literal["console", "smtp"] | None = None
+    smtp_host: str | None = None
+    #: 587 is the submission port; the connection is upgraded with STARTTLS before login.
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+    #: The From address, e.g. ``Adaptive Trainer <no-reply@example.edu>``.
+    smtp_from: str | None = None
 
     # -- Browser clients ----------------------------------------------------
     # Origins allowed to call /api from a browser. Defaults cover the Vite and
@@ -154,13 +267,55 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "llm_api_key", "llm_base_url", "judge_batch_api_key", "judge_batch_model", mode="before"
+        "llm_api_key",
+        "llm_base_url",
+        "azure_base_url",
+        "azure_api_key",
+        "openai_api_key",
+        "anthropic_api_key",
+        "xai_api_key",
+        "deepseek_api_key",
+        "custom_base_url",
+        "custom_api_key",
+        "custom_model",
+        "judge_batch_api_key",
+        "judge_batch_model",
+        "public_app_url",
+        "email_backend",
+        "smtp_host",
+        "smtp_user",
+        "smtp_password",
+        "smtp_from",
+        mode="before",
     )
     @classmethod
     def _blank_is_none(cls, value: object) -> object:
         """Treat ``KEY=`` in a ``.env`` file as "not configured"."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("judge_metrics_enabled", mode="before")
+    @classmethod
+    def _split_metrics(cls, value: object) -> object:
+        """Accept ``JUDGE_METRICS_ENABLED=difficulty,subtopic``; reject unknown metric ids."""
+        from app.domain.enums import JudgeMetricId
+
+        if isinstance(value, str):
+            value = [item.strip().lower() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            known = {metric.value for metric in JudgeMetricId}
+            unknown = [item for item in value if str(item) not in known]
+            if unknown:
+                raise ValueError(f"unknown judge metric(s): {', '.join(map(str, unknown))}")
+        return value
+
+    @field_validator("blind_solve_models", mode="before")
+    @classmethod
+    def _split_models(cls, value: object) -> object:
+        """Accept ``BLIND_SOLVE_MODELS=a/b,c/d``; an empty value turns blind solve off."""
+        if isinstance(value, str):
+            return [model.strip() for model in value.split(",") if model.strip()]
         return value
 
     @field_validator("cors_allow_origins", mode="before")
@@ -170,6 +325,55 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _require_real_auth_secret(self) -> Self:
+        """Fail at startup rather than sign tokens with a public, known secret."""
+        if self.environment is not Environment.PRODUCTION:
+            return self
+        secret = self.auth_secret_key.get_secret_value()
+        if secret == DEV_AUTH_SECRET_KEY or len(secret) < MIN_PRODUCTION_SECRET_LENGTH:
+            raise ValueError(
+                "ENVIRONMENT=production needs AUTH_SECRET_KEY set to a random value of at "
+                f"least {MIN_PRODUCTION_SECRET_LENGTH} characters, e.g. "
+                '`python -c "import secrets; print(secrets.token_urlsafe(32))"`.'
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_production_email(self) -> Self:
+        """Fail at startup rather than send links nobody can open, or no email at all."""
+        if self.environment is not Environment.PRODUCTION:
+            return self
+        if self.public_app_url is None:
+            raise ValueError(
+                "ENVIRONMENT=production needs PUBLIC_APP_URL, the address the Studio is served "
+                "at (e.g. https://trainer.example.edu); email links are built from it."
+            )
+        if self.effective_email_backend == "smtp":
+            missing = [
+                name.upper()
+                for name in ("smtp_host", "smtp_user", "smtp_password", "smtp_from")
+                if getattr(self, name) is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"ENVIRONMENT=production sends email over SMTP and needs {', '.join(missing)}"
+                    " (or EMAIL_BACKEND=console to only log each email)."
+                )
+        return self
+
+    @property
+    def effective_email_backend(self) -> Literal["console", "smtp"]:
+        """The configured email backend, defaulting by environment."""
+        if self.email_backend is not None:
+            return self.email_backend
+        return "smtp" if self.environment is Environment.PRODUCTION else "console"
+
+    @property
+    def app_url(self) -> str:
+        """Base URL for links in emails, without a trailing slash."""
+        return (self.public_app_url or "http://localhost:3000").rstrip("/")
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -207,9 +411,12 @@ class Settings(BaseSettings):
         """Human-readable LLM status for the UI. Never leaks the credential."""
         if self.llm_provider is LLMProvider.NONE:
             return "disabled (LLM_PROVIDER=none)"
+        # A role saved before ADR-068 says "openrouter" with an Azure URL; label it by the URL.
+        on_azure = self.llm_base_url is not None and ".azure.com" in self.llm_base_url
+        label = "azure" if on_azure else self.llm_provider.value
         if self.llm_api_key is None:
-            return f"{self.llm_provider.value}/{self.llm_model} (no API key configured)"
-        return f"{self.llm_provider.value}/{self.llm_model}"
+            return f"{label}/{self.llm_model} (no API key configured)"
+        return f"{label}/{self.llm_model}"
 
 
 @lru_cache(maxsize=1)

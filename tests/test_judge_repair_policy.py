@@ -35,7 +35,6 @@ from app.evaluation.judge_learning import (
 )
 from app.evaluation.prompts import SYSTEM_PROMPT_FOR
 from app.feedback import route_review_outcome, submit_review
-from app.ingestion import BookImportService
 from app.persistence.models import QuestionRow
 from app.persistence.repositories import (
     CurriculumRepository,
@@ -54,9 +53,7 @@ TAXONOMY = (
 @pytest.fixture
 def grounded(session: Session, settings):
     """A book and an approved taxonomy, so a judge context can be rebuilt."""
-    BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+    book = docs.chunked_book(session, docs.minimal())
     TaxonomyImportService(session, settings).import_upload(filename="tax.json", data=TAXONOMY)
     session.commit()
     version = CurriculumRepository(session).get_approved()
@@ -67,6 +64,7 @@ def grounded(session: Session, settings):
         "curriculum_version_id": tree.id,
         "topic_id": topic.id,
         "subtopic_ids": [topic.subtopics[0].id],
+        "spec": {"source_chunk_ids": [book.chunks[0].id]},
     }
 
 
@@ -124,9 +122,8 @@ def _case(
             question_type=QuestionType.MULTIPLE_CHOICE,
             difficulty=Difficulty.EASY,
             status=QuestionStatus.VALIDATION_PASSED,
-            spec={"source_section_ids": [1]},
             pedagogical_eval=_evaluation(gate),
-            **(grounding or {}),
+            **({"spec": {"source_chunk_ids": ["0" * 32]}} | (grounding or {})),
         )
     )
     session.commit()

@@ -37,6 +37,8 @@ __all__ = [
     "CalibrationPair",
     "CalibrationReport",
     "DifficultyConfusion",
+    "JudgeScorecard",
+    "JudgeScorecardReport",
     "MetricAgreement",
     "QuadrantCell",
     "QuadrantCounts",
@@ -213,6 +215,37 @@ class MetricAgreement(BaseModel):
     missed: int
     #: The judge failed the metric and the professor did not object.
     false_alarms: int
+
+
+class JudgeScorecard(BaseModel):
+    """One judge on the m8 scorecard (ADR-064): reviews plus round retries/drops."""
+
+    metric: JudgeMetricId
+    #: Reviewed questions this judge answered.
+    n: int
+    #: Of those, how often its value matched the professor's.
+    agreements: int
+    agreement: float | None
+    #: Cohen's κ on pass vs the professor keeping the requested value.
+    kappa: float | None
+    #: Wilson 95% interval on ``agreement``.
+    agreement_low: float | None
+    agreement_high: float | None
+    missed: int
+    false_alarms: int
+    #: How often this judge flagged the question.
+    flags: int
+    flag_rate: float | None
+    #: Round attempts this judge failed that were then retried.
+    retries: int
+    #: Round questions whose last attempt this judge failed (the target was dropped).
+    drops: int
+
+
+class JudgeScorecardReport(BaseModel):
+    """Per-judge scorecard, issues then difficulty then subtopic."""
+
+    judges: list[JudgeScorecard]
 
 
 class SubtopicConfusion(BaseModel):

@@ -66,12 +66,18 @@ def test_book_ingestion_is_implemented() -> None:
     import book_documents as docs
 
     from app.domain.enums import SourceFormat
-    from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename, parse_book_document
+    from app.ingestion import SUPPORTED_EXTENSIONS, format_for_filename
+    from app.ingestion.parsing import parse_book
 
-    assert SUPPORTED_EXTENSIONS == (".json", ".pdf")
-    assert format_for_filename("book.json") is SourceFormat.BOOK_JSON
+    assert SUPPORTED_EXTENSIONS == (".docx", ".pdf", ".pptx")
     assert format_for_filename("book.pdf") is SourceFormat.BOOK_PDF
-    assert parse_book_document(docs.to_bytes(docs.minimal())).section_count == 1
+    parsed = parse_book(
+        docs.to_pdf(docs.minimal()),
+        filename="book.pdf",
+        source_format=SourceFormat.BOOK_PDF,
+        parser="pages",
+    )
+    assert len(parsed.chunks) == 1
 
 
 def test_unsupported_uploads_are_rejected() -> None:
@@ -79,7 +85,7 @@ def test_unsupported_uploads_are_rejected() -> None:
     from app.ingestion import format_for_filename
 
     with pytest.raises(UnsupportedFileError):
-        format_for_filename("book.docx")
+        format_for_filename("book.odt")
 
 
 def test_the_application_does_no_heuristic_extraction() -> None:
@@ -108,6 +114,8 @@ def test_the_application_does_no_heuristic_extraction() -> None:
         path
         for path in app_root.rglob("*.py")
         if path.relative_to(app_root).parts[:2] != ("ingestion", "pdf")
+        # The chunking parser (Task 5) reads the PDF's outline and page text the same way.
+        and path.relative_to(app_root).as_posix() != "ingestion/parsing.py"
     ]
     assert sources
     for forbidden in ("pypdf", "PdfReader", "fitz", "pdfplumber", "pdfminer", "pymupdf"):
@@ -208,7 +216,7 @@ def test_question_generator_is_base_and_requires_llm_configuration(
         curriculum_version_id=1,
         subtopic_id=2,
         question_type=QuestionType.DEBUGGING,
-        source_section_ids=[3],
+        source_chunk_ids=["a" * 32],
         difficulty=Difficulty.EASY,
         count=3,
     )
@@ -226,14 +234,14 @@ def test_generation_request_requires_curriculum_grounding() -> None:
     with pytest.raises(ValueError):
         GenerationRequest(  # type: ignore[call-arg]
             question_type=QuestionType.DEBUGGING,
-            source_section_ids=[3],
+            source_chunk_ids=["a" * 32],
             difficulty=Difficulty.EASY,
         )
     with pytest.raises(ValueError):
         GenerationRequest(  # type: ignore[call-arg]
             curriculum_version_id=1,
             question_type=QuestionType.DEBUGGING,
-            source_section_ids=[],
+            source_chunk_ids=[],
             difficulty=Difficulty.EASY,
         )
 
@@ -284,9 +292,12 @@ def test_personalization_is_the_type_instruction(session) -> None:
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module)
 
-    from app.personalization import refresh_type_instruction
+    # Since m5 the generator learns guidelines (app.memory); the rule rewriter is retired.
+    from app.memory import distill_guidelines
 
-    assert callable(refresh_type_instruction)
+    assert callable(distill_guidelines)
+    with pytest.raises(ImportError):
+        from app.personalization import refresh_type_instruction  # noqa: F401
 
 
 def test_adaptive_engine_is_implemented(session) -> None:

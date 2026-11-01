@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Question sets · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- D1 · Question sets: freeze the approved bank into an immutable snapshot students practise from (ADR-036). -->
+<body data-scope="course" data-nav="question-sets" data-title="Question sets">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Question sets</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl">A question set is a frozen snapshot of the approved bank. Classes practise from a set, never from the live bank, so editing or rejecting a question later does not change a set that already exists. Only deleting a question removes it from the sets it was in.</p>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <a class="btn" data-variant="outline" :href="Mock.link('coverage.html')">Check coverage</a>
+        <button type="button" class="btn" :disabled="!preview.approved" :title="preview.approved ? '' : 'No approved questions yet'" @click="openFreeze()"><i data-lucide="lock"></i>Freeze a new set</button>
+      </div>
+    </div>
+
+    <!-- Empty state: nothing approved yet (statistics course). -->
+    <template x-if="!sets.length">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="lock"></i></span>
+          <h2 class="font-semibold">No question sets yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md">A set can only be frozen from approved questions, and this course has none yet. An empty set is refused, because it would read later as a real snapshot of an empty bank.</p>
+          <p class="text-sm text-muted-foreground max-w-md">Next step for this course: approve the AI-drafted taxonomy, then generate and review questions.</p>
+          <div class="flex gap-2 mt-2">
+            <a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review the drafted taxonomy</a>
+            <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('course.html')">Course overview</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="sets.length">
+      <div class="card">
+        <header>
+          <h2>Frozen sets</h2>
+          <p x-text="`${sets.length} set${sets.length === 1 ? '' : 's'} · ${sets.filter((s) => s.status === 'published').length} in use by a class`"></p>
+        </header>
+        <section class="p-0">
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="pl-6">Set</th>
+                  <th>Frozen</th>
+                  <th class="text-end" title="Questions still in the set / questions at freeze time">Questions</th>
+                  <th class="text-end">Coverage</th>
+                  <th>Used by</th>
+                  <th>Status</th>
+                  <th class="pr-6 text-end"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="s in sets" :key="s.id">
+                  <tr>
+                    <td class="pl-6">
+                      <div class="font-medium" x-text="s.name"></div>
+                      <div class="text-xs text-muted-foreground font-mono" x-text="`#${s.id} · frozen by ${s.by}`"></div>
+                    </td>
+                    <td class="whitespace-nowrap" x-text="fmtDate(s.frozen)"></td>
+                    <td class="text-end whitespace-nowrap">
+                      <span class="font-mono" x-text="`${s.members.length || s.frozen_count} / ${s.frozen_count}`"></span>
+                      <div class="text-xs" style="color:var(--warn-solid)" x-show="s.members.length && s.members.length < s.frozen_count" x-text="`${s.frozen_count - s.members.length} deleted since freezing`"></div>
+                    </td>
+                    <td class="text-end">
+                      <div class="inline-flex items-center gap-2">
+                        <span class="h-1.5 w-16 rounded-full" style="background:var(--muted)"><span class="block h-1.5 rounded-full" style="background:var(--primary)" :style="{ width: s.coverage_pct + '%' }"></span></span>
+                        <span class="font-mono text-sm w-9" x-text="`${s.coverage_pct}%`"></span>
+                      </div>
+                    </td>
+                    <td>
+                      <template x-for="cid in s.classes" :key="cid">
+                        <a class="block text-sm hover:underline" :href="Mock.link('classes.html')" x-text="className(cid)"></a>
+                      </template>
+                      <span class="text-sm text-muted-foreground" x-show="!s.classes.length">No class</span>
+                    </td>
+                    <td><span class="pill" :class="statusTone(s.status)" x-text="statusLabel(s.status)"></span></td>
+                    <td class="pr-6 text-end whitespace-nowrap">
+                      <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="open = open === s.id ? null : s.id" x-text="open === s.id ? 'Hide contents' : 'View contents'"></button>
+                      <a class="btn" data-variant="outline" data-size="sm" x-show="s.status !== 'archived'" :href="Mock.link('classes.html')">Use in a class</a>
+                      <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="s.status === 'frozen'" @click="archive(s)">Archive</button>
+                      <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="s.status === 'archived'" @click="s.status = 'frozen'; Mock.toast(`${s.name} restored`)">Restore</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <!-- Contents of the open set -->
+    <template x-if="openSet">
+      <div class="card">
+        <header>
+          <h2 x-text="`Contents of ${openSet.name}`"></h2>
+          <p x-text="`Exactly the ${openSet.members.length} questions students in this set can be served, as they were on ${fmtDate(openSet.frozen)}.`"></p>
+        </header>
+        <section class="p-0">
+          <div class="table-container max-h-[28rem] overflow-y-auto">
+            <table class="table">
+              <thead><tr><th class="pl-6">#</th><th>Question</th><th>Topic · subtopic</th><th>Type</th><th>Difficulty</th><th class="pr-6">In the bank now</th></tr></thead>
+              <tbody>
+                <template x-for="q in openSet.questions" :key="q.id">
+                  <tr>
+                    <td class="pl-6 font-mono text-sm"><a class="hover:underline" :href="Mock.link('question.html', { id: q.id })" x-text="q.id"></a></td>
+                    <td class="max-w-[26rem]"><div class="truncate" :title="q.prompt" x-text="q.prompt.split('\n')[0]"></div></td>
+                    <td class="text-sm"><span x-text="q.topic"></span><span class="text-muted-foreground" x-text="` · ${q.subtopic}`"></span></td>
+                    <td class="text-sm whitespace-nowrap" x-text="MOCK.question_types[q.type].label"></td>
+                    <td class="text-sm capitalize" x-text="q.difficulty"></td>
+                    <td class="pr-6">
+                      <span class="pill tone-warn" x-show="openSet.edited.includes(q.id)" title="Edited after freezing; this set keeps the version it froze">Edited since</span>
+                      <span class="pill" :class="openSet.frozen === MOCK.today ? 'tone-ok' : Mock.tone(q.status)" x-show="!openSet.edited.includes(q.id)" x-text="openSet.frozen === MOCK.today ? 'Approved' : Mock.label(q.status)"></span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <section class="grid md:grid-cols-3 gap-4 text-sm">
+      <div class="card p-4 gap-1">
+        <div class="font-medium">Frozen means frozen</div>
+        <p class="text-muted-foreground">There is no edit for a set. A snapshot that could change would say nothing about what a class was actually served.</p>
+      </div>
+      <div class="card p-4 gap-1">
+        <div class="font-medium">Giving students new questions</div>
+        <p class="text-muted-foreground">Freeze a new set, then switch the class to it on Classes. Runs already started stay on the set they began with.</p>
+      </div>
+      <div class="card p-4 gap-1">
+        <div class="font-medium">Coverage is a property of the set</div>
+        <p class="text-muted-foreground">The engine picks a subtopic, then a difficulty. An empty cell makes it fall back to the nearest difficulty, so gaps show up in what students get.</p>
+      </div>
+    </section>
+
+    <!-- Freeze dialog -->
+    <dialog x-ref="freeze" class="dialog" aria-labelledby="freeze-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-lg">
+        <header>
+          <h2 id="freeze-title">Freeze a new set</h2>
+          <p>Takes a snapshot of every approved question in the bank right now.</p>
+        </header>
+        <section class="grid gap-4">
+          <div role="group" class="field">
+            <label for="set-name">Name</label>
+            <input id="set-name" class="input" type="text" x-model="draftName">
+            <p>Students don't see this; it's how you pick the set for a class.</p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-lg border p-3">
+              <div class="text-xs text-muted-foreground">Approved questions included</div>
+              <div class="text-xl font-display font-semibold" x-text="preview.approved"></div>
+            </div>
+            <div class="rounded-lg border p-3">
+              <div class="text-xs text-muted-foreground">Coverage</div>
+              <div class="text-xl font-display font-semibold" x-text="`${preview.coverage_pct}%`"></div>
+            </div>
+          </div>
+          <template x-if="latest">
+            <div class="text-sm">
+              <div class="font-medium mb-1" x-text="`Compared with ${latest.name} (${fmtDate(latest.frozen)})`"></div>
+              <ul class="grid gap-1 text-muted-foreground">
+                <li x-text="`+${preview.added_since_last} questions approved since`"></li>
+                <li x-text="`${preview.edited_since_last} questions edited since. ${latest.name} keeps the versions it froze; this set takes the current ones once they are re-approved.`"></li>
+                <li x-text="latest.coverage_pct === preview.coverage_pct ? `Coverage unchanged at ${preview.coverage_pct}%: the new approvals landed in cells that were already covered` : `Coverage ${latest.coverage_pct}% → ${preview.coverage_pct}%`"></li>
+              </ul>
+            </div>
+          </template>
+          <div class="alert" data-variant="destructive" x-show="gaps.none.length">
+            <i data-lucide="triangle-alert"></i>
+            <h2 x-text="`${gaps.none.length} subtopics have no approved question`"></h2>
+            <section>
+              <p x-text="gaps.none.join(', ') + '.'"></p>
+              <p class="mt-1" x-text="`${gaps.missing} of ${gaps.total} subtopics are missing at least one difficulty; the engine will serve a nearer difficulty there. You can freeze anyway and freeze again once the gaps are filled.`"></p>
+            </section>
+          </div>
+        </section>
+        <footer>
+          <a class="btn" data-variant="outline" :href="Mock.link('coverage.html')">Fill gaps first</a>
+          <button type="button" class="btn" @click="freeze()" :disabled="!draftName.trim()" x-text="`Freeze ${preview.approved} questions`"></button>
+        </footer>
+        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" onclick="this.closest('dialog').close()"><i data-lucide="x"></i></button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-teach.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const sets = MOCK.question_sets.filter((s) => s.course === c.id).map((s) => ({
+        ...s,
+        by: MOCK.question_set_frozen_by[s.id] || "Maya Chen",
+        members: MOCK.question_set_members[s.id] || [],
+        frozen_count: MOCK.question_set_frozen_count[s.id] || s.questions,
+        edited: MOCK.question_set_edited_since[s.id] || [],
+      }));
+      // Gaps from the coverage grid (only courses with an approved taxonomy have one).
+      const gaps = { none: [], missing: 0, total: 0 };
+      c.taxonomy.forEach((t) => t.subtopics.forEach((st) => {
+        const cell = MOCK.coverage[st.id];
+        if (!cell) return;
+        gaps.total++;
+        if (!cell.easy && !cell.medium && !cell.hard) gaps.none.push(st.name);
+        if (!cell.easy || !cell.medium || !cell.hard) gaps.missing++;
+      }));
+      return {
+        course: c,
+        sets,
+        gaps,
+        preview: MOCK.freeze_preview[c.id],
+        open: Mock.param("open"),
+        draftName: "",
+        // ?dialog=freeze opens the dialog on load (handy for screenshots and demos).
+        init() { if (Mock.param("dialog") === "freeze" && this.preview.approved) this.$nextTick(() => this.openFreeze()); },
+        get latest() { return this.sets.find((s) => s.status !== "archived") || this.sets[0]; },
+        get openSet() {
+          const s = this.sets.find((x) => x.id === this.open);
+          return s ? { ...s, questions: s.members.map((id) => MOCK.question(id)).filter(Boolean) } : null;
+        },
+        fmtDate(d) { return new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); },
+        className(id) { return (MOCK.classes.find((k) => k.id === id) || {}).name || id; },
+        statusTone(s) { return { published: "tone-ok", frozen: "tone-accent", archived: "tone-muted" }[s]; },
+        statusLabel(s) { return { published: "In use", frozen: "Frozen, not in use", archived: "Archived" }[s]; },
+        openFreeze() {
+          this.draftName = "Set frozen Sep 30";
+          this.$refs.freeze.showModal();
+        },
+        freeze() {
+          const ids = [...MOCK.questions.filter((q) => q.course === c.id && q.status === "approved").map((q) => q.id), ...(c.id === "python" ? [1000, 1001, 1002] : [])].sort((a, b) => a - b);
+          const id = `qs${this.sets.length + 1}`;
+          this.sets.unshift({
+            id, course: c.id, name: this.draftName.trim(), frozen: MOCK.today, by: MOCK.me.name,
+            questions: this.preview.approved, frozen_count: this.preview.approved, members: ids,
+            coverage_pct: this.preview.coverage_pct, classes: [], status: "frozen", edited: [],
+          });
+          this.$refs.freeze.close();
+          Mock.toast(`Froze "${this.draftName.trim()}" with ${this.preview.approved} questions. Switch a class to it on Classes.`);
+        },
+        archive(s) { s.status = "archived"; if (this.open === s.id) this.open = null; Mock.toast(`${s.name} archived; it can't be picked for a class`); },
+      };
+    }
+  </script>
+</body>
+</html>

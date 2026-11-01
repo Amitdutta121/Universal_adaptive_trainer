@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Practice · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .choice { display: flex; align-items: flex-start; gap: .75rem; border: 1px solid var(--border); border-radius: .6rem; padding: .75rem; cursor: pointer; background: var(--card); }
+    .choice:hover { background: var(--muted); }
+    .choice[data-on] { border-color: var(--primary); background: var(--accent); }
+    .choice[data-right] { border-color: var(--ok-solid); background: var(--ok-wash); }
+    .choice[data-wrong] { border-color: var(--critical-solid); background: var(--critical-wash); }
+    .bar-fill { transition: width .8s ease; }
+  </style>
+</head>
+<!-- F3s · Practice session: the core loop. Serves MOCK.student_session.queue in order
+     (TODO(real): the server picks each next question from the weakest subtopic after every answer).
+     Submit -> feedback + explanation + topic mastery update -> Next. After the queue -> student-summary.html. -->
+<body data-scope="student" data-title="Practice">
+  <main x-data="page()" x-cloak class="mx-auto grid w-full max-w-2xl gap-4 px-4 py-5">
+    <!-- Progress through this session -->
+    <div class="grid gap-2">
+      <div class="flex items-center gap-2 text-sm">
+        <a class="text-muted-foreground hover:underline" href="student-home.html" x-text="course.code"></a>
+        <span class="text-muted-foreground">·</span>
+        <span class="font-medium" x-text="`Question ${i + 1} of ${queue.length}`"></span>
+        <button class="btn ml-auto" data-variant="ghost" data-size="sm" @click="finish()">End session</button>
+      </div>
+      <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="bar-fill h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${((i + (result ? 1 : 0)) / queue.length) * 100}%` }"></div></div>
+    </div>
+
+    <section class="card gap-4 py-5">
+      <header>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="pill tone-muted capitalize" x-text="q.difficulty"></span>
+          <span class="pill tone-muted" x-text="typeLabel"></span>
+        </div>
+        <div class="mt-1 flex items-baseline gap-2">
+          <p x-text="`${q.topic} · ${q.subtopic}`"></p>
+          <button type="button" class="ml-auto shrink-0 text-xs text-muted-foreground hover:underline" x-show="!reported[q.id]" @click="openReport()">Report this question</button>
+          <span class="ml-auto shrink-0 text-xs text-muted-foreground" x-show="reported[q.id]">Reported</span>
+        </div>
+      </header>
+      <section class="grid gap-4">
+        <p class="text-xs text-muted-foreground flex items-start gap-1.5" x-show="!result"><span class="shrink-0 mt-0.5"><i data-lucide="target" class="size-3.5"></i></span><span x-text="why"></span></p>
+        <p class="leading-7" x-html="code(text)"></p>
+        <pre class="overflow-x-auto rounded-lg border p-3 font-mono text-sm leading-6" style="background:var(--muted)" x-show="snippet" x-text="snippet"></pre>
+
+        <!-- Multiple choice -->
+        <template x-if="q.type === 'multiple_choice'">
+          <fieldset class="grid gap-2">
+            <legend class="mb-1 text-sm font-medium">Choose one answer</legend>
+            <template x-for="(o, k) in q.options" :key="k">
+              <label class="choice text-sm" :data-on="!result && answer === k ? '' : null" :data-right="result && k === q.answer ? '' : null" :data-wrong="result && answer === k && k !== q.answer ? '' : null">
+                <input type="radio" name="mc" class="input mt-0.5" :value="k" :checked="answer === k" :disabled="!!result" @change="answer = k">
+                <span class="font-mono text-xs text-muted-foreground mt-0.5" x-text="String.fromCharCode(65 + k)"></span>
+                <span class="font-mono leading-6" x-text="o"></span>
+              </label>
+            </template>
+          </fieldset>
+        </template>
+
+        <!-- True / false -->
+        <template x-if="q.type === 'true_false'">
+          <fieldset class="grid grid-cols-2 gap-2">
+            <legend class="mb-1 text-sm font-medium">True or false</legend>
+            <template x-for="v in [true, false]" :key="String(v)">
+              <label class="choice items-center text-sm font-medium" :data-on="!result && answer === v ? '' : null" :data-right="result && v === q.answer ? '' : null" :data-wrong="result && answer === v && v !== q.answer ? '' : null">
+                <input type="radio" name="tf" class="input" :checked="answer === v" :disabled="!!result" @change="answer = v">
+                <span x-text="v ? 'True' : 'False'"></span>
+              </label>
+            </template>
+          </fieldset>
+        </template>
+
+        <!-- Output prediction -->
+        <template x-if="q.type === 'output_prediction'">
+          <div role="group" class="field">
+            <label for="out">Type the exact output</label>
+            <textarea id="out" rows="2" class="textarea font-mono" x-model="answer" :disabled="!!result" placeholder="e.g. 42" @keydown.ctrl.enter="canSubmit && submit()"></textarea>
+            <p>Spaces between values count; a trailing space doesn't.</p>
+          </div>
+        </template>
+
+        <!-- Parsons: reorder with up/down buttons -->
+        <template x-if="q.type === 'parsons'">
+          <div class="grid gap-2">
+            <p class="text-sm font-medium">Order the lines <span class="font-normal text-muted-foreground">— move each line with the arrows.</span></p>
+            <ol class="grid gap-2">
+              <template x-for="(li, k) in order" :key="li">
+                <li class="flex items-stretch gap-2 rounded-lg border p-1.5" :class="result ? (li === k ? 'tone-ok' : 'tone-critical') : ''" :style="result ? '' : 'background:var(--card)'">
+                  <span class="grid w-6 shrink-0 place-items-center rounded-md font-mono text-xs text-muted-foreground" style="background:var(--muted)" x-text="k + 1"></span>
+                  <pre class="min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 py-1.5 font-mono text-xs leading-5" x-text="q.lines[li]"></pre>
+                  <div class="flex shrink-0 flex-col gap-1" x-show="!result">
+                    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" :disabled="k === 0" @click="move(k, -1)" :aria-label="`Move line ${k + 1} up`"><i data-lucide="arrow-up"></i></button>
+                    <button type="button" class="btn" data-variant="outline" data-size="icon-sm" :disabled="k === order.length - 1" @click="move(k, 1)" :aria-label="`Move line ${k + 1} down`"><i data-lucide="arrow-down"></i></button>
+                  </div>
+                </li>
+              </template>
+            </ol>
+          </div>
+        </template>
+
+        <!-- Written explanation (rubric grader) -->
+        <template x-if="q.type === 'explanation'">
+          <div role="group" class="field">
+            <label for="written">Your explanation</label>
+            <textarea id="written" rows="5" class="textarea leading-6" x-model="answer" :disabled="!!result" placeholder="Write 2–4 sentences in your own words." @keydown.ctrl.enter="canSubmit && submit()"></textarea>
+            <p x-text="`${words} word${words === 1 ? '' : 's'} · graded on ${q.criteria.length} criteria your instructor approved, not on length or spelling.`"></p>
+          </div>
+        </template>
+      </section>
+      <footer class="grid gap-2" x-show="!result">
+        <button class="btn w-full" data-size="lg" :disabled="!canSubmit" @click="submit()" x-text="busy ? 'Checking…' : 'Submit answer'"></button>
+        <p class="text-center text-xs text-muted-foreground">Once you submit, the answer is scored and locked in.</p>
+      </footer>
+    </section>
+
+    <!-- Feedback -->
+    <template x-if="result">
+      <section class="card gap-4 py-5" :style="`border-color:${result?.correct ? 'var(--ok-solid)' : 'var(--critical-solid)'}`">
+        <header>
+          <div class="flex items-center gap-2">
+            <span x-show="result?.correct" style="color:var(--ok-solid)"><i data-lucide="circle-check" class="size-5"></i></span>
+            <span x-show="!result?.correct" style="color:var(--critical-solid)"><i data-lucide="circle-x" class="size-5"></i></span>
+            <h2 x-text="written ? `${result?.score} of ${result?.total} points` : result?.correct ? 'Correct' : 'Not quite'"></h2>
+            <span class="text-sm text-muted-foreground" x-show="result?.detail" x-text="result?.detail"></span>
+          </div>
+          <p x-show="!result?.correct && result?.expected && !written" x-html="`Correct answer: <span class='font-mono text-foreground'>${Mock.esc(result?.expected)}</span>`"></p>
+        </header>
+        <section class="grid gap-4">
+          <div class="grid gap-1" x-show="q.type === 'parsons' && !result?.correct">
+            <div class="text-sm font-medium">Correct order</div>
+            <pre class="overflow-x-auto rounded-lg border p-3 font-mono text-xs leading-5" style="background:var(--muted)" x-text="(q.lines || []).join(String.fromCharCode(10))"></pre>
+          </div>
+          <!-- Written: per-criterion feedback quoting the student's own answer -->
+          <template x-if="written">
+            <div class="grid gap-3">
+              <ul class="grid gap-2">
+                <template x-for="(c, k) in result.crit" :key="k">
+                  <li class="grid gap-1 rounded-lg border p-3 text-sm">
+                    <div class="flex items-start gap-2">
+                      <span class="shrink-0 mt-0.5" x-show="c.met" style="color:var(--ok-solid)"><i data-lucide="circle-check" class="size-4"></i></span>
+                      <span class="shrink-0 mt-0.5" x-show="!c.met" style="color:var(--warn-solid)"><i data-lucide="circle-dashed" class="size-4"></i></span>
+                      <span class="flex-1 font-medium" x-text="c.text"></span>
+                      <span class="shrink-0 font-mono text-xs text-muted-foreground" x-text="`${c.met ? c.points : 0}/${c.points}`"></span>
+                    </div>
+                    <p class="pl-6 leading-6" x-show="c.met"><span class="text-muted-foreground">You wrote: </span><mark class="rounded px-0.5" style="background:var(--accent);color:var(--accent-foreground)" x-text="`“${c.quote}”`"></mark></p>
+                    <p class="pl-6 leading-6 text-muted-foreground" x-show="!c.met" x-text="`Hint: ${c.hint}`"></p>
+                  </li>
+                </template>
+              </ul>
+              <p class="rounded-lg p-3 text-sm tone-critical" x-show="result.injection">Part of your answer reads like an instruction to the grader. It was ignored: answers are graded on what they explain, and your instructor can see it.</p>
+              <details class="text-sm">
+                <summary class="cursor-pointer font-medium">A full-marks answer</summary>
+                <p class="mt-2 leading-6 text-muted-foreground" x-text="MOCK.rubricPractice.model"></p>
+              </details>
+              <p class="flex items-start gap-1.5 rounded-lg border p-3 text-xs leading-5" style="background:var(--muted)"><span class="shrink-0 mt-0.5"><i data-lucide="info" class="size-3.5"></i></span><span>Practice: graded by the rubric grader; doesn't affect your grade until your instructor has checked its grading.</span></p>
+            </div>
+          </template>
+          <p class="text-sm leading-6" x-show="!written" x-html="code(X.explanations[q.id])"></p>
+          <div class="grid gap-1.5 border-t pt-4" x-show="!written">
+            <div class="flex items-baseline gap-2 text-sm">
+              <span class="font-medium" x-text="`${q.topic} mastery`"></span>
+              <span class="ml-auto font-mono" x-text="`${Mock.pct(result?.before)} → ${Mock.pct(result?.after)}`"></span>
+              <span class="pill" :class="result?.after >= result?.before ? 'tone-ok' : 'tone-warn'" x-text="result?.after >= result?.before ? '+' + Math.round((result?.after - result?.before) * 100) + ' pts' : 'needs more practice'"></span>
+            </div>
+            <div class="relative h-2 rounded-full" style="background:var(--muted)">
+              <div class="bar-fill absolute inset-y-0 left-0 rounded-full" :style="`width:${shown * 100}%;background:${result?.correct ? 'var(--primary)' : 'var(--warn-solid)'}`"></div>
+              <div class="absolute -inset-y-0.5 w-0.5" :style="{ background: 'var(--foreground)', left: `${result?.before * 100}%` }" title="Before this answer"></div>
+            </div>
+            <p class="text-xs text-muted-foreground" x-text="result?.correct ? 'Your next questions move on to other weak subtopics.' : `One miss moves this a little. You'll get another ${q.subtopic} question soon, with this idea fresh.`"></p>
+          </div>
+        </section>
+        <!-- Quick refresher after a wrong answer (from the tutorials-inline prototype). -->
+        <template x-if="result && !result?.correct && refresher && !written">
+          <section class="pt-0">
+            <div class="grid gap-2 rounded-lg border p-3" style="background:var(--muted)">
+              <div class="grid gap-0.5">
+                <span class="text-xs font-medium text-muted-foreground">Quick refresher</span>
+                <span class="text-sm font-semibold" x-text="refresher.title"></span>
+              </div>
+              <div class="grid gap-1 text-sm leading-6">
+                <template x-for="l in refresher.lines" :key="l"><p x-text="l"></p></template>
+              </div>
+              <div class="overflow-hidden rounded-md border" style="background:var(--card)">
+                <pre class="overflow-x-auto px-3 py-2 font-mono text-xs leading-5" x-text="refresher.code"></pre>
+                <div class="flex gap-2 border-t px-3 py-1.5 font-mono text-xs"><span class="text-muted-foreground">Output</span><span x-text="refresher.output"></span></div>
+              </div>
+              <!-- The subtopic's full lesson (student-lesson.html); its "Back to practice" returns here. -->
+              <a class="btn w-full" data-variant="outline" :href="`student-lesson.html?sub=${q.subtopic_id}&from=practice&q=${q.id}`">
+                <i data-lucide="book-open-check"></i><span x-text="`3-minute lesson on ${q.subtopic}`"></span>
+              </a>
+            </div>
+          </section>
+        </template>
+        <footer>
+          <button class="btn w-full" data-size="lg" @click="next()" x-text="i === queue.length - 1 ? 'See session summary' : 'Next question'"></button>
+        </footer>
+      </section>
+    </template>
+    <!-- Report this question -->
+    <dialog x-ref="report" class="dialog" aria-labelledby="report-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="report-title">Report this question</h2>
+          <p>Your instructor sees your report with the question and your answer. It doesn't change your score unless they regrade it.</p>
+        </header>
+        <section class="grid gap-3">
+          <fieldset class="grid gap-2">
+            <legend class="mb-1 text-sm font-medium">What's wrong?</legend>
+            <template x-for="(label, key) in MOCK.REPORT_REASONS" :key="key">
+              <label class="choice items-center text-sm" :data-on="report.reason === key ? '' : null">
+                <input type="radio" name="report-reason" class="input" :value="key" :checked="report.reason === key" @change="report.reason = key">
+                <span x-text="label"></span>
+              </label>
+            </template>
+          </fieldset>
+          <div role="group" class="field">
+            <label for="report-text">Details (optional)</label>
+            <textarea id="report-text" rows="3" class="textarea" x-model="report.text" placeholder="e.g. I typed 1 4 7 with a space at the end and it was marked wrong."></textarea>
+          </div>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" :disabled="!report.reason" @click="sendReport()">Send report</button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-run.js"></script>
+  <script src="assets/data-f.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/data-rubrics.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const S = MOCK.student_session;
+      const X = MOCK.student_extra;
+      // ?written=1: the session opens with one written explanation graded by the rubric grader
+      // (practice only; it isn't sent to the summary). TODO(real): the selector serves these like any question.
+      const RP = MOCK.rubricPractice, lists = MOCK.course("python").taxonomy.find((t) => t.name === "Lists");
+      const writtenQ = { id: RP.question.id, type: "explanation", difficulty: "medium", topic: "Lists", topic_id: lists.id,
+        subtopic: RP.question.subtopic, subtopic_id: lists.subtopics.find((x) => x.name === "Aliasing")?.id, prompt: RP.question.prompt, criteria: RP.question.criteria };
+      const withWritten = Mock.param("written") === "1";
+      const norm = (t) => String(t).split("\n").map((l) => l.replace(/\s+$/, "")).join("\n").trim();
+      return {
+        X, course: MOCK.course(S.course),
+        queue: [...(withWritten ? [writtenQ] : []), ...S.queue.map((id) => MOCK.question(id))],
+        mastery: { ...S.student.mastery },
+        i: 0, answer: null, order: [], result: null, busy: false, shown: 0, results: [],
+        reported: {}, report: { reason: null, text: "" },
+        // TODO(real): refreshers are generated with the question and reviewed by the professor.
+        get refresher() { return MOCK.run.refreshers[this.q.subtopic] || null; },
+        openReport() { this.report = { reason: null, text: "" }; this.$refs.report.showModal(); },
+        sendReport() {
+          this.reported[this.q.id] = true;
+          this.$refs.report.close();
+          Mock.toast("Sent to your instructor");
+        },
+        get q() { return this.queue[this.i]; },
+        get written() { return this.q.type === "explanation"; },
+        get typeLabel() { return MOCK.question_types[this.q.type]?.label || MOCK.FORMAT_LABEL[this.q.type]; },
+        get why() { return this.written ? "Aliasing is your weakest subtopic (31%). Explain it in your own words." : X.why[this.q.id]; },
+        get words() { return String(this.answer || "").trim().split(/\s+/).filter(Boolean).length; },
+        get text() { return this.q.prompt.split("\n\n")[0]; },
+        get snippet() { return this.q.prompt.split("\n\n").slice(1).join("\n\n"); },
+        get canSubmit() {
+          if (this.busy) return false;
+          if (this.q.type === "output_prediction") return !!(this.answer && this.answer.trim());
+          if (this.written) return this.words >= 5;
+          if (this.q.type === "parsons") return true;
+          return this.answer !== null;
+        },
+        init() { this.load(); },
+        load() {
+          this.answer = this.q.type === "output_prediction" || this.written ? "" : null;
+          this.order = this.q.type === "parsons" ? [...(X.parsons_shuffle[this.q.id] || this.q.lines.map((_, k) => k).reverse())] : [];
+          this.result = null;
+          window.scrollTo(0, 0);
+        },
+        move(k, d) { const o = [...this.order]; [o[k], o[k + d]] = [o[k + d], o[k]]; this.order = o; },
+        code(s) { return Mock.esc(s || "").replace(/`([^`]+)`/g, '<code class="font-mono rounded px-1" style="background:var(--muted)">$1</code>'); },
+        submit() {
+          const q = this.q;
+          if (this.written) {
+            this.busy = true;
+            setTimeout(() => {
+              const r = RP.grade(this.answer);
+              this.result = { ...r, correct: r.score === r.total };
+              this.busy = false;
+            }, 700);
+            return;
+          }
+          let correct, expected = null, detail = "";
+          if (q.type === "multiple_choice") { correct = this.answer === q.answer; expected = q.options[q.answer]; }
+          else if (q.type === "true_false") { correct = this.answer === q.answer; expected = q.answer ? "True" : "False"; }
+          else if (q.type === "output_prediction") { correct = norm(this.answer) === norm(q.answer_text); expected = q.answer_text; }
+          else {
+            const inPlace = this.order.filter((li, k) => li === k).length;
+            correct = inPlace === q.lines.length;
+            detail = `${inPlace} of ${q.lines.length} lines in place`;
+          }
+          this.busy = true;
+          setTimeout(() => {
+            const before = this.mastery[q.topic_id] || 0;
+            const after = X.update(before, correct);
+            this.mastery[q.topic_id] = after;
+            this.results.push(`${q.id}:${correct ? 1 : 0}`);
+            this.shown = before;
+            this.result = { correct, expected, detail, before, after };
+            this.busy = false;
+            setTimeout(() => { this.shown = after; }, 60);
+          }, 350);
+        },
+        next() {
+          if (this.i === this.queue.length - 1) return this.finish();
+          this.i++;
+          this.load();
+        },
+        finish() { location.href = `student-summary.html?r=${this.results.join(",")}`; },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checking tools · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; line-height: 1.55; white-space: pre; background: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%; resize: vertical; overflow-x: auto; }
+    .frame { width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  </style>
+</head>
+<!-- Checking tools, shown on an example Web Development course. A course's tools are the ways it can
+     check answers; the generator may write any question one of them can check. Tools are added, paused
+     or retired, never deleted, and every question records the tool version that checked it.
+     The Web runner here is real: it loads HTML/CSS/JS in a sandboxed iframe, clicks, and reads the page. -->
+<body data-scope="workspace" data-nav="courses" data-title="Checking tools">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="max-w-3xl">
+      <p class="text-sm text-muted-foreground">Example course · WEB 210 Web Development · Fall 2026</p>
+      <h1 class="text-2xl font-semibold">Checking tools</h1>
+      <p class="text-sm text-muted-foreground mt-1">How this course can check answers. The generator may write any kind of question, as long as one of these tools can check it. Tools are never deleted: pause one to stop new questions using it; questions it already checked stay valid.</p>
+    </div>
+
+    <!-- Tools -->
+    <section class="card gap-0 py-0">
+      <header class="flex flex-wrap items-center gap-3 px-6 pt-5 pb-4">
+        <h2 class="font-semibold">This course's tools</h2>
+        <span class="text-sm text-muted-foreground" x-text="`${tools.filter((t) => t.state === 'on').length} on · ${tools.filter((t) => t.state === 'paused').length} paused`"></span>
+        <button type="button" class="btn ml-auto" data-size="sm" @click="$refs.add.showModal()"><i data-lucide="plus"></i>Add a tool</button>
+      </header>
+      <div class="table-container border-t">
+        <table class="table text-sm">
+          <thead><tr><th class="pl-6">Tool</th><th>Checks</th><th>Version</th><th>Questions using it</th><th>State</th><th class="pr-6"></th></tr></thead>
+          <tbody>
+            <template x-for="t in tools" :key="t.id">
+              <tr :class="t.state !== 'on' && 'opacity-70'">
+                <td class="pl-6"><div class="font-medium" x-text="t.name"></div><div class="text-xs text-muted-foreground" x-text="`Added ${t.added}`"></div></td>
+                <td class="text-xs text-muted-foreground whitespace-normal max-w-xs" x-text="t.checks"></td>
+                <td class="font-mono text-xs" x-text="t.version"></td>
+                <td class="text-xs" x-text="t.uses"></td>
+                <td><span class="pill" :class="{ on: 'tone-ok', paused: 'tone-warn', retired: 'tone-muted' }[t.state]" x-text="{ on: 'On', paused: 'Paused', retired: 'Retired' }[t.state]"></span></td>
+                <td class="pr-6 text-right">
+                  <button type="button" class="btn" data-size="sm" data-variant="outline" x-show="t.state === 'on'" @click="t.state = 'paused'; Mock.toast(`${t.name} paused. No new questions will use it; its ${t.uses} questions stay valid.`)">Pause</button>
+                  <button type="button" class="btn" data-size="sm" data-variant="outline" x-show="t.state === 'paused'" @click="t.state = 'on'; Mock.toast(`${t.name} is on again.`)">Turn on</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <footer class="border-t px-6 py-3 text-xs text-muted-foreground" style="border-color:var(--border)">There's no delete. A tool that turns out to be wrong is retired by an admin, and the questions it checked are flagged for review.</footer>
+    </section>
+
+    <!-- Example questions checked by the Web runner -->
+    <div class="flex items-baseline gap-2"><h2 class="text-lg font-semibold">Questions the Web runner can check</h2><span class="text-sm text-muted-foreground">Generated for this course. Try them: the checks really run.</span></div>
+
+    <template x-for="q in questions" :key="q.id">
+      <section class="card gap-4">
+        <header class="flex flex-wrap items-center gap-2">
+          <span class="pill tone-muted" x-text="q.format"></span>
+          <span class="pill tone-ok">Computed</span>
+          <span class="text-xs text-muted-foreground" x-text="`Checked by Web runner ${tools.find((t) => t.id === 'web').version} · in this mockup the page runs in a frame in your browser; the real runner uses an isolated headless browser with no network`"></span>
+        </header>
+        <div class="grid lg:grid-cols-2 gap-5">
+          <!-- What the student sees -->
+          <div class="grid gap-3 content-start">
+            <div class="text-xs font-medium text-muted-foreground">What the student sees</div>
+            <p class="text-[15px] leading-7" x-text="q.prompt"></p>
+            <template x-if="q.kind === 'predict'">
+              <div class="grid gap-2">
+                <pre class="code" x-text="q.html"></pre>
+                <div class="flex items-center gap-2">
+                  <input class="input w-40 font-mono" placeholder="Your answer" x-model="q.guess" @keydown.enter="checkPredict(q)">
+                  <button type="button" class="btn" data-size="sm" @click="checkPredict(q)">Check</button>
+                </div>
+              </div>
+            </template>
+            <template x-if="q.kind !== 'predict'">
+              <div class="grid gap-2">
+                <textarea class="code" :rows="q.code.split('\n').length + 1" spellcheck="false" x-model="q.code" :aria-label="`Code for ${q.title}`"></textarea>
+                <div class="flex gap-2">
+                  <button type="button" class="btn" data-size="sm" @click="runTests(q)" :disabled="q.running" x-text="q.running ? 'Checking…' : 'Check my code'"></button>
+                  <button type="button" class="btn" data-size="sm" data-variant="ghost" @click="q.code = q.starter; q.results = null">Reset</button>
+                  <button type="button" class="btn" data-size="sm" data-variant="ghost" x-show="q.solution" @click="q.code = q.solution; q.results = null">Show a solution</button>
+                </div>
+                <div class="text-xs text-muted-foreground">Live page</div>
+                <iframe class="frame" sandbox="allow-scripts allow-same-origin" :srcdoc="q.code" :title="`Preview of ${q.title}`"></iframe>
+              </div>
+            </template>
+            <template x-if="q.feedback">
+              <div class="rounded-lg p-3 text-sm" :style="{ background: q.feedback.ok ? 'color-mix(in oklch, var(--ok-solid) 10%, transparent)' : 'color-mix(in oklch, var(--critical-solid) 8%, transparent)' }" x-text="q.feedback.text"></div>
+            </template>
+          </div>
+
+          <!-- How it's checked -->
+          <div class="grid gap-3 content-start">
+            <div class="text-xs font-medium text-muted-foreground">How the Web runner checks it</div>
+            <ol class="grid gap-2 text-sm">
+              <template x-for="(s, i) in q.steps" :key="i">
+                <li class="flex items-start gap-2 rounded-md border px-3 py-2">
+                  <span class="font-mono text-xs text-muted-foreground mt-0.5" x-text="i + 1"></span>
+                  <span class="flex-1" x-text="s.label"></span>
+                  <template x-if="q.results && q.results[i]">
+                    <span class="pill" :class="q.results[i].ok ? 'tone-ok' : 'tone-critical'" x-text="q.results[i].ok ? 'pass' : 'fail'"></span>
+                  </template>
+                </li>
+              </template>
+            </ol>
+            <template x-if="q.results">
+              <div class="grid gap-1 text-xs">
+                <template x-for="(r, i) in q.results" :key="i"><div x-show="!r.ok" class="font-mono" style="color:var(--critical-solid)" x-text="`Step ${i + 1}: ${r.detail}`"></div></template>
+              </div>
+            </template>
+            <template x-if="q.kind === 'predict'">
+              <div class="text-sm">Answer key: <span class="font-mono font-medium" x-text="q.key === null ? 'computing…' : q.key"></span> <span class="text-xs text-muted-foreground">(found by actually clicking, when the question was generated)</span></div>
+            </template>
+            <p class="text-xs text-muted-foreground" x-text="q.note"></p>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <!-- Add a tool -->
+    <dialog x-ref="add" class="dialog" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-lg">
+        <header><h2>Add a checking tool</h2><p>Each tool passed its self-test. Adding one lets the generator write new kinds of questions; it can't be deleted later, only paused.</p></header>
+        <section class="grid gap-2">
+          <template x-for="c in catalog" :key="c.id">
+            <div class="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+              <div class="flex-1"><div class="font-medium" x-text="c.name"></div><div class="text-xs text-muted-foreground" x-text="c.checks"></div></div>
+              <button type="button" class="btn" data-size="sm" data-variant="outline" :disabled="tools.some((t) => t.id === c.id)" @click="addTool(c)" x-text="tools.some((t) => t.id === c.id) ? 'Added' : 'Add'"></button>
+            </div>
+          </template>
+        </section>
+        <footer><button type="button" class="btn" data-variant="outline" @click="$refs.add.close()">Done</button></footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    // Runs a page in a hidden iframe and performs check steps against it. The iframe needs
+    // allow-same-origin to read the page, which means it is NOT a security sandbox: fine for a mockup
+    // showing trusted examples, never for student code in production.
+    // TODO(real): the backend runs the same steps in a headless browser (Playwright) in a sandbox.
+    function webRun(html, steps) {
+      return new Promise((resolve) => {
+        const f = document.createElement("iframe");
+        f.setAttribute("sandbox", "allow-scripts allow-same-origin");
+        f.style.cssText = "position:absolute;left:-9999px;width:600px;height:400px";
+        const errors = [];
+        f.onload = async () => {
+          const w = f.contentWindow, d = f.contentDocument;
+          w.addEventListener("error", (e) => errors.push(e.message));
+          await new Promise((r) => setTimeout(r, 50));
+          const out = [];
+          for (const s of steps) {
+            try { out.push(await s.run(d, w, errors)); } catch (e) { out.push({ ok: false, detail: String(e.message || e) }); }
+          }
+          f.remove();
+          resolve(out);
+        };
+        f.srcdoc = html.replace("<script>", "<script>window.onerror=(m)=>{(window.__errs=window.__errs||[]).push(m)};");
+        document.body.appendChild(f);
+      });
+    }
+    const $ = (d, sel) => { const el = d.querySelector(sel); if (!el) throw new Error(`no element ${sel}`); return el; };
+    const clicks = (d, sel, n) => { for (let i = 0; i < n; i++) $(d, sel).click(); };
+    const text = (d, sel) => $(d, sel).textContent.trim();
+
+    function page() {
+      const counter = `<button id="add">Add</button>
+<p>Total: <span id="total">0</span></p>
+<script>
+  let total = 0;
+  document.getElementById('add').addEventListener('click', () => {
+    total += 2;
+    document.getElementById('total').textContent = total;
+  });
+<\/script>`;
+      const bugStarter = `<button id="like">Like</button>
+<span id="likes">0</span>
+<script>
+  let likes = 0;
+  const out = document.getElementById('likes');
+  function addLike() {
+    likes += 1;
+    out.textContent = likes;
+  }
+  document.getElementById('like').addEventListener('click', addLike());
+<\/script>`;
+      const cssStarter = `<style>
+  body { font-family: sans-serif; }
+  .card { width: 200px; padding: 12px; border: 1px solid #ccc; }
+  .card h2 { color: black; }
+</style>
+<div class="card"><h2>Hello</h2><p>Centre me.</p></div>`;
+      const qs = [
+        { id: "q1", kind: "predict", format: "Predict the result", title: "counter",
+          prompt: "The student clicks Add three times. What number does the page show after “Total:”?",
+          html: counter, guess: "", key: null, feedback: null, results: null,
+          steps: [{ label: "Load the page", run: async (d) => ({ ok: !!d.getElementById("add"), detail: "page didn't load" }) },
+                  { label: "Click #add three times", run: async (d) => { clicks(d, "#add", 3); return { ok: true }; } },
+                  { label: "Read the text of #total → answer key", run: async (d) => ({ ok: true, value: text(d, "#total") }) }],
+          note: "The key is whatever the page actually shows, so it can't disagree with the code." },
+        { id: "q2", kind: "fix", format: "Fix the bug", title: "like button",
+          prompt: "The Like button doesn't count clicks, and the page starts at 1 instead of 0. Fix the code.",
+          starter: bugStarter, code: bugStarter, feedback: null, results: null, running: false,
+          solution: bugStarter.replace("addEventListener('click', addLike())", "addEventListener('click', addLike)"),
+          steps: [{ label: "On load, #likes shows 0", run: async (d) => { const v = text(d, "#likes"); return { ok: v === "0", detail: `#likes shows "${v}" on load` }; } },
+                  { label: "Click #like twice → #likes shows 2", run: async (d) => { clicks(d, "#like", 2); const v = text(d, "#likes"); return { ok: v === "2", detail: `after 2 clicks #likes shows "${v}"` }; } },
+                  { label: "No errors in the console", run: async (d, w) => { const e = w.__errs || []; return { ok: !e.length, detail: e.join("; ") }; } }],
+          note: "These tests were generated with the question and run against the reference fix first; the question is only kept if the fix passes and the buggy code fails.",
+          wrong: "Calls addLike() once while adding the listener, instead of passing the function" },
+        { id: "q3", kind: "css", format: "Write the CSS", title: "card",
+          prompt: "Centre the card horizontally on the page and make the heading green (#2f7d57). Change only the CSS.",
+          starter: cssStarter, code: cssStarter, feedback: null, results: null, running: false,
+          solution: cssStarter.replace(".card { width: 200px;", ".card { width: 200px; margin: 0 auto;").replace(".card h2 { color: black; }", ".card h2 { color: #2f7d57; }"),
+          steps: [{ label: "The card's left and right gaps are equal (within 2px)", run: async (d, w) => {
+                    const r = $(d, ".card").getBoundingClientRect(), W = d.documentElement.clientWidth;
+                    const L = Math.round(r.left), R = Math.round(W - r.right); return { ok: Math.abs(L - R) <= 2 && L > 8, detail: `left gap ${L}px, right gap ${R}px` }; } },
+                  { label: "The heading's computed colour is rgb(47, 125, 87)", run: async (d, w) => {
+                    const c = w.getComputedStyle($(d, ".card h2")).color; return { ok: c === "rgb(47, 125, 87)", detail: `heading colour is ${c}` }; } },
+                  { label: "The card is still 200px wide (no shortcuts)", run: async (d) => { const wd = Math.round($(d, ".card").getBoundingClientRect().width); return { ok: wd >= 200 && wd <= 230, detail: `card is ${wd}px wide` }; } }],
+          note: "Checked by measuring the rendered page, so any correct CSS passes: margin: 0 auto, flexbox or grid on body." },
+      ];
+      return {
+        tools: [
+          { id: "lookup", name: "Book lookup", checks: "Facts and definitions, by quoting the course book", version: "v2.1", uses: 64, added: "Aug 20", state: "on" },
+          { id: "match", name: "Answer matcher", checks: "Multiple choice, ordering, matching, exact text", version: "v1.4", uses: 112, added: "Aug 20", state: "on" },
+          { id: "web", name: "Web runner", checks: "HTML, CSS and JavaScript: loads the page in a sandbox, clicks and types, reads what's on screen", version: "v1.0", uses: 38, added: "Sep 30", state: "on" },
+          { id: "python", name: "Python runner", checks: "Python code: output and tests", version: "v3.12-1", uses: 9, added: "Aug 20", state: "paused" },
+          { id: "rubric", name: "Rubric grader", checks: "Short written answers. Practice only", version: "v1.2", uses: 15, added: "Aug 20", state: "on" },
+        ],
+        catalog: [
+          { id: "sql", name: "SQL engine", checks: "Queries against a seeded database" },
+          { id: "numeric", name: "Numeric checker", checks: "Numbers within a tolerance, with units" },
+          { id: "access", name: "Accessibility checker", checks: "axe-core rules: labels, contrast, landmarks" },
+          { id: "web", name: "Web runner", checks: "HTML, CSS and JavaScript in a sandbox" },
+        ],
+        questions: qs,
+        async init() {
+          // Compute the predict question's key by running it, as the generator would.
+          const r = await webRun(qs[0].html, qs[0].steps);
+          this.questions[0].key = r[2].value;
+        },
+        checkPredict(q) {
+          if (q.key === null) return;
+          const ok = q.guess.trim() === q.key;
+          q.feedback = { ok, text: ok ? "Correct." : q.guess.trim() === "3" ? "Not quite: each click adds 2, not 1. Three clicks make 6." : `Not quite: the page shows ${q.key}.` };
+        },
+        async runTests(q) {
+          q.running = true;
+          const r = await webRun(q.code, q.steps);
+          q.results = r; q.running = false;
+          const ok = r.every((x) => x.ok);
+          const sameBug = q.wrong && /addLike\(\)\s*\)/.test(q.code);
+          q.feedback = { ok, text: ok ? "All checks pass." : sameBug ? `Still failing. Mistake found: ${q.wrong}.` : `${r.filter((x) => !x.ok).length} of ${r.length} checks fail. See the steps.` };
+        },
+        addTool(c) {
+          this.tools.push({ id: c.id, name: c.name, checks: c.checks, version: "v1.0", uses: 0, added: "today", state: "on" });
+          Mock.toast(`${c.name} added. New questions can now use it; it can be paused later but not deleted.`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

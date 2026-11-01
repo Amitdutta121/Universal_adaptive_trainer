@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+name: Step through the code
+summary: The student steps through a short program line by line and watches the variables and the output change.
+renderer: html
+prompt: |
+  Write one short Python program (at most 15 lines, no input(), no imports, no files) that shows
+  the subtopic's idea at work, the way the book excerpts use it. Then write a note for the lines
+  worth explaining: what that line does to the variables or the output, in one sentence each.
+  Never describe values you have not seen run: the stepper shows the recorded run beside your
+  notes, so a note says what the line does, not what a variable ends up holding.
+fits: [code]
+guidance_levels: [worked, faded]
+inputs: [subtopic, chunks, code]
+tool: python_trace
+checks: [html_loads, trace_matches]

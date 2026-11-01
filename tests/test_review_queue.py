@@ -34,6 +34,9 @@ def _question(
     *,
     evaluation: object | None = None,
     status: QuestionStatus = QuestionStatus.VALIDATION_PASSED,
+    audit: bool = False,
+    audit_metric: str | None = None,
+    audit_reason: str | None = None,
 ) -> QuestionRow:
     row = QuestionRepository(session).add(
         QuestionRow(
@@ -47,6 +50,9 @@ def _question(
             generator_version="1",
             status=status,
             pedagogical_eval=evaluation,
+            audit=audit,
+            audit_metric=audit_metric,
+            audit_reason=audit_reason,
         )
     )
     session.commit()
@@ -72,6 +78,37 @@ def test_queue_offers_the_lowest_unreviewed_question(client: TestClient, session
     _question(session)
 
     assert _queue(client)["question"]["question"]["id"] == first.id
+
+
+def test_queue_offers_an_audit_draft_before_ordinary_items(
+    client: TestClient, session: Session
+) -> None:
+    ordinary = _question(session)
+    audit = _question(
+        session,
+        evaluation=_evaluation(),
+        audit=True,
+        audit_metric="difficulty",
+        audit_reason="this is hard, not medium",
+    )
+
+    payload = _queue(client)
+    offered = payload["question"]["question"]
+    assert offered["id"] == audit.id
+    assert offered["id"] != ordinary.id
+    assert offered["audit"] is True
+    assert offered["audit_metric"] == "difficulty"
+    assert offered["audit_reason"] == "this is hard, not medium"
+
+
+def test_skipping_an_ordinary_item_does_not_hide_an_earlier_audit(
+    client: TestClient, session: Session
+) -> None:
+    audit = _question(session, audit=True, audit_metric="topic", audit_reason="wrong cell")
+    later = _question(session)
+
+    payload = _queue(client, after=later.id)
+    assert payload["question"]["question"]["id"] == audit.id
 
 
 def test_queue_skips_questions_that_already_have_a_verdict(

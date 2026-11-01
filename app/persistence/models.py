@@ -10,13 +10,18 @@ needs them.
 from __future__ import annotations
 
 import secrets
-from datetime import UTC, datetime
+import threading
+import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
+from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
+    Dialect,
     Float,
     ForeignKey,
     Integer,
@@ -27,18 +32,24 @@ from sqlalchemy import (
     and_,
 )
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
+from app.assessment.catalog import LEGACY_SUBJECT
 from app.domain.books import ExtractionWarning
 from app.domain.enums import (
     BookStatus,
     CalibrationLabel,
+    ChunkSourceKind,
     ConceptConfidence,
     CurriculumItemStatus,
     CurriculumStatus,
+    CustomJudgeKind,
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidanceLevel,
+    GuidelineStatus,
+    JobKind,
     JudgeBatchStatus,
     JudgeMetricId,
     QuadrantCell,
@@ -47,9 +58,13 @@ from app.domain.enums import (
     QuestionType,
     RejectionReason,
     ReviewDecision,
+    RoundStatus,
     SourceFormat,
     StructureConfidence,
     StructureSource,
+    TutorialBlockStatus,
+    TutorialRenderer,
+    VideoAvailability,
 )
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.domain.questions import DEFAULT_PRIORITY, GenerationAttempt, QuestionValidationReport
@@ -63,9 +78,25 @@ from app.persistence.types import (
     StrEnumType,
 )
 
+_now_lock = threading.Lock()
+_last_now = datetime.min.replace(tzinfo=UTC)
+
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    """UTC time strictly later than the previous stamp from this process.
+
+    Professor reviews are paired with the evaluation that preceded them by
+    ``created_at``. A stalled clock (Windows often repeats a timestamp for about
+    a millisecond) would let a later re-judge share the review's stamp and be
+    read as the verdict the professor actually saw.
+    """
+    global _last_now
+    with _now_lock:
+        current = datetime.now(UTC)
+        if current <= _last_now:
+            current = _last_now + timedelta(microseconds=1)
+        _last_now = current
+        return current
 
 
 def _new_resume_token() -> str:
@@ -80,6 +111,18 @@ def _new_resume_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+class _NullableReviewIds(JsonList):
+    """Only explicit review corrections preserve SQL NULL as no observation."""
+
+    cache_ok = True
+
+    def process_bind_param(self, value: list | None, dialect: Dialect) -> str | None:
+        return None if value is None else super().process_bind_param(value, dialect)
+
+    def process_result_value(self, value: str | None, dialect: Dialect) -> list | None:
+        return None if value is None else super().process_result_value(value, dialect)
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -90,12 +133,51 @@ class TimestampMixin:
 #: its original ``*_json`` name. Nothing about an existing database file changes.
 
 
+class CourseRow(TimestampMixin, Base):
+    """A course: the workspace a professor's books and taxonomies belong to.
+
+    Only books and curriculum versions carry ``course_id`` directly. Everything
+    else reaches its course through one of them -- chapters and sections through
+    their book, topics and subtopics through their version, and questions and
+    question sets through the curriculum version they are generated or frozen
+    against (generation always requires one, see ``app/generation/spec.py``).
+    """
+
+    __tablename__ = "courses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The account that owns it, and so the only one that can reach it (ADR-058, ADR-060).
+    #: ``NULL`` (a deleted owner, or a row from before 0009) means no account reaches it:
+    #: every check compares with ``=``, which a ``NULL`` never satisfies.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="SET NULL"), default=None, index=True
+    )
+    #: Subject preset it was created from (``app.assessment.catalog.SUBJECTS``); ``None`` is
+    #: treated as the legacy Intro Python subject.
+    subject: Mapped[str | None] = mapped_column(String(50), default=None)
+    #: The question types the professor chose: the AI generates only these (ADR-054).
+    question_types: Mapped[list[str]] = mapped_column(
+        "question_types_json", JsonList, default=list, nullable=True
+    )
+    #: Worked out from ``question_types`` on save, never chosen directly.
+    capabilities: Mapped[list[str]] = mapped_column(
+        "capabilities_json", JsonList, default=list, nullable=True
+    )
+
+
 class BookRow(TimestampMixin, Base):
     """An imported textbook, as declared by its book JSON document."""
 
     __tablename__ = "books"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    #: Nullable only for rows built outside the API (scripts, unit tests); every
+    #: book the API imports names the course it was imported into.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), default=None, index=True
+    )
     title: Mapped[str] = mapped_column(String(500))
     #: Only populated when the document states an author. Never inferred.
     author: Mapped[str | None] = mapped_column(String(500), default=None)
@@ -123,6 +205,19 @@ class BookRow(TimestampMixin, Base):
         "warnings_json", PydanticList(ExtractionWarning), default=list, nullable=True
     )
     imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: The chunk version retrieval and listings read. ``None`` for a book imported before
+    #: chunks existed, which has sections only. Older versions' chunks are kept, never
+    #: rewritten, so ids stored on questions and frozen sets keep resolving.
+    current_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: A YouTube source only (``SourceFormat.YOUTUBE``): the 11-character video id, and whether
+    #: the video can still be embedded, as of ``availability_checked_at`` (Task 30).
+    video_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    video_availability: Mapped[VideoAvailability | None] = mapped_column(
+        StrEnumType(VideoAvailability, 16), default=None
+    )
+    availability_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     chapters: Mapped[list[BookChapterRow]] = relationship(
         back_populates="book",
@@ -136,6 +231,46 @@ class BookRow(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="BookSectionRow.position",
     )
+    chunks: Mapped[list[ChunkRow]] = relationship(
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="(ChunkRow.book_version, ChunkRow.ordinal)",
+    )
+
+
+class ChunkRow(Base):
+    """One chunk of a book version: the unit retrieval, generation and citations use.
+
+    Immutable once written (see :mod:`app.domain.chunks`). ``id`` is
+    :func:`~app.domain.chunks.make_chunk_id`; ``content_hash`` is the SHA-256 of ``text``.
+    Page numbers are nullable because a DOCX has none.
+    """
+
+    __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("book_id", "book_version", "ordinal"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    book_version: Mapped[int] = mapped_column(Integer)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    page_start: Mapped[int | None] = mapped_column(Integer, default=None)
+    page_end: Mapped[int | None] = mapped_column(Integer, default=None)
+    heading_path: Mapped[list[str]] = mapped_column(
+        "heading_path_json", JsonList, default=list, nullable=True
+    )
+    text: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    source_kind: Mapped[ChunkSourceKind] = mapped_column(
+        StrEnumType(ChunkSourceKind, 16), default=ChunkSourceKind.BOOK
+    )
+    #: Set for a video chunk only (Phase 7).
+    start_seconds: Mapped[float | None] = mapped_column(Float, default=None)
+    end_seconds: Mapped[float | None] = mapped_column(Float, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    book: Mapped[BookRow] = relationship(back_populates="chunks")
+    #: SQLite here does not enforce ``ON DELETE CASCADE``, so the ORM deletes them.
+    embeddings: Mapped[list[ChunkEmbeddingRow]] = relationship(cascade="all, delete-orphan")
 
 
 class BookChapterRow(Base):
@@ -209,10 +344,8 @@ class SectionEmbeddingRow(Base):
 
     A *derived* index, not source data: it can be rebuilt from
     ``book_sections.text`` at any time by ``scripts/embed_sections.py``. It lives
-    in its own table -- never a column on ``book_sections`` -- so an existing
-    database needs no migration: ``create_all`` adds a missing table, while
-    ``verify_schema`` (ADR-008) only trips on missing *columns* of tables that
-    already exist.
+    in its own table -- never a column on ``book_sections`` -- so dropping and
+    rebuilding it never touches source data.
 
     ``content_hash`` is the SHA-256 of the section text the vector was built
     from, so a re-run re-embeds only the sections whose text changed. ``model``
@@ -234,12 +367,64 @@ class SectionEmbeddingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ChunkEmbeddingRow(Base):
+    """A cached embedding vector for one chunk, in one embedding model's space.
+
+    Derived, like ``section_embeddings``: rebuilt from ``chunks`` on demand. One row per
+    (chunk, model), so switching the embedding model embeds afresh and switching back
+    reuses the old vectors. ``content_hash`` is the SHA-256 of the exact text embedded
+    (heading path plus chunk text).
+    """
+
+    __tablename__ = "chunk_embeddings"
+    __table_args__ = (UniqueConstraint("chunk_id", "model"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ModelSettingRow(Base):
+    """One role's model settings, overriding ``.env`` field by field (``app.settings_store``).
+
+    A null field keeps the ``.env`` value. ``api_key_encrypted`` is Fernet ciphertext; the
+    plaintext key is never stored.
+    """
+
+    __tablename__ = "model_settings"
+
+    role: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider: Mapped[str | None] = mapped_column(String(32), default=None)
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
+    base_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="SET NULL"), default=None
+    )
+    #: On the pending ``embeddings`` row only: the re-embedding job that will activate it.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("background_jobs.id", ondelete="SET NULL"), default=None
+    )
+
+
 class CurriculumVersionRow(TimestampMixin, Base):
     """A proposed or approved Topic -> Subtopic snapshot."""
 
     __tablename__ = "curriculum_versions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    #: Nullable for the same reason as ``BookRow.course_id``.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), default=None, index=True
+    )
     label: Mapped[str] = mapped_column(String(200))
     status: Mapped[CurriculumStatus] = mapped_column(
         StrEnumType(CurriculumStatus, 32), default=CurriculumStatus.PROPOSED
@@ -366,11 +551,13 @@ class SubtopicRow(Base):
 
 
 class SubtopicEvidenceRow(Base):
-    """One section that supports a proposed subtopic, with what it showed.
+    """One chunk that supports a proposed subtopic, with what it showed.
 
     This is the traceability record for curriculum proposal: every subtopic the
-    system invents must point back at real sections of real books. Without it a
+    system invents must point back at real text of real books. Without it a
     proposed subtopic is an assertion the professor cannot check.
+
+    ``section_id`` is legacy: evidence written before chunks names a section and no chunk.
     """
 
     __tablename__ = "subtopic_evidence"
@@ -380,15 +567,18 @@ class SubtopicEvidenceRow(Base):
         ForeignKey("subtopics.id", ondelete="CASCADE"), index=True
     )
     book_id: Mapped[int] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
-    section_id: Mapped[int] = mapped_column(
-        ForeignKey("book_sections.id", ondelete="CASCADE"), index=True
+    section_id: Mapped[int | None] = mapped_column(
+        ForeignKey("book_sections.id", ondelete="CASCADE"), default=None, index=True
+    )
+    chunk_id: Mapped[str | None] = mapped_column(
+        ForeignKey("chunks.id", ondelete="CASCADE"), default=None, index=True
     )
 
-    #: The label this section's own analysis used, before normalisation.
+    #: The label this chunk's own analysis used, before normalisation.
     candidate_label: Mapped[str] = mapped_column(String(300))
-    #: What the section actually teaches, in the analysis's words.
+    #: What the chunk actually teaches, in the analysis's words.
     definition: Mapped[str | None] = mapped_column(Text, default=None)
-    #: Short representative excerpts drawn from the section.
+    #: Short representative excerpts drawn from the chunk.
     quotes: Mapped[list[str]] = mapped_column("quotes_json", JsonList, default=list, nullable=True)
     #: Denormalised one-line citation, so listing evidence needs no extra joins.
     citation: Mapped[str] = mapped_column(String(1000), default="")
@@ -396,7 +586,7 @@ class SubtopicEvidenceRow(Base):
 
     subtopic: Mapped[SubtopicRow] = relationship(back_populates="evidence")
     book: Mapped[BookRow] = relationship()
-    section: Mapped[BookSectionRow] = relationship()
+    chunk: Mapped[ChunkRow | None] = relationship()
 
 
 class QuestionRow(TimestampMixin, Base):
@@ -425,6 +615,15 @@ class QuestionRow(TimestampMixin, Base):
     )
     status: Mapped[QuestionStatus] = mapped_column(
         StrEnumType(QuestionStatus, 32), default=QuestionStatus.GENERATED
+    )
+
+    #: Router provenance, independent of later professor approval/rejection.
+    trust_provenance: Mapped[str | None] = mapped_column(String(32), default=None)
+    trust_scope_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    trust_sequence: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Frozen judge/rule evidence at routing, protected from later re-evaluation.
+    trust_snapshot: Mapped[dict | None] = mapped_column(
+        "trust_snapshot_json", JsonObject, default=None
     )
 
     prompt: Mapped[str] = mapped_column(Text)
@@ -464,6 +663,33 @@ class QuestionRow(TimestampMixin, Base):
     #: The instructor feedback threaded into the generation prompt for a
     #: regenerated question. ``NULL`` unless ``regenerated_from_question_id`` is set.
     regeneration_feedback: Mapped[str | None] = mapped_column(Text, default=None)
+
+    # Question setup (docs/QUESTION_SETUP_PLAN.md). All three are ``NULL`` for a question
+    # not generated by a setup round.
+    #: The library style (``app.styles``) the question was written in. A plain string,
+    #: not a foreign key: the library is versioned code data, not a table.
+    style_id: Mapped[str | None] = mapped_column(String(100), default=None, index=True)
+    #: The generation round that produced it.
+    round_id: Mapped[int | None] = mapped_column(
+        ForeignKey("generation_rounds.id", ondelete="SET NULL"), default=None, index=True
+    )
+    #: The subtopic the generator was *asked* for. ``subtopic_ids`` is what the question
+    #: ended up tagged with; the two differ when the topic judge or the professor corrects it.
+    target_subtopic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
+    )
+    #: Generated on demand for one student who had nothing left to answer. Such a question
+    #: may be served to that student before the professor reviews it; to anyone else only
+    #: once approved.
+    live_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: A judge-failed draft kept so the professor can say whether they agree (ADR-064, m9).
+    #: Never usable unless the professor approves it.
+    audit: Mapped[bool] = mapped_column(Boolean, default=False)
+    audit_metric: Mapped[str | None] = mapped_column(String(32), default=None)
+    audit_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: What blind solvers said against the key of a round question kept on its last attempt
+    #: (app/generation/solve.py). Such a question waits for the professor.
+    solve_flag: Mapped[str | None] = mapped_column(Text, default=None)
 
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
@@ -545,7 +771,7 @@ class QuestionSubtopicRow(Base):
 
 class QuestionSimilarityRow(Base):
     """A flagged possible duplicate, written after a generation run (coverage
-    Generate m3).
+    Generate m3) or when a round keeps a question that resembles one (ADR-063).
 
     Directional: ``question_id`` is the freshly generated question, and
     ``similar_question_id`` the pre-existing approved/validation-passed
@@ -573,6 +799,29 @@ class QuestionSimilarityRow(Base):
     similar_question: Mapped[QuestionRow] = relationship(
         foreign_keys=[similar_question_id], lazy="selectin"
     )
+
+
+class QuestionEmbeddingRow(Base):
+    """A cached embedding of one question's duplicate-check text (ADR-063 point 6).
+
+    Derived, like ``section_embeddings``: rebuilt on demand by
+    :class:`app.retrieval.duplicates.QuestionEmbeddingStore`. ``text_hash`` is the SHA-256 of
+    the *normalised* check text (prompt + code + options), so an edited question is re-embedded
+    and an exact duplicate is found without any embedding call.
+    """
+
+    __tablename__ = "question_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128))
+    dim: Mapped[int] = mapped_column(Integer)
+    #: Raw little-endian float32 bytes (numpy ``tobytes``); ``dim`` floats long.
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    text_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class QuestionEvaluationRow(TimestampMixin, Base):
@@ -618,8 +867,23 @@ class QuestionEvaluationRow(TimestampMixin, Base):
     trigger: Mapped[EvaluationTrigger] = mapped_column(
         StrEnumType(EvaluationTrigger, 32), default=EvaluationTrigger.GENERATION
     )
+    #: Results of the professor's custom rule judges (:class:`CustomJudgeRow`), one entry
+    #: per rule in the shape of ``app.evaluation.custom.CustomJudgeResult``. Kept apart from
+    #: ``evaluation`` because custom rules are not ``JudgeMetricId`` metrics. Empty for
+    #: evaluations recorded before custom judges existed.
+    custom_results: Mapped[list[dict]] = mapped_column(
+        "custom_results_json", JsonList, default=list, nullable=True
+    )
 
     question: Mapped[QuestionRow] = relationship(back_populates="evaluations")
+
+
+class JudgeTrustCounterRow(Base):
+    """Atomic eligible-question sequence per versioned course/taxonomy/style scope."""
+
+    __tablename__ = "judge_trust_counters"
+    scope_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    eligible_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class JudgeBatchRunRow(TimestampMixin, Base):
@@ -636,6 +900,10 @@ class JudgeBatchRunRow(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    #: The course whose questions it re-judges; ``None`` for a run submitted without one.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), default=None, index=True
+    )
     provider_batch_ids: Mapped[list[str]] = mapped_column(
         "provider_batch_ids_json", JsonList, default=list, nullable=True
     )
@@ -678,8 +946,24 @@ class ProfessorReviewRow(TimestampMixin, Base):
     professor_id: Mapped[int | None] = mapped_column(Integer, default=None)
     reviewed_generator_name: Mapped[str | None] = mapped_column(String(200), default=None)
     reviewed_generator_version: Mapped[str | None] = mapped_column(String(50), default=None)
+    #: The difficulty the professor says the question really is. ``NULL`` when the review
+    #: carried no correction (every review before question setup existed); otherwise the
+    #: difficulty judge is at fault iff its verdict differs from this.
+    corrected_difficulty: Mapped[Difficulty | None] = mapped_column(
+        StrEnumType(Difficulty, 16), default=None
+    )
+    #: Explicit professor classification. NULL means it was not confirmed;
+    #: historical empty lists also carry no observation.
+    corrected_subtopic_ids: Mapped[list[int] | None] = mapped_column(
+        "corrected_subtopic_ids_json", _NullableReviewIds, default=None, nullable=True
+    )
 
     question: Mapped[QuestionRow] = relationship(back_populates="reviews")
+    #: The episode this review left in memory (ADR-063). Deleted with the review: SQLite
+    #: enforces no ``ondelete``, so the ORM cascade is what removes it.
+    episode: Mapped[MemoryEpisodeRow | None] = relationship(
+        back_populates="review", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class QuestionSetVersionRow(TimestampMixin, Base):
@@ -772,7 +1056,7 @@ class TypeInstructionRow(TimestampMixin, Base):
     """The generation instruction for one question type, learned from reviews.
 
     Personalization lives here rather than in a block appended to the prompt
-    (ADR-033). One row per :class:`~app.domain.enums.QuestionType`, holding the
+    (ADR-033). One row per subject and :class:`~app.domain.enums.QuestionType`, holding the
     text that occupies the type-specific slot the shipped one-liner used to fill.
 
     ``rules`` is the accumulated list the rewriter edits; ``instruction`` is the
@@ -782,11 +1066,17 @@ class TypeInstructionRow(TimestampMixin, Base):
     """
 
     __tablename__ = "type_instructions"
+    __table_args__ = (
+        UniqueConstraint("subject", "question_type", name="uq_type_instructions_subject_type"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    question_type: Mapped[QuestionType] = mapped_column(
-        StrEnumType(QuestionType, 32), unique=True, index=True
+    #: The subject preset this instruction was learned for. A rule a Python course
+    #: earned must never reach a Physics course, so the row is per (subject, type).
+    subject: Mapped[str] = mapped_column(
+        String(50), default=LEGACY_SUBJECT, server_default=LEGACY_SUBJECT
     )
+    question_type: Mapped[QuestionType] = mapped_column(StrEnumType(QuestionType, 32), index=True)
     instruction: Mapped[str] = mapped_column(Text)
     #: One entry per learned rule: ``{"rule": str, "review_ids": [int]}``.
     rules: Mapped[list[dict]] = mapped_column("rules_json", JsonList, default=list, nullable=True)
@@ -865,9 +1155,142 @@ class ReviewOutcomeRow(TimestampMixin, Base):
     judges_refreshed: Mapped[list[JudgeMetricId]] = mapped_column(
         "judges_refreshed_json", EnumList(JudgeMetricId), default=list, nullable=True
     )
+    #: The round whose lesson run learned from this review (ADR-063). ``NULL`` means the
+    #: lesson is still pending; ``0`` marks reviews learned on submit, before lesson runs.
+    #: Not a foreign key: deleting a round must not make its reviews pending again.
+    lessons_round_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
 
     review: Mapped[ProfessorReviewRow] = relationship()
     question: Mapped[QuestionRow] = relationship()
+
+
+class MemoryEpisodeRow(TimestampMixin, Base):
+    """One reviewed question as memory keeps it: the episode (ADR-063 point 3, ADR-064).
+
+    Written when the professor's verdict lands and frozen there: the text the professor saw
+    (for an edit, their version, with the generated one kept), where the question claimed to
+    sit, the verdict with its reasons and comment, the professor's corrections, and what
+    every judge said about the question at that moment. The generator retrieves episodes as
+    examples (:mod:`app.retrieval.examples`); the judges will read the same rows (m11).
+
+    ``source`` says what produced the verdict: ``review``, ``retry``, ``audit`` (m9), or
+    ``borderline`` (m10). ``review_id`` may be ``NULL`` for audit and borderline rows.
+    Scoped by ``subject``, the course's personal key
+    (:attr:`app.subjects.SubjectProfile.personal_key`), so one professor's or subject's
+    memory never reaches another's.
+    """
+
+    __tablename__ = "memory_episodes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: One episode per review; deleting the review deletes it.
+    review_id: Mapped[int | None] = mapped_column(
+        ForeignKey("professor_reviews.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        default=None,
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(16), default="review")
+    subject: Mapped[str] = mapped_column(String(100), index=True)
+    question_type: Mapped[QuestionType | None] = mapped_column(
+        StrEnumType(QuestionType, 32), default=None, index=True
+    )
+    #: Where the question claimed to sit when it was reviewed (before any correction).
+    topic_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    subtopic_ids: Mapped[list[int]] = mapped_column(
+        "subtopic_ids_json", JsonList, default=list, nullable=True
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(StrEnumType(Difficulty, 16))
+    #: Prompt, code and options as reviewed (:func:`app.retrieval.duplicates.embed_text`);
+    #: for an edit, the professor's version.
+    text: Mapped[str] = mapped_column(Text)
+    #: For an edit, the generated text the professor rewrote; otherwise ``NULL``.
+    original_text: Mapped[str | None] = mapped_column(Text, default=None)
+    decision: Mapped[ReviewDecision] = mapped_column(StrEnumType(ReviewDecision, 16))
+    reasons: Mapped[list[RejectionReason]] = mapped_column(
+        "reasons_json", EnumList(RejectionReason), default=list, nullable=True
+    )
+    comment: Mapped[str | None] = mapped_column(Text, default=None)
+    corrected_difficulty: Mapped[Difficulty | None] = mapped_column(
+        StrEnumType(Difficulty, 16), default=None
+    )
+    corrected_subtopic_ids: Mapped[list[int] | None] = mapped_column(
+        "corrected_subtopic_ids_json", _NullableReviewIds, default=None, nullable=True
+    )
+    #: Every judge's answer at review time, keyed by metric id:
+    #: ``{"passed", "status", "rationale", "issue_codes", "proposed_difficulty",
+    #: "proposed_subtopic_ids"}``. Empty when the question was never judged.
+    judge_verdicts: Mapped[dict] = mapped_column(
+        "judge_verdicts_json", JsonObject, default=dict, nullable=True
+    )
+    rubric_version: Mapped[str | None] = mapped_column(String(50), default=None)
+
+    review: Mapped[ProfessorReviewRow | None] = relationship(back_populates="episode")
+
+    @property
+    def effective_difficulty(self) -> Difficulty:
+        """The professor's difficulty when they corrected it, else the reviewed one."""
+        return self.corrected_difficulty or self.difficulty
+
+    @property
+    def effective_subtopic_ids(self) -> list[int]:
+        """The professor's subtopics when they corrected them, else the reviewed ones."""
+        return list(self.corrected_subtopic_ids or self.subtopic_ids or [])
+
+
+class MemoryGuidelineRow(TimestampMixin, Base):
+    """One learned guideline: semantic memory (ADR-063 points 3-4, ADR-064).
+
+    A short rule distilled from reviews, owned by a ``target``: ``generator:<question type>``
+    (m5), later ``judge:<metric>`` (m11). The lesson run edits these rows with operations
+    (add, merge, support, retire) -- the list is never rewritten -- so ``review_ids`` is the
+    evidence each one has accumulated. Only ``ACTIVE`` rows are sent; a row is active with at
+    least two distinct supporting reviews or ``confirmed_by_professor``. Scoped by
+    ``subject``, the course's personal key, like episodes.
+    """
+
+    __tablename__ = "memory_guidelines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(100), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    #: The distinct reviews that support this guideline.
+    review_ids: Mapped[list[int]] = mapped_column(
+        "review_ids_json", JsonList, default=list, nullable=True
+    )
+    status: Mapped[GuidelineStatus] = mapped_column(
+        StrEnumType(GuidelineStatus, 16), default=GuidelineStatus.PENDING, index=True
+    )
+    confirmed_by_professor: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Why it was refused or retired ("merged into 12", "deleted by the professor", ...).
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The rounds whose lesson run created it and last changed it (``NULL``: migrated or
+    #: changed outside a round).
+    created_round_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_round_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class SubtopicFacetRow(TimestampMixin, Base):
+    """The facets of one subtopic: the distinct things a question about it can assess (m7).
+
+    Listed once by a model call and reused by every later round, so two targets of a cell
+    can be told to assess different things, and a cell whose facets are all covered is
+    known to be saturated without another call.
+    """
+
+    __tablename__ = "subtopic_facets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    facets: Mapped[list[str]] = mapped_column("facets_json", JsonList, default=list)
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
 
 
 class JudgePromptRow(TimestampMixin, Base):
@@ -885,11 +1308,17 @@ class JudgePromptRow(TimestampMixin, Base):
     """
 
     __tablename__ = "judge_prompts"
+    __table_args__ = (
+        UniqueConstraint("subject", "metric", name="uq_judge_prompts_subject_metric"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    metric: Mapped[JudgeMetricId] = mapped_column(
-        StrEnumType(JudgeMetricId, 32), unique=True, index=True
+    #: The subject preset this judge was edited for: one per (subject, metric), so an
+    #: edit made for one subject's questions never judges another subject's.
+    subject: Mapped[str] = mapped_column(
+        String(50), default=LEGACY_SUBJECT, server_default=LEGACY_SUBJECT
     )
+    metric: Mapped[JudgeMetricId] = mapped_column(StrEnumType(JudgeMetricId, 32), index=True)
     system_prompt: Mapped[str] = mapped_column(Text)
     revision: Mapped[int] = mapped_column(Integer, default=1)
     #: Why the professor changed it. Not required, but it is the only record of
@@ -907,6 +1336,372 @@ class JudgePromptRow(TimestampMixin, Base):
     learned: Mapped[bool] = mapped_column(Boolean, default=False)
 
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class JudgeMemorySnapshotRow(TimestampMixin, Base):
+    """Frozen judge guidelines for one subject at one moment (ADR-064, m11).
+
+    A round uses one snapshot throughout. A candidate is promoted only if held-out
+    agreement does not drop and the known-bad pass rate does not rise.
+    """
+
+    __tablename__ = "judge_memory_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subject: Mapped[str] = mapped_column(String(50), index=True)
+    #: ``{metric: [guideline texts]}`` at freeze time.
+    guidelines: Mapped[dict] = mapped_column("guidelines_json", JsonObject, default=dict)
+    promoted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class QuestionSetupRow(TimestampMixin, Base):
+    """A professor-approved question setup for one taxonomy (docs/QUESTION_SETUP_PLAN.md).
+
+    Saved when the professor approves the setup modal: which library styles may be used for
+    each subtopic, and how many approved questions each subtopic x difficulty cell should
+    reach. Append-only: saving again writes a new row, and the newest row for a curriculum
+    version is its current setup.
+
+    ``approved_styles`` maps a subtopic id (as a string -- JSON object keys are strings) to
+    the style ids approved for it: ``{"12": ["py.trace_output", "py.fix_bug"]}``.
+    ``cell_targets`` holds one entry per cell:
+    ``{"subtopic_id": int, "difficulty": "easy"|"medium"|"hard", "target": int}``.
+    """
+
+    __tablename__ = "question_setups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    curriculum_version_id: Mapped[int] = mapped_column(
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"), index=True
+    )
+    approved_styles: Mapped[dict] = mapped_column(
+        "approved_styles_json", JsonObject, default=dict, nullable=True
+    )
+    cell_targets: Mapped[list[dict]] = mapped_column(
+        "cell_targets_json", JsonList, default=list, nullable=True
+    )
+
+    rounds: Mapped[list[GenerationRoundRow]] = relationship(
+        back_populates="setup",
+        cascade="all, delete-orphan",
+        order_by="GenerationRoundRow.number",
+    )
+
+
+class GenerationRoundRow(TimestampMixin, Base):
+    """One background batch of generated questions for a setup (default 10).
+
+    ``start_round`` / ``next_round`` (``app.generation.rounds``) create the row ``QUEUED``
+    with its ``targets`` chosen; ``run_round`` moves it through ``RUNNING`` to ``DONE`` or
+    ``FAILED`` and keeps the counters current so the client can poll progress.
+
+    ``targets`` holds one entry per question to generate:
+    ``{"subtopic_id": int, "difficulty": str, "style_id": str}``. ``produced`` counts stored
+    questions, ``dropped`` the targets abandoned after the last retry (never stored).
+    ``skipped`` counts hard targets the lesson cannot support: one judge call, no drafts,
+    and not a drop. ``skip_reason`` is that judge's reason.
+    """
+
+    __tablename__ = "generation_rounds"
+    __table_args__ = (
+        UniqueConstraint("setup_id", "number", name="uq_generation_rounds_setup_number"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    setup_id: Mapped[int] = mapped_column(
+        ForeignKey("question_setups.id", ondelete="CASCADE"), index=True
+    )
+    #: 1 for the round the setup approval starts, then 2, 3, ... per "Generate next round".
+    number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[RoundStatus] = mapped_column(
+        StrEnumType(RoundStatus, 16), default=RoundStatus.QUEUED
+    )
+    targets: Mapped[list[dict]] = mapped_column(
+        "targets_json", JsonList, default=list, nullable=True
+    )
+    requested: Mapped[int] = mapped_column(Integer, default=0)
+    produced: Mapped[int] = mapped_column(Integer, default=0)
+    dropped: Mapped[int] = mapped_column(Integer, default=0)
+    #: Hard targets the lesson cannot support, and targets of a cell found saturated while
+    #: the round ran (m7). Not stored, and not a drop.
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    #: Why those hard targets were skipped, in the judge's words.
+    skip_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Reviews the round's lesson run learned from before it generated (ADR-063).
+    lessons_applied: Mapped[int] = mapped_column(Integer, default=0)
+    #: Why some of those lessons were not learned. The round generates regardless.
+    lessons_error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: What the drift check saw in this round's questions (answer position, option count,
+    #: stem length); ``NULL`` when nothing looked off (ADR-063 point 4).
+    drift_warning: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Stored questions whose first attempt passed every check (m6); out of ``produced`` +
+    #: ``dropped``. ``NULL`` for rounds generated before it was counted.
+    first_attempt_passed: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Cells left out because every facet of their subtopic is covered (m7), e.g.
+    #: "While loops (medium)"; ``NULL`` when none.
+    saturated: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Why the round failed, in the professor's terms. Never a credential.
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: When the professor asked it to stop (Jobs panel). ``run_round`` stops before its next
+    #: target and ends the round ``FAILED``; a set value makes that failure a cancellation.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    #: Judge memory this round froze (ADR-064, m11). ``NULL`` for rounds before snapshots.
+    judge_snapshot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("judge_memory_snapshots.id", ondelete="SET NULL"), default=None
+    )
+
+    setup: Mapped[QuestionSetupRow] = relationship(back_populates="rounds")
+
+
+class LiveQuestionJobRow(TimestampMixin, Base):
+    """One question generated on demand for a student with nothing left to answer.
+
+    ``app.generation.live`` creates the row ``QUEUED`` for the cell the adaptive engine
+    wanted (``subtopic_id`` at ``requested_difficulty``) and runs it in the background with
+    the setup's aligned generator. ``difficulty`` is what was actually generated: a hard
+    cell the lesson cannot support is generated at medium instead. ``DONE`` carries the
+    stored ``question_id``; ``attempt_id`` is set once that question is served, so a job
+    is served at most once. ``FAILED`` carries ``error`` in the student's terms.
+    """
+
+    __tablename__ = "live_question_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    training_session_id: Mapped[int] = mapped_column(
+        ForeignKey("training_sessions.id", ondelete="CASCADE"), index=True
+    )
+    setup_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_setups.id", ondelete="SET NULL"), default=None
+    )
+    subtopic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="SET NULL"), default=None
+    )
+    requested_difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(
+        StrEnumType(Difficulty, 16), default=Difficulty.EASY
+    )
+    style_id: Mapped[str | None] = mapped_column(String(100), default=None)
+    #: The topic mastery the engine read when it asked for this cell.
+    mastery: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[RoundStatus] = mapped_column(
+        StrEnumType(RoundStatus, 16), default=RoundStatus.QUEUED
+    )
+    question_id: Mapped[int | None] = mapped_column(
+        ForeignKey("questions.id", ondelete="SET NULL"), default=None
+    )
+    attempt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("student_attempts.id", ondelete="SET NULL"), default=None
+    )
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class BackgroundJobRow(TimestampMixin, Base):
+    """One long professor action run in the background: bulk generation or a coverage fill.
+
+    ``app.jobs`` creates the row ``QUEUED`` with the validated ``request``, and its runner moves
+    it through ``RUNNING`` to ``DONE`` (``result`` holds what the old blocking response
+    returned) or ``FAILED`` (``error``). ``done`` / ``total`` count questions as they commit,
+    so the Jobs panel can show progress. Question rounds and judge re-runs are jobs too, but
+    keep their own tables (``generation_rounds``, ``judge_batch_runs``).
+    """
+
+    __tablename__ = "background_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: The course it was started in; ``None`` for a request made without one.
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="CASCADE"), default=None, index=True
+    )
+    kind: Mapped[JobKind] = mapped_column(StrEnumType(JobKind, 32))
+    title: Mapped[str] = mapped_column(String(300), default="")
+    status: Mapped[RoundStatus] = mapped_column(
+        StrEnumType(RoundStatus, 16), default=RoundStatus.QUEUED
+    )
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    done: Mapped[int] = mapped_column(Integer, default=0)
+    #: Groups the questions this job made, as ``questions?run_id=`` filters them.
+    run_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    request: Mapped[dict] = mapped_column("request_json", JsonObject, default=dict, nullable=True)
+    result: Mapped[dict | None] = mapped_column(
+        "result_json", JsonObject, default=None, nullable=True
+    )
+    #: Why the job failed, in the professor's terms. Never a credential.
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: When the professor asked it to stop. The runner stops before its next question and
+    #: ends the job ``FAILED``; a set value is what makes that failure a cancellation.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+
+class CustomJudgeRow(TimestampMixin, Base):
+    """A professor-written rule every generated question of a taxonomy must pass.
+
+    Kept out of ``JudgeMetricId`` on purpose: stored evaluations and calibration depend on
+    that enum, while these rules are per-course data. ``LLM`` rules are one yes/no model call
+    each; ``PATTERN`` rules check ``pattern`` (a regex) against the question's code.
+    Results are stored on ``QuestionEvaluationRow.custom_results``.
+    """
+
+    __tablename__ = "custom_judges"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    curriculum_version_id: Mapped[int] = mapped_column(
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"), index=True
+    )
+    #: The rule in the professor's words, e.g. "Never use global variables".
+    rule_text: Mapped[str] = mapped_column(Text)
+    kind: Mapped[CustomJudgeKind] = mapped_column(
+        StrEnumType(CustomJudgeKind, 16), default=CustomJudgeKind.LLM
+    )
+    #: Only for ``PATTERN`` rules; ``NULL`` for ``LLM`` ones.
+    pattern: Mapped[str | None] = mapped_column(Text, default=None)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class CourseStyleRow(TimestampMixin, Base):
+    """A professor's own question style, visible only in its course (Task 18).
+
+    ``style`` is a ``QuestionStyle`` dump, validated and checked like a library file
+    (``app/styles/checks.py``); export gives the same YAML a library contribution uses. Never
+    deleted or renamed: questions and setups store ``style_id``, as they do library ids.
+    """
+
+    __tablename__ = "course_styles"
+    __table_args__ = (
+        UniqueConstraint("course_id", "style_id", name="uq_course_styles_course_id_style_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    style_id: Mapped[str] = mapped_column(String(100))
+    style: Mapped[dict] = mapped_column("style_json", JsonObject)
+
+
+class ExperimentalRecipeRow(TimestampMixin, Base):
+    """A tutorial recipe made in the experimental recipe builder, kept in its course only.
+
+    ``yaml`` is the recipe as written, validated as a ``TutorialRecipe`` on every save
+    (``app/tutorials/experimental.py``). Once approved for a taxonomy it is served like a library
+    recipe, so blocks do store its id; editing or deleting it hides those blocks.
+    """
+
+    __tablename__ = "experimental_recipes"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id", "recipe_id", name="uq_experimental_recipes_course_id_recipe_id"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    recipe_id: Mapped[str] = mapped_column(String(100))
+    yaml: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class TutorialBlockRow(TimestampMixin, Base):
+    """One generated tutorial block for a subtopic (Phase 5, Task 19).
+
+    Made from a recipe (``recipes/<subject>/<id>.yaml``) at one guidance level. ``payload`` is
+    the renderer's contract (``app/tutorials/renderers.py``). ``chunk_ids`` are the chunks the
+    block was written from -- never empty, so every block can be traced to the book; there is
+    no groundedness judge. ``set_version_id`` is set when the block is frozen with a question
+    set (Phase 6). ``error`` says why a ``failed`` block failed.
+    """
+
+    __tablename__ = "tutorial_blocks"
+    __table_args__ = (
+        CheckConstraint("chunk_ids_json <> '[]'", name="ck_tutorial_blocks_chunk_ids"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subtopic_id: Mapped[int] = mapped_column(
+        ForeignKey("subtopics.id", ondelete="CASCADE"), index=True
+    )
+    recipe_id: Mapped[str] = mapped_column(String(100), index=True)
+    guidance_level: Mapped[GuidanceLevel] = mapped_column(StrEnumType(GuidanceLevel, 16))
+    renderer: Mapped[TutorialRenderer] = mapped_column(StrEnumType(TutorialRenderer, 16))
+    payload: Mapped[dict] = mapped_column("payload_json", JsonObject)
+    chunk_ids: Mapped[list[str]] = mapped_column("chunk_ids_json", JsonList)
+    status: Mapped[TutorialBlockStatus] = mapped_column(
+        StrEnumType(TutorialBlockStatus, 16), default=TutorialBlockStatus.DRAFT
+    )
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Provider and model that wrote the block (``StructuredLLMClient.description``).
+    model: Mapped[str] = mapped_column(String(200), default="")
+    set_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_set_versions.id", ondelete="SET NULL"), default=None, index=True
+    )
+
+    @validates("chunk_ids")
+    def _needs_chunks(self, _key: str, chunk_ids: list[str] | None) -> list[str]:
+        if not chunk_ids:
+            raise ValueError("A tutorial block needs the chunk_ids it was written from.")
+        return list(chunk_ids)
+
+
+class TutorialBlockViewRow(TimestampMixin, Base):
+    """One tutorial block shown to a student, and how their next answer went (Task 28).
+
+    ``moment`` is ``before`` (pre-teaching, shown with the attempt it precedes) or ``after``
+    (on the result card of ``attempt_id``). ``next_correct`` is filled by the student's next
+    answer in the same subtopic of the run -- for a ``before`` view, the attempt itself -- and
+    stays ``None`` until then. Per-recipe stats are read from these rows.
+    """
+
+    __tablename__ = "tutorial_block_views"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "block_id", "moment", name="uq_tutorial_block_views_shown"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    attempt_id: Mapped[int] = mapped_column(
+        ForeignKey("student_attempts.id", ondelete="CASCADE"), index=True
+    )
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("training_sessions.id", ondelete="CASCADE"), index=True
+    )
+    block_id: Mapped[int] = mapped_column(ForeignKey("tutorial_blocks.id", ondelete="CASCADE"))
+    recipe_id: Mapped[str] = mapped_column(String(100), index=True)
+    subtopic_id: Mapped[int] = mapped_column(Integer)
+    moment: Mapped[str] = mapped_column(String(8))
+    next_correct: Mapped[bool | None] = mapped_column(Boolean, default=None)
+
+
+class TutorialRecipeDecisionRow(TimestampMixin, Base):
+    """The professor's approval of one recipe for one taxonomy (Phase 6, Task 24).
+
+    Approving or rejecting a recipe sets the status of its blocks in the taxonomy's question
+    bank; a block generated later starts with the decision already made.
+    """
+
+    __tablename__ = "tutorial_recipe_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "curriculum_version_id", "recipe_id", name="uq_tutorial_recipe_decisions_pair"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    curriculum_version_id: Mapped[int] = mapped_column(
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"), index=True
+    )
+    recipe_id: Mapped[str] = mapped_column(String(100))
+    approved: Mapped[bool] = mapped_column(Boolean)
 
 
 class StudentRow(TimestampMixin, Base):

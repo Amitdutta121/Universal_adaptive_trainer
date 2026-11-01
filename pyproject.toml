@@ -14,6 +14,13 @@ dependencies = [
     # fastapi-users; named here because application code now depends on it.
     "email-validator>=2.0",
     "sqlalchemy>=2.0.36",
+    # Schema migrations, applied in-process on start (app/persistence/database.py).
+    # See docs/DECISIONS.md ADR-051.
+    "alembic>=1.13",
+    # Isolated capability graders (graders/, docs/GENERIC_ASSESSMENT_MILESTONES.md):
+    # numeric answers with units, and symbolic (formula) equivalence.
+    "pint>=0.24",
+    "sympy>=1.13",
     # Cookie-session auth for the Instructor Studio (app/auth/). Database
     # strategy: logout revokes server-side rather than only clearing the cookie.
     "fastapi-users[sqlalchemy]>=14.0",
@@ -32,9 +39,42 @@ dependencies = [
     # ADR-048.
     "pymupdf>=1.28",
     "pymupdf4llm>=1.28",
+    # Hybrid chunk retrieval (app/retrieval/fusion.py, Task 11): QueryFusionRetriever + BM25
+    # (bm25s, PyStemmer). MIT. Its stock setup beat our own BM25 + RRF, MRR@10 0.937 vs 0.888
+    # (docs/RETRIEVAL_BASELINE.md). Imported lazily; no LLM or embedding call goes through it.
+    "llama-index-core>=0.14.25,<0.15",
+    "llama-index-retrievers-bm25>=0.8",
+    # Fernet encryption of API keys saved in model settings (app/settings_store.py, Task 41).
+    # Already installed transitively (paramiko); named because application code uses it.
+    "cryptography>=42",
+    # The question-style library is YAML, one file per style (styles/, app/styles/loader.py).
+    # Already installed transitively; named because application code uses it.
+    "pyyaml>=6.0",
+    # YouTube captions for video sources (app/ingestion/youtube.py, Task 30): the maintained
+    # client for YouTube's transcript endpoint, MIT, two small deps. The video is never downloaded.
+    "youtube-transcript-api>=1.2",
+    # The professor agent (app/agent/, Phase 8): tool calling over our services, human approval
+    # as deferred tools, and an AG-UI endpoint the CopilotKit panel talks to. MIT. 2.56 needs
+    # openai 3 (pip warns that llama-index-llms-openai, unused by app code, pins openai<3, and
+    # instructor pins jiter<0.15; the full suite passes on both).
+    "pydantic-ai-slim[openai,ag-ui]>=2.56,<3",
 ]
 
 [project.optional-dependencies]
+# Layout-aware book chunking for PDF, DOCX and PPTX (app/ingestion/parsing.py; chosen in
+# docs/PARSE_SPIKE.md: +0.08 MRR@10 over page chunks). Optional because it pulls CPU torch
+# and ~500 MB of models; without it a PDF is chunked by page text. CPU torch:
+#   uv pip install -e .[parse] --extra-index-url https://download.pytorch.org/whl/cpu
+parse = [
+    "docling>=2.0",
+]
+# Headless check of html tutorial blocks at generation time (app/tutorials/html_check.py,
+# Task 23): console errors, network requests, and the stepper clicked through against its
+# recorded trace. Needs its browser too: playwright install chromium. Without it html
+# blocks are saved as failed, never shipped unchecked.
+htmlcheck = [
+    "playwright>=1.48",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.7",
@@ -48,7 +88,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "graders*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

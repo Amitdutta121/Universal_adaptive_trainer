@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Book · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- C3 · Book detail: chapters -> sections as the document declared them, structure confidence. -->
+<body data-scope="course" data-nav="materials" data-title="Book">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <a class="text-sm text-muted-foreground hover:underline inline-flex items-center gap-1 w-fit" :href="Mock.link('materials.html')"><i data-lucide="arrow-left" class="size-3"></i>All materials</a>
+
+    <!-- Unknown book -->
+    <template x-if="!book">
+      <div class="card"><section class="py-10 text-center">
+        <p class="font-medium">This book doesn't exist in this course</p>
+        <p class="text-sm text-muted-foreground mt-1">It may have been deleted, or the link belongs to another course.</p>
+        <a class="btn mt-3" data-variant="outline" :href="Mock.link('materials.html')">Back to materials</a>
+      </section></div>
+    </template>
+
+    <template x-if="book">
+      <div class="grid gap-6">
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold" x-text="book.title"></h1>
+            <p class="text-sm text-muted-foreground" x-text="summary"></p>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <span class="pill" :class="Mock.tone(book.status)" x-text="book.status"></span>
+            <button type="button" class="btn" data-variant="outline" data-size="sm" @click="Mock.toast('Labels saved')"><i data-lucide="pencil"></i>Edit</button>
+            <button type="button" class="btn" data-variant="outline" data-size="sm" @click="Mock.toast(`Deleting “${book.title}” needs confirmation in the real app`)"><i data-lucide="trash-2"></i>Delete</button>
+            <a class="btn" data-size="sm" :href="Mock.link('generate.html', { book: book.id })"><i data-lucide="wand-sparkles"></i>Generate from this book</a>
+          </div>
+        </div>
+
+        <div class="alert" x-show="book.embedded < book.sections">
+          <i data-lucide="loader"></i>
+          <h2 x-text="`Embedding: ${book.embedded} of ${book.sections} sections done`"></h2>
+          <section>Sections marked “not embedded yet” can't be cited by generated questions until the Embed book job finishes. <a class="underline" href="jobs.html">View in Jobs</a></section>
+        </div>
+
+        <div class="alert" x-show="book.status === 'partial'">
+          <i data-lucide="book-open"></i>
+          <h2>Imported with caveats</h2>
+          <section>The document validated, but it declares caveats: something was incomplete, or its producer guessed at a boundary. Read the warnings below before generating questions from these sections.</section>
+        </div>
+
+        <section class="card" x-show="book.warnings.length">
+          <header><h2>Declared warnings</h2><p>Stated as facts about the source, not faults in the document. Only a defect makes a book partial.</p></header>
+          <section>
+            <ul class="grid gap-2">
+              <template x-for="w in book.warnings" :key="w.code">
+                <li class="flex items-start gap-2 rounded-md border p-3 text-sm">
+                  <span class="pill" :class="w.severity === 'defect' ? 'tone-critical' : 'tone-muted'" x-text="w.code.replace(/_/g, ' ')"></span>
+                  <span x-text="w.text"></span>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </section>
+
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] items-start">
+          <section class="card">
+            <header>
+              <h2>Structure</h2>
+              <p x-text="`Declared by the document. ${book.chapters} chapters, ${book.sections} sections. The section is the unit questions are generated from and cite.`"></p>
+            </header>
+            <section>
+              <template x-if="chapters.length">
+                <ol class="grid gap-4">
+                  <template x-for="ch in chapters" :key="ch.number">
+                    <li class="rounded-lg border overflow-hidden">
+                      <div class="flex flex-wrap items-center gap-2 border-b px-3 py-2" style="background:var(--muted)">
+                        <span class="font-medium" x-text="`${ch.number} ${ch.title}`"></span>
+                        <span class="ml-auto text-xs text-muted-foreground" x-text="`${ch.sections.length} sections · ${ch.sections.reduce((a, s) => a + qCount(s), 0)} questions`"></span>
+                      </div>
+                      <table class="table">
+                        <tbody>
+                          <template x-for="s in ch.sections" :key="s.id">
+                            <tr>
+                              <td><a class="font-medium hover:underline" :href="Mock.link('section.html', { book: book.id, section: s.id })" x-text="s.title"></a></td>
+                              <td class="w-24 text-end text-xs text-muted-foreground tabular-nums" x-text="`${s.words.toLocaleString()} words`"></td>
+                              <td class="w-40">
+                                <span class="pill tone-warn" x-show="s.confidence !== 'high'" :title="`The boundary of this section was guessed from headings, not read from ${SOURCE_SHORT[book.structure_source]}.`" x-text="`${s.confidence} confidence`"></span>
+                                <span class="pill tone-muted" x-show="s.embedded === false">not embedded yet</span>
+                              </td>
+                              <td class="w-28 text-end text-sm tabular-nums" :class="!qCount(s) && 'text-muted-foreground'" x-text="qCount(s) ? `${qCount(s)} question${qCount(s) === 1 ? '' : 's'}` : 'no questions'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </li>
+                  </template>
+                </ol>
+              </template>
+              <template x-if="!chapters.length">
+                <div class="alert" data-variant="destructive">
+                  <i data-lucide="circle-alert"></i>
+                  <h2>The chapter outline couldn't be loaded</h2>
+                  <section>
+                    <p x-text="`The book imported with ${book.sections} sections, but the outline didn't load. Nothing is lost; try again.`"></p>
+                  </section>
+                  <footer><button type="button" class="btn" data-variant="outline" data-size="sm" @click="Mock.toast('Still unavailable. Try again in a minute.')">Retry</button></footer>
+                </div>
+              </template>
+            </section>
+          </section>
+
+          <div class="grid gap-6">
+            <section class="card">
+              <header><h2>How the structure was read</h2></header>
+              <section class="grid gap-3 text-sm">
+                <div>
+                  <div class="text-muted-foreground text-xs">Structure source</div>
+                  <div class="font-medium" x-text="SOURCE[book.structure_source].label"></div>
+                  <p class="text-muted-foreground" x-text="SOURCE[book.structure_source].meaning"></p>
+                </div>
+                <div>
+                  <div class="text-muted-foreground text-xs">Confidence</div>
+                  <div class="font-medium" x-text="`${book.confidence} overall · ${lowCount} section${lowCount === 1 ? '' : 's'} lower`"></div>
+                  <p class="text-muted-foreground"><b>High</b>: the boundary came from the outline. <b>Medium</b> or <b>low</b>: it was guessed from headings or page layout; check the section before generating from it.</p>
+                </div>
+              </section>
+            </section>
+
+            <section class="card">
+              <header><h2>Provenance</h2></header>
+              <section>
+                <dl class="text-sm">
+                  <template x-for="r in provenance" :key="r[0]">
+                    <div class="flex justify-between gap-2 border-b py-2 last:border-b-0">
+                      <dt class="text-muted-foreground" x-text="r[0]"></dt>
+                      <dd class="text-end" :class="r[2] && 'font-mono text-xs'" x-text="r[1]"></dd>
+                    </div>
+                  </template>
+                </dl>
+              </section>
+            </section>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const book = MOCK.books.find((b) => b.id === (Mock.param("book") || "b1") && b.course === c.id)
+        || (!Mock.param("book") ? MOCK.books.find((b) => b.course === c.id) : null);
+      const chapters = book ? MOCK.books_sections[book.id] || [] : [];
+      const qCount = (s) => (MOCK.section_questions[s.id] ? MOCK.section_questions[s.id].length : s.questions);
+      const total = chapters.reduce((a, ch) => a + ch.sections.reduce((b, s) => b + qCount(s), 0), 0);
+      const file = book ? MOCK.book_files[book.id] || {} : {};
+      return {
+        course: c, book, chapters, qCount,
+        summary: book ? [book.authors, `${book.sections} sections`, total ? `${total} questions generated from it` : "no questions generated from it yet"].join(" · ") : "",
+        lowCount: chapters.reduce((a, ch) => a + ch.sections.filter((s) => s.confidence !== "high").length, 0),
+        SOURCE: {
+          pdf_outline: { label: "PDF table of contents", meaning: "Chapters and sections were read from the PDF's bookmarks. Text between two bookmarks is one section." },
+          structured_json: { label: "Declared in the book JSON", meaning: "The document listed its chapters and sections explicitly; nothing was inferred." },
+          heading_guess: { label: "Guessed from headings", meaning: "The PDF had no outline, so boundaries were guessed from heading fonts. The book is marked partial." },
+        },
+        SOURCE_SHORT: { pdf_outline: "the PDF outline", structured_json: "the JSON document", heading_guess: "an outline" },
+        provenance: book ? [
+          ["Uploaded document", file.filename || "—", true],
+          ["Produced by", file.producer || "—", true],
+          ["Format", book.format, true],
+          ["Size", file.size || "—"],
+          ["Uploaded", `${book.uploaded} by ${MOCK.me.name}`],
+          ["Embedded", `${book.embedded} of ${book.sections} sections`],
+        ] : [],
+      };
+    }
+  </script>
+</body>
+</html>

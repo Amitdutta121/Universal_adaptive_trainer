@@ -25,11 +25,13 @@ those failures back fixed them.
 What this is *not*: repair. Nothing here edits the model's answer. The defect is
 stated and the model writes again, so a corrected question is still its own. A
 question still defective after the cap is returned as it stands, because the
-caller stores it either way.
+caller stores it either way -- except a question-setup round, which judges inside
+the loop and drops what is still defective (``app.generation.rounds``).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from typing import Protocol
@@ -48,7 +50,7 @@ from app.generation.spec import (
     TaxonomyClaimOutcome,
     check_claimed_taxonomy,
 )
-from app.llm import StructuredLLMClient
+from app.llm import ChatTurn, StructuredLLMClient
 from app.persistence.models import CurriculumVersionRow
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,24 @@ MALFORMED_CORRECTION = (
     "object whose fields are the question itself, with every required field "
     "filled in."
 )
+
+
+#: How a check is named to the generator. Internal names ("difficulty_judge") mean nothing
+#: to it; any other check is named by its words ("prompt_code_fences_closed").
+CHECK_LABELS: dict[str, str] = {
+    "blind_solve": "answer key",
+    "difficulty_judge": "difficulty",
+    "topic_judge": "topic",
+    "issues_judge": "quality",
+    "custom_rule": "professor's rule",
+    "target_subtopic": "target subtopic",
+    "same_concept": "same idea",
+}
+
+
+#: Judges one otherwise-clean question inside the loop and returns the checks it failed;
+#: empty means it passes. See ``review`` on :func:`generate_with_retries`.
+QuestionReview = Callable[[Question], list[QuestionCheck]]
 
 
 class QuestionValidator(Protocol):
@@ -139,7 +159,8 @@ def _check_instructions(failed: list[QuestionCheck]) -> list[str]:
     """
     instructions: list[str] = []
     for check in failed:
-        instruction = f"Your question failed the check '{check.name}'"
+        label = CHECK_LABELS.get(check.name, check.name.replace("_", " "))
+        instruction = f"Your question failed the {label} check"
         if check.detail:
             instruction += f" ({check.detail})"
         instruction += "."
@@ -160,9 +181,10 @@ def build_correction(problems: list[str], previously_flagged: list[str]) -> str:
 
     The taxonomy and the source text are already in the user prompt, so this block
     carries only the correction; repeating them would push it further from the
-    instruction it corrects.
+    instruction it corrects. The rejected question itself is the model's previous turn
+    (:func:`render_draft`), so the correction can point at it.
     """
-    lines = ["--- correction ---", "Your previous answer was rejected. Do this:"]
+    lines = ["--- correction ---", "Your question above was rejected. Do this:"]
     lines.extend(f"- {problem}" for problem in problems)
     outstanding = [item for item in previously_flagged if item not in problems]
     if outstanding:
@@ -170,9 +192,29 @@ def build_correction(problems: list[str], previously_flagged: list[str]) -> str:
         lines.append("You were already asked to fix these. Do not reintroduce them:")
         lines.extend(f"- {item}" for item in outstanding)
     lines.append("")
-    lines.append("Write the question again, satisfying every point above.")
+    lines.append(
+        "Write the question again, satisfying every point above. Change only what these "
+        "points require."
+    )
     lines.append("--- end correction ---")
     return "\n".join(lines)
+
+
+#: Content keys that are grounding metadata, not part of what the model wrote.
+_METADATA_KEYS = frozenset({"sources", "model"})
+
+
+def render_draft(question: Question) -> str:
+    """The rejected draft as the model's own turn, the way the checks saw it.
+
+    Built from the question, not the raw reply: multiple-choice options are shuffled before
+    any check runs, and a check that names "option D" means the shuffled order.
+    """
+    content = question.content if isinstance(question.content, dict) else None
+    if not content:
+        return question.prompt or ""
+    shown = {key: value for key, value in content.items() if key not in _METADATA_KEYS}
+    return json.dumps(shown, ensure_ascii=False, indent=1)
 
 
 def generate_with_retries(
@@ -185,6 +227,7 @@ def generate_with_retries(
     build_question: Callable[[TaxonomyClaim, TaxonomyClaimOutcome], Question],
     validator: QuestionValidator | None = None,
     max_attempts: int = MAX_GENERATION_ATTEMPTS,
+    review: QuestionReview | None = None,
 ) -> tuple[Question, list[GenerationAttempt]]:
     """Return the final question, carrying its attempts and validation report.
 
@@ -197,6 +240,13 @@ def generate_with_retries(
     Returns as soon as an attempt is clean. After ``max_attempts`` the last
     question is returned with its defects recorded -- the question is real, and
     both what is wrong with it and how it got there are the caller's to store.
+
+    ``review`` is the question-setup round hook (docs/QUESTION_SETUP_PLAN.md): it runs only
+    once an attempt has passed the claim and deterministic checks, and returns the judge
+    checks that attempt failed (difficulty, topic, custom rules). A failed review is retried
+    with its reason like any other defect and recorded on the attempt's ``failed_checks``.
+    Callers that pass none -- every path outside a round -- behave exactly as before. Whether
+    the returned question is usable is ``attempts[-1].usable``.
 
     A reply that is not a question at all costs an attempt like any other defect,
     and is recorded as one. Only if *every* attempt was malformed is there no
@@ -217,15 +267,21 @@ def generate_with_retries(
     attempts: list[GenerationAttempt] = []
     flagged: list[str] = []
     question: Question | None = None
-    correction = ""
+    #: The conversation so far: each rejected attempt's request and the draft it got back, so
+    #: a correction can refer to "the question above". The first call sends only ``prompt``.
+    history: list[ChatTurn] = []
+    turn = prompt
+    asking = prompt
     last_malformed: MalformedModelOutputError | None = None
 
     for number in range(1, max_attempts + 1):
         try:
             draft = client.complete_structured(
                 system=system,
-                prompt=prompt + correction,
+                prompt=asking,
                 response_model=response_model,
+                # Only a retry has history; first calls keep the two-message shape.
+                **({"history": tuple(history)} if history else {}),
             )
         except MalformedModelOutputError as exc:
             # The reply could not be read as a question, so there is nothing to
@@ -248,7 +304,8 @@ def generate_with_retries(
                 exc.detail,
             )
             problem = MALFORMED_CORRECTION
-            correction = "\n\n" + build_correction([problem], flagged)
+            # No draft to show: ask the same turn again, with the note.
+            asking = f"{turn}\n\n{build_correction([problem], flagged)}"
             if problem not in flagged:
                 flagged.append(problem)
             continue
@@ -283,6 +340,11 @@ def generate_with_retries(
             attempt.failed_checks = failed
 
         problems = _claim_instructions(outcome) + _check_instructions(failed)
+        if not problems and review is not None:
+            # Judges cost calls, so they only see an attempt that is otherwise clean.
+            judged = review(question)
+            attempt.failed_checks = failed + judged
+            problems = _check_instructions(judged)
         if not problems:
             break
 
@@ -292,7 +354,8 @@ def generate_with_retries(
             max_attempts,
             "; ".join(problems),
         )
-        correction = "\n\n" + build_correction(problems, flagged)
+        history += [("user", asking), ("assistant", render_draft(question))]
+        turn = asking = build_correction(problems, flagged)
         for problem in problems:
             if problem not in flagged:
                 flagged.append(problem)

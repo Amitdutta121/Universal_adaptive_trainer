@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Class insights · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* Question text with inline code and a code block, same look as question.html (QView). */
+    .qv-text { white-space: pre-wrap; line-height: 1.6; }
+    .qv-code { font-family: var(--font-mono); font-size: 0.85em; background: var(--muted); border-radius: 0.3rem; padding: 0.05rem 0.3rem; }
+    .qv-pre { font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; background: var(--muted); border-radius: 0.5rem; padding: 0.6rem 0.8rem; margin-top: 0.5rem; overflow-x: auto; white-space: pre; }
+    .qbox .qv-code { background: var(--card); }
+    .qbox .qv-pre { background: var(--card); }
+    /* Full-screen "Show in lecture" view: a plain native dialog, not the Basecoat modal. */
+    dialog.lecture { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--background); color: var(--foreground); }
+    dialog.lecture::backdrop { background: var(--background); }
+    .lecture .qv-text { font-size: 2rem; line-height: 1.35; }
+    .lecture .qv-code { font-size: 0.9em; }
+    .lecture .qv-pre { font-size: 1.5rem; padding: 1.25rem 1.5rem; margin-top: 1.25rem; background: var(--muted); }
+  </style>
+</head>
+<!-- G5 · Class insights: what the class got wrong this week, for Monday's lecture. -->
+<body data-scope="course" data-nav="insights" data-title="Insights">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold" x-text="ins ? `Week ${ins.week} · ${ins.range}` : 'Class insights'"></h1>
+        <p class="text-sm text-muted-foreground max-w-2xl" x-show="ins">What students got wrong in practice this week, ranked by share correct, lowest first, with the wrong answer most students picked. Updated nightly; names are never shown in lecture view.</p>
+      </div>
+      <div class="ml-auto flex items-center gap-2" x-show="ins">
+        <span class="text-sm text-muted-foreground">Section</span>
+        <div class="flex rounded-md border p-0.5" role="group" aria-label="Section">
+          <template x-for="o in sectionOptions" :key="o.id">
+            <button type="button" class="btn" data-size="sm" :data-variant="section === o.id ? 'secondary' : 'ghost'" @click="section = o.id" x-text="o.label"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state (statistics) -->
+    <template x-if="!ins">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="lightbulb"></i></span>
+          <h2 class="font-semibold">No students yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md">Insights come from students' practice attempts. Once a class is open and students have practised for a week, the most common wrong answers show up here.</p>
+          <a class="btn mt-2" data-size="sm" :href="Mock.link('classes.html')">Go to classes</a>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="ins">
+      <div class="grid gap-6">
+        <!-- This week in numbers -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Practised this week</div>
+            <div class="text-2xl font-display font-semibold" x-text="`${act.students_active} of ${enrolled.length}`"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${Mock.pct(act.students_active / enrolled.length)} of the ${section === 'all' ? 'class' : 'section'}`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Attempts</div>
+            <div class="text-2xl font-display font-semibold" x-text="act.attempts.toLocaleString('en-US')"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${Math.round(act.attempts / act.students_active)} per active student`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="flex text-xs text-muted-foreground"><span>Students practising, weeks 1–5</span></div>
+            <div class="flex items-end gap-3">
+              <div x-html="sparkline"></div>
+              <div class="text-xs text-muted-foreground pb-0.5" x-text="`from ${act.weekly_active[0]} in week 1`"></div>
+            </div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground" x-text="`${a4.name.split(':')[0]} · due ${fmt(a4.due)}`"></div>
+            <div class="text-2xl font-display font-semibold" x-text="`${notStarted.length} not started`"></div>
+            <a class="text-xs hover:underline w-fit" style="color:var(--primary)" :href="Mock.link('gradebook.html')">Open gradebook</a>
+          </div>
+        </section>
+
+        <section class="grid lg:grid-cols-[1fr_20rem] gap-6 items-start">
+          <!-- Misconceptions -->
+          <div class="card">
+            <header>
+              <h2>What to reteach</h2>
+              <p x-text="`${items.length} weakest subtopics this week${section === 'all' ? '' : ' in ' + sectionName(section)}.`"></p>
+            </header>
+            <section class="p-0">
+              <ol class="divide-y">
+                <template x-for="(m, k) in items" :key="m.question_id">
+                  <li class="grid gap-3 px-6 py-5">
+                    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <span class="font-mono text-sm text-muted-foreground" x-text="k + 1"></span>
+                      <h3 class="font-semibold" x-text="m.subtopic"></h3>
+                      <span class="text-sm text-muted-foreground" x-text="m.topic"></span>
+                      <span class="ml-auto text-sm"><span class="font-mono font-medium" x-text="Mock.pct(m.correctShown)"></span> <span class="text-muted-foreground">correct</span></span>
+                      <span class="text-sm text-muted-foreground" x-text="`${m.attemptsShown} attempts`"></span>
+                    </div>
+
+                    <div class="grid md:grid-cols-[1fr_17rem] gap-4">
+                      <div class="qbox rounded-lg border p-3 text-sm" style="background:var(--muted)">
+                        <div class="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                          <span x-text="`#${m.q.id} · ${MOCK.question_types[m.q.type].label} · ${m.q.difficulty}`"></span>
+                          <a class="ml-auto hover:underline" :href="Mock.link('question.html', { id: m.q.id })">Open question</a>
+                        </div>
+                        <div x-html="promptHtml(m.q)"></div>
+                        <div class="mt-2 text-xs text-muted-foreground">Answer key: <span class="font-mono text-foreground" x-text="keyText(m.q)"></span></div>
+                      </div>
+                      <div class="grid content-start gap-2 text-sm">
+                        <div>
+                          <div class="flex items-baseline gap-1">
+                            <span class="font-mono font-semibold" x-text="Mock.pct(m.wrongShown)"></span>
+                            <span>chose</span>
+                            <code class="qv-code" x-text="m.top_wrong"></code>
+                          </div>
+                          <div class="mt-1 h-2 rounded-full" style="background:var(--muted)"><div class="h-2 rounded-full" :style="{ background: 'var(--critical-solid)', width: `${m.wrongShown * 100}%` }"></div></div>
+                        </div>
+                        <p class="leading-5" x-text="m.reading"></p>
+                        <div class="text-xs text-muted-foreground">
+                          <template x-for="c in classes" :key="c.id">
+                            <div class="flex" :class="section === c.id ? 'text-foreground font-medium' : ''">
+                              <span x-text="c.name.split(' (')[0]"></span>
+                              <span class="ml-auto font-mono" x-text="`${Mock.pct(m.by_section[c.id])} chose it`"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button type="button" class="btn" data-variant="outline" data-size="sm" @click="lecture(m)"><i data-lucide="presentation"></i>Show in lecture</button>
+                      <button type="button" class="btn" data-variant="outline" data-size="sm" x-show="!boosted[m.question_id]" @click="boost(m)"><i data-lucide="trending-up"></i>Practice more on this</button>
+                      <a class="btn" data-variant="outline" data-size="sm" x-show="lessonFor(m)" :href="lessonFor(m)"><i data-lucide="book-open-check"></i>Lesson on this</a>
+                      <span class="pill tone-accent" x-show="boosted[m.question_id]">Weighted up for Week 6</span>
+                      <button type="button" class="btn" data-variant="ghost" data-size="sm" x-show="boosted[m.question_id]" @click="unboost(m)">Undo</button>
+                      <span class="ml-auto text-xs text-muted-foreground">Book: <span x-text="m.q.source.section"></span></span>
+                    </div>
+                  </li>
+                </template>
+              </ol>
+            </section>
+            <footer class="text-xs text-muted-foreground">Section splits show the share of each section that picked the top wrong answer. Only subtopics with at least 40 attempts this week are ranked.</footer>
+          </div>
+
+          <div class="grid gap-6">
+            <div class="card">
+              <header><h2>Improved since last week</h2><p>Class-wide share correct, week 4 → week 5.</p></header>
+              <section>
+                <ul class="grid gap-3">
+                  <template x-for="i in ins.improved" :key="i.subtopic">
+                    <li class="grid gap-1">
+                      <div class="flex items-baseline gap-2 text-sm">
+                        <span class="font-medium" x-text="i.subtopic"></span>
+                        <span class="ml-auto font-mono" x-text="`${Mock.pct(i.from)} → ${Mock.pct(i.to)}`"></span>
+                      </div>
+                      <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span x-text="i.topic"></span>
+                        <span class="pill tone-ok ml-auto" x-text="`+${Math.round((i.to - i.from) * 100)} pts`"></span>
+                      </div>
+                    </li>
+                  </template>
+                </ul>
+              </section>
+            </div>
+
+            <div class="card">
+              <header>
+                <h2 x-text="`Haven't started ${a4.name}`"></h2>
+                <p x-text="`${notStarted.length} of ${enrolled.length} students · due ${fmtLong(a4.due)}`"></p>
+              </header>
+              <section class="p-0">
+                <ul class="divide-y">
+                  <template x-for="s in notStarted" :key="s.id">
+                    <li class="flex items-center gap-2 px-6 py-2.5 text-sm">
+                      <div class="min-w-0">
+                        <a class="font-medium hover:underline" :href="Mock.link('student.html', { id: s.id })" x-text="s.name"></a>
+                        <div class="text-xs text-muted-foreground" x-text="`${sectionName(s.class_id)} · last practised ${fmt(s.last_active)}`"></div>
+                      </div>
+                      <span class="pill tone-accent ml-auto" x-show="ext(s)" :title="`Extended to ${fmtLong(ext(s) || MOCK.today)}`" x-text="`Ext. ${fmt(ext(s) || MOCK.today)}`"></span>
+                    </li>
+                  </template>
+                  <li class="px-6 py-4 text-sm text-muted-foreground" x-show="!notStarted.length">Everyone in this section has started.</li>
+                </ul>
+              </section>
+              <footer class="flex gap-2">
+                <button type="button" class="btn" data-variant="outline" data-size="sm" :disabled="!notStarted.length" @click="remind()"><i data-lucide="mail"></i>Email a reminder</button>
+              </footer>
+            </div>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <!-- Show in lecture -->
+    <dialog x-ref="lecture" class="lecture" aria-labelledby="lecture-title" @close="reveal = false">
+      <template x-if="shown">
+        <div class="mx-auto grid h-full max-w-5xl content-start gap-8 px-10 py-10">
+          <div class="flex items-center gap-3 text-lg text-muted-foreground">
+            <span id="lecture-title" x-text="`${shown.topic} · ${shown.subtopic}`"></span>
+            <span x-text="`· ${shown.attemptsShown} attempts${section === 'all' ? '' : ', ' + sectionName(section)}`"></span>
+            <button type="button" class="btn ml-auto" data-variant="outline" @click="reveal = !reveal" x-text="reveal ? 'Hide answer' : 'Reveal answer'"></button>
+            <button type="button" class="btn" data-variant="ghost" data-size="icon" aria-label="Close lecture view" onclick="this.closest('dialog').close()"><i data-lucide="x"></i></button>
+          </div>
+          <div x-html="promptHtml(shown.q)"></div>
+          <ul class="grid gap-4">
+            <template x-for="d in dist(shown)" :key="d.label">
+              <li class="grid grid-cols-[14rem_1fr_5rem] items-center gap-4">
+                <code class="font-mono text-2xl" :class="reveal && d.correct ? 'font-semibold' : ''" :style="reveal && d.correct ? { color: 'var(--ok-solid)' } : {}" x-text="d.label"></code>
+                <div class="h-8 rounded-md" style="background:var(--muted)">
+                  <div class="h-8 rounded-md" :style="{ background: reveal ? (d.correct ? 'var(--ok-solid)' : 'var(--muted-foreground)') : 'var(--primary)', width: `${d.share * 100}%` }"></div>
+                </div>
+                <span class="text-right font-mono text-2xl" x-text="Mock.pct(d.share)"></span>
+              </li>
+            </template>
+          </ul>
+          <p class="text-lg text-muted-foreground" x-show="reveal" x-text="`Most common mistake: ${shown.reading}`"></p>
+        </div>
+      </template>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-run.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const ins = MOCK.insights[c.id] || null;
+      const students = MOCK.students.filter((s) => s.course === c.id);
+      const classes = MOCK.classes.filter((k) => k.course === c.id);
+      const a4 = MOCK.assignments.find((a) => a.course === c.id && a.status === "open") || { name: "", due: MOCK.today, id: "" };
+      const esc = Mock.esc;
+      const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code class="qv-code">$1</code>');
+      const d = (iso) => new Date(iso + "T12:00");
+      return {
+        course: c, ins, students, classes, a4,
+        section: "all", boosted: {}, shown: null, reveal: false,
+        get sectionOptions() { return [{ id: "all", label: "All" }, ...classes.map((k) => ({ id: k.id, label: k.name.split(" ")[1] }))]; },
+        // The subtopic's lesson, if lessons exist for this course (Python in the mock).
+        lessonFor(m) { const l = (MOCK.lessons || []).find((x) => x.sub === m.subtopic && c.id === "python"); return l ? Mock.link("lesson.html", { sub: l.sub_id, mode: l.status === "none" ? "draft" : l.status }) : ""; },
+        sectionName(id) { return ((classes.find((k) => k.id === id) || {}).name || "").split(" (")[0]; },
+        get enrolled() { return students.filter((s) => this.section === "all" || s.class_id === this.section); },
+        get act() {
+          if (this.section === "all") return { students_active: ins.students_active, attempts: ins.attempts, weekly_active: ins.weekly_active };
+          return MOCK.run.by_section[this.section];
+        },
+        get sparkline() {
+          const v = this.act.weekly_active, W = 110, H = 32, max = Math.max(...v) + 2, min = Math.min(...v) - 2;
+          const x = (i) => 4 + (i / (v.length - 1)) * (W - 8), y = (n) => 4 + (1 - (n - min) / (max - min)) * (H - 8);
+          const pts = v.map((n, i) => `${x(i)},${y(n)}`).join(" ");
+          const last = v.length - 1;
+          return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Students practising per week: ${v.join(", ")}">
+            <polyline fill="none" stroke="var(--primary)" stroke-width="1.75" stroke-linejoin="round" points="${pts}"/>
+            ${v.map((n, i) => `<circle cx="${x(i)}" cy="${y(n)}" r="${i === last ? 3 : 1.75}" fill="var(--primary)"><title>Week ${i + 1}: ${n}</title></circle>`).join("")}
+          </svg><div class="text-2xl font-display font-semibold leading-none -mt-1">${v[last]}</div>`;
+        },
+        // TODO(real): per-section % correct comes from attempts. Estimated here by moving the class-wide
+        // share correct by the section's difference in the top wrong answer.
+        get items() {
+          if (!ins) return [];
+          const share = this.section === "all" ? 1 : this.enrolled.length / students.length;
+          return ins.misconceptions.map((m) => {
+            const wrong = this.section === "all" ? m.top_wrong_share : m.by_section[this.section];
+            return { ...m, q: MOCK.question(m.question_id), wrongShown: wrong,
+              correctShown: Math.max(0, Math.min(1, m.correct - (wrong - m.top_wrong_share))),
+              attemptsShown: Math.round(m.attempts * share) };
+          }).sort((a, b) => a.correctShown - b.correctShown);
+        },
+        get notStarted() {
+          return this.enrolled.filter((s) => (MOCK.assignment_results[s.id][a4.id] || {}).state === "not_started");
+        },
+        ext(s) { return (MOCK.assignment_results[s.id][a4.id] || {}).extension; },
+        promptHtml(q) {
+          const i = q.prompt.indexOf("\n\n");
+          const [text, code] = i < 0 ? [q.prompt, null] : [q.prompt.slice(0, i), q.prompt.slice(i + 2)];
+          return `<p class="qv-text">${inline(text)}</p>${code ? `<pre class="qv-pre">${esc(code)}</pre>` : ""}`;
+        },
+        keyText(q) {
+          if (q.type === "multiple_choice") return q.options[q.answer];
+          if (q.type === "true_false") return q.answer ? "True" : "False";
+          return q.answer_text;
+        },
+        dist(m) {
+          const key = this.keyText(m.q);
+          return (MOCK.run.distribution[m.question_id] || []).map(([label, share]) => ({ label, share, correct: label === key }));
+        },
+        fmt(iso) { return d(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }); },
+        fmtLong(iso) { return d(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); },
+        // ?lecture=<question id> opens the lecture view directly (a link to paste into slides).
+        init() {
+          const id = Number(Mock.param("lecture"));
+          const m = id && this.items.find((x) => x.question_id === id);
+          if (m) this.$nextTick(() => this.lecture(m));
+        },
+        lecture(m) { this.shown = m; this.reveal = false; this.$refs.lecture.showModal(); },
+        boost(m) {
+          this.boosted[m.question_id] = true;
+          Mock.toast(`${m.subtopic} gets extra weight in next week's practice (Week 6) for ${this.section === "all" ? "both sections" : this.sectionName(this.section)}`);
+        },
+        unboost(m) { this.boosted[m.question_id] = false; Mock.toast(`${m.subtopic} back to normal weight`); },
+        remind() { Mock.toast(`Reminder emailed to ${this.notStarted.length} students: ${a4.name} is due ${this.fmtLong(a4.due)}`); },
+      };
+    }
+  </script>
+</body>
+</html>

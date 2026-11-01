@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Student reports · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* Question text with inline code and a code block, same look as question.html (QView). */
+    .qv-text { white-space: pre-wrap; line-height: 1.6; }
+    .qv-code { font-family: var(--font-mono); font-size: 0.85em; background: var(--card); border-radius: 0.3rem; padding: 0.05rem 0.3rem; }
+    .qv-pre { font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; background: var(--card); border-radius: 0.5rem; padding: 0.6rem 0.8rem; margin-top: 0.5rem; overflow-x: auto; white-space: pre; }
+    .ans { font-family: var(--font-mono); font-size: 0.8rem; white-space: pre; background: var(--card); border: 1px solid var(--border); border-radius: 0.35rem; padding: 0.05rem 0.4rem; }
+    .ws { color: var(--critical-solid); background: var(--critical-wash); border-radius: 0.15rem; }
+  </style>
+</head>
+<!-- G7 · Student reports: "report this question" inbox. Reply and dismiss, edit, regrade, void. -->
+<body data-scope="course" data-nav="reports" data-title="Student reports">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Student reports</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl">
+          Questions students flagged from practice. Your decisions here also feed the generator's learned rules
+          (<a class="underline" :href="Mock.link('alignment.html')">Alignment</a>), so a question that was wrong once is less likely to be generated again.
+        </p>
+      </div>
+      <div class="ml-auto flex rounded-md border p-0.5" role="group" aria-label="Show" x-show="all.length">
+        <template x-for="o in [['all', 'All'], ['open', 'Open'], ['resolved', 'Resolved']]" :key="o[0]">
+          <button type="button" class="btn" data-size="sm" :data-variant="show === o[0] ? 'secondary' : 'ghost'" @click="show = o[0]" x-text="`${o[1]} (${count(o[0])})`"></button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Empty state (statistics) -->
+    <template x-if="!all.length">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="flag"></i></span>
+          <h2 class="font-semibold">No reports</h2>
+          <p class="text-sm text-muted-foreground max-w-md">Students can report a question from the practice screen ("Report this question"). This course has no students practising yet, so nothing has come in.</p>
+          <a class="btn mt-2" data-size="sm" :href="Mock.link('classes.html')">Go to classes</a>
+        </section>
+      </div>
+    </template>
+
+    <template x-for="grp in groups" :key="grp.key">
+      <section class="grid gap-3" x-show="grp.items.length">
+        <h2 class="text-sm font-semibold text-muted-foreground" x-text="`${grp.label} · ${grp.items.length}`"></h2>
+        <template x-for="r in grp.items" :key="r.id">
+          <article class="card gap-0 py-0">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-6 py-3">
+              <span class="pill" :class="reasonTone(r.reason)" x-text="MOCK.REPORT_REASONS[r.reason]"></span>
+              <a class="text-sm font-medium hover:underline" :href="Mock.link('student.html', { id: r.student })" x-text="stu(r).name"></a>
+              <span class="text-sm text-muted-foreground" x-text="section(r)"></span>
+              <span class="ml-auto text-sm text-muted-foreground" x-text="fmtDT(r.at)"></span>
+              <span class="pill" :class="r.status === 'open' ? 'tone-warn' : 'tone-ok'" x-text="r.status === 'open' ? 'Open' : 'Resolved'"></span>
+            </div>
+            <div class="grid lg:grid-cols-[1fr_1.15fr] gap-5 px-6 py-4">
+              <div class="grid content-start gap-3">
+                <blockquote class="border-l-2 pl-3 text-sm leading-6" style="border-color:var(--warn-solid)" x-html="inlineHtml(r.text)"></blockquote>
+                <dl class="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-sm">
+                  <dt class="text-muted-foreground">Their answer</dt>
+                  <dd><span class="ans" x-html="showWs(r.answer)"></span> <span class="pill tone-critical ml-1" x-show="!r.regraded">Marked wrong</span><span class="pill tone-ok ml-1" x-show="r.regraded">Regraded correct</span></dd>
+                  <dt class="text-muted-foreground">Answer key</dt>
+                  <dd><span class="ans" x-text="keyText(q(r))"></span></dd>
+                  <dt class="text-muted-foreground">Reach</dt>
+                  <dd class="text-muted-foreground" x-text="`${reach(r).attempts} attempts by ${reach(r).students} students · in ${reach(r).sets.join(', ')}`"></dd>
+                </dl>
+              </div>
+              <div class="rounded-lg border p-3 text-sm" style="background:var(--muted)" :style="r.voided ? { opacity: 0.6 } : {}">
+                <div class="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span x-text="`#${q(r).id} · ${MOCK.question_types[q(r).type].label} · ${q(r).topic} › ${q(r).subtopic}`"></span>
+                  <span class="pill tone-critical" x-show="r.voided">Voided</span>
+                  <a class="ml-auto hover:underline" :href="Mock.link('question.html', { id: q(r).id })">Open question</a>
+                </div>
+                <div x-html="promptHtml(q(r))"></div>
+                <ol class="mt-2 grid gap-1 text-xs" x-show="q(r).options">
+                  <template x-for="(o, k) in q(r).options || []" :key="k">
+                    <li class="flex gap-2" :class="k === q(r).answer ? 'font-medium' : 'text-muted-foreground'">
+                      <span class="font-mono" x-text="'ABCD'[k]"></span><span class="font-mono" x-text="o"></span>
+                      <span class="pill tone-ok" x-show="k === q(r).answer">Key</span>
+                    </li>
+                  </template>
+                </ol>
+              </div>
+            </div>
+
+            <!-- Open: actions -->
+            <template x-if="r.status === 'open'">
+              <div class="grid gap-3 border-t px-6 py-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <button type="button" class="btn" data-size="sm" :data-variant="replying === r.id ? 'secondary' : 'outline'" @click="replying = replying === r.id ? null : r.id"><i data-lucide="reply"></i>Reply and dismiss</button>
+                  <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('question.html', { id: q(r).id })"><i data-lucide="pencil"></i>Edit question</a>
+                  <template x-if="accept(r)">
+                    <button type="button" class="btn" data-variant="outline" data-size="sm" @click="regrade(r)"><i data-lucide="check-check"></i><span x-text="accept(r).label"></span></button>
+                  </template>
+                  <button type="button" class="btn ml-auto" data-variant="ghost" data-size="sm" @click="askVoid(r)"><i data-lucide="ban"></i>Void question</button>
+                </div>
+                <p class="text-xs text-muted-foreground" x-show="accept(r)" x-text="accept(r)?.note"></p>
+                <p class="text-xs text-muted-foreground" x-show="hint(r)"><span x-text="hint(r)"></span> <a class="underline" :href="Mock.link('insights.html')">Insights</a></p>
+                <div class="grid gap-2" x-show="replying === r.id">
+                  <div role="group" class="field">
+                    <label :for="`reply-${r.id}`" x-text="`Reply to ${stu(r).name.split(' ')[0]}`"></label>
+                    <textarea :id="`reply-${r.id}`" rows="3" class="textarea" x-model="drafts[r.id]" placeholder="They see this under the question in their practice history."></textarea>
+                  </div>
+                  <div class="flex gap-2">
+                    <button type="button" class="btn" data-size="sm" :disabled="!(drafts[r.id] || '').trim()" @click="dismiss(r)">Send reply and dismiss</button>
+                    <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="replying = null">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Resolved: what was done -->
+            <template x-if="r.status === 'resolved'">
+              <div class="grid gap-1 border-t px-6 py-3 text-sm" style="background:var(--muted)">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="pill tone-ok" x-text="ACTIONS[r.resolution.action]"></span>
+                  <span class="text-muted-foreground" x-text="`by ${r.resolution.by} · ${fmtDT(r.resolution.at)}`"></span>
+                </div>
+                <p class="leading-6" x-show="r.resolution.reply" x-text="`“${r.resolution.reply}”`"></p>
+              </div>
+            </template>
+          </article>
+        </template>
+      </section>
+    </template>
+
+    <!-- Void confirm -->
+    <dialog x-ref="void" class="dialog" aria-labelledby="void-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-lg">
+        <header>
+          <h2 id="void-title" x-text="voiding ? `Void question #${q(voiding).id}?` : ''"></h2>
+          <p>Use this when the question itself is wrong and can't be fixed for students who already answered it.</p>
+        </header>
+        <section class="grid gap-3 text-sm" x-show="voiding">
+          <template x-if="voiding">
+            <ul class="grid gap-2">
+              <li class="flex gap-2"><span class="inline-flex mt-0.5 text-muted-foreground"><i data-lucide="layers" class="size-4"></i></span><span x-text="`Removed from ${reach(voiding).sets.join(', ')}. No student is served it again.`"></span></li>
+              <li class="flex gap-2"><span class="inline-flex mt-0.5 text-muted-foreground"><i data-lucide="rotate-ccw" class="size-4"></i></span><span x-text="`Its ${reach(voiding).attempts} attempts stop counting toward mastery and assignment progress, with no penalty.`"></span></li>
+              <li class="flex gap-2"><span class="inline-flex mt-0.5 text-muted-foreground"><i data-lucide="users" class="size-4"></i></span><span x-text="`${reach(voiding).students} students affected; their mastery and gradebook scores are recalculated tonight.`"></span></li>
+              <li class="flex gap-2"><span class="inline-flex mt-0.5 text-muted-foreground"><i data-lucide="archive" class="size-4"></i></span><span>The question moves back to the bank as Rejected, so you can still edit and re-approve it.</span></li>
+            </ul>
+          </template>
+          <div role="group" class="field">
+            <label for="void-reply">Reply to the student (optional)</label>
+            <textarea id="void-reply" rows="2" class="textarea" x-model="voidReply"></textarea>
+          </div>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" data-variant="destructive" @click="confirmVoid()">Void question</button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-run.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    const ACTIONS = { dismissed: "Dismissed with a reply", schedule: "Fixed: practice follows the schedule", regraded: "Answer accepted, attempts regraded", voided: "Question voided", edited: "Question edited" };
+    function page() {
+      const c = Mock.course;
+      const esc = Mock.esc;
+      const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code class="qv-code">$1</code>');
+      const all = MOCK.reports.filter((r) => MOCK.question(r.question_id)?.course === c.id)
+        .map((r) => ({ ...r, resolution: r.resolution ? { ...r.resolution } : null, regraded: r.resolution?.action === "regraded", voided: false }));
+      const now = () => { const d = new Date(); return `${MOCK.today} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+      return {
+        course: c, all, ACTIONS, show: "all", replying: null, drafts: {}, voiding: null, voidReply: "",
+        count(k) { return k === "all" ? this.all.length : this.all.filter((r) => r.status === k).length; },
+        get groups() {
+          const by = (st) => this.all.filter((r) => r.status === st).sort((a, b) => b.at.localeCompare(a.at));
+          return [
+            { key: "open", label: "Open", items: this.show === "resolved" ? [] : by("open") },
+            { key: "resolved", label: "Resolved", items: this.show === "open" ? [] : by("resolved") },
+          ];
+        },
+        q(r) { return MOCK.question(r.question_id); },
+        stu(r) { return MOCK.student(r.student); },
+        section(r) { return ((MOCK.classes.find((k) => k.id === this.stu(r).class_id) || {}).name || "").split(" (")[0]; },
+        reach(r) { return MOCK.run.question_reach[r.question_id] || { attempts: 0, students: 0, sets: [] }; },
+        reasonTone(reason) { return { answer_wrong: "tone-warn", unclear: "tone-accent", not_taught: "tone-muted", typo: "tone-muted" }[reason]; },
+        keyText(q) {
+          if (q.type === "multiple_choice") return q.options[q.answer];
+          if (q.type === "true_false") return q.answer ? "True" : "False";
+          return q.answer_text;
+        },
+        // Trailing spaces shown as a marked dot so the professor can see what the student typed.
+        showWs(a) { const m = String(a).match(/^(.*?)(\s*)$/s); return esc(m[1]) + m[2].replace(/ /g, '<span class="ws">·</span>'); },
+        inlineHtml(t) { return inline(t); },
+        promptHtml(q) {
+          const i = q.prompt.indexOf("\n\n");
+          const [text, code] = i < 0 ? [q.prompt, null] : [q.prompt.slice(0, i), q.prompt.slice(i + 2)];
+          return `<p class="qv-text">${inline(text)}</p>${code ? `<pre class="qv-pre">${esc(code)}</pre>` : ""}`;
+        },
+        // Offer "accept" only where a regrade makes sense: the answer differs from the key only by whitespace.
+        accept(r) {
+          if (r.reason !== "answer_wrong" || r.regraded) return null;
+          const key = String(this.keyText(this.q(r)));
+          const reach = this.reach(r);
+          if (r.answer.trim() === key.trim() && r.answer !== key) {
+            return { mode: "trim", label: `Accept '${r.answer}' and trim whitespace for this question`,
+              n: reach.trailing_space_attempts, students: reach.trailing_space_students,
+              note: `Regrades ${reach.trailing_space_attempts} attempts by ${reach.trailing_space_students} students that differ from the key only by spaces. Future answers are compared with surrounding whitespace trimmed.` };
+          }
+          return null;
+        },
+        // When the reported answer is the class's most common wrong answer, say so: the key is probably right.
+        hint(r) {
+          const m = (MOCK.insights[c.id]?.misconceptions || []).find((x) => x.question_id === r.question_id && x.top_wrong === r.answer);
+          return m ? `'${r.answer}' is this week's most common wrong answer on ${m.subtopic} (${Mock.pct(m.top_wrong_share)} of attempts): ${m.reading.charAt(0).toLowerCase() + m.reading.slice(1)} The key is likely right; consider replying and covering it in lecture.` : "";
+        },
+        resolve(r, action, reply) {
+          r.status = "resolved";
+          r.resolution = { action, by: MOCK.me.name, at: now(), reply: reply || "" };
+          this.replying = null;
+        },
+        dismiss(r) {
+          this.resolve(r, "dismissed", this.drafts[r.id].trim());
+          Mock.toast(`Reply sent to ${this.stu(r).name}; report dismissed`);
+        },
+        regrade(r) {
+          const a = this.accept(r);
+          r.regraded = true;
+          this.resolve(r, "regraded", a.mode === "trim" ? "You were right: the trailing space shouldn't count. Your attempt is now marked correct." : "");
+          Mock.toast(`Regraded ${a.n} attempts for ${a.students} students on #${r.question_id}`);
+        },
+        askVoid(r) { this.voiding = r; this.voidReply = ""; this.$refs.void.showModal(); },
+        confirmVoid() {
+          const r = this.voiding;
+          r.voided = true;
+          // Every open report on the same question is resolved by the void.
+          this.all.filter((x) => x.question_id === r.question_id && x.status === "open").forEach((x) => { x.voided = true; this.resolve(x, "voided", x === r ? this.voidReply.trim() : ""); });
+          this.$refs.void.close();
+          Mock.toast(`#${r.question_id} voided: removed from ${this.reach(r).sets.join(", ")}, ${this.reach(r).attempts} attempts no longer count`);
+        },
+        fmtDT(t) {
+          const [d, hm] = t.split(" ");
+          return `${new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${hm}`;
+        },
+      };
+    }
+  </script>
+</body>
+</html>

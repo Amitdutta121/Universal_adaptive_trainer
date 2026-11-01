@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Taxonomy · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- C5 · Taxonomy: saved versions, the active one, and three ways to create one (F6). -->
+<body data-scope="course" data-nav="taxonomy" data-title="Taxonomy">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Taxonomy</h1>
+        <p class="text-sm text-muted-foreground mt-1">The topics and subtopics students are assessed on. Generation, coverage and mastery all use the active version.</p>
+      </div>
+    </div>
+
+    <!-- Active version, or why there is none -->
+    <template x-if="active">
+      <div class="alert">
+        <i data-lucide="circle-check"></i>
+        <h2><span x-text="active.label"></span> is the active taxonomy</h2>
+        <section><p x-text="`${active.topics} topics · ${active.subtopics} subtopics · active since ${active.created}. Question generation and coverage use this taxonomy.`"></p></section>
+      </div>
+    </template>
+    <template x-if="!active">
+      <div class="alert" data-variant="destructive">
+        <i data-lucide="triangle-alert"></i>
+        <h2>No taxonomy is active yet</h2>
+        <section><p>Questions can't be generated and coverage can't be measured until you approve a taxonomy.</p></section>
+      </div>
+    </template>
+
+    <!-- Draft under review: the next step for the statistics course -->
+    <template x-if="draft">
+      <section class="card" style="border-color:var(--warn-solid)">
+        <header>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 x-text="draft.label"></h2>
+            <span class="pill tone-warn">Under review</span>
+            <span class="pill tone-accent">Drafted with AI</span>
+          </div>
+          <p x-text="`Drafted ${draft.created} from ${bookTitle.replace(/\.$/, '')}. Nothing in it is used until you approve it. You decide every topic and subtopic.`"></p>
+        </header>
+        <section class="grid gap-3">
+          <div class="flex flex-wrap gap-2 text-sm">
+            <span class="pill tone-ok" x-text="`${draftCounts.accepted} accepted`"></span>
+            <span class="pill tone-muted" x-text="`${draftCounts.proposed} still proposed`"></span>
+            <span class="pill tone-warn" x-text="`${draftCounts.flagged} flagged by the AI`"></span>
+            <span class="text-muted-foreground" x-text="`of ${draftCounts.total} rows (${draft.topics} topics)`"></span>
+          </div>
+          <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="{ background: 'var(--ok-solid)', width: `${draftCounts.accepted / draftCounts.total * 100}%` }"></div></div>
+        </section>
+        <footer class="flex gap-2">
+          <a class="btn" :href="Mock.link('taxonomy-draft.html')">Continue review</a>
+          <a class="btn" data-variant="outline" :href="Mock.link('taxonomy-builder.html', { version: draft.id })">Open in builder</a>
+        </footer>
+      </section>
+    </template>
+
+    <!-- Three ways to create -->
+    <section class="grid gap-3 md:grid-cols-3">
+      <div class="card">
+        <header><h2 class="flex items-center gap-2"><i data-lucide="wand-sparkles" class="size-4"></i>Draft with AI from a book</h2>
+          <p>The AI proposes topics and subtopics from a book's chapters. You review every row before anything is used.</p></header>
+        <footer><button type="button" class="btn" data-variant="outline" data-size="sm" @click="openDraft()" :disabled="!books.length">Draft from a book</button></footer>
+      </div>
+      <div class="card">
+        <header><h2 class="flex items-center gap-2"><i data-lucide="file-json" class="size-4"></i>Import JSON</h2>
+          <p>Upload a finished taxonomy document, for example one exported from another course.</p></header>
+        <footer><button type="button" class="btn" data-variant="outline" data-size="sm" @click="$refs.import.showModal()">Import</button></footer>
+      </div>
+      <div class="card">
+        <header><h2 class="flex items-center gap-2"><i data-lucide="list-tree" class="size-4"></i>Build by hand</h2>
+          <p>Start from a blank outline and add topics and subtopics yourself.</p></header>
+        <footer><a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('taxonomy-builder.html', { version: 'new' })">New taxonomy</a></footer>
+      </div>
+    </section>
+
+    <!-- AI draft job progress -->
+    <template x-if="job">
+      <div class="alert">
+        <i data-lucide="loader" class="animate-spin"></i>
+        <h2 x-text="job.done ? `Draft ready: ${job.result}` : `Drafting a taxonomy from ${job.book}…`"></h2>
+        <section>
+          <div class="grid gap-2">
+            <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="job.progress"><span :style="`width:${job.progress}%`"></span></div>
+            <p x-text="job.done ? 'Review each row, then approve it. Nothing is used until you do.' : 'Reading chapter headings and section summaries. This runs as a background job; you can leave the page and find it in Jobs.'"></p>
+          </div>
+        </section>
+        <footer x-show="job.done"><a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html', course.taxonomy_draft ? {} : { draft: 'd2', book: draftBook })">Review the draft</a></footer>
+      </div>
+    </template>
+
+    <!-- Versions -->
+    <section class="card">
+      <header><h2>Versions</h2><p>Every save creates or edits a version. Exactly one is active; replaced versions keep their questions.</p></header>
+      <section class="p-0">
+        <div class="table-container">
+          <table class="table">
+            <thead><tr><th class="pl-6">Name</th><th>Status</th><th class="text-end">Topics</th><th class="text-end">Subtopics</th><th>Source</th><th>Created</th><th class="w-56"></th></tr></thead>
+            <tbody>
+              <template x-for="v in versions" :key="v.id">
+                <tr>
+                  <td class="pl-6 font-medium" x-text="v.label"></td>
+                  <td>
+                    <span class="pill" :class="v.active ? 'tone-ok' : Mock.tone(v.status)" :title="MEANING[v.active ? 'active' : v.status]" x-text="v.active ? 'Active' : v.status === 'superseded' ? 'Replaced' : Mock.label(v.status)"></span>
+                  </td>
+                  <td class="text-end tabular-nums" x-text="v.topics"></td>
+                  <td class="text-end tabular-nums" x-text="v.subtopics"></td>
+                  <td class="text-sm text-muted-foreground" x-text="v.source"></td>
+                  <td class="text-sm text-muted-foreground" x-text="v.created"></td>
+                  <td class="pr-6">
+                    <div class="flex justify-end gap-1">
+                      <template x-if="v.status === 'under_review'"><a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review</a></template>
+                      <template x-if="v.status !== 'under_review'"><a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('taxonomy-builder.html', { version: v.id })">Open</a></template>
+                      <template x-if="!v.active && v.status !== 'under_review'"><button type="button" class="btn" data-variant="ghost" data-size="sm" @click="activate(v)">Make active</button></template>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <p class="px-6 py-8 text-center text-sm text-muted-foreground" x-show="!versions.length">No taxonomy has been saved yet. Draft one with AI, import a document, or build one by hand.</p>
+      </section>
+    </section>
+
+    <!-- Active taxonomy tree summary -->
+    <template x-if="tree.length">
+      <section class="card">
+        <header class="flex flex-wrap items-center gap-2">
+          <div><h2 x-text="`Topics in ${active.label}`"></h2><p x-text="`${tree.length} topics, ${tree.reduce((a, t) => a + t.subtopics.length, 0)} subtopics.`"></p></div>
+          <a class="btn ml-auto" data-variant="outline" data-size="sm" :href="Mock.link('taxonomy-builder.html', { version: active.id })"><i data-lucide="pencil"></i>Edit</a>
+        </header>
+        <section>
+          <ol class="grid gap-x-8 gap-y-4 md:grid-cols-2 xl:grid-cols-3">
+            <template x-for="(t, i) in tree" :key="t.id">
+              <li>
+                <div class="text-sm font-medium"><span class="text-muted-foreground tabular-nums" x-text="`${i + 1}. `"></span><span x-text="t.name"></span></div>
+                <ul class="mt-1 grid gap-0.5 pl-4 text-sm text-muted-foreground">
+                  <template x-for="s in t.subtopics" :key="s.id"><li x-text="s.name"></li></template>
+                </ul>
+              </li>
+            </template>
+          </ol>
+        </section>
+      </section>
+    </template>
+
+    <!-- Draft with AI dialog -->
+    <dialog x-ref="draftDlg" class="dialog" aria-labelledby="draft-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="draft-title">Draft a taxonomy with AI</h2>
+          <p>The draft opens for review. Every topic and subtopic stays proposed until you accept it, and nothing is used until you approve the whole taxonomy.</p>
+        </header>
+        <section class="grid gap-4">
+          <div role="group" class="field">
+            <label for="draft-book">From book</label>
+            <select id="draft-book" class="select w-full" x-model="draftBook">
+              <template x-for="b in books" :key="b.id"><option :value="b.id" x-text="b.title"></option></template>
+            </select>
+          </div>
+          <div role="group" class="field">
+            <label for="draft-size">Target size</label>
+            <select id="draft-size" class="select w-full" x-model="draftSize">
+              <option value="compact">Compact: about 8 topics, 3–4 subtopics each</option>
+              <option value="detailed">Detailed: about 12 topics, 4–5 subtopics each</option>
+            </select>
+          </div>
+          <p class="text-xs text-muted-foreground">Estimated cost: about $0.40 of this month's LLM budget. Runs as a background job.</p>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.draftDlg.close()">Cancel</button>
+          <button type="button" class="btn" @click="startDraft()">Start drafting</button>
+        </footer>
+        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" @click="$refs.draftDlg.close()">✕</button>
+      </div>
+    </dialog>
+
+    <!-- Import dialog -->
+    <dialog x-ref="import" class="dialog" aria-labelledby="import-title" @click="if ($event.target === $el) $el.close()">
+      <div class="sm:max-w-lg">
+        <header>
+          <h2 id="import-title">Import a taxonomy</h2>
+          <p>A taxonomy JSON document: topics, each with at least one subtopic. Importing makes it the active taxonomy; the current one is kept and can be made active again. An invalid document is refused in full, and the reason is shown.</p>
+        </header>
+        <section class="grid gap-4">
+          <div role="group" class="field">
+            <label for="imp-file">Taxonomy document</label>
+            <input id="imp-file" type="file" accept=".json" @change="importName = $event.target.files[0]?.name || ''">
+          </div>
+          <div role="group" class="field">
+            <label for="imp-text">Or paste JSON</label>
+            <textarea id="imp-text" class="textarea font-mono text-xs h-32" x-model="importText" spellcheck="false" placeholder='{"schema_version": "1", "label": "…", "topics": [ … ]}'></textarea>
+          </div>
+          <p class="text-sm" style="color:var(--critical-solid)" x-show="importError" x-text="importError"></p>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.import.close()">Cancel</button>
+          <button type="button" class="btn" @click="doImport()">Import</button>
+        </footer>
+        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" @click="$refs.import.close()">✕</button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      // ?approved=1 = arriving from taxonomy-draft after approving (mock continuity).
+      const justApproved = Mock.param("approved") === "1" && c.taxonomy_draft;
+      const versions = c.taxonomy_versions.map((v) => ({ ...v }));
+      if (justApproved) {
+        versions[0] = { ...versions[0], label: "v1 — from OpenIntro Statistics (AI draft)", status: "approved", active: true, source: "Drafted with AI, approved by you", subtopics: c.taxonomy_draft.reduce((a, t) => a + t.subtopics.length, 0) };
+      }
+      const rows = (c.taxonomy_draft || []).flatMap((t) => [t, ...t.subtopics]);
+      const books = MOCK.books.filter((b) => b.course === c.id);
+      const tree = justApproved ? c.taxonomy_draft : c.taxonomy;
+      return {
+        course: c, versions, books, tree,
+        get active() { return this.versions.find((v) => v.active) || null; },
+        get draft() { return this.versions.find((v) => v.status === "under_review") || null; },
+        bookTitle: books[0] ? books[0].title : "a book",
+        draftCounts: {
+          total: rows.length,
+          accepted: rows.filter((r) => r.draft_state === "accepted").length,
+          proposed: rows.filter((r) => r.draft_state === "proposed").length,
+          flagged: rows.filter((r) => r.draft_state === "flagged").length,
+        },
+        MEANING: {
+          active: "Question generation and coverage use this taxonomy.",
+          superseded: "A newer taxonomy took over. Questions generated from this one keep their taxonomy. You can make it active again.",
+          under_review: "An AI draft you are reviewing. Nothing generates from it until you approve it.",
+        },
+        job: null, draftBook: books[0]?.id, draftSize: "compact",
+        importText: "", importName: "", importError: "",
+        openDraft() { this.$refs.draftDlg.showModal(); },
+        startDraft() {
+          this.$refs.draftDlg.close();
+          const b = books.find((x) => x.id === this.draftBook);
+          this.job = { book: b.title, progress: 8, done: false, result: "" };
+          Mock.toast("Draft taxonomy with AI started. Track it in Jobs.");
+          const t = setInterval(() => {
+            this.job.progress = Math.min(100, this.job.progress + 23);
+            if (this.job.progress >= 100) {
+              clearInterval(t);
+              this.job.done = true;
+              this.job.result = this.draftSize === "compact" ? "8 topics, 28 subtopics" : "12 topics, 51 subtopics";
+              if (!this.draft) this.versions.unshift({ id: "d2", label: `AI draft from ${b.title}`, status: "under_review", active: false, topics: this.draftSize === "compact" ? 8 : 12, subtopics: this.draftSize === "compact" ? 28 : 51, created: MOCK.today, source: "Drafted with AI" });
+            }
+          }, 600);
+        },
+        doImport() {
+          if (!this.importName && !this.importText.trim()) { this.importError = "Choose a file or paste a taxonomy document."; return; }
+          if (this.importText.trim() && !this.importText.trim().startsWith("{")) { this.importError = "This isn't JSON. Paste the document only, with no surrounding code fence."; return; }
+          this.importError = "";
+          this.$refs.import.close();
+          const n = this.versions.length + 1;
+          const v = { id: "v" + n, label: `v${n} — imported`, status: "approved", active: false, topics: 12, subtopics: 47, created: MOCK.today, source: "Imported JSON" };
+          this.versions.unshift(v);
+          this.activate(this.versions[0], true);
+          Mock.toast(`Imported v${n}. It is now the active taxonomy; the previous one is kept as Replaced.`);
+        },
+        activate(v, quiet) {
+          this.versions.forEach((x) => { if (x.active) { x.active = false; x.status = "superseded"; } });
+          v.active = true; v.status = "approved";
+          if (!quiet) Mock.toast(`Active taxonomy is now “${v.label}”`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

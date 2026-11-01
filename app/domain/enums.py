@@ -24,15 +24,44 @@ class BookStatus(StrEnum):
 
 
 class SourceFormat(StrEnum):
-    """Accepted upload formats.
+    """The format a book was imported from.
 
-    Structured book JSON is declared directly. A PDF is turned into that same
-    declared shape by ``app.ingestion.pdf`` before validation -- its own
-    embedded outline stands in for a hand-authored declaration (ADR-048).
+    PDF, DOCX and PPTX are parsed into chunks (``app.ingestion.parsing``). ``BOOK_JSON``
+    is the retired book JSON document (Task 10): no longer accepted, kept so older
+    book rows still read.
     """
 
     BOOK_JSON = "book_json"
     BOOK_PDF = "book_pdf"
+    #: Read by Docling only.
+    BOOK_DOCX = "book_docx"
+    BOOK_PPTX = "book_pptx"
+    #: A YouTube video, imported from its transcript (``app/ingestion/youtube.py``). Never
+    #: downloaded: ``original_filename`` holds the watch URL and ``video_id`` the id.
+    YOUTUBE = "youtube"
+
+
+class ChunkSourceKind(StrEnum):
+    """Where a chunk's text came from: a book page range, or a timed stretch of video."""
+
+    BOOK = "book"
+    VIDEO = "video"
+
+
+class VideoAvailability(StrEnum):
+    """Whether a YouTube source can still be played in an embedded player (Task 30).
+
+    Set at import and by the periodic check (``app/jobs/video_availability.py``); a clip of a
+    video that is not ``AVAILABLE`` is not shown to students.
+    """
+
+    AVAILABLE = "available"
+    #: Private, deleted, or otherwise gone.
+    UNAVAILABLE = "unavailable"
+    #: Exists, but its owner turned off embedding, so a clip cannot play inside the app.
+    NOT_EMBEDDABLE = "not_embeddable"
+    #: The last check could not reach YouTube; the earlier answer is kept where there is one.
+    UNKNOWN = "unknown"
 
 
 class StructureSource(StrEnum):
@@ -201,6 +230,9 @@ class QuestionType(StrEnum):
     DEBUGGING = "debugging"
     PARSONS = "parsons"
     CODING = "coding"
+    #: Phase 2: built only when ``app/question_types/<value>.py`` lands (T1, T2).
+    NUMERIC_RESPONSE = "numeric_response"
+    EQUATION_RESPONSE = "equation_response"
 
 
 class ClaimViolation(StrEnum):
@@ -361,3 +393,98 @@ class JudgeBatchStatus(StrEnum):
             JudgeBatchStatus.FAILED,
             JudgeBatchStatus.EXPIRED,
         )
+
+
+class RoundStatus(StrEnum):
+    """Lifecycle of one generation round of a question setup.
+
+    A round runs in the background (the ``/api/*`` proxy would time out on a synchronous
+    one), so the client polls it until it reaches ``DONE`` or ``FAILED``.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+    def is_terminal(self) -> bool:
+        """True when no further polling can change this round."""
+        return self in (RoundStatus.DONE, RoundStatus.FAILED)
+
+
+class GuidelineStatus(StrEnum):
+    """Where a learned guideline stands (ADR-063 point 4).
+
+    Only ``ACTIVE`` ones are sent: at least two distinct supporting reviews, or the
+    professor's confirmation. ``PENDING`` waits for that. ``RETIRED`` was dropped, merged,
+    or deleted by the professor; ``REFUSED`` was an output-contract rule the deterministic
+    filter would not store as a preference. Both are kept for the record, never sent.
+    """
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    RETIRED = "retired"
+    REFUSED = "refused"
+
+
+class JobKind(StrEnum):
+    """What a background job stored in ``background_jobs`` does.
+
+    Question rounds and judge re-runs keep their own tables; these are the long
+    professor actions that used to be one blocking request.
+    """
+
+    BULK_GENERATION = "bulk_generation"
+    COVERAGE_FILL = "coverage_fill"
+    BOOK_IMPORT = "book_import"
+    #: Re-embedding every chunk in a newly chosen embedding model (Task 43).
+    EMBEDDING_SWITCH = "embedding_switch"
+    #: One new question from an existing one, with instructor feedback (ADR-066).
+    REGENERATION = "regeneration"
+    #: A taxonomy's tutorial blocks, every subtopic x recipe x guidance level (Task 24).
+    TUTORIAL_PREGENERATION = "tutorial_pregeneration"
+
+
+class CustomJudgeKind(StrEnum):
+    """How a professor-written rule judge checks a question.
+
+    ``LLM`` asks the model one yes/no question per rule; ``PATTERN`` is a deterministic
+    regex/AST check over the question's code, with no model call.
+    """
+
+    LLM = "llm"
+    PATTERN = "pattern"
+
+
+class TutorialRenderer(StrEnum):
+    """How the frontend draws a tutorial block (Phase 5). Few and trusted: each has a payload
+    contract (``app/tutorials/renderers.py``) and one frontend component."""
+
+    MARKDOWN = "markdown"
+    MERMAID = "mermaid"
+    CHARTJS = "chartjs"
+    #: Runs in ``<iframe sandbox="allow-scripts">`` without same-origin, under a CSP that
+    #: blocks the network.
+    HTML = "html"
+    #: A range of a YouTube video, played through the IFrame API (Task 31).
+    VIDEO_CLIP = "video_clip"
+
+
+class GuidanceLevel(StrEnum):
+    """How much a tutorial block does for the student, from most to least (BKT-driven)."""
+
+    WORKED = "worked"
+    FADED = "faded"
+    CUE = "cue"
+
+
+class TutorialBlockStatus(StrEnum):
+    """A generated tutorial block: ``DRAFT`` until the professor decides its recipe (Phase 6);
+    ``FAILED`` when its payload stayed invalid after the one repair retry."""
+
+    DRAFT = "draft"
+    FAILED = "failed"
+    #: Its recipe was approved for the taxonomy; only approved blocks are frozen and served.
+    APPROVED = "approved"
+    #: Its recipe was rejected for the taxonomy; hidden from lists, never served.
+    REJECTED = "rejected"

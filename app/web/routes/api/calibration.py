@@ -21,7 +21,7 @@ from app.calibration import (
     reports_by_type,
 )
 from app.domain.enums import JudgeMetricId
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseScope, DbSession
 from app.web.routes.api.schemas import (
     AgreementTrendResponse,
     CalibrationPairOut,
@@ -37,15 +37,17 @@ router = APIRouter(prefix="/calibration", tags=["calibration"])
 
 
 @router.get("/results", response_model=CalibrationResultsResponse)
-def calibration_results(session: DbSession) -> CalibrationResultsResponse:
-    """Judge/professor agreement over every reviewed, judged question."""
-    return CalibrationResultsResponse.from_report(build_calibration_report(session))
+def calibration_results(session: DbSession, course: CourseScope) -> CalibrationResultsResponse:
+    """Judge/professor agreement over the course's reviewed, judged questions."""
+    return CalibrationResultsResponse.from_report(
+        build_calibration_report(session, course_id=course)
+    )
 
 
 @router.get("/pairs", response_model=CalibrationPairsResponse)
-def calibration_pairs(session: DbSession) -> CalibrationPairsResponse:
+def calibration_pairs(session: DbSession, course: CourseScope) -> CalibrationPairsResponse:
     """The questions behind the figures, so a rate can be checked against rows."""
-    pairs = build_calibration_pairs(session)
+    pairs = build_calibration_pairs(session, course_id=course)
     return CalibrationPairsResponse(
         pairs=[CalibrationPairOut.from_pair(pair) for pair in pairs],
         total=len(pairs),
@@ -54,7 +56,7 @@ def calibration_pairs(session: DbSession) -> CalibrationPairsResponse:
 
 @router.get("/quadrant", response_model=CalibrationQuadrantResponse)
 def calibration_quadrant(
-    session: DbSession, rubric_version: str | None = None
+    session: DbSession, course: CourseScope, rubric_version: str | None = None
 ) -> CalibrationQuadrantResponse:
     """The four-cell breakdown per question type, with the questions in each.
 
@@ -62,7 +64,7 @@ def calibration_quadrant(
     reports every version it drew on, so a figure spanning two judges is
     visible rather than implied.
     """
-    pairs = build_calibration_pairs(session, rubric_version=rubric_version)
+    pairs = build_calibration_pairs(session, rubric_version=rubric_version, course_id=course)
     return CalibrationQuadrantResponse(
         overall=CalibrationResultsResponse.from_report(metrics_from_pairs(pairs)),
         types=[
@@ -77,7 +79,7 @@ def calibration_quadrant(
 
 
 @router.get("/trend", response_model=AgreementTrendResponse)
-def agreement_trend(session: DbSession) -> AgreementTrendResponse:
+def agreement_trend(session: DbSession, course: CourseScope) -> AgreementTrendResponse:
     """Agreement per judge panel, in the order the panels ran (ADR-041).
 
     The measurement that can falsify ADR-039: a judge rewriting itself from its
@@ -85,4 +87,4 @@ def agreement_trend(session: DbSession) -> AgreementTrendResponse:
     whether it did. Read-only, and built from the frozen ``review_outcomes``
     rows rather than from the live evaluations, which a re-judge overwrites.
     """
-    return AgreementTrendResponse.from_trend(build_agreement_trend(session))
+    return AgreementTrendResponse.from_trend(build_agreement_trend(session, course_id=course))

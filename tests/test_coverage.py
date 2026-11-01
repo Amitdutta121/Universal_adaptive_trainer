@@ -31,7 +31,6 @@ from app.coverage import (
 from app.domain.enums import CurriculumStatus, Difficulty, QuestionStatus
 from app.errors import DomainRuleError, NotFoundError
 from app.generation.schemas import MultipleChoiceDraft
-from app.ingestion import BookImportService
 from app.persistence.models import (
     CurriculumVersionRow,
     QuestionRow,
@@ -39,8 +38,7 @@ from app.persistence.models import (
     SubtopicRow,
     TopicRow,
 )
-from app.persistence.repositories import BookStructureRepository, QuestionSetRepository
-from app.retrieval import SectionEmbeddingStore
+from app.persistence.repositories import QuestionSetRepository
 from app.web.routes.api.coverage import active_generation_topic_ids, get_generation_client
 from app.web.routes.api.retrieval import get_query_embedder
 
@@ -273,7 +271,9 @@ def test_syncing_prod_again_moves_the_alias_not_the_old_snapshot(session: Sessio
     version, (subtopic_id,) = _taxonomy(session)
     first = _question(session, version=version, subtopic_id=subtopic_id)
     original = sync_prod_question_set(session)
-    second = _question(session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.HARD)
+    second = _question(
+        session, version=version, subtopic_id=subtopic_id, difficulty=Difficulty.HARD
+    )
 
     moved = sync_prod_question_set(session)
     original_again = QuestionSetRepository(session).get(original.id)
@@ -363,15 +363,11 @@ def test_the_endpoint_creates_and_reads_back_a_set(client: TestClient, session: 
     assert listed["total"] == 1
 
 
-def test_the_api_can_sync_and_read_the_current_prod_set(
-    client: TestClient, session: Session
-) -> None:
+def test_the_api_reads_the_current_prod_set(client: TestClient, session: Session) -> None:
     version, (subtopic_id,) = _taxonomy(session)
     approved = _question(session, version=version, subtopic_id=subtopic_id)
 
-    synced = client.post("/api/question-sets/prod/sync")
-    assert synced.status_code == 201
-    assert synced.json()["is_prod"] is True
+    sync_prod_question_set(session)
 
     fetched = client.get("/api/question-sets/prod")
 
@@ -428,7 +424,7 @@ def test_the_openapi_documents_coverage_as_read_only(client: TestClient) -> None
     assert set(schema["paths"]["/api/coverage"]) == {"get"}
     assert set(schema["paths"]["/api/question-sets"]) == {"get", "post"}
     assert set(schema["paths"]["/api/question-sets/prod"]) == {"get"}
-    assert set(schema["paths"]["/api/question-sets/prod/sync"]) == {"post"}
+    assert "/api/question-sets/prod/sync" not in schema["paths"]
     # No PUT, PATCH or DELETE: a frozen set is never edited (ADR-036).
     assert set(schema["paths"]["/api/question-sets/{set_version_id}"]) == {"get"}
 
@@ -544,7 +540,7 @@ class KeywordEmbedder:
     """Deterministic bag-of-words embedder over a fixed vocabulary.
 
     Cosine ordering is then a function of shared keywords, so a "while loop"
-    query ranks the while-loop section first and a query with none of the
+    query ranks the while-loop chunk first and a query with none of the
     vocabulary embeds to a zero vector -- the retriever's "nothing" case.
     """
 
@@ -555,7 +551,7 @@ class KeywordEmbedder:
         return [[float(t.lower().count(word)) for word in self.VOCAB] for t in texts]
 
 
-def _gen_book(session: Session, settings: Settings):
+def _gen_book(session: Session):
     sections = [
         "A while loop repeats while a condition holds. Use a while loop to loop again.",
         "A string can be sliced. Take a slice of a string. string slice string.",
@@ -566,9 +562,7 @@ def _gen_book(session: Session, settings: Settings):
         "title": "Gen Book",
         "chapters": [{"sections": [{"text": text} for text in sections]}],
     }
-    book = BookImportService(session, settings).import_upload(
-        filename="gen_book.json", data=docs.to_bytes(doc)
-    )
+    book = docs.chunked_book(session, doc)
     session.commit()
     return book
 
@@ -624,21 +618,45 @@ def _mcq(topic_id: int, subtopic_id: int) -> MultipleChoiceDraft:
 
 
 @pytest.fixture
-def gen_env(session: Session, settings: Settings) -> SimpleNamespace:
-    book = _gen_book(session, settings)
+def gen_env(session: Session) -> SimpleNamespace:
+    book = _gen_book(session)
     env = _gen_taxonomy(session, book.id)
-    SectionEmbeddingStore(session, KeywordEmbedder()).backfill()
-    session.commit()
     env.book = book
-    env.sections = BookStructureRepository(session).sections_in_book(book.id)
+    env.chunks = book.chunks
     return env
 
 
+class _FinishedRun:
+    """A queued coverage run, read back from the Jobs list once it finished.
+
+    ``TestClient`` runs the job before the POST returns, so the job is already done (or
+    failed) here; ``json()`` is what the run stored, i.e. the old blocking response.
+    """
+
+    def __init__(self, posted: object, job: dict) -> None:
+        self.status_code = posted.status_code
+        self.text = posted.text
+        self.job = job
+
+    def json(self) -> dict:
+        return self.job["result"]
+
+
 def _run(app: FastAPI, gen_client: object, targets: list[dict]) -> object:
+    """A gap run through ``POST /generation-runs`` (ADR-066)."""
     app.dependency_overrides[get_query_embedder] = KeywordEmbedder
     app.dependency_overrides[get_generation_client] = lambda: gen_client
     with TestClient(app) as http:
-        return http.post("/api/coverage/generation-runs", json={"targets": targets})
+        posted = http.post(
+            "/api/generation-runs", json={"target": {"kind": "gaps", "targets": targets}}
+        )
+        if posted.status_code != 202:
+            return posted
+        job_id = posted.json()["job_id"]
+        (job,) = [job for job in http.get("/api/jobs").json()["jobs"] if job["id"] == job_id]
+    assert job["status"] == "done", job
+    assert job["done"] == job["total"] == len(targets)
+    return _FinishedRun(posted, job)
 
 
 def test_a_run_generates_a_grounded_question_into_the_review_queue(
@@ -652,7 +670,7 @@ def test_a_run_generates_a_grounded_question_into_the_review_queue(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["run_id"]
     assert body["skipped"] == [] and body["failed"] == []
@@ -661,7 +679,7 @@ def test_a_run_generates_a_grounded_question_into_the_review_queue(
     assert produced["requested_difficulty"] == "medium"
     assert produced["claimed_topic_id"] == gen_env.while_loops.topic_id
     assert produced["aim_matched"] is True
-    assert produced["section_id"] == gen_env.sections[0].id
+    assert produced["chunk_id"] == gen_env.chunks[0].id
     assert produced["status"] == "validation_passed"
 
     with TestClient(configured_app) as http:
@@ -682,14 +700,14 @@ def test_a_run_surfaces_an_aim_mismatch_without_filtering_it(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "easy"}],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     (produced,) = response.json()["generated"]
     assert produced["requested_subtopic_id"] == gen_env.while_loops.id
     assert produced["claimed_topic_id"] == gen_env.slicing.topic_id
     assert produced["aim_matched"] is False
 
 
-def test_a_target_with_no_confident_section_is_skipped_and_the_run_continues(
+def test_a_target_with_no_confident_chunk_is_skipped_and_the_run_continues(
     configured_app: FastAPI, session: Session, gen_env: SimpleNamespace
 ) -> None:
     client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
@@ -703,25 +721,25 @@ def test_a_target_with_no_confident_section_is_skipped_and_the_run_continues(
         ],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["skipped"] == [
         {
             "subtopic_id": gen_env.recursion.id,
             "difficulty": "easy",
-            "reason": "no confident section",
+            "reason": "no confident chunk",
         }
     ]
     assert [q["requested_subtopic_id"] for q in body["generated"]] == [gen_env.while_loops.id]
 
 
-def test_a_below_floor_section_is_skipped(
+def test_a_below_floor_chunk_is_skipped(
     configured_app: FastAPI,
     session: Session,
     gen_env: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.web.routes.api.coverage.MIN_SECTION_SCORE", 0.999)
+    monkeypatch.setattr("app.web.routes.api.coverage.MIN_CHUNK_SCORE", 0.999)
     client = MetricJudgeClient(draft=_mcq(gen_env.while_loops.topic_id, gen_env.while_loops.id))
 
     response = _run(
@@ -730,10 +748,10 @@ def test_a_below_floor_section_is_skipped(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "hard"}],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["generated"] == []
-    assert body["skipped"][0]["reason"] == "no confident section"
+    assert body["skipped"][0]["reason"] == "no confident chunk"
 
 
 def test_an_unknown_subtopic_is_a_404_before_anything_is_generated(
@@ -766,18 +784,18 @@ def test_a_provider_failure_on_one_target_keeps_the_others(
         ],
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     body = response.json()
     (failed,) = body["failed"]
     assert failed["subtopic_id"] == gen_env.slicing.id
-    assert failed["section_id"] == gen_env.sections[1].id
+    assert failed["chunk_id"] == gen_env.chunks[1].id
     assert failed["error"]
     assert [q["requested_subtopic_id"] for q in body["generated"]] == [gen_env.while_loops.id]
 
     with TestClient(configured_app) as http:
         listed = http.get("/api/questions", params={"status": "validation_passed"}).json()
     assert [q["id"] for q in listed["questions"]] == [body["generated"][0]["question_id"]]
-    assert active_generation_topic_ids() == []
+    assert active_generation_topic_ids(session, None) == []
 
 
 def test_asking_to_fill_no_gaps_at_all_is_rejected(configured_app: FastAPI) -> None:
@@ -796,10 +814,10 @@ def test_a_topic_stays_marked_active_until_its_run_finishes(
 
     class ProbeClient(MetricJudgeClient):
         def complete_structured(self, **kwargs):
-            assert active_generation_topic_ids() == [gen_env.while_loops.topic_id]
+            assert active_generation_topic_ids(session, None) == [gen_env.while_loops.topic_id]
             return super().complete_structured(**kwargs)
 
-    assert active_generation_topic_ids() == []
+    assert active_generation_topic_ids(session, None) == []
 
     response = _run(
         configured_app,
@@ -807,5 +825,5 @@ def test_a_topic_stays_marked_active_until_its_run_finishes(
         [{"subtopic_id": gen_env.while_loops.id, "difficulty": "medium"}],
     )
 
-    assert response.status_code == 200, response.text
-    assert active_generation_topic_ids() == []
+    assert response.status_code == 202, response.text
+    assert active_generation_topic_ids(session, None) == []

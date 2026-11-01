@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schedule · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* Compact select for the per-topic "move to week" control in edit mode. */
+    .select.mini { height: 1.75rem; padding-top: 0; padding-bottom: 0; font-size: 0.75rem; }
+  </style>
+</head>
+<!-- G1 · Schedule: which topics open in which week of the syllabus. Students practise only released topics, plus review. -->
+<body data-scope="course" data-nav="schedule" data-title="Schedule">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Schedule</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl" x-show="s" x-text="s && `${s.term.name}: ${fmt(s.term.starts)} – ${fmt(s.term.ends)}, final exam ${fmt(s.term.final_exam, true)}. A topic opens to students on the Monday of the week it is released.`"></p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="s">
+        <a class="btn" data-variant="outline" :href="Mock.link('assignments.html')">Assignments</a>
+        <button type="button" class="btn" :data-variant="editing ? null : 'outline'" @click="editing = !editing; if (!editing) Mock.toast('Schedule saved. Students see the change at their next session.')">
+          <span x-text="editing ? 'Done editing' : 'Edit schedule'"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Empty state: statistics has no approved taxonomy, so there are no topics to schedule. -->
+    <template x-if="!s">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="calendar-days"></i></span>
+          <h2 class="font-semibold">Nothing to schedule yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md">The schedule maps taxonomy topics to the weeks of your syllabus. This course has no approved taxonomy yet: the AI draft from OpenIntro Statistics (8 topics, 29 subtopics) is waiting for your review.</p>
+          <div class="flex gap-2 mt-2">
+            <a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review the drafted taxonomy</a>
+            <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('course.html')">Course overview</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="s">
+      <div class="grid gap-6">
+        <!-- Key numbers -->
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Today</div>
+            <div class="text-2xl font-display font-semibold" x-text="`Week ${s.current_week} of ${weeks.length}`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Topics open to students</div>
+            <div class="text-2xl font-display font-semibold" x-text="`${openNow.length} of ${course.taxonomy.length}`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Opens next</div>
+            <div class="text-base font-semibold leading-8 truncate" x-text="nextRelease ? `${nextRelease.names} · ${fmt(nextRelease.starts, true)}` : '—'"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Not scheduled</div>
+            <div class="text-2xl font-display font-semibold" x-text="unscheduled.length"></div>
+          </div>
+        </section>
+
+        <!-- Release mode -->
+        <section class="card">
+          <header>
+            <h2>What students can practise</h2>
+            <p x-text="mode === 'schedule'
+              ? `Now: the ${openNow.length} topics released in weeks 1–${s.current_week}. About ${Math.round(reviewShare * 100)}% of questions are review from weeks 1–${s.current_week - 1}; the rest come from this week's ${thisWeekNames || 'topics'}.`
+              : `Now: all ${scheduledCount} scheduled topics, from the first session. The engine serves each student's weakest subtopics across the whole course, including ones not taught yet.`"></p>
+          </header>
+          <section class="grid gap-4">
+            <div class="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Release mode">
+              <label class="flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="mode === 'schedule' ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                <input type="radio" class="input mt-0.5" name="mode" value="schedule" x-model="mode" @change="modeChanged()">
+                <span class="grid gap-0.5"><span class="text-sm font-medium">Release topics by schedule</span><span class="text-xs text-muted-foreground">Each topic opens on the Monday of its week. Recommended: week-3 students don't get Classes.</span></span>
+              </label>
+              <label class="flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="mode === 'all' ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                <input type="radio" class="input mt-0.5" name="mode" value="all" x-model="mode" @change="modeChanged()">
+                <span class="grid gap-0.5"><span class="text-sm font-medium">All topics at once</span><span class="text-xs text-muted-foreground">Everything is open from day one. Suits a review course or a self-paced section.</span></span>
+              </label>
+            </div>
+            <div role="group" class="field" data-orientation="horizontal" x-show="mode === 'schedule'">
+              <label for="review-share" class="text-sm">Review from earlier weeks</label>
+              <select id="review-share" class="select w-28" x-model.number="reviewShare" @change="Mock.toast(`Review share set to ${Math.round(reviewShare * 100)}%`)">
+                <option value="0">None</option><option value="0.1">10%</option><option value="0.2">20%</option><option value="0.3">30%</option><option value="0.5">50%</option>
+              </select>
+              <p class="text-xs text-muted-foreground">Review questions come from the student's weakest subtopics among earlier topics.</p>
+            </div>
+          </section>
+        </section>
+
+        <!-- Weeks -->
+        <section class="card">
+          <header>
+            <h2>Weeks</h2>
+            <p x-text="editing ? 'Use the week menu next to a topic to move it. Moving a topic into a past week opens it to students immediately.' : 'Highlighted: this week. Released topics are shaded; the others open on their Monday.'"></p>
+          </header>
+          <section class="p-0">
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th class="pl-6 w-14">Week</th>
+                    <th class="w-28">Starts</th>
+                    <th>Lecture</th>
+                    <th>Topics released</th>
+                    <th class="pr-6">Assignments due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="w in weeks" :key="w.week">
+                    <tr :style="w.week === s.current_week ? { background: 'var(--muted)', boxShadow: 'inset 3px 0 0 var(--primary)' } : {}">
+                      <td class="pl-6 font-mono text-sm align-top">
+                        <span :class="w.week === s.current_week ? 'font-semibold' : ''" x-text="w.week"></span>
+                      </td>
+                      <td class="whitespace-nowrap text-sm align-top">
+                        <span x-text="fmt(w.starts, true)"></span>
+                        <div class="text-xs font-medium" style="color:var(--accent-text)" x-show="w.week === s.current_week">This week</div>
+                      </td>
+                      <td class="align-top">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-sm" x-text="w.title"></span>
+                          <span class="pill" :class="noteTone(w.note)" x-show="w.note" x-text="w.note"></span>
+                        </div>
+                      </td>
+                      <td class="align-top">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          <template x-for="tid in w.topics" :key="tid">
+                            <span class="inline-flex items-center gap-1">
+                              <span class="pill" :class="isOpen(w.week) ? 'tone-accent' : 'tone-muted'" :title="isOpen(w.week) ? 'Open to students' : `Opens ${fmt(w.starts, true)}`" x-text="topicName(tid)"></span>
+                              <select class="select mini w-24" x-show="editing" :aria-label="`Move ${topicName(tid)} to week`" @change="move(tid, $event.target.value); $event.target.value = w.week">
+                                <template x-for="n in weeks" :key="n.week"><option :value="n.week" :selected="n.week === w.week" x-text="`Week ${n.week}`"></option></template>
+                                <option value="none">Unschedule</option>
+                              </select>
+                            </span>
+                          </template>
+                          <span class="text-sm text-muted-foreground" x-show="!w.topics.length">—</span>
+                        </div>
+                      </td>
+                      <td class="pr-6 align-top">
+                        <template x-for="a in dueIn(w.week)" :key="a.id">
+                          <div class="text-sm whitespace-nowrap">
+                            <a class="hover:underline" :href="Mock.link('assignment.html', { id: a.id })" x-text="a.name"></a>
+                            <span class="text-xs text-muted-foreground" x-text="`· ${fmt(a.due)}`"></span>
+                          </div>
+                        </template>
+                        <span class="text-sm text-muted-foreground" x-show="!dueIn(w.week).length">—</span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- Topics not on the schedule -->
+        <section class="card">
+          <header>
+            <h2>Not scheduled</h2>
+            <p>Topics in the approved taxonomy (v3) that no week releases. Students never see them while release follows the schedule, and assignments can't include them.</p>
+          </header>
+          <section>
+            <ul class="grid gap-2" x-show="unscheduled.length">
+              <template x-for="t in unscheduled" :key="t.id">
+                <li class="flex flex-wrap items-center gap-3 text-sm">
+                  <span class="font-medium" x-text="t.name"></span>
+                  <span class="text-xs text-muted-foreground" x-text="`${t.subtopics.length} subtopics`"></span>
+                  <select class="select mini w-40 ml-auto" :aria-label="`Schedule ${t.name}`" @change="move(t.id, $event.target.value)">
+                    <option value="" selected disabled>Release in week…</option>
+                    <template x-for="n in weeks" :key="n.week"><option :value="n.week" x-text="`Week ${n.week} · ${fmt(n.starts)}`"></option></template>
+                  </select>
+                </li>
+              </template>
+            </ul>
+            <p class="text-sm text-muted-foreground" x-show="!unscheduled.length" x-text="`All ${course.taxonomy.length} topics are scheduled.`"></p>
+          </section>
+        </section>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-plan.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const s = MOCK.schedule[c.id];
+      return {
+        course: c,
+        s,
+        editing: Mock.param("edit") === "1", // ?edit=1 opens edit mode (for demos and screenshots)
+        mode: s ? s.release_mode : "schedule",
+        reviewShare: s ? s.review_share : 0.2,
+        weeks: s ? s.weeks.map((w) => ({ ...w, topics: [...w.topics] })) : [],
+        assignments: MOCK.assignments.filter((a) => a.course === c.id),
+        fmt(d, weekday) {
+          return new Date(d + "T12:00").toLocaleDateString("en-US", weekday ? { weekday: "short", month: "short", day: "numeric" } : { month: "short", day: "numeric" });
+        },
+        topicName(id) { return (c.taxonomy.find((t) => t.id === id) || {}).name || id; },
+        isOpen(week) { return this.mode === "all" || week <= s.current_week; },
+        noteTone(n) { return n === "Midterm exam" ? "tone-warn" : n === "Holiday" ? "tone-critical" : "tone-muted"; },
+        dueIn(week) { return this.assignments.filter((a) => MOCK.plan.weekOf(c.id, a.due) === week); },
+        get scheduledCount() { return this.weeks.reduce((n, w) => n + w.topics.length, 0); },
+        get openNow() { return this.weeks.filter((w) => this.isOpen(w.week)).flatMap((w) => w.topics); },
+        get thisWeekNames() { return this.weeks.find((w) => w.week === s.current_week).topics.map((t) => this.topicName(t)).join(", "); },
+        get nextRelease() {
+          const w = this.weeks.find((x) => x.week > s.current_week && x.topics.length);
+          return this.mode === "schedule" && w ? { starts: w.starts, names: w.topics.map((t) => this.topicName(t)).join(", ") } : null;
+        },
+        get unscheduled() {
+          const on = new Set(this.weeks.flatMap((w) => w.topics));
+          return c.taxonomy.filter((t) => !on.has(t.id));
+        },
+        modeChanged() {
+          Mock.toast(this.mode === "all"
+            ? `All ${this.scheduledCount} topics are open from each student's next session`
+            : `Back to the schedule: students practise the ${this.openNow.length} topics released through week ${s.current_week}`);
+        },
+        move(tid, to) {
+          const from = this.weeks.find((w) => w.topics.includes(tid));
+          if (from && String(from.week) === String(to)) return;
+          if (from) from.topics = from.topics.filter((x) => x !== tid);
+          const name = this.topicName(tid);
+          if (to === "none") { Mock.toast(`${name} removed from the schedule; students no longer practise it`); return; }
+          const w = this.weeks.find((x) => x.week === Number(to));
+          w.topics.push(tid);
+          const wasOpen = from && from.week <= s.current_week;
+          const nowOpen = w.week <= s.current_week;
+          Mock.toast(nowOpen && !wasOpen ? `${name} moved to week ${w.week}; it is open to students now`
+            : !nowOpen && wasOpen ? `${name} moved to week ${w.week}; it leaves practice until ${this.fmt(w.starts, true)}. Mastery so far is kept.`
+            : `${name} moved to week ${w.week} (${this.fmt(w.starts, true)})`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

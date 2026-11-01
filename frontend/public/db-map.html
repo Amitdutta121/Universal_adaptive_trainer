@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Trainer Database Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a single reading column (map → story → areas), area colours carried through every section. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #1d2533;
+  --muted: #5b6577;
+  --line: #dde2ea;
+  --accent: #2f5bd3;
+  --diagram-bg: #ffffff;
+  --a-people: #6b4fbb;
+  --a-books: #b4590f;
+  --a-curr: #1f7a5a;
+  --a-questions: #2f5bd3;
+  --a-feedback: #b03a5b;
+  --a-class: #0f7d8c;
+  --tint: rgba(47, 91, 211, 0.07);
+  --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161d; --surface: #1a2029; --ink: #e5e9f0; --muted: #9aa5b6; --line: #2c3442;
+    --accent: #7d9cf0; --diagram-bg: #f4f6f9; --tint: rgba(125, 156, 240, 0.10);
+    --a-people: #a891f0; --a-books: #e39a52; --a-curr: #5cc79d; --a-questions: #7d9cf0;
+    --a-feedback: #ea7e9b; --a-class: #4fc3d1; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --ink: #e5e9f0; --muted: #9aa5b6; --line: #2c3442;
+  --accent: #7d9cf0; --diagram-bg: #f4f6f9; --tint: rgba(125, 156, 240, 0.10);
+  --a-people: #a891f0; --a-books: #e39a52; --a-curr: #5cc79d; --a-questions: #7d9cf0;
+  --a-feedback: #ea7e9b; --a-class: #4fc3d1; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font-body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 64px; display: flex; flex-direction: column; gap: 48px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.25; margin: 0; }
+h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 700; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.intro { display: flex; flex-direction: column; gap: 12px; }
+.intro p { color: var(--muted); }
+.section { display: flex; flex-direction: column; gap: 16px; }
+.section > p { color: var(--muted); }
+nav.jump { display: flex; flex-wrap: wrap; gap: 8px; }
+nav.jump a { text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--surface); padding: 4px 12px; border-radius: 999px; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; }
+nav.jump a:hover, nav.jump a:focus-visible { border-color: var(--accent); outline: none; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.diagram { background: var(--diagram-bg); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+.diagram pre.mermaid { margin: 0; background: transparent; font-family: "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; text-align: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Life of a question: a real sequence, so numbered. */
+ol.life { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; counter-reset: step; }
+ol.life li { counter-increment: step; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+ol.life li::before { content: "Step " counter(step); font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; }
+ol.life .tables { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 7px; border-radius: 5px; background: var(--tint); color: var(--ink); white-space: nowrap; }
+
+/* Area sections */
+.area { border-top: 3px solid var(--area); padding-top: 20px; display: flex; flex-direction: column; gap: 14px; }
+.area-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.area-head h2 { color: var(--area); }
+.area-head .count { font-size: 13px; color: var(--muted); }
+.area > p { color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card .name { font-family: var(--font-mono); font-weight: 600; font-size: 14px; color: var(--area); word-break: break-word; }
+.card .what { font-size: 14px; }
+.card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; }
+.card dt { font-family: var(--font-mono); font-size: 12px; color: var(--ink); white-space: nowrap; }
+.card dd { margin: 0; color: var(--muted); min-width: 0; }
+.card .links { font-size: 12.5px; color: var(--muted); }
+.card .links b { color: var(--ink); font-weight: 600; }
+.card.legacy { border-style: dashed; }
+.search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.search input { font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); width: min(360px, 100%); }
+.search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search .hint { font-size: 13px; color: var(--muted); }
+.empty-note { font-size: 14px; color: var(--muted); }
+
+/* Inside the question row */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: none; }
+td:first-child { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+.outside { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.outside div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.outside div p { font-size: 14px; color: var(--muted); }
+footer { font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { nav.jump a { transition: border-color .15s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="intro">
+    <span class="eyebrow">Adaptive Trainer · SQLite · 29 tables in use</span>
+    <h1>Adaptive Trainer Database Map</h1>
+    <p>Everything the app remembers lives in one SQLite file (<code>data/adaptive_trainer.db</code>). The tables fall into six areas. A professor fills the first five; students fill the last one. Read the map, then follow one question from book to student.</p>
+    <nav class="jump" aria-label="Jump to an area">
+      <a href="#people"><span class="dot" style="background:var(--a-people)"></span>People &amp; courses</a>
+      <a href="#books"><span class="dot" style="background:var(--a-books)"></span>Books</a>
+      <a href="#curriculum"><span class="dot" style="background:var(--a-curr)"></span>Curriculum</a>
+      <a href="#questions"><span class="dot" style="background:var(--a-questions)"></span>Question bank</a>
+      <a href="#feedback"><span class="dot" style="background:var(--a-feedback)"></span>Feedback &amp; learning</a>
+      <a href="#classroom"><span class="dot" style="background:var(--a-class)"></span>Classroom &amp; students</a>
+      <a href="#inside">Inside a question</a>
+      <a href="#outside">Not in the database</a>
+    </nav>
+  </header>
+
+  <section class="section" aria-labelledby="map-h">
+    <h2 id="map-h">The big picture</h2>
+    <p>Each box is an area of tables. An arrow means "points to": the table on the arrow's tail stores the id of a row in the area it points at.</p>
+    <div class="diagram">
+<pre class="mermaid">
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif", "fontSize": "16px", "primaryTextColor": "#1d2533", "lineColor": "#7a8496"}}}%%
+flowchart TB
+  P["People & courses"]
+  B["Books"]
+  C["Curriculum"]
+  Q["Question bank"]
+  F["Feedback & learning"]
+  S["Classroom & students"]
+  B -- "belongs to a course" --> P
+  C -- "belongs to a course" --> P
+  C -. "quotes sections" .-> B
+  Q -- "written for a taxonomy" --> C
+  Q -. "written from a section" .-> B
+  F -- "reviews a question" --> Q
+  S -- "freezes questions" --> Q
+  S -- "mastery per topic" --> C
+  classDef people fill:#efeafc,stroke:#6b4fbb,color:#1d2533;
+  classDef books fill:#fbeedf,stroke:#b4590f,color:#1d2533;
+  classDef curr fill:#e3f3ec,stroke:#1f7a5a,color:#1d2533;
+  classDef q fill:#e6ecfb,stroke:#2f5bd3,color:#1d2533;
+  classDef fb fill:#f9e5eb,stroke:#b03a5b,color:#1d2533;
+  classDef cls fill:#e1f2f4,stroke:#0f7d8c,color:#1d2533;
+  class P people
+  class B books
+  class C curr
+  class Q q
+  class F fb
+  class S cls
+</pre>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="life-h">
+    <h2 id="life-h">The life of one question</h2>
+    <p>The order things happen in the app, and the tables each step writes to.</p>
+    <ol class="life">
+      <li><h3>A professor creates a course</h3><p>They pick a subject (Intro Python, Physics, ML &amp; LLMs…) and the question types the course will use.</p><div class="tables"><span class="chip">courses</span></div></li>
+      <li><h3>They upload a textbook</h3><p>The book is split into chapters and sections. Each section's text gets an embedding for search.</p><div class="tables"><span class="chip">books</span><span class="chip">book_chapters</span><span class="chip">book_sections</span><span class="chip">section_embeddings</span></div></li>
+      <li><h3>They build a taxonomy</h3><p>Topics and subtopics, by hand, from JSON, or drafted by the AI. Each version is kept.</p><div class="tables"><span class="chip">curriculum_versions</span><span class="chip">topics</span><span class="chip">subtopics</span><span class="chip">subtopic_evidence</span></div></li>
+      <li><h3>The AI writes a question</h3><p>From one section, one type, one difficulty. It is checked (does the answer key hold up?) and retried if a check fails.</p><div class="tables"><span class="chip">questions</span><span class="chip">question_subtopics</span></div></li>
+      <li><h3>Four AI judges score it</h3><p>Issues, subtopic fit, difficulty, and whether the section could support it. Advisory only.</p><div class="tables"><span class="chip">question_evaluations</span><span class="chip">judge_batch_runs</span></div></li>
+      <li><h3>The professor reviews it</h3><p>Approve, reject or edit. Disagreements with the judges teach the generator and the judges, per subject.</p><div class="tables"><span class="chip">professor_reviews</span><span class="chip">review_outcomes</span><span class="chip">type_instructions</span><span class="chip">judge_prompts</span></div></li>
+      <li><h3>A classroom link is made</h3><p>Approved questions of one taxonomy are frozen into a set. A link (alias) points students at it.</p><div class="tables"><span class="chip">question_set_versions</span><span class="chip">question_set_members</span><span class="chip">question_set_aliases</span></div></li>
+      <li><h3>A student practises</h3><p>Each answer is scored, and the student's mastery and weak spots move. The next question is picked from those.</p><div class="tables"><span class="chip">students</span><span class="chip">training_sessions</span><span class="chip">student_attempts</span><span class="chip">student_topic_mastery</span><span class="chip">student_subtopic_weakness</span></div></li>
+    </ol>
+  </section>
+
+  <section class="section" aria-labelledby="tables-h">
+    <h2 id="tables-h">Every table, area by area</h2>
+    <div class="search">
+      <input id="filter" type="search" placeholder="Find a table or column, e.g. mastery or course_id" aria-label="Filter tables">
+      <span class="hint" id="filter-hint">Showing all tables.</span>
+    </div>
+  </section>
+
+  <!-- PEOPLE -->
+  <section class="area" id="people" style="--area: var(--a-people)">
+    <div class="area-head"><h2>People &amp; courses</h2><span class="count">3 tables</span></div>
+    <p>Who can sign in, and the courses they run. A course is the box everything else lives in.</p>
+    <div class="diagram"><pre class="mermaid">
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"}}}%%
+erDiagram
+  user ||--o{ accesstoken : "signs in with"
+  user ||--o{ courses : "owns"
+  user { uuid id PK
+    string email }
+  accesstoken { string token PK
+    uuid user_id FK }
+  courses { int id PK
+    uuid owner_id FK
+    string subject
+    json question_types
+    json capabilities }
+</pre></div>
+    <div class="cards">
+      <article class="card"><span class="name">user</span><p class="what">A professor's login account.</p><dl><dt>email</dt><dd>what they sign in with</dd><dt>hashed_password</dt><dd>never stored in plain text</dd></dl></article>
+      <article class="card"><span class="name">accesstoken</span><p class="what">The login cookie's session. One row per signed-in browser.</p><dl><dt>token</dt><dd>the session id</dd><dt>user_id</dt><dd>whose session</dd></dl></article>
+      <article class="card"><span class="name">courses</span><p class="what">A course, e.g. "Physics 101". Books and taxonomies belong to it; everything else reaches it through them.</p><dl><dt>subject</dt><dd>preset: intro_python, physics, ml_llms, biology, custom</dd><dt>question_types_json</dt><dd>the types this course may generate</dd><dt>capabilities_json</dt><dd>the graders those types need (worked out, never picked)</dd></dl><p class="links">Points to <b>user</b> (owner).</p></article>
+    </div>
+  </section>
+
+  <!-- BOOKS -->
+  <section class="area" id="books" style="--area: var(--a-books)">
+    <div class="area-head"><h2>Books</h2><span class="count">4 tables</span></div>
+    <p>The source material. Questions are always written from one book section, so the AI can't make things up from nowhere.</p>
+    <div class="diagram"><pre class="mermaid">
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"}}}%%
+erDiagram
+  courses ||--o{ books : "has"
+  books ||--o{ book_chapters : "split into"
+  book_chapters ||--o{ book_sections : "split into"
+  book_sections ||--o{ section_embeddings : "searchable as"
+  books { int id PK
+    int course_id FK
+    string title
+    string source_format }
+  book_chapters { int id PK
+    int book_id FK
+    string number }
+  book_sections { int id PK
+    int chapter_id FK
+    text text
+    int start_page }
+  section_embeddings { int id PK
+    int section_id FK
+    blob vector }
+</pre></div>
+    <div class="cards">
+      <article class="card"><span class="name">books</span><p class="what">One uploaded textbook (PDF or a JSON book file).</p><dl><dt>course_id</dt><dd>which course it belongs to</dd><dt>stored_filename</dt><dd>the original PDF, kept on disk in <code>data/books/</code></dd><dt>status, warnings_json</dt><dd>how the import went</dd></dl><p class="links">Points to <b>courses</b>.</p></article>
+      <article class="card"><span class="name">book_chapters</span><p class="what">A chapter of a book, in order.</p><dl><dt>number, title</dt><dd>"3", "Motion Along a Straight Line"</dd><dt>start_page</dt><dd>where it begins in the PDF</dd></dl><p class="links">Points to <b>books</b>.</p></article>
+      <article class="card"><span class="name">book_sections</span><p class="what">A section's full text. This is what the AI reads when it writes a question.</p><dl><dt>text</dt><dd>the section itself</dd><dt>number, title</dt><dd>"3.5", "Free Fall"</dd><dt>structure_confidence</dt><dd>how sure the splitter was</dd></dl><p class="links">Points to <b>book_chapters</b>, <b>books</b>.</p></article>
+      <article class="card"><span class="name">section_embeddings</span><p class="what">A numeric fingerprint of a section's text, for "find similar" search.</p><dl><dt>vector</dt><dd>the embedding</dd><dt>content_hash</dt><dd>re-embed only when the text changes</dd></dl><p class="links">Points to <b>book_sections</b>.</p></article>
+    </div>
+  </section>
+
+  <!-- CURRICULUM -->
+  <section class="area" id="curriculum" style="--area: var(--a-curr)">
+    <div class="area-head"><h2>Curriculum (taxonomy)</h2><span class="count">4 tables</span></div>
+    <p>What the course teaches, as topics and subtopics. Each saved taxonomy is a version; questions, classroom sets and student mastery all point at a specific version.</p>
+    <div class="diagram"><pre class="mermaid">
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"}}}%%
+erDiagram
+  courses ||--o{ curriculum_versions : "has"
+  curriculum_versions ||--o{ topics : "contains"
+  topics ||--o{ subtopics : "contains"
+  subtopics ||--o{ subtopic_evidence : "backed by"
+  book_sections ||--o{ subtopic_evidence : "quoted from"
+  curriculum_versions { int id PK
+    int course_id FK
+    string label
+    string status }
+  topics { int id PK
+    int curriculum_version_id FK
+    string name }
+  subtopics { int id PK
+    int topic_id FK
+    string name }
+  subtopic_evidence { int id PK
+    int subtopic_id FK
+    int section_id FK
+    json quotes }
+</pre></div>
+    <div class="cards">
+      <article class="card"><span class="name">curriculum_versions</span><p class="what">One saved taxonomy, e.g. "Mechanics essentials v12".</p><dl><dt>status</dt><dd>proposed or approved (only approved ones generate)</dd><dt>label</dt><dd>its name</dd></dl><p class="links">Points to <b>courses</b>.</p></article>
+      <article class="card"><span class="name">topics</span><p class="what">A big area of the course, e.g. "Kinematics".</p><dl><dt>name, description</dt><dd>shown to professors and students</dd><dt>position</dt><dd>order in the outline</dd></dl><p class="links">Points to <b>curriculum_versions</b>.</p></article>
+      <article class="card"><span class="name">subtopics</span><p class="what">A skill inside a topic, e.g. "Free fall". Questions are tagged with these; student weakness is tracked per subtopic.</p><dl><dt>name, description</dt><dd>the skill</dd><dt>stable_id</dt><dd>keeps its identity across versions</dd></dl><p class="links">Points to <b>topics</b>.</p></article>
+      <article class="card"><span class="name">subtopic_evidence</span><p class="what">Quotes from the book that justify a subtopic (when a taxonomy is extracted from a book).</p><dl><dt>quotes_json, citation</dt><dd>the supporting text and where it is</dd></dl><p class="links">Points to <b>subtopics</b>, <b>books</b>, <b>book_sections</b>.</p></article>
+    </div>
+  </section>
+
+  <!-- QUESTIONS -->
+  <section class="area" id="questions" style="--area: var(--a-questions)">
+    <div class="area-head"><h2>Question bank</h2><span class="count">5 tables</span></div>
+    <p>The generated questions. Most of a question's detail (the question itself, its answer key, its checks, the judges' verdicts) is stored as JSON inside the <code>questions</code> row; see <a href="#inside">Inside a question</a>.</p>
+    <div class="diagram"><pre class="mermaid">
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"}}}%%
+erDiagram
+  curriculum_versions ||--o{ questions : "written for"
+  topics ||--o{ questions : "classified under"
+  questions ||--o{ question_subtopics : "tagged with"
+  subtopics ||--o{ question_subtopics : "tags"
+  questions ||--o{ question_evaluations : "judged in"
+  questions ||--o{ question_similarity_flags : "too similar to"
+  questions ||--o| questions : "regenerated from"
+  questions { int id PK
+    int curriculum_version_id FK
+    int topic_id FK
+    string question_type
+    string difficulty
+    string status
+    json content }
+  question_subtopics { int id PK
+    int question_id FK
+    int subtopic_id FK }
+  question_evaluations { int id PK
+    int question_id FK
+    string rubric_version
+    string gate }
+  question_similarity_flags { int id PK
+    int question_id FK
+    int similar_question_id FK
+    float score }
+  judge_batch_runs { int id PK
+    string run_id
+    string status }
+</pre></div>
+    <div class="cards">
+      <article class="card"><span class="name">questions</span><p class="what">One generated question of any type (multiple choice, coding, numeric with units, equation…).</p><dl><dt>question_type</dt><dd>one of the 9 built types</dd><dt>status</dt><dd>validation_passed → approved / rejected</dd><dt>content_json</dt><dd>the question and its answer key</dd><dt>validation_report_json</dt><dd>every automatic check, incl. "gradable"</dd><dt>pedagogical_eval_json</dt><dd>latest judge verdicts</dd><dt>original_*</dt><dd>what the AI wrote before a professor edit</dd></dl><p class="links">Points to <b>curriculum_versions</b>, <b>topics</b>, and to another <b>question</b> when regenerated.</p></article>
+      <article class="card"><span class="name">question_subtopics</span><p class="what">Which subtopics a question tests. A question can test more than one.</p><dl><dt>question_id, subtopic_id</dt><dd>one row per tag</dd></dl><p class="links">Points to <b>questions</b>, <b>subtopics</b>.</p></article>
+      <article class="card"><span class="name">question_evaluations</span><p class="what">The history of judge runs on a question (every run is kept, the latest is also copied into the question).</p><dl><dt>gate</dt><dd>approved or needs_review</dd><dt>rubric_version</dt><dd>which judge panel (differs per subject)</dd><dt>trigger, run_id</dt><dd>at generation, or a bulk re-judge</dd></dl><p class="links">Points to <b>questions</b>.</p></article>
+      <article class="card"><span class="name">question_similarity_flags</span><p class="what">Pairs of questions that look like near-duplicates.</p><dl><dt>score</dt><dd>how similar</dd></dl><p class="links">Points to <b>questions</b> twice.</p></article>
+      <article class="card"><span class="name">judge_batch_runs</span><p class="what">A bulk "re-judge the whole bank" job sent to the LLM provider.</p><dl><dt>status</dt><dd>submitted, completed…</dd><dt>rubric_version</dt><dd>which panel ran it</dd></dl><p class="links">Stands alone; its results land in <b>question_evaluations</b>.</p></article>
+    </div>
+  </section>
+
+  <!-- FEEDBACK -->
+  <section class="area" id="feedback" style="--area: var(--a-feedback)">
+    <div class="area-head"><h2>Feedback &amp; learning</h2><span class="count">4 tables</span></div>
+    <p>The professor's verdicts, and what the system learns from them. Learned text is stored per subject (Python lessons never reach Physics).</p>
+    <div class="diagram"><pre class="mermaid">
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"}}}%%
+erDiagram
+  questions ||--o{ professor_reviews : "reviewed in"
+  professor_reviews ||--o| review_outcomes : "sorted into"
+  questions ||--o{ review_outcomes : "about"
+  professor_reviews { int id PK
+    int question_id FK
+    string decision
+    json reasons }
+  review_outcomes { int id PK
+    int review_id FK
+    int question_id FK
+    string cell
+    bool held_out }
+  type_instructions { int id PK
+    string subject
+    string question_type
+    text instruction }
+  judge_prompts { int id PK
+    string subject
+    string metric
+    text system_prompt }
+</pre></div>
+    <div class="cards">
+      <article class="card"><span class="name">professor_reviews</span><p class="what">One approve / reject / edit decision on a question.</p><dl><dt>decision</dt><dd>approve, reject or edit</dd><dt>reasons_json, comment</dt><dd>why</dd><dt>edited_*</dt><dd>the professor's rewrite, if they edited</dd></dl><p class="links">Points to <b>questions</b>.</p></article>
+      <article class="card"><span class="name">review_outcomes</span><p class="what">The review compared with the judges: did they agree? This is the data both kinds of learning use.</p><dl><dt>cell</dt><dd>confirmed good, confirmed bad, missed, false alarm</dd><dt>held_out</dt><dd>kept aside to test a learned change fairly</dd><dt>judges_refreshed_json</dt><dd>which judges relearned from it</dd></dl><p class="links">Points to <b>professor_reviews</b>, <b>questions</b>.</p></article>
+      <article class="card"><span class="name">type_instructions</span><p class="what">What the generator learned for one question type in one subject, replacing the shipped instruction.</p><dl><dt>subject</dt><dd>intro_python, physics, or custom:&lt;course id&gt;</dd><dt>rules_json</dt><dd>the learned rules</dd></dl><p class="links">No links; looked up by subject and type.</p></article>
+      <article class="card"><span class="name">judge_prompts</span><p class="what">A judge's prompt after a professor edited it or it relearned, for one subject.</p><dl><dt>subject, metric</dt><dd>which subject and which of the 4 judges</dd><dt>learned</dt><dd>true if learned, false if hand-written</dd></dl><p class="links">No links; looked up by subject and judge.</p></article>
+    </div>
+  </section>
+
+  <!-- CLASSROOM -->
+  <section class="area" id="classroom" style="--area: var(--a-class)">
+    <div class="area-head"><h2>Classroom &amp; students</h2><span class="count">8 tables</span></div>
+    <p>What students see and do. Students have no password: the browser keeps a resume token so a returning student lands back in their run.</p>
+    <div class="diagram"><pre class="mermaid">
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif"}}}%%
+erDiagram
+  curriculum_versions ||--o{ question_set_versions : "frozen from"
+  question_set_versions ||--o{ question_set_members : "contains"
+  questions ||--o{ question_set_members : "included in"
+  question_set_versions ||--o{ question_set_aliases : "linked by"
+  students ||--o{ training_sessions : "starts"
+  question_set_versions ||--o{ training_sessions : "practised from"
+  training_sessions ||--o{ student_attempts : "serves"
+  questions ||--o{ student_attempts : "answered in"
+  students ||--o{ student_topic_mastery : "has"
+  students ||--o{ student_subtopic_weakness : "has"
+  topics ||--o{ student_topic_mastery : "measured on"
+  subtopics ||--o{ student_subtopic_weakness : "measured on"
+  question_set_versions { int id PK
+    int curriculum_version_id FK
+    string label }
+  question_set_aliases { int id PK
+    string alias
+    int set_version_id FK }
+  students { int id PK
+    string display_name
+    string resume_token }
+  training_sessions { int id PK
+    int student_id FK
+    int set_version_id FK }
+  student_attempts { int id PK
+    int session_id FK
+    int question_id FK
+    text answer
+    float score }
+  student_topic_mastery { int id PK
+    int student_id FK
+    int topic_id FK
+    float p_known }
+  student_subtopic_weakness { int id PK
+    int student_id FK
+    int subtopic_id FK
+    float weakness }
+</pre></div>
+    <div class="cards">
+      <article class="card"><span class="name">question_set_versions</span><p class="what">A frozen snapshot of approved questions from one taxonomy. Students practise from a snapshot, so later edits don't change a running class.</p><dl><dt>label, question_count</dt><dd>"Set #13", 3 questions</dd></dl><p class="links">Points to <b>curriculum_versions</b>.</p></article>
+      <article class="card"><span class="name">question_set_members</span><p class="what">Which questions are in a snapshot.</p><dl><dt>set_version_id, question_id</dt><dd>one row per question</dd></dl><p class="links">Points to <b>question_set_versions</b>, <b>questions</b>.</p></article>
+      <article class="card"><span class="name">question_set_aliases</span><p class="what">A stable name a classroom link uses, moved to the newest snapshot when the professor refreshes it.</p><dl><dt>alias</dt><dd>e.g. "taxonomy:12" or "prod"</dd></dl><p class="links">Points to <b>question_set_versions</b>.</p></article>
+      <article class="card"><span class="name">students</span><p class="what">A learner who joined through a link.</p><dl><dt>display_name, email</dt><dd>what they typed when joining</dd><dt>resume_token</dt><dd>lets the same browser resume</dd></dl><p class="links">No links out.</p></article>
+      <article class="card"><span class="name">training_sessions</span><p class="what">One practice run by a student on one snapshot.</p><dl><dt>rng_seed</dt><dd>so a reload shows the same order</dd><dt>ended_at</dt><dd>empty while the run is open</dd></dl><p class="links">Points to <b>students</b>, <b>question_set_versions</b>.</p></article>
+      <article class="card"><span class="name">student_attempts</span><p class="what">One question served in a run, and the student's answer once they submit it.</p><dl><dt>answer, score</dt><dd>what they typed, 0–100</dd><dt>passed_tests / total_tests</dt><dd>for code questions</dd><dt>requested / served_difficulty</dt><dd>what mastery asked for vs what was available</dd><dt>mastery_before / after</dt><dd>how this answer moved them</dd></dl><p class="links">Points to <b>training_sessions</b>, <b>students</b>, <b>questions</b>, <b>subtopics</b>.</p></article>
+      <article class="card"><span class="name">student_topic_mastery</span><p class="what">How well a student knows a topic, 0–1. Picks the next difficulty.</p><dl><dt>p_known</dt><dd>estimated mastery</dd><dt>observations</dt><dd>answers that fed it</dd></dl><p class="links">Points to <b>students</b>, <b>topics</b>.</p></article>
+      <article class="card"><span class="name">student_subtopic_weakness</span><p class="what">How weak a student is on a subtopic. The engine serves the weakest first.</p><dl><dt>weakness</dt><dd>higher = practise this more</dd></dl><p class="links">Points to <b>students</b>, <b>subtopics</b>.</p></article>
+      <article class="card legacy"><span class="name">review_embeddings · preference_statements</span><p class="what">Leftovers in this database file from earlier work. No current code reads or writes them.</p><p class="links">Safe to ignore.</p></article>
+    </div>
+  </section>
+  <p class="empty-note" id="none" hidden>No table or column matches that search.</p>
+
+  <section class="section" id="inside" aria-labelledby="inside-h">
+    <h2 id="inside-h">Inside a question</h2>
+    <p>The <code>questions</code> row keeps its detail as JSON, so every question type can store what it needs without new columns. The type decides what goes into <code>content_json</code>.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Field</th><th>What it holds</th></tr></thead>
+      <tbody>
+        <tr><td>content_json</td><td>The question as written, including its answer key: options and the right index, the code to read, the hidden tests, the number with its unit and tolerance, the expected formula. Students never see this directly.</td></tr>
+        <tr><td>spec_json</td><td>What was asked for: section, type, difficulty.</td></tr>
+        <tr><td>generation_attempts_json</td><td>Each try the AI made, and what failed (the retry loop).</td></tr>
+        <tr><td>validation_report_json</td><td>Every automatic check: "gradable", the reference solution passes its tests, the number matches its calculation, and so on.</td></tr>
+        <tr><td>pedagogical_eval_json</td><td>The four judges' latest verdicts and rationales.</td></tr>
+        <tr><td>personalization_context_json</td><td>Which instruction wrote it: the shipped one or a learned one.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Question type</th><th>Answer key inside content_json</th><th>Graded by</th></tr></thead>
+      <tbody>
+        <tr><td>multiple_choice</td><td>options, correct_option_index</td><td>choice</td></tr>
+        <tr><td>true_false</td><td>correct_answer</td><td>choice</td></tr>
+        <tr><td>parsons</td><td>blocks with indents, correct_order</td><td>ordering</td></tr>
+        <tr><td>output_prediction</td><td>code, expected_output</td><td>text match</td></tr>
+        <tr><td>code_completion · debugging · coding</td><td>code, reference_solution, tests</td><td>Python tests (runs code)</td></tr>
+        <tr><td>numeric_response</td><td>value, unit, tolerance, calculation</td><td>numbers with units</td></tr>
+        <tr><td>equation_response</td><td>expected, variables</td><td>formula equivalence</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="section" id="outside" aria-labelledby="outside-h">
+    <h2 id="outside-h">Not in the database</h2>
+    <p>Some important pieces are code or files, not tables.</p>
+    <div class="outside">
+      <div><h3>Graders</h3><p>The seven checking engines (choice, ordering, text, Python tests, units, formulas…) live in the <code>graders/</code> folder. A course only stores which ones it needs.</p></div>
+      <div><h3>Question types</h3><p>Each type is one code module in <code>app/question_types/</code>: its instruction to the AI, its checks, what students see.</p></div>
+      <div><h3>Subjects &amp; catalog</h3><p>The subject presets and which types each offers are code (<code>app/assessment/catalog.py</code>). A course stores its chosen subject and types.</p></div>
+      <div><h3>Original PDFs</h3><p>Uploaded files sit in <code>data/books/</code>. The database keeps their extracted text.</p></div>
+      <div><h3>The AI</h3><p>The language model is an outside service (OpenRouter). The database keeps what it produced, never the conversation.</p></div>
+    </div>
+  </section>
+
+  <footer>Built from the app's own models (<code>app/persistence/models.py</code>, migration 0004) on the <code>feature/courses</code> branch.</footer>
+</div>
+
+<script>
+(function () {
+  var input = document.getElementById("filter");
+  var hint = document.getElementById("filter-hint");
+  var none = document.getElementById("none");
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".area .card"));
+  var areas = Array.prototype.slice.call(document.querySelectorAll(".area"));
+  function apply() {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0;
+    cards.forEach(function (card) {
+      var match = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
+      card.hidden = !match;
+      if (match) shown++;
+    });
+    areas.forEach(function (area) {
+      var any = area.querySelector(".card:not([hidden])");
+      area.hidden = !any;
+      var diagram = area.querySelector(".diagram");
+      if (diagram) diagram.hidden = !!q;
+    });
+    none.hidden = shown !== 0;
+    hint.textContent = q ? "Showing " + shown + " of " + cards.length + " cards." : "Showing all tables.";
+  }
+  input.addEventListener("input", apply);
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: false, securityLevel: "loose" }); document.fonts.ready.then(function () { mermaid.run(); });</script>
+</body>
+</html>

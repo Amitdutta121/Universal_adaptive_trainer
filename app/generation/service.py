@@ -1,4 +1,4 @@
-"""Section-first orchestration for question generation and persistence.
+"""Chunk-first orchestration for question generation and persistence.
 
 One generator, not two. Personalization is the per-type instruction the
 generator already reads (ADR-033), so there is no longer a "personalized"
@@ -8,31 +8,45 @@ learned for its type.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, EvaluationTrigger, QuestionType
+from app.domain.enums import Difficulty, EvaluationTrigger, JudgeMetricId, QuestionType
 from app.domain.questions import Question
 from app.errors import InvalidQuestionSpecError
-from app.evaluation import PedagogicalJudge, new_run_id, record_evaluation, skipped_evaluation
+from app.evaluation import (
+    PedagogicalEvaluation,
+    PedagogicalJudge,
+    new_run_id,
+    record_evaluation,
+    skipped_evaluation,
+)
+from app.evaluation.custom import CustomRule
+from app.evaluation.schema import MetricStatus
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
+from app.generation.prompts import RoundExamples
+from app.generation.review import ConceptCheck, DuplicateCheck, RoundReview
+from app.generation.solve import BlindSolve
 from app.generation.spec import QuestionSpec, build_question_spec, require_approved_version
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient
-from app.persistence.models import CurriculumVersionRow, QuestionRow
-from app.persistence.repositories import QuestionRepository, _source_section_ids
+from app.persistence.models import CurriculumVersionRow, QuestionRow, QuestionSimilarityRow
+from app.persistence.repositories import QuestionRepository, source_chunk_ids
 
 
 class GenerationService:
-    """Validate a section set, generate one question per section, and store it."""
+    """Validate a chunk set, generate one question per chunk, and store it."""
 
     def __init__(
         self,
         session: Session,
         *,
         client: StructuredLLMClient | None = None,
+        snapshot_id: int | None = None,
+        memory_as_of: datetime | None = None,
     ) -> None:
         from app.validation import get_question_validator
 
@@ -48,31 +62,34 @@ class GenerationService:
             retrieval=self._retrieval,
             validator=self._validator,
         )
-        self._judge = PedagogicalJudge(session, client=client)
+        self._client = client
+        self._judge = PedagogicalJudge(
+            session, client=client, snapshot_id=snapshot_id, memory_as_of=memory_as_of
+        )
         self._questions = QuestionRepository(session)
 
-    def generate_for_sections(
+    def generate_for_chunks(
         self,
         *,
         curriculum_version_id: int,
         question_type: QuestionType,
         difficulty: Difficulty,
-        source_section_ids: list[int] | None = None,
+        source_chunk_ids: list[str] | None = None,
         book_id: int | None = None,
         seed: str | None = None,
     ) -> list[QuestionRow]:
-        """Generate and persist one question for each explicit or book section.
+        """Generate and persist one question for each explicit chunk, or each of a book's.
 
         All specs are validated before the first model call, so a bad id later in
         the selection costs nothing rather than being discovered mid-run. The
         topic and subtopics each question carries come back from the generator,
         not from this call.
 
-        Each section commits on its own. A partly finished batch is therefore a
-        real outcome: if the provider fails on the fourth of six sections, three
+        Each chunk commits on its own. A partly finished batch is therefore a
+        real outcome: if the provider fails on the fourth of six chunks, three
         questions are kept and the caller sees the error (ADR-032).
         """
-        section_ids = self._resolve_section_ids(source_section_ids, book_id)
+        chunk_ids = self._resolve_chunk_ids(source_chunk_ids, book_id)
         version = require_approved_version(self._session, curriculum_version_id)
         specs = [
             build_question_spec(
@@ -80,10 +97,10 @@ class GenerationService:
                 curriculum_version_id=curriculum_version_id,
                 question_type=question_type,
                 difficulty=difficulty,
-                source_section_ids=[section_id],
+                source_chunk_ids=[chunk_id],
                 seed=seed,
             )
-            for section_id in section_ids
+            for chunk_id in chunk_ids
         ]
         return self._generate_specs(specs, version=version)
 
@@ -94,10 +111,12 @@ class GenerationService:
         chunks: Sequence[ChunkQuestionRequest],
         seed: str | None = None,
         run_id: str | None = None,
+        on_question: Callable[[], None] | None = None,
+        start_at: int = 0,
     ) -> list[QuestionRow]:
         """Generate the questions a per-chunk spec sheet asks for (ADR-044).
 
-        Unlike :meth:`generate_for_sections`, one chunk may produce several
+        Unlike :meth:`generate_for_chunks`, one chunk may produce several
         questions, at several difficulties, in several formats. The compiler
         decides which format each question gets; this method only turns the
         compiled plan into specs and runs it.
@@ -111,8 +130,13 @@ class GenerationService:
         one request -- the coverage "Generate" flow issues one per gap target so
         a provider failure isolates to that target -- keep every question under a
         single run id. Left ``None``, a fresh one is minted per call as before.
+
+        ``on_question`` is called after each question commits, so a background job can
+        count progress (``app.jobs``). ``start_at`` skips that many questions of the
+        compiled plan -- the plan's order is fixed, so a retry of a run that stopped part-way
+        generates exactly the questions it had not reached.
         """
-        planned = compile_chunk_requests(chunks)
+        planned = compile_chunk_requests(chunks)[start_at:]
         version = require_approved_version(self._session, curriculum_version_id)
         specs = [
             build_question_spec(
@@ -120,12 +144,12 @@ class GenerationService:
                 curriculum_version_id=curriculum_version_id,
                 question_type=question.question_type,
                 difficulty=question.difficulty,
-                source_section_ids=[question.section_id],
+                source_chunk_ids=[question.chunk_id],
                 seed=seed,
             )
             for question in planned
         ]
-        return self._generate_specs(specs, version=version, run_id=run_id)
+        return self._generate_specs(specs, version=version, run_id=run_id, on_question=on_question)
 
     def regenerate_from_question(
         self,
@@ -133,6 +157,7 @@ class GenerationService:
         *,
         feedback: str,
         professor_id: int | None = None,
+        run_id: str | None = None,
     ) -> QuestionRow:
         """Generate a NEW question from the same inputs as an existing one.
 
@@ -147,52 +172,20 @@ class GenerationService:
         :mod:`app.web.routes.api.feedback`, not here.
 
         ``professor_id`` is accepted for parity with the review endpoint but is
-        not used to switch generators.
+        not used to switch generators. ``run_id`` lets a job group the new question
+        under its own run.
         """
         source = self._questions.get(question_id)
-        spec = self._spec_from_row(source)
+        spec = regeneration_spec(self._session, source)
         version = require_approved_version(self._session, spec.curriculum_version_id)
-        rows = self._generate_specs([spec], version=version, instructor_feedback=feedback)
+        rows = self._generate_specs(
+            [spec], version=version, instructor_feedback=feedback, run_id=run_id
+        )
         new_row = rows[0]
         new_row.regenerated_from_question_id = source.id
         new_row.regeneration_feedback = feedback
         self._session.commit()
         return new_row
-
-    def _spec_from_row(self, row: QuestionRow) -> QuestionSpec:
-        """Rebuild the generation spec for an existing question.
-
-        Prefers the frozen ``spec_json``; falls back to the section ids recorded
-        in ``content["sources"]`` for rows written before specs were stored. The
-        rebuilt spec is re-validated through :func:`build_question_spec` so a
-        since-deleted section or a curriculum that is no longer approved is
-        reported before any model call.
-        """
-        if row.question_type is None:
-            raise InvalidQuestionSpecError(
-                "This question has no recorded type.",
-                detail="Generate a fresh question instead of regenerating this one.",
-            )
-        if row.curriculum_version_id is None:
-            raise InvalidQuestionSpecError(
-                "This question is not grounded in a curriculum version.",
-                detail="Generate a fresh question instead of regenerating this one.",
-            )
-        section_ids = _source_section_ids(row)
-        if len(section_ids) != 1:
-            raise InvalidQuestionSpecError(
-                "Cannot recover a single source section for this question.",
-                detail=f"Recovered section ids: {section_ids or 'none'}.",
-            )
-        seed = (row.spec or {}).get("seed")
-        return build_question_spec(
-            self._session,
-            curriculum_version_id=row.curriculum_version_id,
-            question_type=row.question_type,
-            difficulty=row.difficulty,
-            source_section_ids=section_ids,
-            seed=seed if isinstance(seed, str) else None,
-        )
 
     def _generate_specs(
         self,
@@ -201,6 +194,7 @@ class GenerationService:
         version: CurriculumVersionRow,
         instructor_feedback: str | None = None,
         run_id: str | None = None,
+        on_question: Callable[[], None] | None = None,
     ) -> list[QuestionRow]:
         """Generate, validate, judge and persist one question per spec.
 
@@ -210,7 +204,7 @@ class GenerationService:
         grouped; otherwise a fresh one is minted here.
 
         ``instructor_feedback`` is set only by :meth:`regenerate_from_question`
-        and is forwarded verbatim to the generator; the section-first callers
+        and is forwarded verbatim to the generator; the chunk-first callers
         leave it ``None``.
         """
         run_id = run_id or new_run_id()
@@ -239,24 +233,156 @@ class GenerationService:
                 run_id=run_id,
                 trigger=EvaluationTrigger.GENERATION,
             )
-            # Committed per section, not once at the end: a transport error on a
-            # later section must not discard the questions already paid for
-            # (ADR-032). The caller's rollback then only loses the section in
+            # Committed per chunk, not once at the end: a transport error on a
+            # later chunk must not discard the questions already paid for
+            # (ADR-032). The caller's rollback then only loses the chunk in
             # flight.
             self._session.commit()
             rows.append(row)
+            if on_question is not None:
+                on_question()
         return rows
 
-    def _resolve_section_ids(
-        self, source_section_ids: list[int] | None, book_id: int | None
-    ) -> list[int]:
-        if source_section_ids:
-            return source_section_ids
+    def generate_round_question(
+        self,
+        spec: QuestionSpec,
+        *,
+        version: CurriculumVersionRow,
+        round_id: int | None,
+        rules: Sequence[CustomRule] = (),
+        examples: RoundExamples | None = None,
+        run_id: str | None = None,
+        duplicates: DuplicateCheck | None = None,
+        concepts: ConceptCheck | None = None,
+        solver: BlindSolve | None = None,
+    ) -> QuestionRow | None:
+        """Generate one round question, judged inside the retry loop; ``None`` when dropped.
+
+        docs/QUESTION_SETUP_PLAN.md step 4: generate -> answer check -> difficulty judge ->
+        topic judge -> custom rules. Any failure is fed back as a correction; after
+        ``MAX_GENERATION_ATTEMPTS`` a question that still fails is **not stored**. A stored
+        question carries ``style_id``, ``round_id`` and ``target_subtopic_id``, keeps the
+        judge evaluation that passed it (no second judge run), and lands in the review queue.
+
+        ``duplicates`` (ADR-063 point 6) runs before the judges: a duplicate is retried with
+        "too similar to: ...", except on the last attempt, where it is judged as usual and, if
+        kept, stored with a :class:`QuestionSimilarityRow` per resembled question -- as is any
+        kept question that only resembles one. A kept duplicate always goes to the review
+        queue, never auto-approved by trust routing. ``concepts`` asks, for the nearest match
+        below the duplicate line, whether it is the same idea reworded; "yes" is treated like
+        a duplicate (retried; kept, flagged and held on the last attempt). ``solver`` answers a
+        multiple-choice or true/false question without its key; a disagreement is retried
+        with the solver's finding, and on the last attempt kept with ``solve_flag`` and held.
+
+        Flushes; the caller commits.
+
+        A hard cell does this in two steps. First it generates a medium question and
+        keeps it only when the answer check passes. Then it asks for a harder question
+        made from that one, and the difficulty judge runs on the harder question.
+        """
+        if not spec.is_round_spec:
+            raise InvalidQuestionSpecError(
+                "Round generation needs a target subtopic.",
+                detail="Use generate_for_chunks for chunk-only specs.",
+            )
+        review = RoundReview(
+            self._judge,
+            rules,
+            spec=spec,
+            client=self._client,
+            duplicates=duplicates,
+            concepts=concepts,
+            solver=solver,
+        )
+        question = self._question_for_round(spec, version=version, review=review, examples=examples)
+        if not question.generation_attempts or not question.generation_attempts[-1].usable:
+            self._maybe_store_audit(spec, review, round_id)
+            return None
+        evaluation = review.last_evaluation
+        if evaluation is None:
+            self._maybe_store_audit(spec, review, round_id)
+            return None
+
+        row = self._row_from_question(question)
+        row.style_id = spec.style_id
+        row.round_id = round_id
+        row.target_subtopic_id = spec.target_subtopic_id
+        row.solve_flag = review.last_solve_flag
+        row = self._questions.add(row)
+        report = question.validation_report or self._validator.validate(question)
+        row.validation_report = report
+        row.status = report.resulting_status()
+        evaluation = evaluation.model_copy(update={"question_id": row.id})
+        stored = record_evaluation(
+            self._session,
+            row.id,
+            evaluation,
+            run_id=run_id or new_run_id(),
+            trigger=EvaluationTrigger.GENERATION,
+        )
+        stored.custom_results = [result.model_dump(mode="json") for result in review.last_custom]
+        for match in review.last_similar:
+            self._session.add(
+                QuestionSimilarityRow(
+                    question_id=row.id,
+                    similar_question_id=match.question_id,
+                    score=match.score,
+                    model=match.model,
+                )
+            )
+        self._session.flush()
+        from app.evaluation.trust import route_generated_question
+
+        # A duplicate kept on the last attempt waits for the professor, who sees its flag.
+        route_generated_question(
+            self._session,
+            row,
+            review.last_custom,
+            hold_for_review=review.last_same_concept is not None
+            or review.last_solve_flag is not None
+            or any(match.duplicate for match in review.last_similar),
+        )
+        self._maybe_store_audit(spec, review, round_id)
+        return row
+
+    def _question_for_round(
+        self,
+        spec: QuestionSpec,
+        *,
+        version: CurriculumVersionRow,
+        review: RoundReview,
+        examples: RoundExamples | None,
+    ) -> Question:
+        """One round question. A hard cell is a valid medium question, then a harder one."""
+        if spec.difficulty is not Difficulty.HARD:
+            return self._generator.generate_one(
+                spec, version=version, review=review, examples=examples
+            )
+        seed = self._generator.generate_one(
+            spec.model_copy(update={"difficulty": Difficulty.MEDIUM}),
+            version=version,
+            examples=None,
+        )
+        if not seed.generation_attempts or not seed.generation_attempts[-1].usable:
+            return seed
+        return self._generator.generate_one(
+            spec,
+            version=version,
+            review=review,
+            examples=examples,
+            follow_up=_harden_follow_up(seed),
+        )
+
+    def _resolve_chunk_ids(
+        self, source_chunk_ids: list[str] | None, book_id: int | None
+    ) -> list[str]:
+        if source_chunk_ids:
+            return source_chunk_ids
         if book_id is not None:
-            return [section.id for section in self._retrieval.sections_in_book(book_id)]
+            return [chunk.id for chunk in self._retrieval.chunks_in_book(book_id)]
         raise InvalidQuestionSpecError(
-            "Select at least one source section or a book.",
-            detail="Question generation needs one or more source sections.",
+            "Select at least one source chunk or a book.",
+            detail="Question generation needs one or more source chunks.",
         )
 
     @staticmethod
@@ -292,3 +418,117 @@ class GenerationService:
             created_at=question.created_at,
             updated_at=question.updated_at,
         )
+
+    def _maybe_store_audit(
+        self,
+        spec: QuestionSpec,
+        review: RoundReview,
+        round_id: int | None,
+    ) -> None:
+        """Keep at most two judge-failed drafts per round for the professor to confirm."""
+        if round_id is None:
+            return
+        question = review.last_failed_question
+        evaluation = review.last_failed_evaluation
+        if question is None or evaluation is None:
+            return
+        metric = _audit_metric(evaluation)
+        if metric is None:
+            return
+        if self._questions.count_audit_for_round(round_id) >= 2:
+            return
+        row = self._row_from_question(question)
+        row.style_id = spec.style_id
+        row.round_id = round_id
+        row.target_subtopic_id = spec.target_subtopic_id
+        row.audit = True
+        row.audit_metric = metric
+        row.audit_reason = _audit_reason(evaluation, metric)
+        row = self._questions.add(row)
+        report = question.validation_report or self._validator.validate(question)
+        row.validation_report = report
+        row.status = report.resulting_status()
+        evaluation = evaluation.model_copy(update={"question_id": row.id})
+        record_evaluation(
+            self._session,
+            row.id,
+            evaluation,
+            run_id=new_run_id(),
+            trigger=EvaluationTrigger.GENERATION,
+        )
+        self._session.flush()
+
+
+def regeneration_spec(session: Session, row: QuestionRow) -> QuestionSpec:
+    """Rebuild the generation spec for an existing question.
+
+    Prefers the frozen ``spec_json``; falls back to the chunk ids recorded
+    in ``content["sources"]``. The rebuilt spec is re-validated through
+    :func:`build_question_spec` so a since-deleted chunk or a curriculum that is no
+    longer approved is reported before any model call.
+    """
+    if row.question_type is None:
+        raise InvalidQuestionSpecError(
+            "This question has no recorded type.",
+            detail="Generate a fresh question instead of regenerating this one.",
+        )
+    if row.curriculum_version_id is None:
+        raise InvalidQuestionSpecError(
+            "This question is not grounded in a curriculum version.",
+            detail="Generate a fresh question instead of regenerating this one.",
+        )
+    chunk_ids = source_chunk_ids(row)
+    if len(chunk_ids) != 1:
+        raise InvalidQuestionSpecError(
+            "Cannot recover a single source chunk for this question.",
+            detail=f"Recovered chunk ids: {chunk_ids or 'none'}.",
+        )
+    seed = (row.spec or {}).get("seed")
+    return build_question_spec(
+        session,
+        curriculum_version_id=row.curriculum_version_id,
+        question_type=row.question_type,
+        difficulty=row.difficulty,
+        source_chunk_ids=chunk_ids,
+        seed=seed if isinstance(seed, str) else None,
+    )
+
+
+def _audit_metric(evaluation: PedagogicalEvaluation) -> str | None:
+    """Which completed judge failed first; skip ERROR / skipped panels."""
+    difficulty = evaluation.metric(JudgeMetricId.DIFFICULTY)
+    if (
+        difficulty is not None
+        and difficulty.status is MetricStatus.COMPLETED
+        and difficulty.passed is False
+    ):
+        return "difficulty"
+    topic = evaluation.metric(JudgeMetricId.SUBTOPIC)
+    if topic is not None and topic.status is MetricStatus.COMPLETED and topic.passed is False:
+        return "topic"
+    return None
+
+
+def _audit_reason(evaluation: PedagogicalEvaluation, metric: str) -> str:
+    key = JudgeMetricId.DIFFICULTY if metric == "difficulty" else JudgeMetricId.SUBTOPIC
+    result = evaluation.metric(key)
+    return (result.rationale or "").strip() if result is not None else ""
+
+
+def _harden_follow_up(seed: Question) -> str:
+    """Tell the model to make a passing question harder without breaking the answer check."""
+    content = seed.content if isinstance(seed.content, dict) else {}
+    code = content.get("code")
+    lines = [
+        "This question already passes the answer check. Make a harder question from it.",
+        "Keep the same subtopic and the same question type.",
+        "The harder question must still pass the answer check.",
+        "",
+        f"Prompt:\n{seed.prompt}",
+    ]
+    if isinstance(code, str) and code.strip():
+        lines.append(f"Code:\n{code}")
+    solution = seed.reference_solution
+    if isinstance(solution, str) and solution.strip() and solution != code:
+        lines.append(f"Reference solution:\n{solution}")
+    return "\n".join(lines)

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Classes · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- D2 · Classes: sections with a join code/link, the frozen set they practise, optional roster restriction (F7). -->
+<body data-scope="course" data-nav="classes" data-title="Classes">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Classes</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl">Each class section has its own join code and link, and points at one frozen question set. Students join with a name and email; progress lives on the Students page.</p>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <a class="btn" data-variant="outline" :href="Mock.link('students.html')" x-show="classes.length">View students</a>
+        <button type="button" class="btn" :disabled="!usableSets.length" :title="usableSets.length ? '' : 'Freeze a question set first'" @click="openNew()"><i data-lucide="plus"></i>New class</button>
+      </div>
+    </div>
+
+    <!-- Empty state: no frozen set, so no class can exist (statistics course). -->
+    <template x-if="!classes.length">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="school"></i></span>
+          <h2 class="font-semibold">No classes yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md" x-show="!usableSets.length">A class needs a frozen question set to practise from, and this course doesn't have one. Freeze a set once questions are approved.</p>
+          <p class="text-sm text-muted-foreground max-w-md" x-show="usableSets.length">Create a class to get a join code and link to share with students.</p>
+          <a class="btn mt-2" data-size="sm" :href="Mock.link('question-sets.html')" x-show="!usableSets.length">Go to question sets</a>
+        </section>
+      </div>
+    </template>
+
+    <template x-for="k in classes" :key="k.id">
+      <section class="card">
+        <header class="flex flex-wrap items-start gap-3">
+          <div>
+            <h2 x-text="k.name"></h2>
+            <p x-text="`Created ${fmtDate(k.created)} · ${k.students} student${k.students === 1 ? '' : 's'} joined`"></p>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('students.html', { class: k.id })">Roster</a>
+            <a class="btn" data-variant="ghost" data-size="sm" :href="`student-join.html?code=${k.join_code}`" title="Opens the page students land on">Preview as a student</a>
+          </div>
+        </header>
+        <section class="grid lg:grid-cols-2 gap-6">
+          <!-- Joining -->
+          <div class="grid gap-4 content-start">
+            <div>
+              <div class="text-xs text-muted-foreground mb-1">Join code</div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-2xl font-medium tracking-wider" x-text="k.join_code"></span>
+                <button type="button" class="btn" data-variant="outline" data-size="sm" @click="copy(k.join_code, 'Join code')"><i data-lucide="copy"></i>Copy</button>
+              </div>
+              <p class="text-xs text-muted-foreground mt-1" x-text="`Students enter it at ${MOCK.join_base}`"></p>
+            </div>
+            <div role="group" class="field">
+              <label :for="`link-${k.id}`">Join link</label>
+              <div class="flex gap-2">
+                <input :id="`link-${k.id}`" class="input font-mono text-xs" type="text" readonly :value="joinLink(k)">
+                <button type="button" class="btn" data-variant="outline" data-size="sm" @click="copy(joinLink(k), 'Join link')">Copy link</button>
+              </div>
+              <p>Anyone with this link can join<span x-show="k.restrict_roster"> if their email is on the allowed list</span>. Nobody needs an account.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="regenerate(k)"><i data-lucide="refresh-cw"></i>New code</button>
+              <span class="text-xs text-muted-foreground">The old code and link stop working; students who already joined are not affected.</span>
+            </div>
+          </div>
+
+          <!-- Set + roster restriction -->
+          <div class="grid gap-4 content-start">
+            <div role="group" class="field">
+              <label :for="`set-${k.id}`">Question set</label>
+              <select :id="`set-${k.id}`" class="select w-full" :value="k.question_set" @change="changeSet(k, $event.target.value)">
+                <template x-for="s in usableSets" :key="s.id">
+                  <option :value="s.id" :selected="s.id === k.question_set" x-text="`${s.name} · ${s.questions} questions · ${s.coverage_pct}% coverage`"></option>
+                </template>
+              </select>
+              <p>New practice sessions use this set. Runs already started stay on the set they began with.</p>
+            </div>
+
+            <div class="rounded-lg border p-4 grid gap-3">
+              <div role="group" class="field" data-orientation="horizontal">
+                <section>
+                  <label :for="`restrict-${k.id}`">Only allow listed emails</label>
+                  <p>When on, a student can join only if the email they enter is on the list below.</p>
+                </section>
+                <input type="checkbox" :id="`restrict-${k.id}`" role="switch" class="input" :checked="k.restrict_roster" @change="toggleRestrict(k, $event.target.checked)">
+              </div>
+              <template x-if="k.restrict_roster">
+                <div role="group" class="field">
+                  <label :for="`emails-${k.id}`" x-text="`Allowed emails (${emailList(k).length})`"></label>
+                  <textarea :id="`emails-${k.id}`" class="textarea font-mono text-xs" rows="5" x-model="k.emails"></textarea>
+                  <p x-text="`One per line, or paste a column from your LMS export. ${joinedCount(k)} of ${emailList(k).length} have joined.`"></p>
+                  <div class="flex gap-2">
+                    <button type="button" class="btn" data-variant="outline" data-size="sm" @click="Mock.toast(`Allowed list saved (${emailList(k).length} emails)`)">Save list</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
+      </section>
+    </template>
+
+    <!-- What students see -->
+    <section class="card" x-show="classes.length">
+      <header>
+        <h2>What a student sees when joining</h2>
+        <p>The join page is phone-first and asks for three things. Nothing else is collected.</p>
+      </header>
+      <section>
+        <ol class="grid md:grid-cols-4 gap-4 text-sm">
+          <li class="grid gap-1"><span class="font-medium">1. Open the link or enter the code</span><span class="text-muted-foreground" x-text="`${MOCK.join_base}/${classes[0]?.join_code}`"></span></li>
+          <li class="grid gap-1"><span class="font-medium">2. Name and email</span><span class="text-muted-foreground">The email is how you identify them in the roster and CSV, and how a returning student resumes on a new device.</span></li>
+          <li class="grid gap-1"><span class="font-medium">3. Practise</span><span class="text-muted-foreground">Questions are picked from the class's set, weighted towards the student's weakest subtopics.</span></li>
+          <li class="grid gap-1"><span class="font-medium">Not on the list?</span><span class="text-muted-foreground">With the restriction on, they see "This class is limited to enrolled students. Ask your instructor to add your email."</span></li>
+        </ol>
+      </section>
+      <footer>
+        <a class="btn" data-variant="outline" data-size="sm" :href="`student-join.html?code=${classes[0]?.join_code}`">Open the student join page</a>
+      </footer>
+    </section>
+
+    <!-- New class dialog -->
+    <dialog x-ref="newClass" class="dialog" aria-labelledby="new-class-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="new-class-title">New class</h2>
+          <p>Creates a join code and link. You can change the set or the restriction later.</p>
+        </header>
+        <section class="grid gap-4">
+          <div role="group" class="field">
+            <label for="nc-name">Name</label>
+            <input id="nc-name" class="input" type="text" x-model="draft.name" placeholder="Section 003 (Fri lab)">
+          </div>
+          <div role="group" class="field">
+            <label for="nc-set">Question set</label>
+            <select id="nc-set" class="select w-full" x-model="draft.question_set">
+              <template x-for="s in usableSets" :key="s.id">
+                <option :value="s.id" x-text="`${s.name} · ${s.questions} questions`"></option>
+              </template>
+            </select>
+            <p>Only frozen sets that aren't archived are listed.</p>
+          </div>
+          <div role="group" class="field" data-orientation="horizontal">
+            <input id="nc-restrict" type="checkbox" role="switch" class="input" x-model="draft.restrict_roster">
+            <label for="nc-restrict">Only allow listed emails</label>
+          </div>
+          <div role="group" class="field" x-show="draft.restrict_roster">
+            <label for="nc-emails">Allowed emails</label>
+            <textarea id="nc-emails" class="textarea font-mono text-xs" rows="4" x-model="draft.emails" placeholder="first.last@example.edu"></textarea>
+          </div>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" :disabled="!draft.name.trim()" @click="create()">Create class</button>
+        </footer>
+        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" onclick="this.closest('dialog').close()"><i data-lucide="x"></i></button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-teach.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const sets = MOCK.question_sets.filter((s) => s.course === c.id);
+      const code = () => {
+        const A = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+        const r = () => A[Math.floor(Math.random() * A.length)];
+        return `${{ python: "PY7", biology: "BIO", statistics: "ST2" }[c.id] || "CRS"}-${r()}${r()}${r()}`;
+      };
+      return {
+        course: c,
+        usableSets: sets.filter((s) => s.status !== "archived"),
+        classes: MOCK.classes.filter((k) => k.course === c.id).map((k) => ({
+          ...k, emails: (MOCK.class_allowed_emails[k.id] || []).join("\n"),
+        })),
+        draft: { name: "", question_set: "", restrict_roster: false, emails: "" },
+        init() { if (Mock.param("dialog") === "new" && this.usableSets.length) this.$nextTick(() => this.openNew()); },
+        fmtDate(d) { return new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); },
+        joinLink(k) { return `https://${MOCK.join_base}/${k.join_code}`; },
+        emailList(k) { return k.emails.split(/[\s,;]+/).filter((e) => e.includes("@")); },
+        joinedCount(k) {
+          const joined = new Set(MOCK.students.filter((s) => s.class_id === k.id).map((s) => s.email));
+          return this.emailList(k).filter((e) => joined.has(e)).length;
+        },
+        copy(text, what) {
+          try { navigator.clipboard.writeText(text); } catch (e) {}
+          Mock.toast(`${what} copied`);
+        },
+        setName(id) { return (sets.find((s) => s.id === id) || {}).name; },
+        changeSet(k, id) {
+          k.question_set = id;
+          Mock.toast(`${k.name} now uses ${this.setName(id)} for new sessions`);
+        },
+        toggleRestrict(k, on) {
+          k.restrict_roster = on;
+          if (on && !k.emails) k.emails = MOCK.students.filter((s) => s.class_id === k.id).map((s) => s.email).join("\n");
+          Mock.toast(on ? `${k.name}: only listed emails can join. Students already in the class stay.` : `${k.name}: anyone with the code can join`);
+        },
+        regenerate(k) {
+          k.join_code = code();
+          Mock.toast(`New join code for ${k.name}: ${k.join_code}`);
+        },
+        openNew() {
+          this.draft = { name: "", question_set: (this.usableSets.find((s) => s.status === "published") || this.usableSets[0]).id, restrict_roster: false, emails: "" };
+          this.$refs.newClass.showModal();
+        },
+        create() {
+          const k = {
+            id: `c${this.classes.length + 1}`, course: c.id, name: this.draft.name.trim(), join_code: code(),
+            question_set: this.draft.question_set, students: 0, restrict_roster: this.draft.restrict_roster,
+            emails: this.draft.emails, created: MOCK.today,
+          };
+          this.classes.push(k);
+          this.$refs.newClass.close();
+          Mock.toast(`${k.name} created. Join code ${k.join_code}`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

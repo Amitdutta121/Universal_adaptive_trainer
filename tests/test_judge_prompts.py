@@ -86,11 +86,14 @@ def test_the_judge_sends_the_edited_prompt(session: Session, monkeypatch) -> Non
         requested_question_type="coding",
     )
     judge = PedagogicalJudge(session, client=RecordingClient())
+    question = _question(session)
+    prompts, _version = judge._panel(question)
     with pytest.raises(RuntimeError):
         judge._run_metric(
             JudgeMetricId.DIFFICULTY,
             context,
-            _question(session),
+            question,
+            prompts[JudgeMetricId.DIFFICULTY],
         )
 
     assert seen == [REPLACEMENT]

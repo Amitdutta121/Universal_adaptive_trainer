@@ -18,10 +18,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/env";
-import { ApiError, api, unwrap } from "./client";
+import { ApiError, api, COURSE_HEADER, unwrap } from "./client";
 import type {
+  GuidelineListResponse,
   QuestionStatus,
-  QuestionType,
   Schemas,
   TreeUpdate,
   TypeInstructionListResponse,
@@ -31,6 +31,13 @@ type ChunkGenerationSpec = Schemas["ChunkGenerationSpec"];
 
 /** The query key factory. Every key in the app starts here. */
 export const qk = {
+  tutorials: {
+    all: ["tutorials"] as const,
+    recipes: (versionId: number | null) => ["tutorials", "recipes", versionId] as const,
+    blocks: (subtopicId: number) => ["tutorials", "blocks", subtopicId] as const,
+    sample: (versionId: number, recipeId: string) =>
+      ["tutorials", "sample", versionId, recipeId] as const,
+  },
   system: {
     health: () => ["system", "health"] as const,
     config: () => ["system", "config"] as const,
@@ -38,23 +45,29 @@ export const qk = {
   },
   questions: {
     all: ["questions"] as const,
-    list: (params: { limit?: number; status?: QuestionStatus; run_id?: string }) =>
+    list: (params: { limit?: number; status?: QuestionStatus[]; run_id?: string }) =>
       ["questions", "list", params] as const,
     detail: (id: number) => ["questions", "detail", id] as const,
     evaluations: (id: number) => ["questions", "evaluations", id] as const,
-    reviewQueue: (params: { mode: "all" | "scoreable"; after?: number | null }) =>
-      ["questions", "review-queue", params] as const,
-    generationPlan: (bookId: number) => ["questions", "generation-plan", bookId] as const,
+    reviewQueue: (params: {
+      mode: "all" | "scoreable";
+      after?: number | null;
+      curriculumVersionId?: number | null;
+    }) => ["questions", "review-queue", params] as const,
+    // Under "questions" so a generation's invalidation refreshes what each chunk has produced.
+    chunkOutline: (bookId: number) => ["questions", "chunk-outline", bookId] as const,
     batchPlan: (chunks: readonly ChunkGenerationSpec[]) =>
-      ["questions", "batch-plan", chunks] as const,
+      ["questions", "run-plan", chunks] as const,
   },
   books: {
     all: ["books"] as const,
     list: () => ["books", "list"] as const,
     detail: (bookId: number) => ["books", "detail", bookId] as const,
-    guide: () => ["books", "document-guide"] as const,
-    section: (bookId: number, sectionId: number) =>
-      ["books", "section", bookId, sectionId] as const,
+  },
+  chunks: {
+    all: ["chunks"] as const,
+    detail: (chunkId: string) => ["chunks", "detail", chunkId] as const,
+    book: (bookId: number, page: number | null) => ["chunks", "book", bookId, page] as const,
   },
   curriculum: {
     all: ["curriculum"] as const,
@@ -69,14 +82,22 @@ export const qk = {
     list: () => ["question-sets", "list"] as const,
     detail: (setVersionId: number) => ["question-sets", "detail", setVersionId] as const,
     prod: () => ["question-sets", "prod"] as const,
+    taxonomy: (curriculumVersionId: number) =>
+      ["question-sets", "taxonomy", curriculumVersionId] as const,
+    taxonomyLinks: () => ["question-sets", "taxonomy-links"] as const,
   },
   instructions: {
     all: ["instructions"] as const,
     list: () => ["instructions", "list"] as const,
+    guidelines: () => ["instructions", "guidelines"] as const,
   },
   judgePrompts: {
     all: ["judge-prompts"] as const,
     list: () => ["judge-prompts", "list"] as const,
+    stats: () => ["judge-prompts", "stats"] as const,
+  },
+  judges: {
+    scorecard: () => ["judges", "scorecard"] as const,
   },
   coverage: {
     all: ["coverage"] as const,
@@ -95,14 +116,57 @@ export const qk = {
     detail: (trainingSessionId: number) =>
       ["training-sessions", "detail", trainingSessionId] as const,
     next: (trainingSessionId: number) => ["training-sessions", "next", trainingSessionId] as const,
+    progress: (trainingSessionId: number) =>
+      ["training-sessions", "progress", trainingSessionId] as const,
+    review: (attemptId: number) => ["training-sessions", "review", attemptId] as const,
   },
   evaluation: {
     all: ["evaluation"] as const,
     batchRuns: () => ["evaluation", "batch-runs"] as const,
     batchRun: (id: string) => ["evaluation", "batch-runs", id] as const,
+    rerunPreview: () => ["evaluation", "rerun-preview"] as const,
+  },
+  jobs: {
+    all: ["jobs"] as const,
+    list: () => ["jobs", "list"] as const,
   },
   auth: {
     me: () => ["auth", "me"] as const,
+  },
+  settings: {
+    all: ["settings"] as const,
+    roles: () => ["settings", "roles"] as const,
+    models: (provider: string) => ["settings", "models", provider] as const,
+  },
+  setup: {
+    all: ["setup"] as const,
+    styles: (subject?: string | null) => ["setup", "styles", subject ?? null] as const,
+    current: (curriculumVersionId: number) => ["setup", "current", curriculumVersionId] as const,
+    // One key per opening. A remount of that opening reads the same in-flight request.
+    suggestion: (curriculumVersionId: number, session: number) =>
+      ["setup", "suggestion", curriculumVersionId, session] as const,
+  },
+  rounds: {
+    all: ["rounds"] as const,
+    detail: (roundId: number) => ["rounds", "detail", roundId] as const,
+  },
+  customJudges: {
+    all: ["custom-judges"] as const,
+    list: (curriculumVersionId: number) => ["custom-judges", "list", curriculumVersionId] as const,
+  },
+  courses: {
+    all: ["courses"] as const,
+    list: () => ["courses", "list"] as const,
+    overview: () => ["courses", "overview"] as const,
+    catalog: () => ["courses", "catalog"] as const,
+    detail: (courseId: number) => ["courses", "detail", courseId] as const,
+  },
+  experimentalRecipes: {
+    all: ["experimental-recipes"] as const,
+    list: (courseId: number) => ["experimental-recipes", "list", courseId] as const,
+    curriculum: (courseId: number) => ["experimental-recipes", "curriculum", courseId] as const,
+    example: (courseId: number, run: number, body: Schemas["ExperimentalRecipeTryRequest"]) =>
+      ["experimental-recipes", "example", courseId, run, body] as const,
   },
 } as const;
 
@@ -128,9 +192,11 @@ async function login(email: string, password: string): Promise<void> {
 async function activateCurriculumVersion(
   versionId: number,
 ): Promise<Schemas["CurriculumVersionDetail"]> {
+  // A plain fetch, so the client's course middleware does not run: name the course here.
+  const courseId = /^\/courses\/(\d+)/.exec(window.location.pathname)?.[1];
   const response = await fetch(`${API_BASE_URL}/api/curriculum/versions/${versionId}/activate`, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...(courseId ? { [COURSE_HEADER]: courseId } : {}) },
   });
   if (!response.ok) {
     let payload: unknown = null;
@@ -177,6 +243,110 @@ export function useLogout() {
   });
 }
 
+/**
+ * Public signup (ADR-061), then the same cookie login as the login screen, so a new
+ * professor lands in the Studio without typing the password twice.
+ */
+export function useRegister() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
+      await unwrap(api.POST("/api/auth/register", { body: { email, password } }));
+      try {
+        await login(email, password);
+      } catch {
+        // The account exists now; "incorrect password" or a retry ("already exists") would
+        // both mislead, so say what actually happened.
+        throw new ApiError(
+          401,
+          "registered_login_failed",
+          "Your account was created, but signing in failed.",
+          "Sign in with the email and password you just chose.",
+        );
+      }
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.auth.me() }),
+  });
+}
+
+/** Redeems the emailed verification link; `/me` then reports the account as verified. */
+export function useVerifyEmail() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => unwrap(api.POST("/api/auth/verify", { body: { token } })),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.auth.me() }),
+  });
+}
+
+/** Emails a fresh verification link. Answers 202 whether or not one was sent. */
+export const useRequestVerifyEmail = () =>
+  useMutation({
+    mutationFn: (email: string) =>
+      unwrap(api.POST("/api/auth/request-verify-token", { body: { email } })),
+  });
+
+/** Emails a password reset link. Answers 202 whether or not the address has an account. */
+export const useForgotPassword = () =>
+  useMutation({
+    mutationFn: (email: string) =>
+      unwrap(api.POST("/api/auth/forgot-password", { body: { email } })),
+  });
+
+export const useResetPassword = () =>
+  useMutation({
+    mutationFn: ({ token, password }: { token: string; password: string }) =>
+      unwrap(api.POST("/api/auth/reset-password", { body: { token, password } })),
+  });
+
+// --- Courses ----------------------------------------------------------------
+
+export const useCourses = () =>
+  useQuery({ queryKey: qk.courses.list(), queryFn: () => unwrap(api.GET("/api/courses")) });
+
+export const useCourse = (courseId: number | null) =>
+  useQuery({
+    queryKey: qk.courses.detail(courseId ?? 0),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/courses/{course_id}", { params: { path: { course_id: courseId ?? 0 } } }),
+      ),
+    enabled: courseId !== null,
+  });
+
+export const useCoursesOverview = () =>
+  useQuery({
+    queryKey: qk.courses.overview(),
+    queryFn: () => unwrap(api.GET("/api/courses/overview")),
+  });
+
+export function useUpdateCourse() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, body }: { courseId: number; body: Schemas["CourseUpdate"] }) =>
+      unwrap(
+        api.PATCH("/api/courses/{course_id}", { params: { path: { course_id: courseId } }, body }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.courses.all }),
+  });
+}
+
+/** Subjects, question types and capabilities, for choosing what a new course assesses. */
+export const useAssessmentCatalog = () =>
+  useQuery({
+    queryKey: qk.courses.catalog(),
+    queryFn: () => unwrap(api.GET("/api/courses/catalog")),
+    // The registry only changes with a deploy.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+export function useCreateCourse() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CourseCreate"]) => unwrap(api.POST("/api/courses", { body })),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.courses.all }),
+  });
+}
+
 // --- System -----------------------------------------------------------------
 
 export const healthQuery = () =>
@@ -208,9 +378,12 @@ export const useConfig = () => useQuery(configQuery());
 
 type QuestionListParams = {
   limit?: number;
-  status?: QuestionStatus;
+  /** Any of these; the API takes the parameter repeated. */
+  status?: QuestionStatus[];
   curriculum_version_id?: number;
-  section_id?: number;
+  /** Any of these topics, repeated like `status`. */
+  topic_id?: number[];
+  chunk_id?: string;
   run_id?: string;
 };
 
@@ -223,10 +396,10 @@ export const questionsQuery = (params: QuestionListParams) =>
 export const useQuestions = (params: QuestionListParams) => useQuery(questionsQuery(params));
 
 /** Every question already generated from one chunk, newest first. */
-export const useQuestionsForSection = (sectionId: number | null) =>
+export const useQuestionsForChunk = (chunkId: string | null) =>
   useQuery({
-    ...questionsQuery({ section_id: sectionId ?? 0, limit: 50 }),
-    enabled: sectionId !== null,
+    ...questionsQuery({ chunk_id: chunkId ?? "", limit: 50 }),
+    enabled: chunkId !== null,
   });
 
 export const useQuestion = (id: number | null, { enabled = true } = {}) =>
@@ -241,7 +414,12 @@ export const useQuestion = (id: number | null, { enabled = true } = {}) =>
       ),
   });
 
-export const useReviewQueue = (params: { mode: "all" | "scoreable"; after?: number | null }) =>
+export const useReviewQueue = (params: {
+  mode: "all" | "scoreable";
+  after?: number | null;
+  /** The taxonomy picked in the header; the queue offers only its questions. */
+  curriculumVersionId?: number | null;
+}) =>
   useQuery({
     queryKey: qk.questions.reviewQueue(params),
     queryFn: () =>
@@ -251,6 +429,9 @@ export const useReviewQueue = (params: { mode: "all" | "scoreable"; after?: numb
             query: {
               mode: params.mode,
               ...(params.after ? { after: params.after } : {}),
+              ...(params.curriculumVersionId
+                ? { curriculum_version_id: params.curriculumVersionId }
+                : {}),
             },
           },
         }),
@@ -279,6 +460,9 @@ export function useSubmitReview() {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: ["calibration"] });
       client.invalidateQueries({ queryKey: ["instructions"] });
+      client.invalidateQueries({ queryKey: qk.judgePrompts.all });
+      // The approved count per taxonomy: course setup's review and share steps read it.
+      client.invalidateQueries({ queryKey: qk.questionSets.taxonomyLinks() });
     },
   });
 }
@@ -286,24 +470,22 @@ export function useSubmitReview() {
 // --- Generating from book chunks --------------------------------------------
 
 /**
- * Every candidate chunk in one book, with what it has already produced.
- *
- * The plan endpoint is per-book, so a screen that spans several books asks for
- * one plan each and merges them; see `useGenerationPlans`.
+ * One book's current chunks without their text, each with the questions it has produced —
+ * what a chunk picker lists. Several books are asked for one by one; see `useChunkOutlines`.
  */
-export const generationPlanQuery = (bookId: number) =>
+export const chunkOutlineQuery = (bookId: number) =>
   queryOptions({
-    queryKey: qk.questions.generationPlan(bookId),
+    queryKey: qk.questions.chunkOutline(bookId),
     queryFn: () =>
-      unwrap(api.GET("/api/questions/generation-plan", { params: { query: { book_id: bookId } } })),
+      unwrap(api.GET("/api/chunks/outline", { params: { query: { book_id: bookId } } })),
   });
 
-/** The plans for several books at once, as one loading state. */
-export function useGenerationPlans(bookIds: readonly number[]) {
+/** The outlines of several books at once, as one loading state. */
+export function useChunkOutlines(bookIds: readonly number[]) {
   return useQueries({
-    queries: bookIds.map((bookId) => generationPlanQuery(bookId)),
+    queries: bookIds.map((bookId) => chunkOutlineQuery(bookId)),
     combine: (results) => ({
-      plans: results.flatMap((result) => (result.data ? [result.data] : [])),
+      outlines: results.flatMap((result) => (result.data ? [result.data] : [])),
       isPending: results.some((result) => result.isPending),
       isError: results.some((result) => result.isError),
       error: results.find((result) => result.error)?.error ?? null,
@@ -312,18 +494,33 @@ export function useGenerationPlans(bookIds: readonly number[]) {
 }
 
 /** One chunk's full text and its citation, fetched only when it is being read. */
-export const useSection = (
-  bookId: number | null,
-  sectionId: number | null,
-  { enabled = true } = {},
-) =>
+export const useChunk = (chunkId: string | null, { enabled = true } = {}) =>
   useQuery({
-    queryKey: qk.books.section(bookId ?? 0, sectionId ?? 0),
-    enabled: enabled && bookId !== null && sectionId !== null,
+    queryKey: qk.chunks.detail(chunkId ?? ""),
+    enabled: enabled && chunkId !== null,
     queryFn: () =>
       unwrap(
-        api.GET("/api/books/{book_id}/sections/{section_id}", {
-          params: { path: { book_id: bookId as number, section_id: sectionId as number } },
+        api.GET("/api/chunks/{chunk_id}", {
+          params: { path: { chunk_id: chunkId as string } },
+        }),
+      ),
+  });
+
+/**
+ * A book's current chunks, in reading order; with `page`, only the chunks covering that page.
+ *
+ * The page form is what follows the PDF as it scrolls, so the previous page's chunks stay on
+ * screen while the next page's load.
+ */
+export const useBookChunks = (bookId: number | null, page: number | null = null) =>
+  useQuery({
+    queryKey: qk.chunks.book(bookId ?? 0, page),
+    enabled: bookId !== null,
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/chunks", {
+          params: { query: { book_id: bookId as number, page: page ?? undefined } },
         }),
       ),
   });
@@ -345,25 +542,77 @@ export const useBatchPlan = (chunks: readonly ChunkGenerationSpec[]) =>
     // A plan is a pure function of the sheet, so a cached one never goes stale.
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
-    queryFn: () => unwrap(api.POST("/api/questions/batch-plan", { body: { chunks: [...chunks] } })),
+    queryFn: async () => {
+      const plan = await planGenerationRun({ kind: "chunks", chunks: [...chunks] });
+      const count = (difficulty: Schemas["Difficulty"]) =>
+        plan.planned.filter((question) => question.difficulty === difficulty).length;
+      return {
+        planned: plan.planned,
+        totals: {
+          ...plan.totals,
+          chunks_specified: new Set(plan.planned.map((question) => question.chunk_id)).size,
+          easy: count("easy"),
+          medium: count("medium"),
+          hard: count("hard"),
+        },
+      };
+    },
   });
 
+type RunTarget = Schemas["GenerationRunRequest"]["target"];
+
+/** Queue a generation run of any kind (ADR-066): `202 { job_id }`, plus `round_id` for a round. */
+async function startGenerationRun(target: RunTarget): Promise<Schemas["GenerationRunStarted"]> {
+  const run = await unwrap(api.POST("/api/generation-runs", { body: { target, dry_run: false } }));
+  if (!("job_id" in run)) {
+    throw new Error("The server returned a plan instead of starting the run.");
+  }
+  return run;
+}
+
 /**
- * Run a per-chunk spec sheet.
+ * Resolve once a queued job ends: its final state when done, its error when it failed or was
+ * cancelled. For the screens that show the one question a short run makes, as soon as it exists.
+ */
+export async function waitForJob(
+  jobId: string,
+  pollMs: number = JOBS_ACTIVE_POLL_MS,
+): Promise<Schemas["JobOut"]> {
+  for (;;) {
+    const { jobs } = await unwrap(api.GET("/api/jobs"));
+    const job = jobs.find((listed) => listed.id === jobId);
+    if (job?.status === "done") return job;
+    if (job?.status === "failed" || job?.status === "cancelled") {
+      throw new Error(job.error ?? "The run stopped before it finished.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/** Plan and price a generation run: no model call, nothing written. */
+async function planGenerationRun(target: RunTarget): Promise<Schemas["GenerationRunPlan"]> {
+  const plan = await unwrap(api.POST("/api/generation-runs", { body: { target, dry_run: true } }));
+  if (!("planned" in plan)) {
+    throw new Error("The server started the run instead of planning it.");
+  }
+  return plan;
+}
+
+/**
+ * Queue a per-chunk spec sheet as a background job.
  *
- * Synchronous on the server: every question costs one generation call plus one
- * judge call per metric, made in sequence. Each question commits on its own, so a
- * failure part-way through still leaves the questions already paid for — which is
- * why the caller shows what was created rather than treating the run as atomic.
+ * The server answers `202 { job_id }` at once and generates in the background —
+ * one generation call plus one judge call per metric per question, each question
+ * committed on its own. Follow the run with `useJob(job_id)`; the Jobs panel
+ * refreshes the question lists when it finishes.
  */
 export function useGenerateBatch() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["GenerateBatchRequest"]) =>
-      unwrap(api.POST("/api/questions/generate-batch", { body })),
+    mutationFn: (body: Omit<Schemas["ChunksRunTarget"], "kind">) =>
+      startGenerationRun({ ...body, kind: "chunks" }),
     onSuccess: () => {
-      client.invalidateQueries({ queryKey: qk.questions.all });
-      client.invalidateQueries({ queryKey: qk.system.counts() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
     },
   });
 }
@@ -371,15 +620,38 @@ export function useGenerateBatch() {
 /**
  * Generate from one chunk, one type, one difficulty at a time.
  *
- * The same endpoint the bulk sheet's per-format rows resolve to underneath —
- * given a single section id it creates exactly one question, so the
- * single-chunk generator needs no endpoint of its own.
+ * A `chunks` run with one question per chunk, queued like any other; the mutation resolves
+ * when its job has made the questions, so the screen can open the one it asked for.
  */
 export function useGenerateQuestions() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["GenerateQuestionsRequest"]) =>
-      unwrap(api.POST("/api/questions/generate", { body })),
+    mutationFn: async ({
+      chunk_ids,
+      question_type,
+      difficulty,
+      curriculum_version_id,
+    }: {
+      chunk_ids: string[];
+      question_type: Schemas["QuestionType"];
+      difficulty: Schemas["Difficulty"];
+      curriculum_version_id?: number | null;
+    }) => {
+      const run = await startGenerationRun({
+        kind: "chunks",
+        curriculum_version_id,
+        chunks: chunk_ids.map((chunk_id) => ({
+          chunk_id,
+          easy: difficulty === "easy" ? 1 : 0,
+          medium: difficulty === "medium" ? 1 : 0,
+          hard: difficulty === "hard" ? 1 : 0,
+          question_types: [question_type],
+        })),
+      });
+      const result = (await waitForJob(run.job_id)).result;
+      if (!result || !("question_ids" in result)) throw new Error("The run stored no questions.");
+      return result;
+    },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
@@ -391,7 +663,7 @@ export function useGenerateQuestions() {
 export function useRegenerateWithFeedback() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       questionId,
       feedback,
       professor_id,
@@ -399,13 +671,19 @@ export function useRegenerateWithFeedback() {
       questionId: number;
       feedback: string;
       professor_id?: number | null;
-    }) =>
-      unwrap(
-        api.POST("/api/questions/{question_id}/regenerate", {
-          params: { path: { question_id: questionId } },
-          body: { feedback, professor_id },
-        }),
-      ),
+    }) => {
+      const run = await startGenerationRun({
+        kind: "regenerate",
+        question_id: questionId,
+        feedback,
+        professor_id,
+      });
+      const result = (await waitForJob(run.job_id)).result;
+      if (!result || !("regenerated_from_question_id" in result)) {
+        throw new Error("The regeneration stored no question.");
+      }
+      return result;
+    },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questions.all });
       client.invalidateQueries({ queryKey: qk.system.counts() });
@@ -433,19 +711,18 @@ export const useCoverage = (setVersionId?: number) =>
   });
 
 /**
- * Run the coverage "Generate" button: one grounded question per selected gap
- * cell. Synchronous, like `useGenerateBatch` -- the caller shows the run
- * summary (or the 502/422 it failed with) once the response comes back.
+ * Queue the coverage "Generate" button's run: one grounded question per selected
+ * gap cell, as a background job (`202 { job_id }`). The coverage report marks the
+ * topic as generating until the job ends; `useJob(job_id)` carries its summary.
  */
 export function useGenerateCoverageRun() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["FillGapsRequest"]) =>
-      unwrap(api.POST("/api/coverage/generation-runs", { body })),
+    mutationFn: ({ targets }: { targets: Schemas["CoverageTargetRef"][] }) =>
+      startGenerationRun({ kind: "gaps", targets }),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.coverage.all });
-      client.invalidateQueries({ queryKey: qk.questions.all });
-      client.invalidateQueries({ queryKey: qk.system.counts() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
     },
   });
 }
@@ -464,21 +741,9 @@ export const useBook = (bookId: number) =>
   });
 
 /**
- * What a valid book document is, and the prompt that produces one.
- *
- * Rendered by the backend from the ingestion contract, so this client never
- * describes a document the validator would refuse. It only changes when the
- * contract does, hence no refetching.
- */
-export const useBookDocumentGuide = () =>
-  useQuery({
-    queryKey: qk.books.guide(),
-    queryFn: () => unwrap(api.GET("/api/books/document-guide")),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-
-/**
- * Import a book document.
+ * Import a book document: the quick checks answer here, the import itself is a
+ * background job (`202 {job_id}`) that the Jobs panel follows. The books list is
+ * refreshed when that job finishes (`useJobFinishedToasts`).
  *
  * `file` is typed as `string` by the generated types because OpenAPI describes an
  * upload as a binary string; a `File` is what the multipart body actually needs.
@@ -502,8 +767,22 @@ export function useImportBook() {
         }),
       ),
     onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+/**
+ * Import a YouTube video's transcript as a source (Task 30). Runs in the request, so it resolves
+ * with the book; a `transcript_unavailable` error means paste the transcript and send again.
+ */
+export function useImportYoutube() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["YouTubeImportRequest"]) =>
+      unwrap(api.POST("/api/books/youtube", { body })),
+    onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.books.all });
-      client.invalidateQueries({ queryKey: qk.system.counts() });
     },
   });
 }
@@ -615,6 +894,14 @@ export const useTaxonomyDocumentGuide = () =>
  * Unlike the book import there is no title override to send: a taxonomy document
  * declares its own `label`, and a wrong label is a wrong document.
  */
+/** Ask the AI to propose a taxonomy from the professor's brief. Nothing is saved (ADR-052). */
+export function useDraftTaxonomy() {
+  return useMutation({
+    mutationFn: (body: Schemas["TaxonomyDraftRequest"]) =>
+      unwrap(api.POST("/api/curriculum/drafts", { body })),
+  });
+}
+
 export function useImportTaxonomy() {
   const client = useQueryClient();
   return useMutation({
@@ -808,13 +1095,39 @@ export function useCreateQuestionSet() {
   });
 }
 
-export function useSyncProdQuestionSet() {
+/** The snapshot behind one taxonomy's classroom link; 404 until the link is created. */
+export const useTaxonomyClassroom = (curriculumVersionId: number | null, { enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.questionSets.taxonomy(curriculumVersionId ?? 0),
+    enabled: enabled && curriculumVersionId !== null,
+    retry: false,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/question-sets/taxonomy/{curriculum_version_id}", {
+          params: { path: { curriculum_version_id: curriculumVersionId ?? 0 } },
+        }),
+      ),
+  });
+
+/** Every taxonomy in the course with the snapshot its classroom link serves, in one call. */
+export const useTaxonomyLinks = () =>
+  useQuery({
+    queryKey: qk.questionSets.taxonomyLinks(),
+    queryFn: () => unwrap(api.GET("/api/question-sets/taxonomy-links")),
+  });
+
+/** Freeze a taxonomy's approved questions and point its classroom link at them. */
+export function useSyncTaxonomyClassroom() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => unwrap(api.POST("/api/question-sets/prod/sync", {})),
+    mutationFn: (curriculumVersionId: number) =>
+      unwrap(
+        api.POST("/api/question-sets/taxonomy/{curriculum_version_id}/sync", {
+          params: { path: { curriculum_version_id: curriculumVersionId } },
+        }),
+      ),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.questionSets.all });
-      client.invalidateQueries({ queryKey: qk.questionSets.prod() });
       client.invalidateQueries({ queryKey: qk.coverage.all });
     },
   });
@@ -828,13 +1141,25 @@ export const instructionsQuery = () =>
 
 export const useInstructions = () => useQuery(instructionsQuery());
 
-export function useRefreshInstruction() {
+/**
+ * The generator guidelines learned from reviews (ADR-063): pending until two reviews
+ * support one or the professor confirms it; only active ones are sent.
+ */
+export const guidelinesQuery = () =>
+  queryOptions({
+    queryKey: qk.instructions.guidelines(),
+    queryFn: () => unwrap(api.GET("/api/guidelines")) as Promise<GuidelineListResponse>,
+  });
+
+export const useGuidelines = () => useQuery(guidelinesQuery());
+
+export function useConfirmGuideline() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (questionType: QuestionType) =>
+    mutationFn: (guidelineId: number) =>
       unwrap(
-        api.POST("/api/instructions/{question_type}/refresh", {
-          params: { path: { question_type: questionType } },
+        api.POST("/api/guidelines/{guideline_id}/confirm", {
+          params: { path: { guideline_id: guidelineId } },
         }),
       ),
     onSuccess: () => {
@@ -844,13 +1169,13 @@ export function useRefreshInstruction() {
   });
 }
 
-export function useDeleteInstructionRule() {
+export function useDeleteGuideline() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ questionType, ruleIndex }: { questionType: QuestionType; ruleIndex: number }) =>
+    mutationFn: (guidelineId: number) =>
       unwrap(
-        api.DELETE("/api/instructions/{question_type}/rules/{rule_index}", {
-          params: { path: { question_type: questionType, rule_index: ruleIndex } },
+        api.DELETE("/api/guidelines/{guideline_id}", {
+          params: { path: { guideline_id: guidelineId } },
         }),
       ),
     onSuccess: () => {
@@ -870,9 +1195,34 @@ export const judgePromptsQuery = () =>
   queryOptions({
     queryKey: qk.judgePrompts.list(),
     queryFn: () => unwrap(api.GET("/api/judge-prompts")),
+    // A review in another tab can relearn a judge; this tab cannot see that mutation.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
 export const useJudgePrompts = () => useQuery(judgePromptsQuery());
+
+/** Agreement per judge and trust per style under the current panel (step 13). */
+export const judgeStatsQuery = () =>
+  queryOptions({
+    queryKey: qk.judgePrompts.stats(),
+    queryFn: () => unwrap(api.GET("/api/judge-prompts/stats")),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+export const useJudgeStats = () => useQuery(judgeStatsQuery());
+
+/** Per-judge scorecard: agreement, κ, Wilson 95% range, retries and drops (ADR-064, m8). */
+export const judgeScorecardQuery = () =>
+  queryOptions({
+    queryKey: qk.judges.scorecard(),
+    queryFn: () => unwrap(api.GET("/api/judges/scorecard")),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+export const useJudgeScorecard = () => useQuery(judgeScorecardQuery());
 
 type JudgeMetricId = Schemas["JudgeMetricId"];
 
@@ -940,6 +1290,9 @@ export interface StudentRosterQuery {
   curriculumVersionId?: number | null;
   page?: number;
   pageSize?: number;
+  /** Column to order by across all pages; omitted keeps name order. */
+  sort?: "name" | "email" | "answered" | "average" | "last_active" | "enrolled" | null;
+  order?: "asc" | "desc";
 }
 
 export const useStudents = (params: StudentRosterQuery = {}) => {
@@ -951,6 +1304,8 @@ export const useStudents = (params: StudentRosterQuery = {}) => {
     curriculum_version_id: params.curriculumVersionId ?? undefined,
     page: params.page ?? 1,
     page_size: params.pageSize ?? 20,
+    sort: params.sort ?? undefined,
+    order: params.order ?? "asc",
   };
   return useQuery({
     queryKey: qk.students.list(query),
@@ -1039,10 +1394,65 @@ export const useNextQuestion = (trainingSessionId: number | null, { enabled = tr
     enabled: enabled && trainingSessionId !== null,
     retry: false,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      const error = query.state.error;
+      if (!(error instanceof ApiError)) return false;
+      if (error.code === "question_generating") return 3000;
+      return error.code === "no_question_available" ? 10000 : false;
+    },
     queryFn: () =>
       unwrap(
         api.GET("/api/training-sessions/{training_session_id}/next", {
           params: { path: { training_session_id: trainingSessionId as number } },
+        }),
+      ),
+  });
+
+/**
+ * Ask for a question generated live, even right after one failed. Answers like `/next`:
+ * the question when one is ready, otherwise `question_generating` -- either way the
+ * next-question query picks it up from here.
+ */
+export function useRequestLiveQuestion() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (trainingSessionId: number) =>
+      unwrap(
+        api.POST("/api/training-sessions/{training_session_id}/live-question", {
+          params: { path: { training_session_id: trainingSessionId } },
+        }),
+      ),
+    onSettled: (_result, _error, trainingSessionId) => {
+      client.invalidateQueries({ queryKey: qk.trainingSessions.next(trainingSessionId) });
+    },
+  });
+}
+
+/** The learner's own progress, keyed by their run (no instructor login on the student page). */
+export const useTrainingSessionProgress = (
+  trainingSessionId: number | null,
+  { enabled = true } = {},
+) =>
+  useQuery({
+    queryKey: qk.trainingSessions.progress(trainingSessionId ?? 0),
+    enabled: enabled && trainingSessionId !== null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/training-sessions/{training_session_id}/progress", {
+          params: { path: { training_session_id: trainingSessionId as number } },
+        }),
+      ),
+  });
+
+/** An answered attempt's question with its answer key, for the student's result card. */
+export const useAttemptReview = (attemptId: number | null, { enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.trainingSessions.review(attemptId ?? 0),
+    enabled: enabled && attemptId !== null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/attempts/{attempt_id}/review", {
+          params: { path: { attempt_id: attemptId as number } },
         }),
       ),
   });
@@ -1064,6 +1474,9 @@ export function useAnswerAttempt() {
       client.invalidateQueries({
         queryKey: qk.trainingSessions.next(result.training_session_id),
       });
+      client.invalidateQueries({
+        queryKey: qk.trainingSessions.progress(result.training_session_id),
+      });
       client.invalidateQueries({ queryKey: qk.students.all });
     },
   });
@@ -1079,8 +1492,9 @@ export function useEndTrainingSession() {
         }),
       ),
     onSuccess: (result) => {
+      // Not /next: asking an ended run for a question is a 422. The refreshed detail
+      // (ended_at set) switches that query off instead.
       client.invalidateQueries({ queryKey: qk.trainingSessions.detail(result.id) });
-      client.invalidateQueries({ queryKey: qk.trainingSessions.next(result.id) });
       client.invalidateQueries({ queryKey: qk.students.progress(result.student_id) });
       client.invalidateQueries({ queryKey: qk.students.all });
     },
@@ -1109,6 +1523,576 @@ export function useBatchRun(runId: string, { enabled = true } = {}) {
       // A provider-side cancellation is recorded as `failed`, so these three are
       // the whole terminal set.
       return status === "completed" || status === "failed" || status === "expired" ? false : 5_000;
+    },
+  });
+}
+
+/** What "Run judges" would do now: how many questions, or why it cannot run. */
+export const useJudgeRerunPreview = () =>
+  useQuery({
+    queryKey: qk.evaluation.rerunPreview(),
+    queryFn: () => unwrap(api.GET("/api/evaluation/rerun-preview")),
+  });
+
+/** Submit the course's eligible questions for re-judging; results arrive in Jobs. */
+export function useRunJudges() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.POST("/api/evaluation/batch-runs", { body: {} })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.evaluation.all });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+// --- Jobs -------------------------------------------------------------------
+
+/** How often the Jobs list refreshes while something is queued or running, and otherwise. */
+export const JOBS_ACTIVE_POLL_MS = 2_000;
+export const JOBS_IDLE_POLL_MS = 30_000;
+
+/**
+ * Every recent and running job of the open course: bulk generation, coverage
+ * fills, question rounds and judge runs, newest first (`GET /api/jobs`).
+ *
+ * One query for the whole Studio — the header button, its popover, the run
+ * window and the screens that started a job all read it, so they never disagree.
+ */
+export const useJobs = ({ enabled = true }: { enabled?: boolean } = {}) =>
+  useQuery({
+    queryKey: qk.jobs.list(),
+    enabled,
+    queryFn: () => unwrap(api.GET("/api/jobs")),
+    refetchInterval: (query) =>
+      (query.state.data?.jobs ?? []).some(
+        (job) => job.status === "queued" || job.status === "running",
+      )
+        ? JOBS_ACTIVE_POLL_MS
+        : JOBS_IDLE_POLL_MS,
+  });
+
+/** One job of `useJobs`, by id (`job-12`, `round-5`, `judge-…`); `undefined` until listed. */
+export function useJob(jobId: string | null | undefined) {
+  const jobs = useJobs({ enabled: jobId != null });
+  return jobId == null ? undefined : jobs.data?.jobs.find((job) => job.id === jobId);
+}
+
+/**
+ * Stop a queued or running job (`POST /api/jobs/{id}/cancel`). A running one finishes the
+ * question in flight first; the returned job says `cancel_requested` until it does.
+ */
+export function useCancelJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      unwrap(api.POST("/api/jobs/{job_id}/cancel", { params: { path: { job_id: jobId } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+    },
+  });
+}
+
+/** Start a new job for what a stopped or partly failed one left undone (its `retry_label`). */
+export function useRetryJob() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      unwrap(api.POST("/api/jobs/{job_id}/retry", { params: { path: { job_id: jobId } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+      client.invalidateQueries({ queryKey: qk.evaluation.all });
+    },
+  });
+}
+
+// --- Question setup, rounds and custom judges -------------------------------
+// docs/QUESTION_SETUP_PLAN.md. Until Phase 1 lands every one of these endpoints
+// answers 501 (`feature_not_available`).
+
+/** The style library of a subject; the course's own subject when `subject` is omitted. */
+export const useStyles = (subject?: string | null, { enabled = true } = {}) =>
+  useQuery({
+    queryKey: qk.setup.styles(subject),
+    enabled,
+    queryFn: () =>
+      unwrap(api.GET("/api/styles", { params: { query: subject ? { subject } : {} } })),
+    // The library ships with the backend; course styles change only through
+    // `useCreateCourseStyle`, which invalidates this query.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/** Add a style to this course only. The backend runs the library's style checks on it. */
+export function useCreateCourseStyle() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (yaml: string) => unwrap(api.POST("/api/styles", { body: { yaml } })),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["setup", "styles"] }),
+  });
+}
+
+/** One style (library or course) as the YAML file a library contribution uses. */
+export function fetchStyleYaml(styleId: string): Promise<string> {
+  return unwrap(
+    api.GET("/api/styles/{style_id}/export", {
+      params: { path: { style_id: styleId } },
+      parseAs: "text",
+    }),
+  ) as Promise<string>;
+}
+
+/**
+ * Ask the AI for styles per subtopic and a target per cell. Persists nothing.
+ *
+ * This is a query, not a mutation. The dialog mounts twice in development, and a
+ * mutation result from the first mount is discarded while a one-shot flag stops
+ * the second mount from asking again. A shared query keeps that one request and
+ * gives the result to the mount that stays on screen. `session` changes each
+ * time the professor opens the dialog, so the next opening asks again.
+ */
+export function useSetupSuggestion(curriculumVersionId: number, session: number) {
+  return useQuery({
+    queryKey: qk.setup.suggestion(curriculumVersionId, session),
+    enabled: session > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    queryFn: () =>
+      unwrap(
+        api.POST("/api/setup/suggest", {
+          body: { curriculum_version_id: curriculumVersionId },
+        }),
+      ),
+  });
+}
+
+/** The newest saved setup of a taxonomy, with its newest round; `setup` is null when none. */
+export const useCurrentSetup = (curriculumVersionId: number | null | undefined) =>
+  useQuery({
+    queryKey: qk.setup.current(curriculumVersionId ?? 0),
+    enabled: curriculumVersionId != null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/setup", {
+          params: { query: { curriculum_version_id: curriculumVersionId as number } },
+        }),
+      ),
+  });
+
+/** Save the approved setup; the backend starts round 1 in the background. */
+export function useSaveSetup() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["SaveSetupRequest"]) => unwrap(api.POST("/api/setup", { body })),
+    onSuccess: (_result, body) => {
+      client.invalidateQueries({ queryKey: qk.setup.current(body.curriculum_version_id) });
+      client.invalidateQueries({ queryKey: qk.rounds.all });
+    },
+  });
+}
+
+/** Queue the next round of a setup, for cells still below target. */
+export function useStartNextRound() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ setup_id, size }: { setup_id: number; size: number }) => {
+      const run = await startGenerationRun({ kind: "setup_cells", setup_id, size });
+      if (run.round_id == null) throw new Error("The server started no round.");
+      return { round_id: run.round_id };
+    },
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.setup.all });
+      client.invalidateQueries({ queryKey: qk.rounds.all });
+    },
+  });
+}
+
+const ROUND_POLL_MS = 2_000;
+
+/**
+ * One round's status and progress.
+ *
+ * Polls every two seconds while the round is queued or running and stops once it is `done` or
+ * `failed`, unless the caller passes its own `refetchInterval` (a number, or `false` to never
+ * poll).
+ */
+export function useRound(
+  roundId: number | null | undefined,
+  { enabled = true, refetchInterval }: { enabled?: boolean; refetchInterval?: number | false } = {},
+) {
+  return useQuery({
+    queryKey: qk.rounds.detail(roundId ?? 0),
+    enabled: enabled && roundId != null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/rounds/{round_id}", {
+          params: { path: { round_id: roundId as number } },
+        }),
+      ),
+    refetchInterval:
+      refetchInterval !== undefined
+        ? refetchInterval
+        : (query) => {
+            const status = query.state.data?.status;
+            return status === "done" || status === "failed" ? false : ROUND_POLL_MS;
+          },
+    // Each poll can bring a new question into the review queue; a professor who switches
+    // tabs while a round generates comes back to it already there.
+    refetchIntervalInBackground: true,
+  });
+}
+
+/** Every custom rule judge of a taxonomy, enabled or not. */
+export const useCustomJudges = (curriculumVersionId: number | null | undefined) =>
+  useQuery({
+    queryKey: qk.customJudges.list(curriculumVersionId ?? 0),
+    enabled: curriculumVersionId != null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/custom-judges", {
+          params: { query: { curriculum_version_id: curriculumVersionId as number } },
+        }),
+      ),
+  });
+
+export function useCreateCustomJudge() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CreateCustomJudgeRequest"]) =>
+      unwrap(api.POST("/api/custom-judges", { body })),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.customJudges.all }),
+  });
+}
+
+export function useUpdateCustomJudge() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      judgeId,
+      body,
+    }: {
+      judgeId: number;
+      body: Schemas["UpdateCustomJudgeRequest"];
+    }) =>
+      unwrap(
+        api.PATCH("/api/custom-judges/{judge_id}", {
+          params: { path: { judge_id: judgeId } },
+          body,
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.customJudges.all }),
+  });
+}
+
+// ------------------------------------------------------------- model settings (Task 44)
+
+type ModelRole = Schemas["ModelRole"];
+
+/** Instance-wide model settings per role. Polls while an embedding model switch runs. */
+export const useModelSettings = () =>
+  useQuery({
+    queryKey: qk.settings.roles(),
+    queryFn: () => unwrap(api.GET("/api/settings")),
+    refetchInterval: (query) => {
+      const embeddings = query.state.data?.roles.find((role) => role.role === "embeddings");
+      const status = embeddings?.switch?.status;
+      return status === "queued" || status === "running" ? 2_000 : false;
+    },
+  });
+
+/** The provider's model ids for the picker; cached by the backend for an hour. */
+export const useProviderModels = (provider: ProviderId, enabled: boolean) =>
+  useQuery({
+    queryKey: qk.settings.models(provider),
+    queryFn: () => unwrap(api.GET("/api/settings/models", { params: { query: { provider } } })),
+    enabled,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+
+type ProviderId = Schemas["ProviderOut"]["id"];
+
+/** Test a provider's URL, key and default model with one call, and save them if it passes. */
+export function useSaveProvider() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ provider, body }: { provider: ProviderId; body: Schemas["ProviderUpdate"] }) =>
+      unwrap(
+        api.PUT("/api/settings/providers/{provider}", { params: { path: { provider } }, body }),
+      ),
+    onSuccess: (data, { provider }) => {
+      client.setQueryData(qk.settings.roles(), data);
+      client.removeQueries({ queryKey: qk.settings.models(provider) });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+    },
+  });
+}
+
+/** Forget a provider's saved values; `.env` applies again. */
+export function useResetProvider() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: ProviderId) =>
+      unwrap(api.DELETE("/api/settings/providers/{provider}", { params: { path: { provider } } })),
+    onSuccess: (data, provider) => {
+      client.setQueryData(qk.settings.roles(), data);
+      client.removeQueries({ queryKey: qk.settings.models(provider) });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+    },
+  });
+}
+
+/** One minimal provider call with the edited values; nothing is saved. */
+export function useTestRoleSettings() {
+  return useMutation({
+    mutationFn: ({ role, body }: { role: ModelRole; body: Schemas["RoleSettingsUpdate"] }) =>
+      unwrap(api.POST("/api/settings/{role}/test", { params: { path: { role } }, body })),
+  });
+}
+
+export function useSaveRoleSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ role, body }: { role: ModelRole; body: Schemas["RoleSettingsSave"] }) =>
+      unwrap(api.PUT("/api/settings/{role}", { params: { path: { role } }, body })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.settings.all });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+/** Point every role without its own saved settings at OpenRouter or Azure. */
+export function useSetRoute() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (route: Schemas["RouteUpdate"]["route"]) =>
+      unwrap(api.PUT("/api/settings/route", { body: { route } })),
+    onSuccess: (data) => {
+      client.setQueryData(qk.settings.roles(), data);
+      client.invalidateQueries({ queryKey: qk.system.health() });
+    },
+  });
+}
+
+/** Back to `.env` for every value of the role. */
+export function useResetRoleSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (role: ModelRole) =>
+      unwrap(api.DELETE("/api/settings/{role}", { params: { path: { role } } })),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.settings.all });
+      client.invalidateQueries({ queryKey: qk.system.health() });
+      client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------- tutorials (Phase 5)
+
+/**
+ * The tutorial recipes of the course's subject (shipped with the backend), with the
+ * taxonomy's approve/reject decisions when a taxonomy is given.
+ */
+export const useTutorialRecipes = (curriculumVersionId: number | null = null) =>
+  useQuery({
+    queryKey: qk.tutorials.recipes(curriculumVersionId),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-recipes", {
+          params: {
+            query:
+              curriculumVersionId === null ? {} : { curriculum_version_id: curriculumVersionId },
+          },
+        }),
+      ),
+  });
+
+/** A few of a recipe's blocks in the taxonomy, to judge the recipe by. */
+export const useTutorialSample = (versionId: number, recipeId: string | null, limit = 3) =>
+  useQuery({
+    queryKey: qk.tutorials.sample(versionId, recipeId ?? ""),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-blocks", {
+          params: {
+            query: { curriculum_version_id: versionId, recipe_id: recipeId ?? "", limit },
+          },
+        }),
+      ),
+    enabled: recipeId !== null,
+  });
+
+/** Approve or reject a recipe for a taxonomy; its blocks there follow. */
+export function useDecideTutorialRecipe() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      recipeId,
+      ...body
+    }: Schemas["TutorialRecipeDecisionRequest"] & { recipeId: string }) =>
+      unwrap(
+        api.PUT("/api/tutorial-recipes/{recipe_id}/decision", {
+          params: { path: { recipe_id: recipeId } },
+          body,
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.tutorials.all }),
+  });
+}
+
+/** Stop showing one bank block to students (live tutorials' review after publishing). */
+export function useRetireTutorialBlock() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (blockId: number) =>
+      unwrap(
+        api.PUT("/api/tutorial-blocks/{block_id}/retire", {
+          params: { path: { block_id: blockId } },
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.tutorials.all }),
+  });
+}
+
+/** Price (``dry_run``) or queue the taxonomy's missing tutorial blocks as one job. */
+export function usePregenerateTutorials() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["TutorialPregenerationRequest"]) =>
+      unwrap(api.POST("/api/tutorial-pregeneration", { body })),
+    onSuccess: (_result, body) => {
+      if (!body.dry_run) client.invalidateQueries({ queryKey: qk.jobs.all });
+    },
+  });
+}
+
+/** A subtopic's generated tutorial blocks, newest first. */
+export const useTutorialBlocks = (subtopicId: number | null) =>
+  useQuery({
+    queryKey: qk.tutorials.blocks(subtopicId ?? 0),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-blocks", { params: { query: { subtopic_id: subtopicId ?? 0 } } }),
+      ),
+    enabled: subtopicId !== null,
+  });
+
+/** Generate one block (one model call, plus the recipe's tool and checks). */
+export function useGenerateTutorialBlock() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["GenerateTutorialBlockRequest"]) =>
+      unwrap(api.POST("/api/tutorial-blocks", { body })),
+    onSuccess: (block) =>
+      client.invalidateQueries({ queryKey: qk.tutorials.blocks(block.subtopic_id) }),
+  });
+}
+
+// ------------------------------------------- experimental recipe builder (/experimental_tutorial)
+
+// The page lives outside /courses/{id}, so the course header is passed explicitly.
+const inCourse = (courseId: number) => ({ headers: { [COURSE_HEADER]: String(courseId) } });
+
+export const useExperimentalRecipes = (courseId: number | null) =>
+  useQuery({
+    queryKey: qk.experimentalRecipes.list(courseId ?? 0),
+    queryFn: () => unwrap(api.GET("/api/experimental/recipes", inCourse(courseId ?? 0))),
+    enabled: courseId !== null,
+  });
+
+/** The course's approved taxonomy, for picking a subtopic to try a recipe on. */
+export const useExperimentalCurriculum = (courseId: number | null) =>
+  useQuery({
+    queryKey: qk.experimentalRecipes.curriculum(courseId ?? 0),
+    queryFn: () => unwrap(api.GET("/api/curriculum/approved", inCourse(courseId ?? 0))),
+    enabled: courseId !== null,
+    retry: false,
+  });
+
+export function useDraftExperimentalRecipe() {
+  return useMutation({
+    mutationFn: ({
+      courseId,
+      body,
+    }: {
+      courseId: number;
+      body: Schemas["ExperimentalRecipeDraftRequest"];
+    }) => unwrap(api.POST("/api/experimental/recipes/draft", { ...inCourse(courseId), body })),
+  });
+}
+
+/**
+ * One example block of a recipe, written once per `run` (a model call, so never refetched).
+ *
+ * A query, not a mutation: an example starts when its card mounts, and a mutation fired from an
+ * effect loses its result when StrictMode remounts the card -- the spinner never stops.
+ */
+export const useExperimentalExample = (
+  courseId: number,
+  run: number,
+  body: Schemas["ExperimentalRecipeTryRequest"],
+) =>
+  useQuery({
+    queryKey: qk.experimentalRecipes.example(courseId, run, body),
+    queryFn: () =>
+      unwrap(api.POST("/api/experimental/recipes/try", { ...inCourse(courseId), body })),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 10 * 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+export function useTryExperimentalRecipe() {
+  return useMutation({
+    mutationFn: ({
+      courseId,
+      body,
+    }: {
+      courseId: number;
+      body: Schemas["ExperimentalRecipeTryRequest"];
+    }) => unwrap(api.POST("/api/experimental/recipes/try", { ...inCourse(courseId), body })),
+  });
+}
+
+/** Create (`id` null) or replace a recipe. */
+export function useSaveExperimentalRecipe() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, id, yaml }: { courseId: number; id: number | null; yaml: string }) =>
+      id === null
+        ? unwrap(api.POST("/api/experimental/recipes", { ...inCourse(courseId), body: { yaml } }))
+        : unwrap(
+            api.PUT("/api/experimental/recipes/{row_id}", {
+              ...inCourse(courseId),
+              params: { path: { row_id: id } },
+              body: { yaml },
+            }),
+          ),
+    // A saved recipe joins the course's tutorial recipes, and an edit hides its old blocks.
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.experimentalRecipes.all });
+      client.invalidateQueries({ queryKey: qk.tutorials.all });
+    },
+  });
+}
+
+export function useDeleteExperimentalRecipe() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, id }: { courseId: number; id: number }) =>
+      unwrap(
+        api.DELETE("/api/experimental/recipes/{row_id}", {
+          ...inCourse(courseId),
+          params: { path: { row_id: id } },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.experimentalRecipes.all });
+      client.invalidateQueries({ queryKey: qk.tutorials.all });
     },
   });
 }

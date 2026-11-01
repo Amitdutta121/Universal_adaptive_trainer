@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Student · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .chart text { font-family: var(--font-sans); font-size: 11px; fill: var(--muted-foreground); }
+    .chart .grid line { stroke: var(--border); }
+    .bar-low { background: var(--critical-solid); } .bar-medium { background: var(--warn-solid); } .bar-high { background: var(--ok-solid); }
+  </style>
+</head>
+<!-- D4 · Student detail: one learner's mastery per topic, trend, weak subtopics, attempts, sessions (F7). -->
+<body data-scope="course" data-nav="students" data-title="Student">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <a class="text-sm text-muted-foreground inline-flex items-center gap-1 hover:underline w-fit" :href="Mock.link('students.html')"><i data-lucide="chevron-left" class="size-4"></i>Students</a>
+
+    <!-- Not found / not in this course -->
+    <template x-if="!s">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="user-x"></i></span>
+          <h2 class="font-semibold" x-text="removed ? 'Student removed' : 'Student not found in this course'"></h2>
+          <p class="text-sm text-muted-foreground max-w-md" x-text="removed ? 'Their sessions, attempts and mastery were deleted.' : `There's no enrolled student with id ${Mock.param('id') || '(none)'} in ${course.name}.`"></p>
+          <a class="btn mt-2" data-size="sm" :href="Mock.link('students.html')">Back to the roster</a>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="s">
+      <div class="grid gap-6">
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <p class="text-sm text-muted-foreground" x-text="`${className} · joined Sep 6`"></p>
+            <div class="flex items-center gap-2">
+              <h1 class="text-2xl font-semibold" x-text="s.name"></h1>
+              <span class="pill tone-critical" x-show="risk.length" :title="risk.join('; ')">At risk</span>
+              <span class="pill tone-muted" x-show="reset">Run reset today</span>
+            </div>
+            <p class="text-sm text-muted-foreground" x-text="s.email"></p>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <a class="btn" data-variant="outline" :href="`mailto:${s.email}?subject=${encodeURIComponent(course.code + ' practice')}`"><i data-lucide="mail"></i>Email</a>
+            <button type="button" class="btn" data-variant="outline" @click="ask('reset')"><i data-lucide="rotate-ccw"></i>Reset run</button>
+            <button type="button" class="btn" data-variant="ghost" @click="ask('remove')"><i data-lucide="user-minus"></i>Remove</button>
+          </div>
+        </div>
+
+        <!-- Numbers -->
+        <section class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <template x-for="n in numbers" :key="n.label">
+            <div class="card p-4 gap-1">
+              <div class="text-xs text-muted-foreground" x-text="n.label"></div>
+              <div class="text-2xl font-display font-semibold" x-text="n.value"></div>
+              <div class="text-xs text-muted-foreground" x-text="n.note"></div>
+            </div>
+          </template>
+        </section>
+
+        <!-- Assignments and notes (Phase 2: D4) -->
+        <section class="grid lg:grid-cols-[1.6fr_1fr] gap-6 items-start">
+          <div class="card">
+            <header>
+              <h2>Assignments</h2>
+              <p x-text="`${assignTotal.text} on closed assignments (${Mock.pct(assignTotal.pct)}). Scores are recorded at the due date or the extended date.`"></p>
+            </header>
+            <section class="p-0">
+              <div class="table-container">
+                <table class="table">
+                  <thead><tr><th class="pl-6">Assignment</th><th>Due</th><th>Status</th><th class="text-end">Score</th><th class="pr-4 w-10"></th></tr></thead>
+                  <tbody>
+                    <template x-for="a in assignRows" :key="a.id">
+                      <tr>
+                        <td class="pl-6">
+                          <a class="font-medium hover:underline" :href="Mock.link('assignment.html', { id: a.id })" :title="a.name" x-text="a.name.split(': ')[0]"></a>
+                          <div class="text-xs text-muted-foreground" x-text="`${a.name.split(': ')[1]} · ${a.goal.type === 'mastery' ? 'reach ' + Mock.pct(a.goal.target) : a.goal.n + ' questions'}`"></div>
+                        </td>
+                        <td class="text-sm whitespace-nowrap">
+                          <span :class="a.r.extension ? 'line-through text-muted-foreground' : ''" x-text="fmtD(a.due)"></span>
+                          <span class="block text-xs" style="color:var(--accent-text)" x-show="a.r.extension" x-text="a.r.extension ? `Extended to ${fmtD(a.r.extension)}` : ''"></span>
+                        </td>
+                        <td><span class="pill" :class="A_STATE[a.r.state][1]" x-text="A_STATE[a.r.state][0]"></span></td>
+                        <td class="text-end font-mono text-sm whitespace-nowrap" x-text="a.r.state === 'excused' ? '—' : a.r.state === 'in_progress' ? `${Mock.pct(Math.min(1, a.r.progress))} of goal` : a.r.score == null ? '' : `${a.r.score} / ${a.points}`"></td>
+                        <td class="pr-4 text-end">
+                          <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" title="Grant extension" aria-label="Grant extension" x-show="canExtend(a)" @click="askExt(a.id)"><i data-lucide="calendar-clock"></i></button>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <footer class="flex items-center gap-2">
+              <a class="text-xs text-muted-foreground hover:underline" :href="Mock.link('gradebook.html')">Excuse or compare with the class in the gradebook</a>
+              <button type="button" class="btn ml-auto" data-variant="outline" data-size="sm" @click="askExt()"><i data-lucide="calendar-clock"></i>Grant extension</button>
+            </footer>
+          </div>
+
+          <div class="card">
+            <header>
+              <h2>Notes</h2>
+              <p>Accommodations and anything your co-instructor and TAs should know. Never shown to the student.</p>
+            </header>
+            <section>
+              <div role="group" class="field">
+                <label for="s-notes" class="sr-only">Notes</label>
+                <textarea id="s-notes" rows="4" class="textarea" x-model="note" placeholder="e.g. Accommodation letter: +3 days on practice deadlines"></textarea>
+              </div>
+            </section>
+            <footer class="flex items-center gap-2">
+              <span class="text-xs text-muted-foreground" x-text="note === savedNote ? '' : 'Unsaved changes'"></span>
+              <button type="button" class="btn ml-auto" data-size="sm" :disabled="note === savedNote" @click="saveNote()">Save</button>
+            </footer>
+          </div>
+        </section>
+
+        <section class="grid lg:grid-cols-[1.6fr_1fr] gap-6 items-start">
+          <!-- Trend chart -->
+          <div class="card">
+            <header>
+              <h2>Mastery over time</h2>
+              <p>Average mastery across practised topics, at the end of each week.</p>
+            </header>
+            <section>
+              <template x-if="!reset">
+                <div class="relative">
+                  <div x-html="chartSvg"></div>
+                  <!-- Hover targets, one per week (HTML so Alpine can bind them; SVG <template> doesn't work) -->
+                  <template x-for="(v, i) in trend" :key="'h' + i">
+                    <div class="absolute" :style="`left:${((x(i) - 24) / W) * 100}%;width:${(48 / W) * 100}%;top:0;bottom:${(PB / H) * 100}%`" @mouseenter="hover = i" @mouseleave="hover = null"></div>
+                  </template>
+                  <div x-show="hover !== null" class="absolute pointer-events-none rounded-md border px-2 py-1 text-xs shadow-sm" style="background:var(--popover)" :style="{ left: hover === null ? '0' : (x(hover) / W) * 100 + '%', top: '0', transform: 'translateX(-50%)' }">
+                    <div class="font-medium" x-text="hover !== null && `Week of ${weeks[hover]}`"></div>
+                    <div class="text-muted-foreground" x-text="hover !== null && `Avg. mastery ${Mock.pct(trend[hover])}`"></div>
+                  </div>
+                </div>
+              </template>
+              <p class="text-sm text-muted-foreground py-8 text-center" x-show="reset">The run was reset today. The graph fills in again as they answer questions.</p>
+            </section>
+          </div>
+
+          <!-- Weak subtopics -->
+          <div class="card">
+            <header>
+              <h2>Weak subtopics</h2>
+              <p>Where the engine sends this student most often. Weakness starts at 100% and never drops below 5%, so nothing is ruled out for good.</p>
+            </header>
+            <section class="grid gap-4">
+              <ul class="grid gap-3">
+                <template x-for="w in weak" :key="w.name">
+                  <li class="grid gap-1">
+                    <div class="flex text-sm"><span class="font-medium" x-text="w.name"></span><span class="ml-auto font-mono" x-text="`${Math.round(w.weakness * 100)}% weak`"></span></div>
+                    <div class="text-xs text-muted-foreground" x-text="w.topic"></div>
+                    <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" style="background:var(--critical-solid)" :style="{ width: w.weakness * 100 + '%' }"></div></div>
+                  </li>
+                </template>
+              </ul>
+              <div class="text-sm" x-show="unpractised.length">
+                <div class="font-medium">Not practised yet</div>
+                <p class="text-muted-foreground" x-text="unpractised.join(', ')"></p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Topic mastery -->
+        <section class="card">
+          <header>
+            <h2>Topic mastery</h2>
+            <p>The engine's estimate that this student knows each topic. The band sets the difficulty of the next question from that topic.</p>
+          </header>
+          <section>
+            <div class="grid md:grid-cols-2 gap-x-10 gap-y-3">
+              <template x-for="t in topicRows" :key="t.id">
+                <div class="grid gap-1">
+                  <div class="flex items-baseline gap-2 text-sm">
+                    <span class="font-medium" x-text="t.name"></span>
+                    <span class="text-xs text-muted-foreground" x-text="t.m ? `Next difficulty: ${t.next} · ${t.obs} scores` : 'Not practised yet'"></span>
+                    <span class="ml-auto font-mono" x-text="t.m ? Mock.pct(t.m) : '–'"></span>
+                    <span class="pill" :class="t.tone" x-show="t.m" x-text="t.band"></span>
+                  </div>
+                  <div class="h-2 rounded-full" style="background:var(--muted)"><div class="h-2 rounded-full" :class="`bar-${t.band}`" :style="`width:${(t.m || 0) * 100}%`"></div></div>
+                </div>
+              </template>
+            </div>
+          </section>
+        </section>
+
+        <section class="grid lg:grid-cols-[1.6fr_1fr] gap-6 items-start">
+          <!-- Recent attempts -->
+          <div class="card">
+            <header>
+              <h2>Recent attempts</h2>
+              <p x-text="`Last ${attempts.length} of ${s.attempts} answered questions.`"></p>
+            </header>
+            <section class="p-0">
+              <div class="table-container">
+                <table class="table">
+                  <thead><tr><th class="pl-6">When</th><th>Question</th><th>Difficulty</th><th class="pr-6 text-end">Score</th></tr></thead>
+                  <tbody>
+                    <template x-for="a in attempts" :key="a.id">
+                      <tr>
+                        <td class="pl-6 text-sm whitespace-nowrap" x-text="fmtDateTime(a.at)"></td>
+                        <td class="max-w-[22rem]">
+                          <a class="block truncate hover:underline" :href="Mock.link('question.html', { id: a.question_id })" :title="a.prompt" x-text="a.prompt.split('\n')[0]"></a>
+                          <div class="text-xs text-muted-foreground truncate" x-text="`#${a.question_id} · ${MOCK.question_types[a.type].label} · ${a.topic} › ${a.subtopic}`"></div>
+                        </td>
+                        <td class="text-sm capitalize" x-text="a.difficulty"></td>
+                        <td class="pr-6 text-end"><span class="pill" :class="a.score === 100 ? 'tone-ok' : a.score === 0 ? 'tone-critical' : 'tone-warn'" x-text="`${a.score} / 100`"></span></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <!-- Sessions -->
+          <div class="card">
+            <header>
+              <h2>Training sessions</h2>
+              <p x-text="`${sessions.length} sessions on the class's set.`"></p>
+            </header>
+            <section class="p-0">
+              <div class="table-container">
+                <table class="table">
+                  <thead><tr><th class="pl-6">Session</th><th class="text-end">Answered</th><th>Started</th><th class="pr-6">Status</th></tr></thead>
+                  <tbody>
+                    <template x-for="x in sessions" :key="x.id">
+                      <tr>
+                        <td class="pl-6 font-mono text-sm" :title="x.set" x-text="`#${x.id}`"></td>
+                        <td class="text-end font-mono text-sm" x-text="`${x.answered} / ${x.served}`"></td>
+                        <td class="text-sm whitespace-nowrap" x-text="fmtDateTime(x.started)"></td>
+                        <td class="pr-6"><span class="pill" :class="x.status === 'open' ? 'tone-accent' : 'tone-muted'" x-text="x.status === 'open' ? 'Open' : 'Closed'"></span></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <footer class="text-xs text-muted-foreground">All sessions use Midterm practice (frozen Sep 20).</footer>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <!-- Extension dialog -->
+    <dialog x-ref="ext" class="dialog" aria-labelledby="ext-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="ext-title" x-text="s ? `Grant ${s.name.split(' ')[0]} an extension` : ''"></h2>
+          <p>The student sees the new due date on their home page. A closed assignment reopens for them until then.</p>
+        </header>
+        <section class="grid gap-3">
+          <div role="group" class="field">
+            <label for="ext-a">Assignment</label>
+            <select id="ext-a" class="select w-full" x-model="ext.assignment">
+              <template x-for="a in extendable" :key="a.id"><option :value="a.id" :selected="a.id === ext.assignment" x-text="`${a.name} (due ${fmtD(a.r.extension || a.due)})`"></option></template>
+            </select>
+          </div>
+          <div class="grid grid-cols-[1fr_1.3fr] gap-2">
+            <div role="group" class="field">
+              <label for="ext-d">New due date</label>
+              <input id="ext-d" type="date" class="input" x-model="ext.due">
+            </div>
+            <div role="group" class="field">
+              <label for="ext-r">Reason</label>
+              <input id="ext-r" type="text" class="input" x-model="ext.reason" placeholder="e.g. Illness">
+            </div>
+          </div>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" :disabled="!ext.assignment || !ext.due" @click="grantExt()">Grant extension</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <!-- Confirm dialog -->
+    <dialog x-ref="confirm" class="dialog" aria-labelledby="confirm-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="confirm-title" x-text="pending === 'reset' ? `Reset ${s?.name}'s run?` : `Remove ${s?.name}?`"></h2>
+          <p x-show="pending === 'reset'">Their mastery and subtopic weakness go back to the starting values and their next session starts a new run. Past attempts stay in the history and in CSV exports.</p>
+          <p x-show="pending === 'remove'" x-text="`Removes them from ${className} and deletes their sessions, attempts and mastery. This can't be undone.`"></p>
+        </header>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" :data-variant="pending === 'remove' ? 'destructive' : null" @click="confirmAction()" x-text="pending === 'reset' ? 'Reset run' : 'Remove student'"></button>
+        </footer>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-teach.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    const A_STATE = {
+      done: ["Done", "tone-ok"], late: ["Late", "tone-warn"], partial: ["Partial", "tone-warn"], missed: ["Missed", "tone-critical"],
+      in_progress: ["In progress", "tone-accent"], not_started: ["Not started", "tone-muted"], excused: ["Excused", "tone-muted"],
+    };
+    function page() {
+      const c = Mock.course;
+      const found = MOCK.student(Mock.param("id") || "s5");
+      const s = found && found.course === c.id ? { ...found, mastery: { ...found.mastery } } : null;
+      const data = s ? MOCK.attemptsFor(s.id) : { attempts: [], sessions: [], weak: [] };
+      const daysAgo = (d) => Math.round((new Date(MOCK.today) - new Date(d)) / 86400000);
+      const topicOf = (subName) => (c.taxonomy.find((t) => t.subtopics.some((x) => x.name === subName)) || {}).name;
+      const band = (m) => (m < 0.45 ? "low" : m < 0.85 ? "medium" : "high");
+      if (s) document.title = `${s.name} · Adaptive Trainer (mockup)`;
+      const opened = MOCK.assignments.filter((a) => a.course === c.id && (a.status === "closed" || a.status === "open"));
+      const note0 = s ? (MOCK.student_notes[s.id] || "") : "";
+      return {
+        course: c, s, removed: false, reset: false, pending: null, hover: null, A_STATE,
+        assignRows: s ? opened.map((a) => ({ ...a, r: { ...MOCK.assignment_results[s.id][a.id] } })) : [],
+        note: note0, savedNote: note0,
+        ext: { assignment: "", due: "", reason: "" },
+        canExtend(a) { return !["excused", "done", "late"].includes(a.r.state); },
+        get extendable() { return this.assignRows.filter((x) => this.canExtend(x)); },
+        get assignTotal() {
+          let got = 0, max = 0;
+          this.assignRows.filter((a) => a.status === "closed" && a.r.state !== "excused").forEach((a) => { got += a.r.score || 0; max += a.points; });
+          return { text: `${got.toFixed(1)} / ${max} pts`, pct: max ? got / max : null };
+        },
+        fmtD(iso) { return new Date(iso + "T12:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); },
+        askExt(id) {
+          const open = this.extendable;
+          const a = open.find((x) => x.id === id) || open.find((x) => x.status === "open") || open[0];
+          if (!a) return Mock.toast("Nothing to extend: every assignment is done or excused");
+          const d = new Date((a.r.extension || (a.due > MOCK.today ? a.due : MOCK.today)) + "T12:00");
+          d.setDate(d.getDate() + 3);
+          this.ext = { assignment: a.id, due: d.toISOString().slice(0, 10), reason: "" };
+          this.$refs.ext.showModal();
+        },
+        grantExt() {
+          const a = this.assignRows.find((x) => x.id === this.ext.assignment);
+          a.r.extension = this.ext.due;
+          if (a.status === "closed" && ["missed", "partial"].includes(a.r.state) && this.ext.due > MOCK.today) a.r.state = "in_progress";
+          this.$refs.ext.close();
+          Mock.toast(`Extension granted: ${a.name.split(":")[0]} now due ${this.fmtD(this.ext.due)} for ${this.s.name}`);
+        },
+        saveNote() { this.savedNote = this.note; Mock.toast("Note saved. Visible to instructors and TAs only."); },
+        className: s ? (MOCK.classes.find((k) => k.id === s.class_id) || {}).name : "",
+        attempts: data.attempts, sessions: data.sessions.slice().reverse(),
+        weak: data.weak.map((w) => ({ ...w, topic: topicOf(w.name) })),
+        trend: s ? s.trend : [],
+        weeks: ["Aug 10", "Aug 17", "Aug 24", "Aug 31", "Sep 7", "Sep 14", "Sep 21", "Sep 28"],
+        W: 620, H: 240, PL: 52, PR: 40, PT: 12, PB: 42,
+        x(i) { return this.PL + (i / (this.trend.length - 1)) * (this.W - this.PL - this.PR); },
+        y(v) { return this.PT + (1 - v) * (this.H - this.PT - this.PB); },
+        get chartSvg() {
+          const { W, H, PL, PR, PT, PB } = this;
+          const t = this.trend;
+          let g = "";
+          [0, 25, 50, 75, 100].forEach((v) => {
+            g += `<line x1="${PL}" x2="${W - PR}" y1="${this.y(v / 100)}" y2="${this.y(v / 100)}" stroke="var(--border)"/>`;
+            g += `<text x="${PL - 8}" y="${this.y(v / 100) + 4}" text-anchor="end">${v}%</text>`;
+          });
+          // Engine bands: the difficulty served changes at 45% and 85% (app/domain/mastery.py).
+          [[0.45, "medium questions from 45%"], [0.85, "hard questions from 85%"]].forEach(([b, label]) => {
+            g += `<line x1="${PL}" x2="${W - PR}" y1="${this.y(b)}" y2="${this.y(b)}" stroke="var(--muted-foreground)" stroke-dasharray="3 4" opacity="0.6"/>`;
+            g += `<text x="${PL + 4}" y="${this.y(b) - 5}" text-anchor="start">${label}</text>`;
+          });
+          this.weeks.forEach((w, i) => { g += `<text x="${this.x(i)}" y="${H - PB + 18}" text-anchor="middle">${w}</text>`; });
+          g += `<text x="${(PL + W - PR) / 2}" y="${H - 4}" text-anchor="middle">Week starting</text>`;
+          g += `<text transform="translate(12 ${(PT + H - PB) / 2}) rotate(-90)" text-anchor="middle">Avg. mastery</text>`;
+          g += `<polyline fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${t.map((v, i) => `${this.x(i)},${this.y(v)}`).join(" ")}"/>`;
+          t.forEach((v, i) => { g += `<circle cx="${this.x(i)}" cy="${this.y(v)}" r="${this.hover === i ? 5.5 : 4}" fill="var(--primary)" stroke="var(--card)" stroke-width="2"/>`; });
+          const last = t.length - 1;
+          g += `<text x="${this.x(last) + 9}" y="${this.y(t[last]) + 4}" style="fill:var(--foreground);font-weight:600">${Mock.pct(t[last])}</text>`;
+          const label = `Mastery rose from ${Mock.pct(t[0])} to ${Mock.pct(t[last])} over 8 weeks`;
+          return `<svg class="chart w-full" style="display:block;height:auto;aspect-ratio:${W}/${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${label}">${g}</svg>`;
+        },
+        get topicRows() {
+          return c.taxonomy.map((t) => {
+            const m = this.s.mastery[t.id];
+            const b = band(m || 0);
+            return {
+              id: t.id, name: t.name, m, band: b, obs: MOCK.topicObservations(this.s, t.id),
+              next: { low: "easy", medium: "medium", high: "hard" }[b],
+              tone: { low: "tone-critical", medium: "tone-warn", high: "tone-ok" }[b],
+            };
+          });
+        },
+        get unpractised() { return this.topicRows.filter((t) => !t.m).map((t) => t.name); },
+        get risk() {
+          if (!this.s) return [];
+          const r = [];
+          if (this.s.avg_mastery != null && this.s.avg_mastery < 0.5) r.push(`average mastery ${Mock.pct(this.s.avg_mastery)}`);
+          if (daysAgo(this.s.last_active) >= 14) r.push(`no practice in ${daysAgo(this.s.last_active)} days`);
+          return r;
+        },
+        get numbers() {
+          const scored = this.attempts.map((a) => a.score);
+          const avgScore = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
+          const n = daysAgo(this.s.last_active);
+          return [
+            { label: "Avg. mastery", value: Mock.pct(this.s.avg_mastery), note: `${this.topicRows.filter((t) => t.m).length} of ${c.taxonomy.length} topics practised` },
+            { label: "Average score", value: avgScore == null ? "—" : `${avgScore.toFixed(0)} / 100`, note: "recent attempts" },
+            { label: "Answered", value: this.s.attempts, note: "questions, all sessions" },
+            { label: "Sessions", value: this.s.sessions, note: this.sessions.some((x) => x.status === "open") ? "1 open" : "all closed" },
+            { label: "Last active", value: new Date(this.s.last_active + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }), note: n === 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago` },
+          ];
+        },
+        fmtDateTime(t) {
+          const [d, hm] = t.split(" ");
+          return `${new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${hm}`;
+        },
+        ask(kind) { this.pending = kind; this.$refs.confirm.showModal(); },
+        confirmAction() {
+          this.$refs.confirm.close();
+          if (this.pending === "reset") {
+            Object.keys(this.s.mastery).forEach((k) => { this.s.mastery[k] = 0; });
+            this.s.avg_mastery = null;
+            this.weak = [];
+            this.reset = true;
+            Mock.toast(`${this.s.name}'s run was reset. Their next session starts fresh.`);
+          } else {
+            Mock.toast(`${this.s.name} removed from ${this.className}`);
+            this.removed = true;
+            this.s = null;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

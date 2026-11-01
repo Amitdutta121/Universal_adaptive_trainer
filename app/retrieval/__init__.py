@@ -1,11 +1,16 @@
-"""Semantic retrieval over imported book sections.
+"""Semantic retrieval over imported book chunks.
 
-``SectionEmbeddingStore`` fills and loads the ``section_embeddings`` index from
-``book_sections.text``; ``SectionRetriever`` ranks sections against a free-text
-query or against a curriculum subtopic. Dense cosine only -- see
-:mod:`app.retrieval.retriever` for why no BM25 or reranker.
+``ChunkEmbeddingStore`` fills and loads ``chunk_embeddings`` (one vector per chunk and
+embedding model); ``ChunkRetriever`` ranks a book's current chunks against a free-text
+query or a curriculum subtopic, by dense cosine. See :mod:`app.retrieval.chunks`.
 """
 
+from app.retrieval.chunks import (
+    ChunkEmbeddingStore,
+    ChunkRetriever,
+    RetrievedChunk,
+    subtopic_query_text,
+)
 from app.retrieval.embedder import (
     DEFAULT_BATCH_SIZE,
     MAX_EMBED_CHARS,
@@ -13,29 +18,15 @@ from app.retrieval.embedder import (
     OpenRouterEmbedder,
     get_embedder,
 )
-from app.retrieval.retriever import (
-    RetrievedSection,
-    SectionRetriever,
-    subtopic_query_text,
-)
-from app.retrieval.store import (
-    BackfillResult,
-    LoadedVectors,
-    SectionEmbeddingStore,
-    content_hash,
-)
 
 __all__ = [
     "DEFAULT_BATCH_SIZE",
     "MAX_EMBED_CHARS",
-    "BackfillResult",
+    "ChunkEmbeddingStore",
+    "ChunkRetriever",
     "Embedder",
-    "LoadedVectors",
     "OpenRouterEmbedder",
-    "RetrievedSection",
-    "SectionEmbeddingStore",
-    "SectionRetriever",
-    "content_hash",
+    "RetrievedChunk",
     "get_embedder",
     "subtopic_query_text",
 ]

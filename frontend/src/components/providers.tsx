@@ -4,10 +4,12 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { usePathname } from "next/navigation";
 import { ThemeProvider } from "next-themes";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { isStudentPath } from "@/lib/navigation";
 import { ApiError } from "@/lib/api/client";
 
 function makeQueryClient() {
@@ -33,9 +35,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // Created in state so a client is never shared between two users on the server
   // and never rebuilt on re-render.
   const [queryClient] = useState(makeQueryClient);
+  // The student classroom is a light-only design (its shell paints a light backdrop
+  // in globals.css); a dark system theme would put light text on it.
+  const forcedTheme = isStudentPath(usePathname()) ? "light" : undefined;
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem forcedTheme={forcedTheme}>
       <QueryClientProvider client={queryClient}>
         <NuqsAdapter>
           <TooltipProvider delayDuration={200}>{children}</TooltipProvider>

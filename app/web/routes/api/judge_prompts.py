@@ -15,21 +15,30 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter
+from sqlalchemy import select
 
+from app.config import get_settings
 from app.domain.enums import JudgeMetricId
-from app.errors import NotFoundError
-from app.evaluation.judge_learning import disagreements_for, refresh_judge_prompt
+from app.errors import DomainRuleError, NotFoundError
+from app.evaluation.judge_learning import disagreements_for, held_out_for, refresh_judge_prompt
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
-from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
-from app.persistence.models import JudgePromptRow
+from app.evaluation.prompts import rubric_version_for, system_prompt_for
+from app.evaluation.trust_scope import style_trust_under_current_panel, trusted_scopes
+from app.persistence.models import CurriculumVersionRow, JudgePromptRow
 from app.persistence.repositories import JudgePromptRepository
-from app.web.routes.api.deps import DbSession
+from app.styles import styles_for
+from app.subjects import SubjectProfile
+from app.web.routes.api.deps import SPENDS_LLM_CREDIT, CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import (
     JudgePromptListResponse,
     JudgePromptOut,
     JudgePromptRefreshResponse,
     JudgePromptRequest,
     JudgePromptSaveResponse,
+    JudgeStatsOut,
+    JudgeStatsResponse,
+    MetricTrustOut,
+    StyleTrustOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,13 +47,18 @@ router = APIRouter(prefix="/judge-prompts", tags=["judge-prompts"])
 
 
 def _out(
-    metric: JudgeMetricId, row: JudgePromptRow | None, *, available: int = 0
+    metric: JudgeMetricId,
+    row: JudgePromptRow | None,
+    profile: SubjectProfile,
+    *,
+    available: int = 0,
 ) -> JudgePromptOut:
+    shipped = system_prompt_for(metric, profile)
     return JudgePromptOut(
         metric=metric,
         label=metric.value.replace("_", " "),
-        system_prompt=row.system_prompt if row else SYSTEM_PROMPT_FOR[metric],
-        shipped_prompt=SYSTEM_PROMPT_FOR[metric],
+        system_prompt=row.system_prompt if row else shipped,
+        shipped_prompt=shipped,
         edited=row is not None,
         learned=row.learned if row else False,
         rules=[str(rule.get("rule", "")) for rule in (row.rules if row else [])],
@@ -57,22 +71,118 @@ def _out(
 
 
 @router.get("", response_model=JudgePromptListResponse)
-def list_judge_prompts(session: DbSession) -> JudgePromptListResponse:
-    """All four judges, each with the text it runs and the text it shipped with."""
-    stored = {row.metric: row for row in JudgePromptRepository(session).list_all()}
+def list_judge_prompts(session: DbSession, profile: CourseProfile) -> JudgePromptListResponse:
+    """All four judges of this course's subject: the text each runs and the text it shipped with."""
+    stored = {
+        row.metric: row
+        for row in JudgePromptRepository(session).list_all(subject=profile.personal_key)
+    }
     return JudgePromptListResponse(
         prompts=[
-            _out(metric, stored.get(metric), available=len(disagreements_for(session, metric)))
+            _out(
+                metric,
+                stored.get(metric),
+                profile,
+                available=len(disagreements_for(session, metric, profile=profile)),
+            )
             for metric in JudgeMetricId
         ],
-        rubric_version=effective_rubric_version(session),
-        shipped_rubric_version=RUBRIC_VERSION,
+        rubric_version=effective_rubric_version(session, profile=profile),
+        shipped_rubric_version=rubric_version_for(profile),
+    )
+
+
+SHOWN_JUDGES = (JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC)
+
+
+@router.get("/stats", response_model=JudgeStatsResponse)
+def judge_stats(
+    session: DbSession, profile: CourseProfile, course: CourseScope
+) -> JudgeStatsResponse:
+    """Agreement per judge and trust per style under the panel in force now.
+
+    Styles are this course's; the learning pause is the subject's, because a rewrite renames
+    the panel for every course that shares these judges.
+    """
+    settings = get_settings()
+    version_ids = (
+        set(
+            session.scalars(
+                select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course)
+            )
+        )
+        if course is not None
+        else None
+    )
+    scoped = style_trust_under_current_panel(session, profile, curriculum_version_ids=version_ids)
+    subject_wide = (
+        scoped if version_ids is None else style_trust_under_current_panel(session, profile)
+    )
+    names = {style.id: style.name for style in styles_for(session, profile)}
+    # A style's reviews pool across the course's versions, so each version's row repeats the
+    # same window: count one row per style (the newest version's) in the totals.
+    per_style = {item.style_id: item for item in scoped}
+    subject_per_style = {item.style_id: item for item in subject_wide}
+
+    judges = []
+    for metric in SHOWN_JUDGES:
+        windows = [
+            item.report.metrics[metric.value]
+            for item in per_style.values()
+            if metric.value in item.report.metrics
+        ]
+        observations = sum(window.observations for window in windows)
+        agreements = sum(window.agreements for window in windows)
+        judges.append(
+            JudgeStatsOut(
+                metric=metric,
+                observations=observations,
+                agreements=agreements,
+                agreement_rate=agreements / observations if observations else None,
+            )
+        )
+    trusted_count = sum(
+        any(item.report.trusted for item in subject_wide if item.style_id == style_id)
+        for style_id in subject_per_style
+    )
+    return JudgeStatsResponse(
+        rubric_version=effective_rubric_version(session, profile=profile),
+        judges=judges,
+        styles=[
+            StyleTrustOut(
+                curriculum_version_id=item.curriculum_version_id,
+                style_id=item.style_id,
+                style_name=names.get(item.style_id),
+                trusted=item.report.trusted,
+                metrics={
+                    name: MetricTrustOut(
+                        observations=value.observations,
+                        agreements=value.agreements,
+                        agreement_rate=value.agreement_rate,
+                        trusted=value.trusted,
+                        audit_revoked=value.audit_revoked,
+                        local_observations=value.local_observations,
+                    )
+                    for name, value in item.report.metrics.items()
+                },
+            )
+            for item in scoped
+        ],
+        held_out_pairs=held_out_for(session, profile=profile),
+        held_out_needed=settings.judge_repair_min_scoring_pairs,
+        learning_enabled=settings.judge_learning_enabled,
+        learning_paused=trusted_count > 0,
+        trusted_style_count=trusted_count,
+        min_observations=settings.judge_trust_min_observations,
+        min_agreement=settings.judge_trust_min_agreement,
+        min_acceptance=settings.judge_trust_min_acceptance,
+        min_topic_local=settings.judge_trust_min_topic_local,
     )
 
 
 @router.put("/{metric}", response_model=JudgePromptSaveResponse)
 def save_judge_prompt(
-    session: DbSession, metric: JudgeMetricId, payload: JudgePromptRequest
+    session: DbSession, metric: JudgeMetricId, payload: JudgePromptRequest, profile: CourseProfile
 ) -> JudgePromptSaveResponse:
     """Replace one judge's system prompt, and re-name the panel.
 
@@ -80,18 +190,21 @@ def save_judge_prompt(
     is a separate, explicit act (ADR-030) -- rewriting stored verdicts here would
     destroy the very pairs the repair is supposed to be scored against.
     """
-    before = effective_rubric_version(session)
+    before = effective_rubric_version(session, profile=profile)
     text = payload.system_prompt.strip()
     try:
         row = JudgePromptRepository(session).save(
-            metric, system_prompt=text, note=(payload.note or "").strip() or None
+            metric,
+            subject=profile.personal_key,
+            system_prompt=text,
+            note=(payload.note or "").strip() or None,
         )
     except Exception:
         session.rollback()
         raise
     session.commit()
 
-    after = effective_rubric_version(session)
+    after = effective_rubric_version(session, profile=profile)
     logger.info(
         "Judge %s edited (revision %s). Rubric version %s -> %s.",
         metric.value,
@@ -100,57 +213,79 @@ def save_judge_prompt(
         after,
     )
     return JudgePromptSaveResponse(
-        prompt=_out(metric, row),
+        prompt=_out(metric, row, profile),
         rubric_version=after,
         rubric_version_changed=after != before,
     )
 
 
 @router.delete("/{metric}", response_model=JudgePromptSaveResponse)
-def revert_judge_prompt(session: DbSession, metric: JudgeMetricId) -> JudgePromptSaveResponse:
+def revert_judge_prompt(
+    session: DbSession, metric: JudgeMetricId, profile: CourseProfile
+) -> JudgePromptSaveResponse:
     """Drop one override so the judge runs its shipped prompt again."""
-    before = effective_rubric_version(session)
+    before = effective_rubric_version(session, profile=profile)
     repository = JudgePromptRepository(session)
-    if not repository.delete(metric):
+    if not repository.delete(metric, subject=profile.personal_key):
         raise NotFoundError(
             f"The {metric.value} judge is already running its shipped prompt.",
             detail="There is no override to revert.",
         )
     session.commit()
 
-    after = effective_rubric_version(session)
+    after = effective_rubric_version(session, profile=profile)
     logger.info("Judge %s reverted. Rubric version %s -> %s.", metric.value, before, after)
     return JudgePromptSaveResponse(
-        prompt=_out(metric, None),
+        prompt=_out(metric, None, profile),
         rubric_version=after,
         rubric_version_changed=after != before,
     )
 
 
-def current_prompts(session: DbSession) -> dict[JudgeMetricId, str]:
+def current_prompts(session: DbSession, profile: SubjectProfile) -> dict[JudgeMetricId, str]:
     """The prompt set in force, for callers that need the text rather than the API shape."""
-    return resolve_system_prompts(session)
+    return resolve_system_prompts(session, profile=profile)
 
 
-@router.post("/{metric}/refresh", response_model=JudgePromptRefreshResponse)
-def refresh(session: DbSession, metric: JudgeMetricId) -> JudgePromptRefreshResponse:
+@router.post(
+    "/{metric}/refresh",
+    response_model=JudgePromptRefreshResponse,
+    dependencies=SPENDS_LLM_CREDIT,
+)
+def refresh(
+    session: DbSession, metric: JudgeMetricId, profile: CourseProfile
+) -> JudgePromptRefreshResponse:
     """Re-learn one judge's prompt from the questions it got wrong (ADR-039).
 
-    The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
+    Manual, as the generator's retired refresh was (m5 moved it to guidelines). Reads only
     the disagreements this judge is named in, minus the held-out third, so the
     reserved questions stay available to score the result.
     """
-    before = effective_rubric_version(session)
+    trusted = trusted_scopes(session, profile)
+    if trusted:
+        raise DomainRuleError(
+            "Judge learning is paused while questions skip review.",
+            detail=(
+                f"{len(trusted)} style(s) are trusted under the current judges. A rewrite would "
+                "send them all back to review; edit the prompt by hand if that is intended."
+            ),
+        )
+    before = effective_rubric_version(session, profile=profile)
     try:
-        row = refresh_judge_prompt(session, metric)
+        row = refresh_judge_prompt(session, metric, profile=profile)
     except Exception:
         session.rollback()
         raise
 
-    available = len(disagreements_for(session, metric))
+    available = len(disagreements_for(session, metric, profile=profile))
     if row is None:
         return JudgePromptRefreshResponse(
-            prompt=_out(metric, JudgePromptRepository(session).get(metric), available=available),
+            prompt=_out(
+                metric,
+                JudgePromptRepository(session).get(metric, subject=profile.personal_key),
+                profile,
+                available=available,
+            ),
             rubric_version=before,
             rubric_version_changed=False,
             learned=False,
@@ -158,9 +293,9 @@ def refresh(session: DbSession, metric: JudgeMetricId) -> JudgePromptRefreshResp
             evidence_count=0,
         )
 
-    after = effective_rubric_version(session)
+    after = effective_rubric_version(session, profile=profile)
     return JudgePromptRefreshResponse(
-        prompt=_out(metric, row, available=available),
+        prompt=_out(metric, row, profile, available=available),
         rubric_version=after,
         rubric_version_changed=after != before,
         learned=True,

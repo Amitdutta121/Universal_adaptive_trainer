@@ -10,17 +10,26 @@ from __future__ import annotations
 import book_documents as docs
 import pymupdf
 import pytest
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.domain.enums import CurriculumStatus, JudgeMetricId, QuestionType, ReviewDecision
+from app.domain.enums import (
+    CurriculumStatus,
+    GuidelineStatus,
+    QuestionStatus,
+    QuestionType,
+    ReviewDecision,
+)
 from app.generation.prompts import base_type_instruction
+from app.persistence.models import MemoryGuidelineRow
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
-    TypeInstructionRepository,
 )
+from app.question_types import implemented_types
+from app.subjects import PYTHON_PROFILE
 
 VALID_TAXONOMY = (
     b'{"schema_version":"1","label":"Uploaded","topics":['
@@ -28,15 +37,14 @@ VALID_TAXONOMY = (
 )
 
 
-def _import_book(client: TestClient) -> dict:
-    response = client.post(
-        "/api/books",
-        files={
-            "file": ("think_python.json", docs.to_bytes(docs.think_python()), "application/json")
-        },
+def _import_chunked_book(client: TestClient) -> tuple[dict, list[dict]]:
+    """Think Python uploaded as a PDF, and its chunks: one per section, in reading order."""
+    book = upload_book(
+        client,
+        files={"file": ("think_python.pdf", docs.to_pdf(docs.think_python()), "application/pdf")},
     )
-    assert response.status_code == 201, response.text
-    return response.json()
+    chunks = client.get("/api/chunks", params={"book_id": book["id"]}).json()["chunks"]
+    return book, chunks
 
 
 def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
@@ -49,12 +57,7 @@ def _one_page_pdf(text: str = "Chapter 1\n\nHello.") -> bytes:
 
 
 def _import_pdf_book(client: TestClient) -> dict:
-    response = client.post(
-        "/api/books",
-        files={"file": ("textbook.pdf", _one_page_pdf(), "application/pdf")},
-    )
-    assert response.status_code == 201, response.text
-    return response.json()
+    return upload_book(client, files={"file": ("textbook.pdf", _one_page_pdf(), "application/pdf")})
 
 
 def _import_taxonomy(client: TestClient) -> dict:
@@ -79,7 +82,8 @@ def test_health_reports_a_real_database_probe(client: TestClient) -> None:
 def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient) -> None:
     payload = client.get("/api/config").json()
 
-    assert payload["supported_book_extensions"] == [".json", ".pdf"]
+    assert payload["supported_book_extensions"] == [".docx", ".pdf", ".pptx"]
+    assert "book_schema_version" not in payload
     assert [option["value"] for option in payload["difficulties"]] == ["easy", "medium", "hard"]
     assert {option["value"] for option in payload["question_types"]} == {
         "multiple_choice",
@@ -89,6 +93,8 @@ def test_config_publishes_every_enum_a_client_would_hard_code(client: TestClient
         "debugging",
         "parsons",
         "coding",
+        "numeric_response",
+        "equation_response",
     }
     # Rejection reasons carry the professor-facing label, not the raw code.
     labels = {option["value"]: option["label"] for option in payload["rejection_reasons"]}
@@ -115,48 +121,24 @@ def test_book_list_is_empty_before_any_import(client: TestClient) -> None:
 
 
 def test_import_book_returns_the_created_book(client: TestClient, session: Session) -> None:
-    book = _import_book(client)
+    book, _ = _import_chunked_book(client)
 
     assert book["title"] == "Think Python"
+    assert book["author"] == "Allen B. Downey"
     assert book["status"] == "imported"
-    assert book["source_format"] == "book_json"
+    assert book["source_format"] == "book_pdf"
     assert BookRepository(session).count() == 1
 
 
-def test_book_detail_exposes_the_chapter_section_hierarchy(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
+def test_book_detail_reports_the_current_chunk_version(client: TestClient) -> None:
+    book, chunks = _import_chunked_book(client)
 
-    payload = client.get(f"/api/books/{book_id}").json()
+    payload = client.get(f"/api/books/{book['id']}").json()
 
-    assert payload["book"]["id"] == book_id
-    assert payload["section_count"] > 0
-    assert payload["chapters"]
-    first_section = payload["chapters"][0]["sections"][0]
-    assert first_section["display_title"]
-    assert "text" not in first_section  # summaries stay light
-
-
-def test_section_detail_carries_verbatim_text_and_a_citation(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    sections = client.get(f"/api/books/{book_id}/sections").json()["sections"]
-    section_id = sections[0]["id"]
-
-    payload = client.get(f"/api/books/{book_id}/sections/{section_id}").json()
-
-    assert payload["text"]
-    assert payload["citation"]
-    assert payload["source"]["book_title"] == "Think Python"
-    assert payload["section"]["id"] == section_id
-
-
-def test_section_under_the_wrong_book_is_a_404(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
-
-    response = client.get(f"/api/books/{book_id + 999}/sections/{section_id}")
-
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "not_found"
+    assert payload["book"]["id"] == book["id"]
+    assert (payload["chunk_count"], payload["current_version"]) == (4, 1)
+    assert len(chunks) == 4
+    assert "chapters" not in payload  # the chapter/section tree is retired
 
 
 def test_book_source_streams_the_retained_pdf(client: TestClient) -> None:
@@ -169,8 +151,11 @@ def test_book_source_streams_the_retained_pdf(client: TestClient) -> None:
     assert response.content.startswith(b"%PDF")
 
 
-def test_book_source_for_a_json_imported_book_is_a_404(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
+def test_book_source_for_a_book_with_no_retained_pdf_is_a_404(
+    client: TestClient, session: Session
+) -> None:
+    book_id = docs.chunked_book(session, docs.think_python()).id
+    session.commit()
 
     response = client.get(f"/api/books/{book_id}/source")
 
@@ -185,16 +170,17 @@ def test_book_source_for_an_unknown_book_is_a_404(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
-def test_invalid_book_document_is_rejected_and_stores_nothing(
+def test_a_book_json_upload_is_refused_and_stores_nothing(
     client: TestClient, session: Session
 ) -> None:
+    """The book JSON document format is retired: a book is uploaded as the file itself."""
     response = client.post(
         "/api/books",
-        files={"file": ("broken.json", b'{"schema_version":"1"}', "application/json")},
+        files={"file": ("book.json", docs.to_bytes(docs.think_python()), "application/json")},
     )
 
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_book_document"
+    assert response.status_code == 415
+    assert response.json()["error"]["code"] == "unsupported_file"
     assert BookRepository(session).count() == 0
 
 
@@ -270,146 +256,6 @@ def test_an_older_approved_curriculum_can_be_made_active_again(client: TestClien
     assert client.get("/api/curriculum/approved").json()["version"]["id"] == old
 
 
-def test_single_generation_uses_the_active_curriculum_version(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.web.routes.api import questions as api_questions
-
-    old = _import_taxonomy(client)["version"]["id"]
-    _import_taxonomy(client)
-    activate = client.post(f"/api/curriculum/versions/{old}/activate")
-    assert activate.status_code == 200
-
-    seen: dict[str, int] = {}
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def generate_for_sections(self, **kwargs: object) -> list[object]:
-            seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
-            return []
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "question_type": "debugging",
-            "difficulty": "medium",
-            "section_ids": [1],
-        },
-    )
-
-    assert response.status_code == 201, response.text
-    assert seen["curriculum_version_id"] == old
-
-
-def test_batch_generation_uses_the_active_curriculum_version(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.web.routes.api import questions as api_questions
-
-    old = _import_taxonomy(client)["version"]["id"]
-    _import_taxonomy(client)
-    activate = client.post(f"/api/curriculum/versions/{old}/activate")
-    assert activate.status_code == 200
-
-    seen: dict[str, int] = {}
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def generate_batch(self, **kwargs: object) -> list[object]:
-            seen["curriculum_version_id"] = int(kwargs["curriculum_version_id"])
-            return []
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post(
-        "/api/questions/generate-batch",
-        json={
-            "chunks": [
-                {
-                    "section_id": 1,
-                    "easy": 1,
-                    "question_types": ["debugging"],
-                }
-            ]
-        },
-    )
-
-    assert response.status_code == 201, response.text
-    assert seen["curriculum_version_id"] == old
-
-
-def test_regenerate_threads_feedback_and_returns_both_ids(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.persistence.models import QuestionRow
-    from app.web.routes.api import questions as api_questions
-
-    _import_taxonomy(client)
-    seen: dict[str, object] = {}
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
-            seen["question_id"] = question_id
-            seen["feedback"] = feedback
-            row = QuestionRow(
-                prompt="a regenerated question", original_prompt="a regenerated question"
-            )
-            self._session.add(row)
-            self._session.flush()
-            return row
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post(
-        "/api/questions/77/regenerate",
-        json={"feedback": "Make the distractors subtler."},
-    )
-
-    assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["regenerated_from_question_id"] == 77
-    assert body["question_id"] == body["question"]["id"]
-    assert seen == {"question_id": 77, "feedback": "Make the distractors subtler."}
-
-
-def test_regenerate_surfaces_an_unknown_question_as_a_json_404(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.errors import NotFoundError
-    from app.web.routes.api import questions as api_questions
-
-    _import_taxonomy(client)
-
-    class FakeGenerationService:
-        def __init__(self, request_session) -> None:
-            self._session = request_session
-
-        def regenerate_from_question(self, question_id, *, feedback, professor_id=None):
-            raise NotFoundError(f"Question {question_id} does not exist.")
-
-    monkeypatch.setattr(api_questions, "GenerationService", FakeGenerationService)
-
-    response = client.post("/api/questions/424242/regenerate", json={"feedback": "anything"})
-
-    assert response.status_code == 404
-    assert response.headers["content-type"].startswith("application/json")
-
-
-def test_regenerate_requires_feedback(client: TestClient) -> None:
-    response = client.post("/api/questions/1/regenerate", json={"feedback": ""})
-
-    assert response.status_code == 422
-
-
 def test_subtopic_detail_reports_a_taxonomy_upload_has_no_evidence(client: TestClient) -> None:
     version = _import_taxonomy(client)
     subtopic_id = version["topics"][0]["subtopics"][0]["id"]
@@ -449,6 +295,7 @@ def test_question_list_is_empty_before_any_generation(client: TestClient) -> Non
         "total": 0,
         "status": None,
         "curriculum_version_id": None,
+        "topic_id": None,
         "run_id": None,
     }
 
@@ -479,84 +326,75 @@ def test_question_list_filters_by_curriculum_version_across_the_whole_bank(
     assert payload["curriculum_version_counts"] == {"1": 1, "2": 3}
 
 
-def test_question_list_filters_by_section_across_the_whole_bank(
+def test_question_list_filters_by_any_of_several_statuses(
     client: TestClient, session: Session
 ) -> None:
-    """``section_id`` narrows to questions grounded in that one section.
+    """``status`` repeats: the listing keeps a question in any of the named statuses."""
+    from app.persistence.models import QuestionRow
+
+    approved = QuestionRow(prompt="Approved.", status=QuestionStatus.APPROVED)
+    rejected = QuestionRow(prompt="Rejected.", status=QuestionStatus.REJECTED)
+    session.add_all([approved, rejected, QuestionRow(prompt="Generated.")])
+    session.commit()
+
+    response = client.get("/api/questions", params={"status": ["approved", "rejected"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert sorted(q["id"] for q in payload["questions"]) == sorted([approved.id, rejected.id])
+    assert sorted(payload["status"]) == ["approved", "rejected"]
+    assert payload["total"] == 3
+
+
+def test_question_list_filters_by_any_of_several_topics_across_the_whole_bank(
+    client: TestClient, session: Session
+) -> None:
+    """``topic_id`` repeats and is applied before ``limit``, like the status filter."""
+    from app.persistence.models import QuestionRow
+
+    old_topic_1 = QuestionRow(prompt="Topic 1.", topic_id=1)
+    topic_2 = QuestionRow(prompt="Topic 2.", topic_id=2)
+    session.add_all([old_topic_1, topic_2])
+    session.flush()
+    for i in range(3):
+        session.add(QuestionRow(prompt=f"Topic 3, #{i}.", topic_id=3))
+    session.add(QuestionRow(prompt="No topic."))
+    session.commit()
+
+    response = client.get("/api/questions", params={"topic_id": [1, 2], "limit": 2})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert sorted(q["id"] for q in payload["questions"]) == sorted([old_topic_1.id, topic_2.id])
+    assert sorted(payload["topic_id"]) == [1, 2]
+    assert payload["total"] == 6
+
+
+def test_question_list_filters_by_chunk_across_the_whole_bank(
+    client: TestClient, session: Session
+) -> None:
+    """``chunk_id`` narrows to questions grounded in that one chunk.
 
     Grounding is read from the frozen spec (ADR-044), not a foreign key, so this
-    exercises the same scan :meth:`count_grounded_in_sections` already relies on.
+    exercises the same scan :meth:`count_grounded_in_chunks` already relies on.
     """
     from app.persistence.models import QuestionRow
 
     wanted = QuestionRow(
-        prompt="From section 7.",
-        spec={"source_section_ids": [7]},
+        prompt="From chunk 7.",
+        spec={"source_chunk_ids": ["7" * 32]},
     )
     session.add(wanted)
-    session.add(QuestionRow(prompt="From section 9.", spec={"source_section_ids": [9]}))
+    session.add(QuestionRow(prompt="From chunk 9.", spec={"source_chunk_ids": ["9" * 32]}))
     session.add(QuestionRow(prompt="No spec at all."))
     session.commit()
 
-    response = client.get("/api/questions", params={"section_id": 7})
+    response = client.get("/api/questions", params={"chunk_id": "7" * 32})
 
     assert response.status_code == 200
     payload = response.json()
     assert [q["id"] for q in payload["questions"]] == [wanted.id]
     assert payload["total"] == 3
-
-
-def test_generation_without_an_approved_curriculum_is_refused(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
-
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "topic_id": 1,
-            "subtopic_id": 1,
-            "question_type": "debugging",
-            "difficulty": "medium",
-            "book_id": book_id,
-            "section_ids": [section_id],
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_question_spec"
-
-
-def test_generation_requires_a_source_selection(client: TestClient) -> None:
-    _import_taxonomy(client)
-
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "topic_id": 1,
-            "subtopic_id": 1,
-            "question_type": "debugging",
-            "difficulty": "medium",
-        },
-    )
-
-    assert response.status_code == 422
-    assert "section" in response.json()["error"]["message"].lower()
-
-
-def test_generation_rejects_an_unknown_question_type(client: TestClient) -> None:
-    response = client.post(
-        "/api/questions/generate",
-        json={
-            "topic_id": 1,
-            "subtopic_id": 1,
-            "question_type": "essay",
-            "difficulty": "medium",
-            "section_ids": [1],
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_request"
 
 
 def test_unknown_question_is_a_json_404(client: TestClient) -> None:
@@ -566,70 +404,29 @@ def test_unknown_question_is_a_json_404(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
-def test_generation_plan_prices_a_selection_without_running_it(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    sections = client.get(f"/api/books/{book_id}/sections").json()["sections"]
-    chosen = [sections[0]["id"], sections[1]["id"]]
-
-    response = client.get(
-        "/api/questions/generation-plan",
-        params={"book_id": book_id, "section_ids": chosen},
-    )
-
-    assert response.status_code == 200
-    plan = response.json()
-    totals = plan["totals"]
-    assert totals["sections_available"] == len(sections)
-    assert totals["sections_selected"] == 2
-    assert totals["questions_to_create"] == 2
-    assert totals["generation_calls"] == 2
-    # One judge call per advisory metric per question (ADR-031).
-    assert totals["judge_calls"] == 2 * len(JudgeMetricId)
-    assert totals["source_chars"] == sections[0]["char_count"] + sections[1]["char_count"]
-    assert plan["blockers"] == []
-    # Pricing a run must not create one.
-    assert client.get("/api/questions").json()["total"] == 0
-
-
-def test_generation_plan_groups_sections_by_chapter_and_marks_the_selection(
-    client: TestClient,
+def test_the_chunk_outline_lists_a_books_chunks_with_what_they_produced(
+    client: TestClient, session: Session
 ) -> None:
-    book_id = _import_book(client)["id"]
-    section_id = client.get(f"/api/books/{book_id}/sections").json()["sections"][0]["id"]
+    from app.persistence.models import QuestionRow
 
-    plan = client.get(
-        "/api/questions/generation-plan",
-        params={"book_id": book_id, "section_ids": [section_id]},
-    ).json()
+    book, chunks = _import_chunked_book(client)
+    session.add(
+        QuestionRow(prompt="q", original_prompt="q", spec={"source_chunk_ids": [chunks[0]["id"]]})
+    )
+    session.commit()
 
-    assert [chapter["label"] for chapter in plan["chapters"]] == [
-        "1 The Way of the Program",
-        "2 Variables, Expressions and Statements",
-    ]
-    entries = {
-        item["section"]["id"]: item for chapter in plan["chapters"] for item in chapter["sections"]
-    }
-    assert entries[section_id]["selected"] is True
-    assert entries[section_id]["selectable"] is True
-    assert entries[section_id]["existing_question_count"] == 0
-    assert sum(1 for item in entries.values() if item["selected"]) == 1
+    outline = client.get("/api/chunks/outline", params={"book_id": book["id"]}).json()
+
+    assert outline["book"]["id"] == book["id"]
+    assert [entry["chunk"]["id"] for entry in outline["chunks"]] == [c["id"] for c in chunks]
+    counts = {e["chunk"]["id"]: e["existing_question_count"] for e in outline["chunks"]}
+    assert counts[chunks[0]["id"]] == 1 and counts[chunks[1]["id"]] == 0
+    assert outline["chunks"][0]["chunk"]["char_count"] == len(chunks[0]["text"])
+    assert "text" not in outline["chunks"][0]["chunk"]
 
 
-def test_generation_plan_for_a_whole_book_selects_every_section(client: TestClient) -> None:
-    book_id = _import_book(client)["id"]
-    section_count = len(client.get(f"/api/books/{book_id}/sections").json()["sections"])
-
-    plan = client.get(
-        "/api/questions/generation-plan",
-        params={"book_id": book_id, "all_sections": True},
-    ).json()
-
-    assert plan["totals"]["sections_selected"] == section_count
-    assert plan["totals"]["judge_calls"] == section_count * len(JudgeMetricId)
-
-
-def test_generation_plan_for_an_unknown_book_is_a_json_404(client: TestClient) -> None:
-    response = client.get("/api/questions/generation-plan", params={"book_id": 4242})
+def test_the_chunk_outline_of_an_unknown_book_is_a_json_404(client: TestClient) -> None:
+    response = client.get("/api/chunks/outline", params={"book_id": 4242})
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
@@ -754,7 +551,7 @@ def test_every_type_is_listed_with_its_shipped_instruction(client: TestClient) -
     payload = client.get("/api/instructions").json()
 
     entries = {entry["question_type"]: entry for entry in payload["instructions"]}
-    assert set(entries) == {question_type.value for question_type in QuestionType}
+    assert set(entries) == {question_type.value for question_type in implemented_types()}
     multiple_choice = entries["multiple_choice"]
     assert multiple_choice["learned"] is False
     assert multiple_choice["rules"] == []
@@ -762,102 +559,45 @@ def test_every_type_is_listed_with_its_shipped_instruction(client: TestClient) -
     assert multiple_choice["instruction"]
 
 
-def test_refreshing_a_type_with_no_reviews_changes_nothing(client: TestClient) -> None:
-    """Nothing to learn from is not an error, and must not invent rules."""
-    response = client.post("/api/instructions/multiple_choice/refresh")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["learned"] is False
-    assert payload["rule_count"] == 0
-    assert payload["review_count"] == 0
-
-
-def test_refreshing_an_unknown_type_is_a_json_422(client: TestClient) -> None:
-    response = client.post("/api/instructions/not_a_type/refresh")
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_request"
-
-
-def test_deleting_a_learned_instruction_reverts_to_the_shipped_default(
+def test_an_active_guideline_reaches_the_listed_instruction(
     client: TestClient, session: Session
 ) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="Use shorter distractors.",
-        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
-        review_count=1,
-    )
+    """The list shows the text the generator receives: shipped + active guidelines only."""
+    for text, status in (
+        ("Keep options short.", GuidelineStatus.ACTIVE),
+        ("Waiting for a second review.", GuidelineStatus.PENDING),
+    ):
+        session.add(
+            MemoryGuidelineRow(
+                target="generator:multiple_choice",
+                subject=PYTHON_PROFILE.personal_key,
+                text=text,
+                review_ids=[1, 2] if status is GuidelineStatus.ACTIVE else [3],
+                status=status,
+                confirmed_by_professor=False,
+            )
+        )
     session.commit()
 
-    response = client.delete("/api/instructions/multiple_choice")
+    listed = client.get("/api/instructions").json()["instructions"]
+    entries = {entry["question_type"]: entry for entry in listed}
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["question_type"] == QuestionType.MULTIPLE_CHOICE.value
-    assert payload["learned"] is False
-    assert payload["rules"] == []
-    assert payload["review_count"] == 0
-    assert payload["available_reviews"] == 0
-    assert payload["instruction"] == base_type_instruction(QuestionType.MULTIPLE_CHOICE)
-    assert TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE) is None
-
-
-def test_deleting_a_missing_instruction_is_a_json_404(client: TestClient) -> None:
-    response = client.delete("/api/instructions/multiple_choice")
-
-    assert response.status_code == 404
-    payload = response.json()
-    assert payload["error"]["code"] == "not_found"
-    assert "shipped instruction" in payload["error"]["message"]
-
-
-def test_deleting_one_learned_rule_keeps_the_other_rules(
-    client: TestClient, session: Session
-) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="ignored here",
-        rules=[
-            {"rule": "Keep options short.", "review_ids": [1]},
-            {"rule": "Make exactly one option correct.", "review_ids": [2]},
-        ],
-        review_count=2,
+    multiple_choice = entries["multiple_choice"]
+    assert multiple_choice["learned"] is True
+    assert multiple_choice["rules"] == ["Keep options short."]
+    assert multiple_choice["review_count"] == 2
+    assert multiple_choice["instruction"].startswith(
+        base_type_instruction(QuestionType.MULTIPLE_CHOICE)
     )
-    session.commit()
-
-    response = client.delete("/api/instructions/multiple_choice/rules/0")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["learned"] is True
-    assert payload["review_count"] == 2
-    assert payload["rules"] == ["Make exactly one option correct."]
-    assert "Keep options short." not in payload["instruction"]
-    assert "Make exactly one option correct." in payload["instruction"]
+    assert "Waiting for a second review." not in multiple_choice["instruction"]
+    assert entries["true_false"]["learned"] is False
+    assert client.get("/api/counts").json()["learned_instructions"] == 1
 
 
-def test_deleting_the_last_learned_rule_reverts_to_the_shipped_default(
-    client: TestClient, session: Session
-) -> None:
-    TypeInstructionRepository(session).upsert(
-        QuestionType.MULTIPLE_CHOICE,
-        instruction="ignored here",
-        rules=[{"rule": "Keep options short.", "review_ids": [1]}],
-        review_count=1,
-    )
-    session.commit()
-
-    response = client.delete("/api/instructions/multiple_choice/rules/0")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["learned"] is False
-    assert payload["rules"] == []
-    assert payload["review_count"] == 0
-    assert payload["instruction"] == base_type_instruction(QuestionType.MULTIPLE_CHOICE)
-    assert TypeInstructionRepository(session).get(QuestionType.MULTIPLE_CHOICE) is None
+def test_the_retired_rule_endpoints_are_gone(client: TestClient) -> None:
+    """Guidelines are learned by the lesson run and edited under /api/guidelines (m5)."""
+    assert client.post("/api/instructions/multiple_choice/refresh").status_code in {404, 405}
+    assert client.delete("/api/instructions/multiple_choice").status_code in {404, 405}
 
 
 # ------------------------------------------------------------------------- schema
@@ -870,13 +610,14 @@ def test_deleting_the_last_learned_rule_reverts_to_the_shipped_default(
         "/api/config",
         "/api/counts",
         "/api/books",
-        "/api/books/document-guide",
         "/api/curriculum/versions",
         "/api/curriculum/document-guide",
         "/api/questions",
         "/api/reviews",
         "/api/reviews/stats",
         "/api/instructions",
+        "/api/guidelines",
+        "/api/judges/scorecard",
         "/api/calibration/results",
         "/api/calibration/pairs",
         "/api/evaluation/batch-runs",
@@ -900,8 +641,10 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/counts",
         "/api/books",
         "/api/books/{book_id}",
-        "/api/books/{book_id}/sections",
-        "/api/books/{book_id}/sections/{section_id}",
+        "/api/chunks",
+        "/api/chunks/{chunk_id}",
+        "/api/chunks/outline",
+        "/api/generation-runs",
         "/api/curriculum/versions",
         "/api/curriculum/approved",
         "/api/curriculum/document-guide",
@@ -910,16 +653,15 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/curriculum/topics/{topic_id}",
         "/api/curriculum/subtopics/{subtopic_id}",
         "/api/questions",
-        "/api/questions/generate",
         "/api/questions/{question_id}",
-        "/api/questions/{question_id}/regenerate",
         "/api/questions/{question_id}/review",
         "/api/reviews",
         "/api/reviews/stats",
         "/api/instructions",
-        "/api/instructions/{question_type}",
-        "/api/instructions/{question_type}/rules/{rule_index}",
-        "/api/instructions/{question_type}/refresh",
+        "/api/guidelines",
+        "/api/guidelines/{guideline_id}",
+        "/api/guidelines/{guideline_id}/confirm",
+        "/api/judges/scorecard",
         "/api/calibration/results",
         "/api/calibration/pairs",
         "/api/evaluation/batch-runs",
@@ -928,6 +670,17 @@ def test_openapi_documents_the_whole_api(client: TestClient) -> None:
         "/api/questions/{question_id}/evaluations",
     ):
         assert path in paths, f"{path} is missing from the OpenAPI schema"
+    # Replaced by POST /api/generation-runs (ADR-066).
+    for gone in (
+        "/api/questions/generate",
+        "/api/questions/{question_id}/regenerate",
+        "/api/questions/generate-batch",
+        "/api/questions/batch-plan",
+        "/api/questions/generation-plan",
+        "/api/coverage/generation-runs",
+    ):
+        assert gone not in paths, f"{gone} should be gone"
+    assert "post" not in paths["/api/rounds/{round_id}"] and "/api/rounds" not in paths
 
 
 # ------------------------------------------------------------------------- cors
@@ -938,7 +691,7 @@ ALLOWED_ORIGIN = "http://localhost:5173"
 
 def test_preflight_from_an_allowed_origin_is_accepted(client: TestClient) -> None:
     response = client.options(
-        "/api/questions/generate",
+        "/api/generation-runs",
         headers={
             "Origin": ALLOWED_ORIGIN,
             "Access-Control-Request-Method": "POST",

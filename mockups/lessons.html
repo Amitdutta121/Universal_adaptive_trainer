@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lessons · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- Lessons: a short lesson per subtopic. The professor edits 5–6 "example lessons" by hand; the
+     generator learns her style from them and writes the rest, which she spot-checks.
+     State comes back from lesson.html in the URL: ?saved=<subId,...>&generated=1&approved=<subId,...> -->
+<body data-scope="course" data-nav="lessons" data-title="Lessons">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <template x-if="!lessons.length">
+      <div class="card"><section class="text-sm text-muted-foreground">Lessons are written per subtopic, so they start once the taxonomy is approved. <a class="underline" :href="Mock.link('taxonomy.html')">Taxonomy</a></section></div>
+    </template>
+
+    <template x-if="lessons.length">
+      <div class="grid gap-6">
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="max-w-3xl">
+            <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+            <h1 class="text-2xl font-semibold">Lessons</h1>
+            <p class="text-sm text-muted-foreground mt-1">A three-minute lesson for every subtopic. Students get it when they miss that subtopic, and can open it from their course page. Edit a few yourself; the rest are written in your style.</p>
+          </div>
+        </div>
+
+        <!-- The three steps -->
+        <section class="grid lg:grid-cols-3 gap-4">
+          <div class="card gap-3">
+            <header>
+              <h2 class="flex items-center gap-2"><span class="grid size-6 place-items-center rounded-full text-xs font-semibold" :class="examples.length >= target.min ? 'tone-ok' : 'tone-accent'" x-text="examples.length >= target.min ? '✓' : '1'"></span>Edit example lessons yourself</h2>
+              <p x-text="examples.length >= target.min ? `${examples.length} done. More examples make the style sharper, but you don't need them.` : `${examples.length} of ${target.min} done. Each one takes about 5 minutes: start from the AI draft and make it yours.`"></p>
+            </header>
+            <section class="grid gap-2">
+              <div class="flex gap-1">
+                <template x-for="i in target.ideal" :key="i">
+                  <span class="h-1.5 flex-1 rounded-full" :style="{ background: i <= examples.length ? 'var(--ok-solid)' : i <= target.min ? 'var(--muted-foreground)' : 'var(--muted)', opacity: i <= examples.length ? 1 : 0.35 }"></span>
+                </template>
+              </div>
+              <div class="text-xs text-muted-foreground">Pick different kinds, so the generator sees range: one that's mostly code tracing, one that's a concept, one with a classic mistake.</div>
+              <template x-for="s in suggestions" :key="s.sub_id">
+                <a class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-[var(--accent)]" :href="editLink(s)">
+                  <span class="font-medium" x-text="s.sub"></span><span class="text-xs text-muted-foreground" x-text="s.topic"></span>
+                  <span class="ml-auto text-xs" x-text="s.status === 'draft' ? 'AI draft ready' : 'Draft on open'"></span>
+                </a>
+              </template>
+            </section>
+          </div>
+
+          <div class="card gap-3">
+            <header>
+              <h2 class="flex items-center gap-2"><span class="grid size-6 place-items-center rounded-full text-xs font-semibold tone-accent">2</span>Your style, learned from them</h2>
+              <p x-text="`From the changes you made to ${examples.length} AI drafts. Turn off anything you don't want copied.`"></p>
+            </header>
+            <section class="grid gap-2">
+              <template x-for="r in style" :key="r.id">
+                <label class="flex items-start gap-2 text-sm">
+                  <input type="checkbox" class="input mt-0.5" x-model="r.on">
+                  <span class="grid">
+                    <span :class="!r.on && 'text-muted-foreground'" x-text="r.rule"></span>
+                    <span class="text-xs text-muted-foreground" x-text="r.detail || `In ${r.seen + (r.on ? examples.length - r.of : 0)} of your ${examples.length} example lessons.`"></span>
+                  </span>
+                </label>
+              </template>
+            </section>
+          </div>
+
+          <div class="card gap-3">
+            <header>
+              <h2 class="flex items-center gap-2"><span class="grid size-6 place-items-center rounded-full text-xs font-semibold" :class="generated ? 'tone-ok' : 'tone-muted'" x-text="generated ? '✓' : '3'"></span>Generate the rest</h2>
+              <p x-show="!generated" x-text="`${toGenerate.length} lessons, each from its book section, with every code example run and every explanation checked against the book.`"></p>
+              <p x-show="generated" x-text="`${counts.generated + counts.spot} generated. All code examples ran and matched. ${counts.spot} picked for you to spot-check.`"></p>
+            </header>
+            <section class="grid gap-3">
+              <template x-if="!generated && !running">
+                <div class="grid gap-2">
+                  <button type="button" class="btn" :disabled="examples.length < target.min" @click="generate()" x-text="`Generate ${toGenerate.length} lessons in your style`"></button>
+                  <p class="text-xs" style="color:var(--warn-solid)" x-show="examples.length < target.min" x-text="`Edit ${target.min - examples.length} more example lesson${target.min - examples.length === 1 ? '' : 's'} first, so there's enough of your style to copy.`"></p>
+                  <p class="text-xs text-muted-foreground" x-show="examples.length >= target.min" x-text="`About ${Mock.usd(toGenerate.length * 0.06)} of AI spend. Runs in the background; it appears in Jobs.`"></p>
+                </div>
+              </template>
+              <template x-if="running">
+                <div class="grid gap-1.5">
+                  <div class="h-2 rounded-full" style="background:var(--muted)"><div class="h-2 rounded-full" :style="{ background: 'var(--primary)', width: `${progress * 100}%` }"></div></div>
+                  <div class="text-xs text-muted-foreground" x-text="`Writing and checking ${Math.round(progress * toGenerate.length)} of ${toGenerate.length}… (${current})`"></div>
+                </div>
+              </template>
+              <template x-if="generated">
+                <div class="grid gap-2">
+                  <button type="button" class="btn" data-variant="outline" @click="filter = 'spot'" x-text="`Spot-check ${counts.spot} lessons`"></button>
+                  <button type="button" class="btn" :disabled="!counts.generated" @click="approveRest()" x-text="counts.generated ? `Approve the other ${counts.generated}` : 'All approved'"></button>
+                  <p class="text-xs text-muted-foreground">We pick lessons whose explanation changed the most from the book's wording, plus a random few.</p>
+                </div>
+              </template>
+            </section>
+          </div>
+        </section>
+
+        <!-- Lesson list -->
+        <section class="card gap-0 py-0">
+          <header class="flex flex-wrap items-center gap-3 px-6 pt-5 pb-4">
+            <h2 class="font-semibold">All lessons</h2>
+            <span class="text-sm text-muted-foreground" x-text="`${lessons.length} subtopics · ${counts.example} yours · ${counts.approved} approved`"></span>
+            <div class="ml-auto flex gap-1 rounded-lg p-1" style="background:var(--muted)">
+              <template x-for="f in FILTERS" :key="f[0]">
+                <button type="button" class="btn" data-size="sm" :data-variant="filter === f[0] ? 'outline' : 'ghost'" @click="filter = f[0]" x-text="f[1](counts)"></button>
+              </template>
+            </div>
+          </header>
+          <div class="table-container border-t">
+            <table class="table text-sm">
+              <thead><tr><th class="pl-6">Subtopic</th><th>Lesson</th><th>Blocks</th><th>Checks</th><th>Students see it</th><th class="pr-6"></th></tr></thead>
+              <tbody>
+                <template x-for="l in shown" :key="l.sub_id">
+                  <tr>
+                    <td class="pl-6"><div class="font-medium" x-text="l.sub"></div><div class="text-xs text-muted-foreground" x-text="l.topic"></div></td>
+                    <td><span class="pill" :class="STATUS[l.status][1]" x-text="STATUS[l.status][0]"></span>
+                      <div class="text-xs text-muted-foreground mt-0.5" x-show="l.status === 'example' && l.edits" x-text="l.edits ? `${l.edits.changed} blocks changed · ${l.edits.words_before} → ${l.edits.words_after} words` : ''"></div></td>
+                    <td class="text-xs" x-text="l.blocks ? blockSummary(l) : '—'"></td>
+                    <td class="text-xs" x-text="l.blocks ? checkSummary(l) : '—'"></td>
+                    <td class="text-xs text-muted-foreground"><div x-text="released(l)"></div>
+                      <div class="mt-0.5 text-foreground" x-show="usage(l)" x-text="usage(l) ? `${usage(l).students} of ${MOCK.lessonEnrolled} students opened it` : ''"></div></td>
+                    <td class="pr-6 text-right whitespace-nowrap">
+                      <a class="btn" data-variant="ghost" data-size="sm" x-show="usage(l)" :href="Mock.link('lesson-results.html', { sub: l.sub_id })">Results</a>
+                      <a class="btn" data-size="sm" :data-variant="l.status === 'spot' || l.status === 'draft' ? null : 'outline'" :href="editLink(l)"
+                         x-text="{ example: 'Edit', draft: 'Edit draft', spot: 'Spot-check', generated: 'Open', approved: 'Open', none: 'Write it myself' }[l.status]"></a>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/lesson-schema.js"></script>
+  <script src="assets/data-lesson-player.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const list = (k) => (Mock.param(k) || "").split(",").filter(Boolean);
+      const saved = list("saved"), approved = list("approved");
+      // TODO(real): lessons exist per course; the mock has them for Intro to Python only.
+      const base = c.id === "python" ? MOCK.lessons : [];
+      const lessons = base.map((l) => {
+        const x = { ...l };
+        if (saved.includes(String(l.sub_id))) { x.status = "example"; x.blocks = x.blocks || MOCK.styledLesson(MOCK.lessonSub(l.sub_id)); x.edits = x.edits || { changed: 5, words_before: 124, words_after: 47 }; }
+        return x;
+      });
+      const generatedFlag = Mock.param("generated") === "1";
+      const markGenerated = (arr) => {
+        let k = 0;
+        arr.filter((l) => l.status === "none" || l.status === "draft").forEach((l) => {
+          l.blocks = MOCK.styledLesson(MOCK.lessonSub(l.sub_id));
+          l.status = k++ % 5 === 2 ? "spot" : "generated";
+        });
+      };
+      if (generatedFlag) markGenerated(lessons);
+      lessons.forEach((l) => { if (approved.includes(String(l.sub_id)) && (l.status === "spot" || l.status === "generated")) l.status = "approved"; });
+      const weeks = {};
+      (MOCK.schedule?.[c.id]?.weeks || []).forEach((w) => w.topics.forEach((t) => { weeks[t] = w.week; }));
+      const nowWeek = MOCK.schedule?.[c.id]?.current_week || 0;
+      return {
+        course: c, lessons, style: MOCK.lessonStyle.map((r) => ({ ...r })), target: MOCK.lessonTarget,
+        generated: generatedFlag, running: false, progress: 0, current: "",
+        filter: Mock.param("filter") || "all",
+        STATUS: {
+          example: ["Your example", "tone-accent"], draft: ["AI draft", "tone-warn"], spot: ["Generated · spot-check", "tone-warn"],
+          generated: ["Generated", "tone-muted"], approved: ["Approved", "tone-ok"], none: ["Not written yet", "tone-muted"],
+        },
+        FILTERS: [
+          ["all", (n) => "All"], ["example", (n) => `Your examples (${n.example})`],
+          ["spot", (n) => `Spot-check (${n.spot})`], ["none", (n) => `Not written (${n.none + n.draft})`],
+        ],
+        get examples() { return this.lessons.filter((l) => l.status === "example"); },
+        get toGenerate() { return this.lessons.filter((l) => l.status === "none" || l.status === "draft"); },
+        get counts() {
+          const n = { example: 0, draft: 0, spot: 0, generated: 0, approved: 0, none: 0 };
+          this.lessons.forEach((l) => n[l.status]++);
+          return n;
+        },
+        get suggestions() { return this.lessons.filter((l) => ["draft", "none"].includes(l.status) && ["Slicing", "while loops", "Scope"].includes(l.sub)).sort((a, b) => (a.status === "draft" ? -1 : 1)); },
+        get shown() {
+          const f = this.filter;
+          return this.lessons.filter((l) => f === "all" || (f === "none" ? ["none", "draft"].includes(l.status) : l.status === f));
+        },
+        state() {
+          const saved = this.lessons.filter((l) => l.status === "example" && !MOCK.lesson(l.sub_id).edits).map((l) => l.sub_id);
+          const appr = this.lessons.filter((l) => l.status === "approved").map((l) => l.sub_id);
+          return { ...(saved.length ? { saved: saved.join(",") } : {}), ...(this.generated ? { generated: 1 } : {}), ...(appr.length ? { approved: appr.join(",") } : {}) };
+        },
+        editLink(l) { return Mock.link("lesson.html", { sub: l.sub_id, mode: l.status === "none" && !this.generated ? "draft" : l.status, ...this.state() }); },
+        blockSummary(l) {
+          const SHORT = { explain: "explain", example: "example", predict: "predict", mistake: "mistake", check: "check" };
+          const k = l.blocks.filter((b) => b.type !== "h2").map((b) => SHORT[b.type]);
+          return k.join(" · ");
+        },
+        checkSummary(l) {
+          const code = l.blocks.filter((b) => b.type === "example" || b.type === "predict").length;
+          return code ? `${code} code block${code === 1 ? "" : "s"} ran` : "Quoted";
+        },
+        // Seen by students: her examples and approved lessons whose topic is already open. TODO(real): from lesson events.
+        usage(l) { const w = weeks[l.topic_id]; return ["example", "approved"].includes(l.status) && w && w <= nowWeek ? MOCK.lessonUsage(l.sub_id) : null; },
+        released(l) { const w = weeks[l.topic_id]; return !w ? "Not scheduled" : w <= nowWeek ? `Now (week ${w} topic)` : `From week ${w}`; },
+        generate() {
+          this.running = true; this.progress = 0;
+          const items = this.toGenerate;
+          const t = setInterval(() => {
+            this.progress = Math.min(1, this.progress + 0.06);
+            this.current = items[Math.min(items.length - 1, Math.floor(this.progress * items.length))].sub;
+            if (this.progress >= 1) {
+              clearInterval(t);
+              markGenerated(this.lessons);
+              this.running = false; this.generated = true;
+              Mock.toast(`${items.length} lessons written and checked. The job is in Jobs.`);
+            }
+          }, 140);
+        },
+        approveRest() {
+          const n = this.counts.generated;
+          this.lessons.forEach((l) => { if (l.status === "generated") l.status = "approved"; });
+          Mock.toast(`${n} lessons approved. Students start seeing them as their topics open.`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

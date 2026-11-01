@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient, unwrap } from "./client";
+import {
+  clearLearnerIdentity,
+  saveLearnerIdentity,
+} from "@/app/students/join/learner-identity";
+import { ApiError, createApiClient, STUDENT_HEADER, unwrap } from "./client";
 
 function result<T>(body: T, status = 200) {
   const response = new Response(null, { status });
@@ -72,5 +76,37 @@ describe("request headers", () => {
     const request = fetchSpy.mock.calls[0]?.[0] as Request;
     expect(request.headers.get("Accept")).toBe("application/json");
     fetchSpy.mockRestore();
+  });
+});
+
+describe("student token", () => {
+  const ok = () =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+  it("sends the stored learner token on run and attempt calls only", async () => {
+    saveLearnerIdentity({
+      studentId: 7,
+      resumeToken: "learner-token",
+      displayName: "Ada",
+      email: "ada@example.edu",
+    });
+    const fetchSpy = ok();
+    const client = createApiClient("http://backend.test");
+
+    await client.GET("/api/training-sessions/{training_session_id}/next", {
+      params: { path: { training_session_id: 3 } },
+    });
+    await client.GET("/api/health");
+
+    const [run, health] = fetchSpy.mock.calls.map((call) => call[0] as Request);
+    expect(run?.headers.get(STUDENT_HEADER)).toBe("learner-token");
+    expect(health?.headers.get(STUDENT_HEADER)).toBeNull();
+    fetchSpy.mockRestore();
+    clearLearnerIdentity();
   });
 });

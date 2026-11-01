@@ -57,11 +57,12 @@ def test_approve_sets_status_and_ignores_reasons_and_edit_snapshots(session: Ses
     assert review.reviewed_generator_name == "base-gen"
 
 
-def test_reject_requires_reasons(session: Session) -> None:
+def test_reject_without_reasons(session: Session) -> None:
     question = _question(session)
 
-    with pytest.raises(DomainRuleError):
-        submit_review(session, question_id=question.id, decision=ReviewDecision.REJECT)
+    review = submit_review(session, question_id=question.id, decision=ReviewDecision.REJECT)
+    assert review.reasons == []
+    assert question.status is QuestionStatus.REJECTED
 
 
 def test_reject_stores_many_reasons_and_ignores_edit_payloads(session: Session) -> None:

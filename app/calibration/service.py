@@ -91,6 +91,19 @@ def _pair_for_question(row: QuestionRow) -> CalibrationPair | None:
         for result in evaluation.metrics
         if result.status is MetricStatus.COMPLETED and result.passed is not None
     }
+    # Explicit confirmations/corrections measure value agreement, regardless of
+    # whether the question was accepted overall. Legacy reviews retain reason inference.
+    from app.feedback.outcomes import _observed_faults
+
+    observed = _observed_faults(evaluation, review, row)
+    explicit = review.corrected_difficulty is not None or bool(review.corrected_subtopic_ids)
+    if explicit:
+        for metric in (JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC):
+            if metric not in observed:
+                passed.pop(metric, None)
+    objected = {metric: bool(cited & reasons) for metric, reasons in PROFESSOR_OBJECTIONS.items()}
+    for metric, fault in observed.items():
+        objected[metric] = passed[metric] if fault else not passed[metric]
     return CalibrationPair(
         question_id=row.id,
         judge=judge,
@@ -98,36 +111,52 @@ def _pair_for_question(row: QuestionRow) -> CalibrationPair | None:
         question_type=row.question_type,
         rubric_version=evaluation.rubric_version,
         metric_passed=passed,
-        metric_objected={
-            metric: bool(cited & reasons) for metric, reasons in PROFESSOR_OBJECTIONS.items()
-        },
-        subtopic_disagreement=_subtopic_disagreement(evaluation, row),
-        difficulty_disagreement=_difficulty_disagreement(evaluation, row),
+        metric_objected=objected,
+        subtopic_disagreement=_subtopic_disagreement(evaluation, row, review),
+        difficulty_disagreement=_difficulty_disagreement(evaluation, row, review),
     )
 
 
 def _subtopic_disagreement(
-    evaluation: PedagogicalEvaluation, row: QuestionRow
+    evaluation: PedagogicalEvaluation, row: QuestionRow, review: ProfessorReviewRow
 ) -> tuple[list[int], list[int]] | None:
     """The claimed and proposed subtopic sets, when the judge proposed others."""
     result = evaluation.metric(JudgeMetricId.SUBTOPIC)
-    if result is None or result.passed is not False or not result.proposed_subtopic_ids:
+    if result is None or result.status is not MetricStatus.COMPLETED or result.passed is None:
         return None
-    return (sorted(row.subtopic_ids), sorted(result.proposed_subtopic_ids))
+    proposed = list(result.proposed_subtopic_ids)
+    if not proposed and result.passed:
+        proposed = list((row.spec or {}).get("subtopic_ids", row.subtopic_ids))
+    if review.corrected_subtopic_ids:
+        confirmed = sorted(review.corrected_subtopic_ids)
+        return (
+            (confirmed, sorted(proposed)) if proposed and set(confirmed) != set(proposed) else None
+        )
+    if result.passed is not False or not proposed:
+        return None
+    return (sorted(row.subtopic_ids), sorted(proposed))
 
 
 def _difficulty_disagreement(
-    evaluation: PedagogicalEvaluation, row: QuestionRow
+    evaluation: PedagogicalEvaluation, row: QuestionRow, review: ProfessorReviewRow
 ) -> tuple[Difficulty, Difficulty] | None:
     """The requested and proposed difficulty, when the judge proposed another."""
     result = evaluation.metric(JudgeMetricId.DIFFICULTY)
-    if result is None or result.passed is not False or result.proposed_difficulty is None:
+    if result is None or result.status is not MetricStatus.COMPLETED or result.passed is None:
         return None
-    return (Difficulty(row.difficulty), result.proposed_difficulty)
+    proposed = result.proposed_difficulty
+    if proposed is None and result.passed:
+        proposed = Difficulty((row.spec or {}).get("difficulty", row.difficulty))
+    if review.corrected_difficulty is not None:
+        confirmed = Difficulty(review.corrected_difficulty)
+        return (confirmed, proposed) if proposed is not None and confirmed != proposed else None
+    if result.passed is not False or proposed is None:
+        return None
+    return (Difficulty(row.difficulty), proposed)
 
 
 def build_calibration_pairs(
-    session: Session, *, rubric_version: str | None = None
+    session: Session, *, rubric_version: str | None = None, course_id: int | None = None
 ) -> list[CalibrationPair]:
     """Every reviewed question the judge actually rendered a verdict on.
 
@@ -136,7 +165,7 @@ def build_calibration_pairs(
     and the honest alternative -- naming every version present in the report --
     is what :attr:`CalibrationReport.rubric_versions` does.
     """
-    rows = QuestionRepository(session).list_reviewed_with_evaluation()
+    rows = QuestionRepository(session).list_reviewed_with_evaluation(course_id=course_id)
     pairs = [_pair_for_question(row) for row in rows]
     found = [pair for pair in pairs if pair is not None]
     if rubric_version is None:
@@ -285,6 +314,8 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, _RATE_PLACES)
 
 
-def build_calibration_report(session: Session) -> CalibrationReport:
-    """The judge reliability report over all reviewed, evaluated questions."""
-    return metrics_from_pairs(build_calibration_pairs(session))
+def build_calibration_report(
+    session: Session, *, course_id: int | None = None
+) -> CalibrationReport:
+    """The judge reliability report over the reviewed, evaluated questions (of one course)."""
+    return metrics_from_pairs(build_calibration_pairs(session, course_id=course_id))

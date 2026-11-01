@@ -5,8 +5,12 @@
  * read this list, so a section cannot appear in one place and be missing from
  * another.
  *
- * `review` and `generate` are distinct routes because they are screens of their
- * own in the React console, even though their data hangs off the questions API.
+ * `review` is a distinct route because it is a screen of its own in the React
+ * console, even though its data hangs off the questions API. The generate
+ * screens are not in the nav: they open from cards at the top of Questions.
+ *
+ * Every `path` is relative to the open course: the sidebar and dashboard turn
+ * `/books` into `/courses/{id}/books` with `coursePath` (`lib/course.ts`).
  */
 
 import {
@@ -17,25 +21,25 @@ import {
   ListChecks,
   type LucideIcon,
   Network,
+  Presentation,
   Scale,
-  ScrollText,
+  Table2,
   Users,
-  Wand2,
 } from "lucide-react";
-import type { Route } from "next";
 
 /** A sidebar-only sub-link, nested under a `NavSection` that has more than one screen. */
 export interface NavChild {
   key: string;
   label: string;
-  path: Route;
+  /** Relative to the open course. */
+  path: string;
 }
 
 export interface NavSection {
   key: string;
   label: string;
-  /** `Route` is Next's typed-routes union: a path with no page fails to compile. */
-  path: Route;
+  /** Relative to the open course, e.g. `/books`. */
+  path: string;
   summary: string;
   icon: LucideIcon;
   /**
@@ -50,43 +54,34 @@ export interface NavSection {
 export const NAV_SECTIONS: readonly NavSection[] = [
   {
     key: "books",
-    label: "Books",
+    label: "Contents",
     path: "/books",
-    summary: "Upload introductory Python textbooks and inspect their extracted structure.",
+    summary:
+      "The course's books and lecture videos: upload more, filter by type, and inspect what was extracted from each.",
     icon: BookOpen,
   },
   {
     key: "curriculum",
     label: "Curriculum",
     path: "/curriculum",
-    summary: "Build a Topic → Subtopic taxonomy, or import one you already have. The active taxonomy is what questions and coverage use.",
+    summary:
+      "Build a Topic → Subtopic taxonomy, or import one you already have. Every page follows the taxonomy chosen at the top right.",
     icon: Network,
   },
   {
     key: "questions",
     label: "Questions",
     path: "/questions",
-    summary: "Generate, validate and review Python assessment questions.",
+    summary: "Generate, validate and review assessment questions.",
     icon: ListChecks,
   },
   {
-    key: "generate",
-    label: "Generate",
-    path: "/questions/generate",
-    summary: "Generate one question at a time from a chunk, or produce a whole sheet in bulk.",
-    icon: Wand2,
-    children: [
-      {
-        key: "generate-single",
-        label: "Generate questions",
-        path: "/questions/generate/single",
-      },
-      {
-        key: "generate-bulk",
-        label: "Bulk generate",
-        path: "/questions/generate",
-      },
-    ],
+    key: "tutorials",
+    label: "Tutorials",
+    path: "/tutorials",
+    summary:
+      "The ways tutorials teach in this course: approve or stop each recipe, preview its blocks as students see them, and create your own.",
+    icon: Presentation,
   },
   {
     key: "review",
@@ -97,17 +92,10 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     icon: ClipboardCheck,
   },
   {
-    key: "instructions",
-    label: "Instructions",
-    path: "/instructions",
-    summary: "What the generator is told for each question type, learned from your reviews.",
-    icon: ScrollText,
-  },
-  {
     key: "judges",
     label: "Judges",
     path: "/judges",
-    summary: "The four advisory reviewers, and the prompt each one follows.",
+    summary: "The difficulty judge, the topic-alignment judge, and this taxonomy's custom rules.",
     icon: Scale,
   },
   {
@@ -131,8 +119,22 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     summary: "Enrolled learners' progress: score trends, BKT topic mastery, and subtopic weakness.",
     icon: Users,
   },
+  {
+    key: "students",
+    label: "Students",
+    path: "/students/list",
+    summary:
+      "Every enrolled learner in one filterable table: score, answered count, and last activity.",
+    icon: Table2,
+  },
 ] as const;
 
 export const SECTIONS_BY_KEY: Record<string, NavSection> = Object.fromEntries(
   NAV_SECTIONS.map((section) => [section.key, section]),
 );
+
+/**
+ * The student classroom: no account, its own light-only shell (`StudentChrome`), so
+ * both the chrome and the theme provider branch on it.
+ */
+export const isStudentPath = (pathname: string) => pathname.startsWith("/students/join");

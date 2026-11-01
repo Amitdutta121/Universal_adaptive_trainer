@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- A3 · Log in (instructors). Log in -> courses.html. -->
+<body data-scope="public" data-title="Log in">
+  <main x-data="page()" x-cloak class="mx-auto w-full max-w-md px-5 py-12">
+    <form class="card" @submit.prevent="submit()" novalidate>
+      <header>
+        <h2>Log in</h2>
+        <p>Instructor Studio. Students join a class with a code instead.</p>
+      </header>
+      <section class="grid gap-4">
+        <div class="alert" data-variant="destructive" x-show="failed" role="alert">
+          <i data-lucide="circle-alert"></i>
+          <h2>Wrong email or password</h2>
+          <section x-text="attempts >= 3 ? `${attempts} failed attempts. After 5, logging in is paused for 15 minutes.` : 'Check both and try again, or reset your password.'"></section>
+        </div>
+        <div role="group" class="field" :data-invalid="errors.email ? '' : null">
+          <label for="email">Email</label>
+          <input id="email" type="email" x-model="email" autocomplete="email" :aria-invalid="!!errors.email">
+          <p role="alert" x-show="errors.email" x-text="errors.email"></p>
+        </div>
+        <div role="group" class="field" :data-invalid="errors.password || failed ? '' : null">
+          <div class="flex items-baseline">
+            <label for="pw">Password</label>
+            <a class="ml-auto text-sm underline underline-offset-4" :href="`reset-password.html?email=${encodeURIComponent(email)}`">Forgot password?</a>
+          </div>
+          <input id="pw" type="password" x-model="password" autocomplete="current-password" :aria-invalid="!!errors.password || failed">
+          <p role="alert" x-show="errors.password" x-text="errors.password"></p>
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="input" x-model="remember"> Keep me logged in on this computer</label>
+      </section>
+      <footer class="grid gap-3">
+        <button type="submit" class="btn w-full" :disabled="busy" x-text="busy ? 'Logging in…' : 'Log in'"></button>
+        <p class="text-center text-sm text-muted-foreground">New here? <a class="underline underline-offset-4" href="signup.html">Create an account</a></p>
+      </footer>
+    </form>
+    <p class="mt-4 text-center text-xs text-muted-foreground">Mockup: any password logs you in except <span class="font-mono">wrong</span>, which shows the error state.</p>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      return {
+        email: Mock.param("email") || MOCK.me.email, password: "", remember: true,
+        errors: {}, failed: false, attempts: 0, busy: false,
+        submit() {
+          const e = {};
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.email.trim())) e.email = "Enter a valid email address.";
+          if (!this.password) e.password = "Enter your password.";
+          this.errors = e;
+          this.failed = false;
+          if (Object.keys(e).length) return;
+          if (this.password === "wrong") { this.attempts++; this.failed = true; this.password = ""; return; }
+          this.busy = true;
+          setTimeout(() => { location.href = "courses.html"; }, 500);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

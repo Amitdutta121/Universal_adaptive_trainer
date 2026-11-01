@@ -12,5 +12,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // CopilotKit's v2 entry imports its own stylesheet, which Node cannot load; inlined, Vite
+    // handles the CSS import like any other.
+    server: { deps: { inline: [/@copilotkit\//] } },
   },
 });

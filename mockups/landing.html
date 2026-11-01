@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .prose-ink { color: var(--ink-2); }
+    .step-row { display: grid; gap: .5rem 2.5rem; border-top: 1px solid var(--border); padding: 1.4rem 0; }
+    @media (min-width: 768px) { .step-row { grid-template-columns: 14rem minmax(0, 1fr); } }
+  </style>
+</head>
+<!-- A1 · Landing: for a professor deciding whether to try it. Written like the current `/` page:
+     plain prose, stated limits, no feature cards or gradients. The product panels are built from MOCK. -->
+<body data-scope="public" data-title="Adaptive Trainer">
+  <main x-data="page()" x-cloak class="mx-auto max-w-5xl px-5">
+    <section class="pt-16 pb-10">
+      <h1 class="max-w-[22ch] font-display font-semibold leading-[1.06]" style="font-size:clamp(2.1rem,5vw,3.3rem);letter-spacing:-0.03em">Adaptive practice questions, built from your own textbook.</h1>
+      <p class="mt-6 max-w-[64ch] text-[1.05rem] leading-7 prose-ink">
+        Upload the book you teach from. Adaptive Trainer drafts a topic outline from it and questions for
+        each subtopic, runs every question through automated checks and four judge prompts, and puts it in
+        front of you to approve, edit or reject. Your decisions are kept: they become rules the generator
+        follows next time, and they measure how often each judge agrees with you. Students join with a code
+        and practise the questions you approved, and the next question always comes from the subtopic they
+        are weakest in.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <a class="btn" data-size="lg" href="signup.html">Create a free account</a>
+        <a class="btn" data-variant="outline" data-size="lg" href="login.html">Log in</a>
+        <a class="text-sm underline underline-offset-4" href="student-join.html">I'm a student with a join code</a>
+      </div>
+    </section>
+
+    <!-- Product panel: one review-queue card, built from MOCK so it matches the rest of the mockup. -->
+    <figure class="pb-14">
+      <div class="grid gap-4 rounded-md border p-4 md:p-5 lg:grid-cols-[minmax(0,1fr)_19rem]" style="border-color:var(--hairline-2);background:var(--background)">
+        <div class="card gap-4 py-5">
+          <header>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 x-text="`Question ${q.id}`"></h2>
+              <span class="pill tone-muted" x-text="q.difficulty"></span>
+              <span class="pill tone-muted" x-text="MOCK.question_types[q.type].label"></span>
+              <span class="pill" :class="Mock.tone(state)" x-text="Mock.label(state)"></span>
+            </div>
+            <p x-text="`${q.topic} · ${q.subtopic} · from ${q.source.book}, ${q.source.section}`"></p>
+          </header>
+          <section class="grid gap-3">
+            <p class="leading-7" x-html="code(q.prompt)"></p>
+            <ol class="grid gap-2 text-sm">
+              <template x-for="(o, i) in q.options" :key="o">
+                <li class="flex items-center gap-3 rounded-lg border px-3 py-2" :class="i === q.answer ? 'tone-ok' : ''" :style="i === q.answer ? 'border-color:var(--ok-solid)' : ''">
+                  <span class="font-mono text-xs text-muted-foreground" x-text="String.fromCharCode(65 + i)"></span>
+                  <span class="font-mono" x-text="o"></span>
+                  <span class="ml-auto text-xs" x-show="i === q.answer">Correct answer</span>
+                </li>
+              </template>
+            </ol>
+            <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span>Checks:</span>
+              <span class="pill tone-ok">Schema pass</span>
+              <span class="pill tone-ok">Answer consistent</span>
+              <span class="pill tone-muted">Code run n/a</span>
+            </div>
+          </section>
+          <footer class="flex flex-wrap items-center gap-2 border-t pt-4">
+            <template x-if="state === 'validation_passed' && !rejecting">
+              <div class="flex flex-wrap gap-2">
+                <button class="btn" data-size="sm" @click="state = 'approved'">Approve</button>
+                <button class="btn" data-variant="outline" data-size="sm" @click="Mock.toast('In the app this opens the editor')">Edit</button>
+                <button class="btn" data-variant="outline" data-size="sm" @click="rejecting = true">Reject</button>
+              </div>
+            </template>
+            <template x-if="rejecting">
+              <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span class="text-muted-foreground">Reason:</span>
+                <template x-for="r in reasons" :key="r[0]">
+                  <button class="btn" data-variant="outline" data-size="sm" @click="state = 'rejected'; reason = r[1]; rejecting = false" x-text="r[1]"></button>
+                </template>
+              </div>
+            </template>
+            <template x-if="state !== 'validation_passed'">
+              <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span x-text="state === 'approved' ? 'Approved. It can go into the next frozen set.' : `Rejected: ${reason}. The generator gets this as feedback.`"></span>
+                <button class="btn" data-variant="ghost" data-size="sm" @click="state = 'validation_passed'; reason = ''">Undo</button>
+              </div>
+            </template>
+            <span class="ml-auto text-xs text-muted-foreground" x-text="`${remaining} awaiting review`"></span>
+          </footer>
+        </div>
+
+        <div class="card gap-3 py-5">
+          <header><h2>Judges</h2><p>Advisory. You decide.</p></header>
+          <section class="grid gap-3">
+            <template x-for="j in judges" :key="j.id">
+              <div class="grid gap-1 border-b pb-3 last:border-0 last:pb-0">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="font-medium" x-text="j.label"></span>
+                  <span class="ml-auto pill" :class="Mock.tone(j.verdict)" x-text="j.verdict"></span>
+                </div>
+                <p class="text-xs text-muted-foreground" x-text="j.note"></p>
+                <p class="text-xs text-muted-foreground" x-text="`Agrees with you ${Mock.pct(j.agreement)} of the time`"></p>
+              </div>
+            </template>
+          </section>
+        </div>
+      </div>
+      <figcaption class="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+        One card from the review queue, with mock data. On the left, the question as a student will see it,
+        with the answer key. On the right, the four judges' verdicts and how often each has agreed with your
+        past decisions. The buttons work.
+      </figcaption>
+    </figure>
+
+    <section class="pb-14">
+      <h2 class="mb-5 text-2xl font-semibold">How a course gets set up</h2>
+      <ol>
+        <template x-for="(s, i) in steps" :key="s.title">
+          <li class="step-row">
+            <h3 class="font-display font-semibold"><span class="mr-2 font-mono text-sm text-muted-foreground" x-text="i + 1"></span><span x-text="s.title"></span></h3>
+            <p class="max-w-[64ch] leading-7 prose-ink" x-text="s.body"></p>
+          </li>
+        </template>
+      </ol>
+    </section>
+
+    <section class="pb-14">
+      <h2 class="mb-2 text-2xl font-semibold">What your reviews change</h2>
+      <p class="mb-6 max-w-[64ch] leading-7 prose-ink">
+        From the sample course (CS 135) after <span x-text="reviews"></span> reviews. A rejection with a reason
+        is turned into a rule the generator is given next time, once enough reviews point the same way. You can
+        read, switch off or delete every rule.
+      </p>
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="card gap-3 py-5">
+          <header><h2>Judge agreement with you</h2><p>First review vs. each judge's verdict, over four review rounds.</p></header>
+          <section class="p-0">
+            <table class="table">
+              <thead><tr><th>Judge</th><th class="text-right">Round 1</th><th class="text-right">Now</th></tr></thead>
+              <tbody>
+                <template x-for="j in MOCK.alignment.judges" :key="j.id">
+                  <tr>
+                    <td x-text="MOCK.judge(j.id).label"></td>
+                    <td class="text-right font-mono" x-text="Mock.pct(j.trend[0])"></td>
+                    <td class="text-right font-mono" x-text="Mock.pct(j.agreement)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </section>
+          <footer class="text-xs text-muted-foreground">The difficulty judge is still at 67%, so the review page tells you not to lean on it.</footer>
+        </div>
+        <div class="card gap-3 py-5">
+          <header><h2>Approval rate of generated questions</h2><p x-text="`${Mock.pct(approval[0])} in the first batch, ${Mock.pct(approval.at(-1))} in the latest.`"></p></header>
+          <section class="grid gap-3">
+            <div class="flex h-24 items-end gap-2">
+              <template x-for="(a, i) in approval" :key="i">
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <span class="text-xs font-mono text-muted-foreground" x-text="Mock.pct(a)"></span>
+                  <div class="w-full rounded-t" :style="{ background: 'var(--primary)', height: `${a * 70}px` }"></div>
+                </div>
+              </template>
+            </div>
+            <div class="rounded-lg border p-3 text-sm">
+              <div class="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <span class="pill tone-accent">Learned rule</span>
+                <span x-text="`${rule.from_reviews} reviews · ${MOCK.question_types[rule.type].label}`"></span>
+              </div>
+              <p x-text="rule.text"></p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="pb-14">
+      <h2 class="mb-5 text-2xl font-semibold">What students get</h2>
+      <div class="step-row">
+        <h3 class="font-display font-semibold">A join code, no account</h3>
+        <p class="max-w-[64ch] leading-7 prose-ink">You open a class and share its code (for example <span class="font-mono">PY7-K4Q</span>). Students type the code, their name and school email, and start. You can restrict a class to the students on your roster.</p>
+      </div>
+      <div class="step-row">
+        <h3 class="font-display font-semibold">Mastery per topic</h3>
+        <p class="max-w-[64ch] leading-7 prose-ink">Mastery of each topic is estimated with Bayesian knowledge tracing after every answer. The next question is picked from the student's weakest subtopic, at a difficulty that follows their mastery. After each answer they see the explanation and how their mastery moved.</p>
+      </div>
+      <div class="step-row">
+        <h3 class="font-display font-semibold">What you see</h3>
+        <p class="max-w-[64ch] leading-7 prose-ink">Each student's mastery per topic over time, their weakest subtopics, and the class average (58% in the sample course). Export the roster as CSV.</p>
+      </div>
+    </section>
+
+    <section class="pb-16">
+      <h2 class="mb-4 text-2xl font-semibold">Limits</h2>
+      <ul class="flex max-w-[64ch] list-disc flex-col gap-2 pl-5 leading-7 prose-ink">
+        <li>Introductory Python is the subject it was built for: all seven question types, with generated code actually run. For other subjects (statistics, biology) it writes multiple-choice and true/false questions only.</li>
+        <li>Books are PDF or structured JSON. A PDF with no table of contents still imports, with its chapters guessed and marked for you to check. EPUB, Markdown and HTML are refused.</li>
+        <li>The judges advise; they don't approve anything. Nothing reaches students until you have approved it and frozen it into a set.</li>
+        <li>Generation and judging use a language model and cost money. Each workspace has a monthly spending cap, and you see the spend per course.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="border-t">
+    <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-5 py-6 text-sm text-muted-foreground">
+      <span>Adaptive Trainer</span>
+      <a class="hover:text-foreground" href="login.html">Log in</a>
+      <a class="hover:text-foreground" href="signup.html">Sign up</a>
+      <a class="hover:text-foreground" href="student-join.html">Student join</a>
+    </div>
+  </footer>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const q = MOCK.question(1000);
+      const notes = {
+        issues: "No factual or wording problems found.",
+        subtopic: "Tests aliasing directly: two names, one list.",
+        difficulty: `Stated ${q.difficulty}; reads as medium for students who have finished chapter 9.`,
+        generatability: "Section 9.11 has this exact example.",
+      };
+      const verdicts = { issues: "pass", subtopic: "pass", difficulty: "flag", generatability: "pass" };
+      return {
+        q,
+        state: q.status,
+        rejecting: false,
+        reason: "",
+        reasons: MOCK.rejection_reasons.filter((r) => ["too_easy", "poor_distractors", "ambiguous"].includes(r[0])),
+        get remaining() { return Mock.course.numbers.awaiting_review - (this.state === "validation_passed" ? 0 : 1); },
+        judges: MOCK.judges.map((j) => ({
+          ...j, verdict: verdicts[j.id], note: notes[j.id],
+          agreement: MOCK.alignment.judges.find((a) => a.id === j.id).agreement,
+        })),
+        reviews: MOCK.alignment.judges[0].reviews,
+        approval: MOCK.alignment.approval_rate_trend,
+        rule: MOCK.alignment.learned_rules[0],
+        code(s) { return Mock.esc(s).replace(/`([^`]+)`/g, '<code class="font-mono rounded px-1" style="background:var(--muted)">$1</code>'); },
+        steps: [
+          { title: "Upload the book", body: "A PDF or structured JSON. Chapters and sections are read from the table of contents, and every question later cites the section it came from. Think Python (19 chapters, 212 sections) imports in a few minutes." },
+          { title: "Approve the taxonomy", body: "The topics and subtopics students are assessed on. AI drafts it from the book and you accept, edit or discard each row; or import your own outline, or build it by hand." },
+          { title: "Generate questions", body: "For one subtopic, or in bulk for every subtopic and difficulty that has no approved question yet. Each question passes schema and answer checks, generated code is run, and four judges read it: issues, subtopic fit, difficulty and generatability." },
+          { title: "Review", body: "Approve, edit or reject each question with the judges' verdicts beside it. Rejections carry a reason. Your reviews teach the generator and calibrate the judges, so later batches need fewer rejections." },
+          { title: "Freeze a set and open a class", body: "Approved questions are frozen into a set, so later edits don't change what students practise. Each class gets a join code." },
+          { title: "Students practise", body: "Adaptive practice from the frozen set, weakest subtopics first. You see mastery per student and per topic as they go." },
+        ],
+      };
+    }
+  </script>
+</body>
+</html>

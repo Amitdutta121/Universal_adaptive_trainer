@@ -10,19 +10,30 @@ from fastapi import APIRouter, Depends
 
 from app.auth.backend import current_active_user
 from app.web.routes.api import (
+    agent,
     auth,
     books,
     calibration,
+    courses,
     coverage,
     curriculum,
+    custom_judges,
     evaluation,
+    experimental_recipes,
     feedback,
+    generation_runs,
     instructions,
+    jobs,
     judge_prompts,
+    judges,
     questions,
     retrieval,
+    rounds,
+    settings,
+    setup,
     students,
     system,
+    tutorials,
 )
 
 router = APIRouter(prefix="/api")
@@ -34,15 +45,27 @@ router.include_router(auth.router)
 #: with the anonymous student join/session flow, so it protects its own
 #: routes individually instead (see the ``dependencies=`` on those handlers).
 _professor_only = [
+    courses.router,
     books.router,
     curriculum.router,
     questions.router,
+    generation_runs.router,
     feedback.router,
     instructions.router,
+    instructions.guidelines_router,
     judge_prompts.router,
+    judges.router,
     calibration.router,
     coverage.router,
     retrieval.router,
+    setup.router,
+    rounds.router,
+    custom_judges.router,
+    jobs.router,
+    settings.router,
+    tutorials.router,
+    experimental_recipes.router,
+    agent.router,
 ]
 for professor_router in _professor_only:
     router.include_router(professor_router, dependencies=[Depends(current_active_user)])
@@ -56,15 +79,22 @@ __all__ = [
     "auth",
     "books",
     "calibration",
+    "courses",
     "coverage",
     "curriculum",
+    "custom_judges",
     "evaluation",
     "feedback",
     "instructions",
     "judge_prompts",
+    "judges",
     "questions",
     "retrieval",
+    "rounds",
     "router",
+    "settings",
+    "setup",
     "students",
     "system",
+    "tutorials",
 ]

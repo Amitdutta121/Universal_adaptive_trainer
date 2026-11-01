@@ -13,13 +13,7 @@ Rules for this package:
   and is free to store a subset (see ``docs/DECISIONS.md``).
 """
 
-from app.domain.books import (
-    Book,
-    BookChapter,
-    BookSection,
-    ExtractionWarning,
-    SectionSource,
-)
+from app.domain.books import ExtractionWarning
 from app.domain.curriculum import CurriculumVersion, Subtopic, Topic
 from app.domain.enums import (
     BookStatus,
@@ -56,9 +50,6 @@ __all__ = [
     "MAX_SCORE",
     "MIN_SCORE",
     "BKTParameters",
-    "Book",
-    "BookChapter",
-    "BookSection",
     "BookStatus",
     "CurriculumStatus",
     "CurriculumVersion",
@@ -75,7 +66,6 @@ __all__ = [
     "QuestionValidationReport",
     "RejectionReason",
     "ReviewDecision",
-    "SectionSource",
     "SourceFormat",
     "StructureConfidence",
     "StructureSource",

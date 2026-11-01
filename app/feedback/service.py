@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+from pydantic import ValidationError
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.domain.enums import QuestionStatus, RejectionReason, ReviewDecision
+from app.domain.enums import Difficulty, QuestionStatus, RejectionReason, ReviewDecision
 from app.domain.questions import Question, apply_professor_edit
-from app.errors import DomainRuleError
-from app.persistence.models import ProfessorReviewRow
+from app.errors import DomainRuleError, NotFoundError
+from app.evaluation import PedagogicalEvaluation
+from app.evaluation.severity import borderline_notes
+from app.memory import (
+    SOURCE_AUDIT,
+    SOURCE_BORDERLINE,
+    SOURCE_RETRY,
+    SOURCE_REVIEW,
+    MemoryEpisodeRepository,
+    forget_review,
+    record_review_episode,
+    snapshot_question,
+)
+from app.persistence.models import (
+    ProfessorReviewRow,
+    QuestionRow,
+    QuestionSubtopicRow,
+    ReviewOutcomeRow,
+    SubtopicRow,
+    TopicRow,
+)
 from app.persistence.repositories import ProfessorReviewRepository, QuestionRepository
 
 _EDITABLE = ("prompt", "reference_solution", "tests")
@@ -28,15 +49,31 @@ def submit_review(
     reference_solution: str | None = None,
     tests: str | None = None,
     professor_id: int | None = None,
+    corrected_difficulty: Difficulty | None = None,
+    corrected_subtopic_ids: list[int] | None = None,
 ) -> ProfessorReviewRow:
     """Append a professor review and update the question's usable status.
 
     Edit updates current question fields but never touches ``original_*``.
     ``changed_fields`` are derived here by comparing submitted values to the
     persisted question, never trusted from the client.
+
+    ``corrected_difficulty`` / ``corrected_subtopic_ids`` are what the professor says the
+    question really is (the review form requires explicit confirmation). They are
+    stored as given, whatever the decision, because attribution reads them as direct
+    evidence about the difficulty and subtopic judges. Rejection permits an optional
+    comment without requiring structured reasons or classification corrections.
+
+    The review is also written into memory as an episode (:mod:`app.memory`, ADR-063): the
+    question as reviewed, the verdict, and the judges' verdicts. No model call.
     """
     question = QuestionRepository(session).get(question_id)
+    reviewed = snapshot_question(question)
     reason_list = list(reasons or [])
+    if corrected_subtopic_ids is not None:
+        if not corrected_subtopic_ids:
+            raise DomainRuleError("A subtopic correction must name at least one subtopic.")
+        _check_subtopics_in_taxonomy(session, question, corrected_subtopic_ids)
 
     edited_prompt: str | None = None
     edited_reference_solution: str | None = None
@@ -47,8 +84,6 @@ def submit_review(
         reason_list = []
         question.status = QuestionStatus.APPROVED
     elif decision is ReviewDecision.REJECT:
-        if not reason_list:
-            raise DomainRuleError("Reject requires at least one structured reason.")
         question.status = QuestionStatus.REJECTED
     elif decision is ReviewDecision.EDIT:
         if prompt is None or reference_solution is None or tests is None:
@@ -102,6 +137,30 @@ def submit_review(
     else:
         raise DomainRuleError(f"Unsupported review decision: {decision}")
 
+    # Keep original classification in the frozen generation spec for older judge
+    # blobs whose passing verdict did not include its proposed value.
+    spec = dict(question.spec or {})
+    if corrected_difficulty is not None or corrected_subtopic_ids is not None:
+        spec.setdefault("difficulty", question.difficulty.value)
+        spec.setdefault("topic_id", question.topic_id)
+        spec.setdefault("subtopic_ids", list(question.subtopic_ids))
+        question.spec = spec
+    if decision in (ReviewDecision.APPROVE, ReviewDecision.EDIT):
+        if corrected_difficulty is not None:
+            question.difficulty = corrected_difficulty
+        if corrected_subtopic_ids is not None:
+            ids = list(dict.fromkeys(corrected_subtopic_ids))
+            # Keep existing association rows by difference to preserve retained
+            # join rows and avoid unique-key collisions during flush.
+            question.subtopic_links = [
+                link for link in question.subtopic_links if link.subtopic_id in ids
+            ]
+            retained = {link.subtopic_id for link in question.subtopic_links}
+            question.subtopic_links.extend(
+                QuestionSubtopicRow(subtopic_id=sid) for sid in ids if sid not in retained
+            )
+            question.topic_id = session.get(SubtopicRow, ids[0]).topic_id
+
     review = ProfessorReviewRow(
         question_id=question.id,
         decision=decision,
@@ -112,7 +171,82 @@ def submit_review(
         edited_tests=edited_tests,
         changed_fields=changed_fields,
         professor_id=professor_id,
+        corrected_difficulty=corrected_difficulty,
+        corrected_subtopic_ids=(
+            list(dict.fromkeys(corrected_subtopic_ids))
+            if corrected_subtopic_ids is not None
+            else None
+        ),
         reviewed_generator_name=question.generator_name,
         reviewed_generator_version=question.generator_version,
     )
-    return ProfessorReviewRepository(session).add(review)
+    review = ProfessorReviewRepository(session).add(review)
+    record_review_episode(session, review, reviewed, source=_episode_source(question))
+    return review
+
+
+def delete_review(session: Session, review_id: int) -> None:
+    """Delete a review, its episode and its outcome. Flushes; the caller commits.
+
+    The episode goes with the review (ORM cascade), so it is never retrieved again; the
+    outcome row is deleted explicitly because SQLite enforces no ``ondelete``. The review
+    stops supporting any guideline it taught (:func:`app.memory.forget_review`), and the retry
+    episodes its approval let the question's failed attempts teach go too. The question
+    keeps whatever status and fields the review gave it.
+    """
+    review = session.get(ProfessorReviewRow, review_id)
+    if review is None:
+        raise NotFoundError(f"Review {review_id} not found.")
+    session.execute(delete(ReviewOutcomeRow).where(ReviewOutcomeRow.review_id == review_id))
+    forget_review(session, review_id)
+    MemoryEpisodeRepository(session).delete_of_source(SOURCE_RETRY, question_id=review.question_id)
+    session.delete(review)
+    session.flush()
+
+
+def _episode_source(question: QuestionRow) -> str:
+    """Audit and borderline keeps are their own episode sources (m9, m10)."""
+    if question.audit:
+        return SOURCE_AUDIT
+    spec = question.spec if isinstance(question.spec, dict) else {}
+    try:
+        requested = Difficulty(spec.get("difficulty") or question.difficulty)
+    except ValueError:
+        requested = question.difficulty
+    target = question.target_subtopic_id
+    evaluation = None
+    if isinstance(question.pedagogical_eval, dict):
+        try:
+            evaluation = PedagogicalEvaluation.model_validate(question.pedagogical_eval)
+        except ValidationError:
+            evaluation = None
+    if target is not None and borderline_notes(
+        evaluation, requested_difficulty=requested, target_subtopic_id=target
+    ):
+        return SOURCE_BORDERLINE
+    return SOURCE_REVIEW
+
+
+def _check_subtopics_in_taxonomy(
+    session: Session, question: QuestionRow, subtopic_ids: list[int]
+) -> None:
+    """Refuse a subtopic correction naming a subtopic outside the question's taxonomy.
+
+    A foreign id would be recorded as the professor's verdict and then counted against
+    the subtopic judge, which could never have proposed it.
+    """
+    if question.curriculum_version_id is None:
+        raise DomainRuleError("Subtopic corrections require a question taxonomy.")
+    known = set(
+        session.scalars(
+            select(SubtopicRow.id)
+            .join(TopicRow, SubtopicRow.topic_id == TopicRow.id)
+            .where(TopicRow.curriculum_version_id == question.curriculum_version_id)
+        )
+    )
+    unknown = sorted(set(subtopic_ids) - known)
+    if unknown:
+        raise DomainRuleError(
+            "Corrected subtopics must belong to the question's taxonomy.",
+            detail=f"unknown subtopic ids: {unknown}",
+        )

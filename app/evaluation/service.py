@@ -1,6 +1,12 @@
-"""Four advisory judges per question, each with its own bounded retries."""
+"""Advisory metric judges per question, each with its own bounded retries.
+
+Which judges run is ``settings.judge_metrics_enabled`` (docs/QUESTION_SETUP_PLAN.md); the
+others are absent from the stored evaluation, not failed.
+"""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -34,12 +40,14 @@ from app.evaluation.schema import (
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.repositories import CurriculumRepository
+from app.settings_store import ModelRole
+from app.subjects import profile_for_version
 
 JUDGE_MAX_ATTEMPTS = 3
 
 
 def build_judge_context(session: Session, question: Question) -> JudgeContext:
-    """Gather the question, its cited sections and the approved taxonomy.
+    """Gather the question, its cited chunks and the approved taxonomy.
 
     Shared by the synchronous judges below and by the bulk re-run in
     :mod:`app.evaluation.batch_service` (ADR-030). The batch path builds its own
@@ -62,15 +70,9 @@ def build_judge_context(session: Session, question: Question) -> JudgeContext:
         "content": content,
     }
     sources = []
-    for section_id in _source_section_ids(question):
-        section = retrieval.get_section(section_id)
-        sources.append(
-            {
-                "section_id": section_id,
-                "citation": retrieval.section_source(section_id).citation(),
-                "text": section.text,
-            }
-        )
+    for chunk_id in _source_chunk_ids(question):
+        chunk = retrieval.get_chunk(chunk_id)
+        sources.append({"chunk_id": chunk_id, "citation": chunk.citation(), "text": chunk.text})
 
     version = CurriculumRepository(session).get_with_tree(question.curriculum_version_id)
     taxonomy = [
@@ -141,18 +143,50 @@ def result_from_verdict(metric: JudgeMetricId, verdict: object, question: Questi
     raise TypeError(msg)
 
 
-class PedagogicalJudge:
-    """Run all four metric judges over one question."""
+def enabled_metrics() -> list[JudgeMetricId]:
+    """The metric judges new evaluations run, in ``JudgeMetricId`` order."""
+    enabled = set(get_settings().judge_metrics_enabled)
+    return [metric for metric in JudgeMetricId if metric.value in enabled]
 
-    def __init__(self, session: Session, *, client: StructuredLLMClient | None = None) -> None:
+
+class PedagogicalJudge:
+    """Run the enabled metric judges over one question."""
+
+    def __init__(
+        self,
+        session: Session,
+        *,
+        client: StructuredLLMClient | None = None,
+        snapshot_id: int | None = None,
+        memory_as_of: datetime | None = None,
+    ) -> None:
         self._session = session
         # Temperature 0: a judge is an instrument, and E1 measured the provider
         # default flipping 20% of verdicts between runs (ADR-042).
-        self._client = client or get_structured_client(temperature=get_settings().judge_temperature)
-        # Resolved once per judge, not per metric: all four answers belong to one
-        # panel, and re-reading between them could straddle a professor's edit.
-        self._prompts = resolve_system_prompts(session)
-        self._rubric_version = effective_rubric_version(session)
+        self._client = client or get_structured_client(
+            role=ModelRole.JUDGES, temperature=get_settings().judge_temperature
+        )
+        # Resolved once per judge and subject, not per metric: all four answers belong to
+        # one panel, and re-reading between them could straddle a professor's edit.
+        self._panels: dict[str, tuple[dict[JudgeMetricId, str], str]] = {}
+        self._snapshot_id = snapshot_id
+        self._memory_as_of = memory_as_of
+
+    def _panel(self, question: Question) -> tuple[dict[JudgeMetricId, str], str]:
+        """The prompts and rubric version for the subject of this question's course."""
+        profile = profile_for_version(self._session, question.curriculum_version_id)
+        if profile.personal_key not in self._panels:
+            snapshot_id = self._snapshot_id
+            if snapshot_id is None:
+                from app.evaluation.judge_memory import latest_promoted
+
+                current = latest_promoted(self._session, profile.personal_key)
+                snapshot_id = current.id if current is not None else None
+            self._panels[profile.personal_key] = (
+                resolve_system_prompts(self._session, profile=profile),
+                effective_rubric_version(self._session, profile=profile, snapshot_id=snapshot_id),
+            )
+        return self._panels[profile.personal_key]
 
     def evaluate(self, question: Question) -> PedagogicalEvaluation:
         """Return one evaluation, with a failed judge recorded rather than raised.
@@ -161,30 +195,81 @@ class PedagogicalJudge:
         the metrics that did come back and reviews it anyway.
         """
         model = self._client.description
+        prompts, rubric_version = self._panel(question)
+        # Read per call, not at construction: the panel is configuration, and a judge
+        # built before a settings change must not keep running the old one.
+        panel = enabled_metrics()
         try:
             context = build_judge_context(self._session, question)
         except (AdaptiveTrainerError, LookupError, TypeError, ValueError) as exc:
             detail = humanize_judge_error_detail(_error_detail(exc))
             return evaluation_from_metrics(
-                [failed_metric(metric, detail=detail) for metric in JudgeMetricId],
+                [failed_metric(metric, detail=detail) for metric in panel],
                 question_id=question.id,
                 judge_model=model,
-                rubric_version=self._rubric_version,
+                rubric_version=rubric_version,
+                expected=panel,
             )
 
-        metrics = [self._run_metric(metric, context, question) for metric in JudgeMetricId]
+        metrics = [self._run_metric(metric, context, question, prompts[metric]) for metric in panel]
         return evaluation_from_metrics(
             metrics,
             question_id=question.id,
             judge_model=model,
-            rubric_version=self._rubric_version,
+            rubric_version=rubric_version,
+            expected=panel,
         )
 
+    def section_supports(
+        self,
+        *,
+        curriculum_version_id: int,
+        difficulty: str,
+        question_type: str,
+        section_text: str,
+        citation: str,
+    ) -> tuple[bool | None, str]:
+        """Whether this lesson can support a question of this difficulty and type.
+
+        The generatability judge sees the section, the difficulty, and the type,
+        not a question. ``None`` means it could not answer. The caller generates
+        anyway, so a judge outage does not skip the cell.
+        """
+        profile = profile_for_version(self._session, curriculum_version_id)
+        if profile.personal_key not in self._panels:
+            self._panels[profile.personal_key] = (
+                resolve_system_prompts(self._session, profile=profile),
+                effective_rubric_version(self._session, profile=profile),
+            )
+        prompts, _rubric = self._panels[profile.personal_key]
+        context = JudgeContext(
+            question_artifact={},
+            source_sections=[{"citation": citation, "text": section_text}],
+            taxonomy=[],
+            claimed_taxonomy={},
+            requested_difficulty=difficulty,
+            requested_question_type=question_type,
+        )
+        prompt = build_user_prompt(JudgeMetricId.GENERATABILITY, context)
+        system = prompts[JudgeMetricId.GENERATABILITY]
+        last = "The generatability judge could not answer."
+        for _ in range(JUDGE_MAX_ATTEMPTS):
+            try:
+                verdict = self._client.complete_structured(
+                    system=system,
+                    prompt=prompt,
+                    response_model=GeneratabilityVerdict,
+                )
+                return bool(verdict.should_have_generated), verdict.rationale
+            except (LLMRequestError, MalformedModelOutputError) as exc:
+                last = humanize_judge_error_detail(str(exc.detail or exc))
+        return None, last
+
     def _run_metric(
-        self, metric: JudgeMetricId, context: JudgeContext, question: Question
+        self, metric: JudgeMetricId, context: JudgeContext, question: Question, system: str
     ) -> MetricResult:
         """One judge, retried on transport and shape failures alike."""
-        system = self._prompts[metric]
+        system = self._compose(metric, question, system)
         prompt = build_user_prompt(metric, context)
         last_detail = "unknown"
         for _ in range(JUDGE_MAX_ATTEMPTS):
@@ -199,22 +284,45 @@ class PedagogicalJudge:
                 last_detail = humanize_judge_error_detail(str(exc.detail or exc))
         return failed_metric(metric, detail=last_detail)
 
+    def _compose(self, metric: JudgeMetricId, question: Question, system: str) -> str:
+        """Render this judge's frozen guidelines and nearest cases onto ``system``."""
+        if metric is JudgeMetricId.GENERATABILITY:
+            return system
+        from app.evaluation.judge_memory import compose_judge_system, latest_promoted
+        from app.persistence.models import JudgeMemorySnapshotRow
 
-def _source_section_ids(question: Question) -> list[int]:
-    """Collect unique source ids in frozen-request order, then content order."""
-    section_ids: list[int] = []
+        profile = profile_for_version(self._session, question.curriculum_version_id)
+        snapshot = None
+        if self._snapshot_id is not None:
+            snapshot = self._session.get(JudgeMemorySnapshotRow, self._snapshot_id)
+        elif self._memory_as_of is None:
+            snapshot = latest_promoted(self._session, profile.personal_key)
+        return compose_judge_system(
+            self._session,
+            metric,
+            profile,
+            question=question,
+            snapshot=snapshot,
+            base=system,
+            created_before=self._memory_as_of,
+        )
+
+
+def _source_chunk_ids(question: Question) -> list[str]:
+    """Collect unique source chunk ids in frozen-request order, then content order."""
+    chunk_ids: list[str] = []
     for payload, key in (
-        (question.spec or {}, "source_section_ids"),
+        (question.spec or {}, "source_chunk_ids"),
         (question.content or {}, "sources"),
     ):
         values = payload.get(key)
         if key == "sources" and isinstance(values, list):
-            values = [source.get("section_id") for source in values if isinstance(source, dict)]
+            values = [source.get("chunk_id") for source in values if isinstance(source, dict)]
         if isinstance(values, list):
             for value in values:
-                if type(value) is int and value not in section_ids:
-                    section_ids.append(value)
-    return section_ids
+                if isinstance(value, str) and value not in chunk_ids:
+                    chunk_ids.append(value)
+    return chunk_ids
 
 
 def _error_detail(exc: Exception) -> str:

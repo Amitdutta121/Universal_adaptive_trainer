@@ -19,7 +19,9 @@ def describe_availability(settings: Settings | None = None) -> tuple[bool, str]:
 
     Never returns the API key or any part of it.
     """
-    settings = settings or get_settings()
+    from app.settings_store import ModelRole, settings_for
+
+    settings = settings_for(ModelRole.GENERATION, settings)
     return settings.llm_configured, settings.describe_llm()
 
 

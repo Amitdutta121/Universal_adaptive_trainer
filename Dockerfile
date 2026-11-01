@@ -7,6 +7,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY styles ./styles
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install .

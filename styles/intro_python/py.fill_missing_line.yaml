@@ -1,0 +1,58 @@
+id: py.fill_missing_line
+name: Fill in the missing line
+summary: A working function with the one line that carries the logic blanked out.
+question_type: code_completion
+difficulty_range:
+- medium
+- hard
+checked_by: Runs hidden tests on the student's code (cannot read or write files)
+applies_to:
+- loops
+- dictionaries
+- recursion
+- conditionals
+- list building
+examples:
+- prompt: Complete the function so it returns the largest value in t, without using max().
+  code: |-
+    def largest(t):
+        best = t[0]
+        for x in t:
+            ________
+        return best
+  answer: 'if x > best: best = x'
+  tests: 5
+  solution: |-
+    def largest(t):
+        best = t[0]
+        for x in t:
+            if x > best:
+                best = x
+        return best
+  test_cases:
+  - assert: 'assert largest([3, 9, 2]) == 9'
+  - assert: 'assert largest([7]) == 7'
+  - assert: 'assert largest([-5, -2, -9]) == -2'
+  - assert: 'assert largest([1, 2, 3, 4]) == 4'
+  - assert: 'assert largest([4, 4, 1]) == 4'
+  grounding: Map, filter and reduce
+- prompt: Complete power(b, n) so it returns b to the power n for n >= 0.
+  code: |-
+    def power(b, n):
+        if n == 0:
+            return 1
+        ________
+  answer: return b * power(b, n - 1)
+  tests: 5
+  solution: |-
+    def power(b, n):
+        if n == 0:
+            return 1
+        return b * power(b, n - 1)
+  test_cases:
+  - assert: 'assert power(2, 0) == 1'
+  - assert: 'assert power(2, 3) == 8'
+  - assert: 'assert power(5, 1) == 5'
+  - assert: 'assert power(3, 4) == 81'
+  - assert: 'assert power(1, 10) == 1'
+  grounding: More recursion

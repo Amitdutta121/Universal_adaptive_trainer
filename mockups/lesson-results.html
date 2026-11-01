@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson results · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- Lesson results: how one subtopic's lesson performs with students. lesson-results.html?course=python&sub=<id>
+     Opens, per-block funnel (where students leave), the interactive blocks with the most wrong first tries,
+     time, and the randomized holdout (1 in 5 misses get no lesson offer) comparing the next answer on the subtopic.
+     TODO(real): all numbers come from lesson events; here from assets/data-lesson-player.js (invented). -->
+<body data-scope="course" data-nav="lessons" data-title="Lesson results">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="max-w-3xl">
+        <a class="text-sm text-muted-foreground hover:underline" :href="Mock.link('lessons.html')">Lessons</a>
+        <h1 class="text-2xl font-semibold" x-text="`${sub ? sub.name : 'Lesson'}: results`"></h1>
+        <p class="text-sm text-muted-foreground mt-1" x-show="R" x-text="R ? `${sub.topic} · ${statusLabel} · ${R.rows.length} blocks · since ${since}. Counts are lesson opens; a student can open it more than once.` : ''"></p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="R">
+        <a class="btn" data-variant="outline" :href="Mock.link('lesson.html', { sub: sub && sub.id, mode: lessonStatus })"><i data-lucide="pencil"></i>Edit lesson</a>
+        <button type="button" class="btn" :disabled="regen" @click="regenerate()"><i data-lucide="refresh-cw"></i><span x-text="regen ? 'Regenerating…' : `Regenerate the weakest block`"></span></button>
+      </div>
+    </div>
+
+    <!-- Not seen yet / other course -->
+    <template x-if="!R">
+      <div class="card"><section class="grid place-items-center gap-2 py-12 text-center">
+        <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="book-open-check"></i></span>
+        <h2 class="font-semibold">No students have seen this lesson yet</h2>
+        <p class="text-sm text-muted-foreground max-w-md">Results start once the lesson is approved and its topic is open. Students get it after a wrong answer on the subtopic, or from their course page.</p>
+        <a class="btn mt-2" data-size="sm" :href="Mock.link('lessons.html')">Back to lessons</a>
+      </section></div>
+    </template>
+
+    <template x-if="R">
+      <div class="grid gap-6">
+        <!-- In numbers -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Students who opened it</div>
+            <div class="text-2xl font-display font-semibold" x-text="`${R.use.students} of ${R.enrolled}`"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${R.use.opens} opens · ${R.from_practice} right after a wrong answer`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Finished</div>
+            <div class="text-2xl font-display font-semibold" x-text="Mock.pct(R.finished / R.use.opens)"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${R.finished} of ${R.use.opens} opens reached the last block`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Time in the lesson</div>
+            <div class="text-2xl font-display font-semibold" x-text="mmss(R.median_seconds)"></div>
+            <div class="text-xs text-muted-foreground" x-text="`median · mean ${mmss(R.avg_seconds)} · written for 3:00`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground" x-text="`Next ${sub.name} answer after a miss`"></div>
+            <div class="text-2xl font-display font-semibold" x-text="H ? `${H.diff >= 0 ? '+' : '−'}${Math.abs(Math.round(H.diff * 100))} pts` : '—'"></div>
+            <div class="text-xs text-muted-foreground" x-text="H ? `vs. holdout · 95% CI ${ci(H)}` : 'No holdout data yet'"></div>
+          </div>
+        </section>
+
+        <!-- The evidence: randomized holdout -->
+        <section class="card gap-4">
+          <header>
+            <h2>Does the lesson help?</h2>
+            <p x-text="`When a student misses a ${sub.name} question in practice, 1 in 5 misses is picked at random and gets no lesson offer (the holdout). Outcome: is their next ${sub.name} question correct?`"></p>
+          </header>
+          <section class="grid gap-5" x-show="H">
+            <div class="grid lg:grid-cols-[1fr_22rem] gap-6 items-start">
+              <div class="grid gap-3">
+                <template x-for="row in H ? [['Offered the lesson', H.a], ['Holdout: not offered', H.b]] : []" :key="row[0]">
+                  <div class="grid gap-1">
+                    <div class="flex items-baseline gap-2 text-sm">
+                      <span class="font-medium" x-text="row[0]"></span>
+                      <span class="ml-auto font-mono" x-text="Mock.pct(row[1].p)"></span>
+                      <span class="w-48 text-right text-xs text-muted-foreground" x-text="`${row[1].k} of ${row[1].n} next answers right`"></span>
+                    </div>
+                    <div class="h-2.5 rounded-full" style="background:var(--muted)"><div class="h-2.5 rounded-full" :style="{ width: `${row[1].p * 100}%`, background: row[0].startsWith('Offered') ? 'var(--primary)' : 'var(--muted-foreground)' }"></div></div>
+                  </div>
+                </template>
+                <!-- Difference with its 95% interval -->
+                <div class="grid gap-1 pt-2">
+                  <div class="flex text-xs text-muted-foreground"><span>Difference, percentage points (95% interval)</span></div>
+                  <div class="relative h-9">
+                    <div class="absolute inset-x-0 top-1/2 h-px" style="background:var(--border)"></div>
+                    <div class="absolute top-1 bottom-1 w-px" :style="{ left: `${axis(0)}%`, background: 'var(--foreground)' }"></div>
+                    <div class="absolute top-1/2 h-1 -translate-y-1/2 rounded-full" :style="{ left: `${axis(H ? H.lo : 0)}%`, width: `${H ? axis(H.hi) - axis(H.lo) : 0}%`, background: 'var(--primary)', opacity: 0.45 }"></div>
+                    <div class="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full" :style="{ left: `${axis(H ? H.diff : 0)}%`, background: 'var(--primary)' }"></div>
+                  </div>
+                  <div class="relative h-4 font-mono text-xs text-muted-foreground">
+                    <template x-for="t in [-40, -20, 0, 20, 40, 60]" :key="t"><span class="absolute -translate-x-1/2" :style="{ left: `${axis(t / 100)}%` }" x-text="t > 0 ? `+${t}` : t"></span></template>
+                  </div>
+                </div>
+              </div>
+              <div class="grid gap-3 text-sm leading-6">
+                <div class="flex items-center gap-2"><span class="pill" :class="H && H.lo > 0 ? 'tone-ok' : 'tone-warn'" x-text="H && H.lo > 0 ? 'Helps' : 'Leaning positive, not yet clear'"></span></div>
+                <p x-text="verdict"></p>
+                <p class="text-xs text-muted-foreground" x-text="H ? `Intent-to-treat: “offered” includes the ${Mock.pct(1 - H.opened)} who didn't open it, so this understates the effect of actually doing the lesson. Students who chose to open it aren't compared with those who didn't; that comparison is biased by who chooses to.` : ''"></p>
+              </div>
+            </div>
+            <div class="grid gap-1 rounded-lg border p-3 text-sm" x-show="P">
+              <div class="flex flex-wrap items-baseline gap-x-3">
+                <span class="font-medium" x-text="`Pooled over your ${P && P.lessons} lessons with a holdout`"></span>
+                <span class="font-mono" x-text="P ? `${Mock.pct(P.a.p)} vs ${Mock.pct(P.b.p)}` : ''"></span>
+                <span class="text-muted-foreground" x-text="P ? `n = ${P.a.n} offered, ${P.b.n} holdout · ${P.diff >= 0 ? '+' : '−'}${Math.abs(Math.round(P.diff * 100))} pts, 95% CI ${ci(P)}` : ''"></span>
+              </div>
+              <p class="text-xs text-muted-foreground">The holdout is per miss, not per student, so the same student can land in both groups on different days. TODO(real): a mixed model by student would tighten this.</p>
+            </div>
+          </section>
+          <section x-show="!H"><p class="text-sm text-muted-foreground">Not enough misses in the holdout yet. It needs at least 5 holdout cases before a comparison is shown.</p></section>
+        </section>
+
+        <section class="grid lg:grid-cols-[1fr_24rem] gap-6 items-start">
+          <!-- Funnel per block -->
+          <div class="card gap-0 py-0">
+            <header class="px-6 pt-5 pb-4">
+              <h2>Where students leave</h2>
+              <p x-text="`Opens that reached each block, out of ${R.use.opens}. “Left” counts opens that stopped on that block.`"></p>
+            </header>
+            <div class="table-container border-t">
+              <table class="table text-sm">
+                <thead><tr><th class="pl-6 w-8">#</th><th class="w-[44%]">Block</th><th class="w-[24%]">Reached</th><th class="text-right">Left</th><th class="pr-6 text-right">Avg time</th></tr></thead>
+                <tbody>
+                  <template x-for="(r, k) in R.rows" :key="k">
+                    <tr>
+                      <td class="pl-6 font-mono text-xs text-muted-foreground" x-text="k + 1"></td>
+                      <td class="max-w-0">
+                        <div class="flex items-center gap-2 pr-4"><span class="font-medium truncate" x-text="MOCK.BLOCK_TYPES[r.b.type]"></span><span class="pill tone-warn shrink-0" x-show="k === weakest">Most leave here</span></div>
+                        <div class="truncate text-xs text-muted-foreground" x-text="gist(r.b)"></div>
+                      </td>
+                      <td>
+                        <div class="flex items-center gap-2">
+                          <div class="h-2 flex-1 rounded-full" style="background:var(--muted)"><div class="h-2 rounded-full" :style="{ width: `${(r.reached / R.use.opens) * 100}%`, background: k === weakest ? 'var(--warn-solid)' : 'var(--primary)' }"></div></div>
+                          <span class="w-8 text-right font-mono text-xs" x-text="r.reached"></span>
+                        </div>
+                      </td>
+                      <td class="text-right font-mono text-xs" :style="{ color: k === weakest ? 'var(--warn-solid)' : '' }" x-text="left(k) ? left(k) : '—'"></td>
+                      <td class="pr-6 text-right font-mono text-xs" x-text="`${r.seconds}s`"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="grid gap-6">
+            <!-- Most wrong first tries -->
+            <div class="card gap-4">
+              <header>
+                <h2>Most wrong first tries</h2>
+                <p>Interactive blocks, worst first. Shares are of opens that reached the block.</p>
+              </header>
+              <section class="grid gap-4">
+                <template x-for="w in R.wrong" :key="w.b.type">
+                  <div class="grid gap-1.5 border-t pt-3 first:border-t-0 first:pt-0">
+                    <div class="flex items-baseline gap-2 text-sm">
+                      <span class="font-medium" x-text="MOCK.BLOCK_TYPES[w.b.type]"></span>
+                      <span class="ml-auto font-mono" x-text="Mock.pct(w.first_try)"></span><span class="text-xs text-muted-foreground" x-text="`wrong · n ${w.n}`"></span>
+                    </div>
+                    <div class="truncate text-xs text-muted-foreground" x-text="gist(w.b)"></div>
+                    <template x-for="t in w.top" :key="t[0]">
+                      <div class="grid grid-cols-[1fr_6rem_2.5rem] items-center gap-2 text-xs">
+                        <span class="truncate font-mono" x-text="t[0]"></span>
+                        <div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="{ width: `${Math.min(100, t[1] / 0.5 * 100)}%`, background: 'var(--critical-solid)' }"></div></div>
+                        <span class="text-right font-mono" x-text="Mock.pct(t[1])"></span>
+                      </div>
+                    </template>
+                    <p class="text-xs text-muted-foreground" x-show="w.b.type === 'branch' && w.b.misconception" x-text="`Tagged misconception: ${w.b.misconception}`"></p>
+                  </div>
+                </template>
+              </section>
+            </div>
+
+            <!-- How the lesson adapted -->
+            <div class="card gap-3" x-show="R.paths">
+              <header><h2>How it adapted</h2><p>What the lesson changed for students, and how that went.</p></header>
+              <section class="grid gap-2 text-sm leading-6" x-show="R.paths">
+                <p x-text="R.paths ? `${Mock.pct(R.paths.predict_right)} predicted the output right and got the short explanation; ${Mock.pct(R.paths.took_skip)} of them skipped the step-through.` : ''"></p>
+                <p x-text="R.paths ? `${Mock.pct(R.paths.branch_missed)} missed the quick check and got a replay of the step-through. They got the bank question right ${Mock.pct(R.paths.replay_then_check_right)} of the time, against ${Mock.pct(R.paths.no_replay_check_right)} for everyone else.` : ''"></p>
+              </section>
+            </div>
+
+            <!-- Student reports -->
+            <div class="card gap-3">
+              <header><h2>Student reports</h2><p x-text="R.reports.length ? `${R.reports.length} on this lesson` : 'None so far.'"></p></header>
+              <section class="grid gap-3" x-show="R.reports.length">
+                <template x-for="r in R.reports" :key="r.at">
+                  <div class="grid gap-0.5 text-sm">
+                    <div class="text-xs text-muted-foreground" x-text="`${fmt(r.at)} · ${MOCK.BLOCK_TYPES[r.block]}`"></div>
+                    <p x-text="`“${r.text}”`"></p>
+                  </div>
+                </template>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/lesson-schema.js"></script>
+  <script src="assets/data-lesson-player.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const subId = Mock.param("sub") || 27;
+      const sub = Mock.courseId === "python" ? MOCK.lessonSub(subId) : null;
+      const lesson = sub ? MOCK.lesson(sub.id) : null;
+      // Seen by students only once it's her example or approved, and its topic is open.
+      const weeks = {};
+      (MOCK.schedule?.[Mock.courseId]?.weeks || []).forEach((w) => w.topics.forEach((t) => { weeks[t] = w.week; }));
+      const open = sub && weeks[sub.topic_id] && weeks[sub.topic_id] <= (MOCK.schedule?.[Mock.courseId]?.current_week || 0);
+      const seen = lesson && open && (["example", "approved"].includes(lesson.status) || Mock.param("approved"));
+      const R = seen ? MOCK.lessonResults(sub.id) : null;
+      const cmp = (a, b) => {
+        const A = { k: a[0], n: a[1], p: a[0] / a[1] }, B = { k: b[0], n: b[1], p: b[0] / b[1] };
+        const diff = A.p - B.p, se = Math.sqrt(A.p * (1 - A.p) / A.n + B.p * (1 - B.p) / B.n);
+        return { a: A, b: B, diff, lo: diff - 1.96 * se, hi: diff + 1.96 * se };
+      };
+      const H = R && R.hold && R.hold.holdout[1] >= 5 ? { ...cmp(R.hold.offered, R.hold.holdout), opened: R.hold.opened_of_offered } : null;
+      const PP = MOCK.lessonHoldoutPooled;
+      const P = H ? { ...cmp(PP.offered, PP.holdout), lessons: PP.lessons } : null;
+      // The block where most opens stop (the "weakest" one to regenerate).
+      const leftAt = (k) => R ? (k < R.rows.length - 1 ? R.rows[k].reached - R.rows[k + 1].reached : 0) : 0;
+      let weakest = -1, most = 0;
+      if (R) R.rows.forEach((_, k) => { if (leftAt(k) > most) { most = leftAt(k); weakest = k; } });
+      return {
+        sub, R, H, P, weakest, regen: false,
+        lessonStatus: lesson ? lesson.status : "none",
+        statusLabel: lesson ? ({ example: "Your example lesson", approved: "Approved", generated: "Generated", spot: "Generated" }[lesson.status] || "Lesson") : "",
+        since: lesson && lesson.edited ? new Date(lesson.edited + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "it was approved",
+        left: leftAt,
+        mmss(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; },
+        fmt(d) { return new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); },
+        ci(x) { const f = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(Math.round(v * 100))}`; return `${f(x.lo)} to ${f(x.hi)}`; },
+        axis(v) { return Math.max(0, Math.min(100, ((v * 100 + 40) / 100) * 100)); },
+        gist(b) {
+          const t = (b.children || []).map((c) => c.text).join("");
+          return String(({ predict: b.code && b.code.split("\n").slice(-1)[0], explain: t, mistake: t, example: b.code && b.code.split("\n")[0], trace: b.caption, memory: b.caption, branch: b.question,
+            fill: b.hint, parsons: b.prompt, explore: b.caption, check: b.question, recap: b.points && b.points.join(" · ") })[b.type] || "").replace(/`/g, "");
+        },
+        get verdict() {
+          if (!H) return "";
+          const need = Math.ceil(7.84 * (H.a.p * (1 - H.a.p) + H.b.p * (1 - H.b.p)) / Math.max(0.0025, H.diff * H.diff));
+          if (H.lo > 0) return `Students offered the lesson got the next ${sub.name} question right more often, and the interval stays above zero.`;
+          return `Offered students did ${Math.round(H.diff * 100)} points better, but with ${H.b.n} holdout cases the interval still includes zero. Confirming a gain this size takes about ${need} misses in each group; the pooled result below is the better read for now.`;
+        },
+        regenerate() {
+          const b = R.rows[weakest].b;
+          this.regen = true;
+          setTimeout(() => {
+            this.regen = false;
+            Mock.toast(`New ${MOCK.BLOCK_TYPES[b.type].toLowerCase()} drafted in your style. Review it in the editor; students keep the current one until you approve. The job is in Jobs.`);
+          }, 1400);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

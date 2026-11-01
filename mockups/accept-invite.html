@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accept invite · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- A5 · Accept a co-instructor invite. Daniel Ortiz, invited by Maya Chen to CS 135. Set password -> courses.html. -->
+<body data-scope="public" data-title="Accept invite">
+  <main x-data="page()" x-cloak class="mx-auto w-full max-w-md px-5 py-12">
+    <form class="card" @submit.prevent="submit()" novalidate>
+      <header>
+        <h2>Join Intro to Python</h2>
+        <p><span x-text="inviter.name"></span> invited you to <span class="font-medium text-foreground" x-text="`${course.name} (${course.code})`"></span> as a co-instructor.</p>
+      </header>
+      <section class="grid gap-4">
+        <dl class="grid grid-cols-[7rem_1fr] gap-y-1.5 rounded-lg border p-3 text-sm">
+          <dt class="text-muted-foreground">Course</dt><dd x-text="`${course.name} (${course.code}) · ${course.term}`"></dd>
+          <dt class="text-muted-foreground">Role</dt><dd>Co-instructor: can upload books, generate and review questions, and see students. Can't delete the course.</dd>
+          <dt class="text-muted-foreground">Invited by</dt><dd x-text="`${inviter.name} · ${inviter.email}`"></dd>
+          <dt class="text-muted-foreground">Expires</dt><dd>Oct 7, 2026</dd>
+        </dl>
+        <div role="group" class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" :value="invitee.email" disabled>
+          <p>The invite is tied to this address.</p>
+        </div>
+        <div role="group" class="field" :data-invalid="errors.name ? '' : null">
+          <label for="name">Your name</label>
+          <input id="name" type="text" x-model="name" :aria-invalid="!!errors.name">
+          <p role="alert" x-show="errors.name" x-text="errors.name"></p>
+        </div>
+        <div role="group" class="field" :data-invalid="errors.pw ? '' : null">
+          <label for="pw">Choose a password</label>
+          <input id="pw" type="password" x-model="pw" autocomplete="new-password" :aria-invalid="!!errors.pw">
+          <p x-show="!errors.pw">At least 10 characters.</p>
+          <p role="alert" x-show="errors.pw" x-text="errors.pw"></p>
+        </div>
+        <div role="group" class="field" :data-invalid="errors.pw2 ? '' : null">
+          <label for="pw2">Repeat password</label>
+          <input id="pw2" type="password" x-model="pw2" autocomplete="new-password" :aria-invalid="!!errors.pw2">
+          <p role="alert" x-show="errors.pw2" x-text="errors.pw2"></p>
+        </div>
+      </section>
+      <footer class="grid gap-3">
+        <button type="submit" class="btn w-full" :disabled="busy" x-text="busy ? 'Joining…' : 'Accept and join course'"></button>
+        <p class="text-center text-sm text-muted-foreground">Already have an account? <a class="underline underline-offset-4" :href="`login.html?email=${encodeURIComponent(invitee.email)}`">Log in to accept</a></p>
+      </footer>
+    </form>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const invitee = MOCK.users.find((u) => u.id === "u2");
+      return {
+        course: MOCK.course("python"), inviter: MOCK.users[0], invitee,
+        name: invitee.name, pw: "", pw2: "", errors: {}, busy: false,
+        submit() {
+          const e = {};
+          if (!this.name.trim()) e.name = "Enter your name.";
+          if (this.pw.length < 10) e.pw = `Use at least 10 characters (${this.pw.length} so far).`;
+          else if (this.pw2 !== this.pw) e.pw2 = "The passwords don't match.";
+          this.errors = e;
+          if (Object.keys(e).length) return;
+          this.busy = true;
+          setTimeout(() => { location.href = "courses.html"; }, 600);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

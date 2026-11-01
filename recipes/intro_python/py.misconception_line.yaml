@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../schema.json
+name: Name the misconception
+summary: One line naming a common wrong belief about the subtopic and the correction, with a tiny example.
+renderer: markdown
+prompt: |
+  Name one wrong belief students commonly hold about this subtopic and correct it, in Markdown.
+  Use the book excerpts' own terms. Shape: a bold one-line statement of the misconception, then
+  the correction in one or two sentences, then (for worked and faded) a tiny code example in a
+  python code fence of at most 4 lines.
+fits: [misconception, concept]
+guidance_levels: [worked, faded, cue]
+inputs: [subtopic, chunks]
+checks: []

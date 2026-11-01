@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -124,17 +125,25 @@ class PedagogicalEvaluation(BaseModel):
         ]
 
 
-def derive_gate(metrics: list[MetricResult]) -> JudgeGate | None:
-    """Reduce the four metric results to one suggestion, or ``None``.
+def derive_gate(
+    metrics: list[MetricResult], *, expected: Collection[JudgeMetricId] | None = None
+) -> JudgeGate | None:
+    """Reduce the metric results to one suggestion, or ``None``.
 
-    All four pass, approve. None of them pass, reject. Anything between needs a
+    All pass, approve. None of them pass, reject. Anything between needs a
     human. Returning ``None`` when a judge is missing is deliberate: a question
     whose judges partly failed still reaches the professor, and it reaches them
     labelled as unjudged rather than as a verdict resting on partial evidence.
+
+    ``expected`` is the panel that was asked (default: every ``JudgeMetricId``). A
+    metric outside it was never run, so it is absent rather than missing
+    (``settings.judge_metrics_enabled``); a metric inside it with no result is missing.
     """
-    if len(metrics) < len(JudgeMetricId):
+    panel = set(JudgeMetricId if expected is None else expected)
+    present = {row.metric for row in metrics}
+    if not panel or not panel <= present:
         return None
-    verdicts = [row.passed for row in metrics]
+    verdicts = [row.passed for row in metrics if row.metric in panel]
     if any(passed is None for passed in verdicts):
         return None
     if all(verdicts):
@@ -225,24 +234,30 @@ def evaluation_from_metrics(
     question_id: int | None,
     judge_model: str,
     rubric_version: str = RUBRIC_VERSION,
+    expected: Collection[JudgeMetricId] | None = None,
 ) -> PedagogicalEvaluation:
-    """Assemble the stored evaluation from whatever the four judges returned.
+    """Assemble the stored evaluation from whatever the judges returned.
+
+    ``expected`` is the panel that was run (default: all four metrics). The evaluation
+    is ``COMPLETED`` when every expected judge answered; a metric outside the panel is
+    absent, not a failure.
 
     ``rubric_version`` is passed in rather than read from the module constant:
     once a professor may edit a judge prompt (ADR-038), the panel that produced
     these metrics is a fact about the call, not about the code.
     """
-    answered = [row for row in metrics if row.status is MetricStatus.COMPLETED]
+    panel = set(JudgeMetricId if expected is None else expected)
+    answered = {row.metric for row in metrics if row.status is MetricStatus.COMPLETED}
     if not answered:
         status = PedagogicalEvalStatus.ERROR
-    elif len(answered) < len(JudgeMetricId):
+    elif not panel <= answered:
         status = PedagogicalEvalStatus.PARTIAL
     else:
         status = PedagogicalEvalStatus.COMPLETED
     return PedagogicalEvaluation(
         question_id=question_id,
         status=status,
-        gate=derive_gate(metrics),
+        gate=derive_gate(metrics, expected=panel),
         metrics=metrics,
         judge_model=judge_model,
         rubric_version=rubric_version,

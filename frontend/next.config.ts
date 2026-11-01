@@ -14,7 +14,22 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` }];
   },
+  // Professor screens moved under /courses/{id}; an old bookmark lands on the
+  // course list rather than a 404.
+  async redirects() {
+    return ["books", "curriculum", "questions", "review", "coverage", "judges", "dashboard", "feedback"]
+      .flatMap((section) => [`/${section}`, `/${section}/:path*`])
+      .concat(["/students", "/students/roster"])
+      .map((source) => ({ source, destination: "/courses", permanent: false }));
+  },
   typedRoutes: true,
+  // Opening the dev server from another machine (e.g. over Tailscale) needs its host listed, or
+  // Next blocks its dev scripts and the page never becomes interactive. Comma-separated hosts in
+  // DEV_ALLOWED_ORIGINS (frontend/.env.local); unset means localhost only, as before.
+  allowedDevOrigins: (process.env.DEV_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean),
   experimental: {
     // Next's rewrite proxy kills the upstream connection after 30s by default
     // (dist/server/lib/router-utils/proxy-request.js). Coverage generation runs

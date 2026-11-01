@@ -19,6 +19,9 @@ dist/
 # Runtime data (SQLite database, uploaded books, generated artifacts)
 data/
 
+# Downloaded model weights: `python -m scripts.download_docling_models` fills models/docling
+models/
+
 # Editors / OS
 .vscode/
 .idea/
@@ -32,9 +35,19 @@ desktop.ini
 /CLAUDE.md
 /frontend/CLAUDE.md
 /frontend/AGENTS.md
+/AGENTS.md
 
 # Source textbooks (PDFs). Out of scope per ADR-012..016: the app imports
 # structured book JSON, never a PDF. Kept locally, never committed.
 # Anchored to the repository root: unanchored, this also swallowed the console's
 # /books route, which then went untracked and unscanned by Tailwind.
 /books/
+
+# Dev-server PIDs and logs (scripts/dev.ps1)
+.dev/
+
+# Generated dev/eval artifacts (never commit)
+*_fresh_*.log
+raganything_eval/rag_storage/
+raganything_eval/*.log
+spikes/

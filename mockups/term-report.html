@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Term report · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .rchart .bar { fill: var(--primary); }
+    .rchart .slot { fill: none; stroke: var(--border); stroke-dasharray: 3 3; }
+    .rchart .grid-line { stroke: var(--border); }
+    .rchart .ref-line { stroke: var(--muted-foreground); stroke-dasharray: 4 3; }
+    .rchart .axis { stroke: var(--hairline-2); }
+    .rchart .axis-text { fill: var(--muted-foreground); font-size: 11px; font-family: var(--font-sans); }
+    .rchart .val-text { fill: var(--foreground); font-size: 11px; font-family: var(--font-sans); font-weight: 500; }
+    .rchart .dot-c1 { fill: var(--primary); }
+    .rchart .dot-c2 { fill: var(--card); stroke: var(--primary); stroke-width: 1.5; }
+    .rchart .trend { stroke: var(--muted-foreground); stroke-width: 1.25; }
+    .report-section { break-inside: avoid; page-break-inside: avoid; }
+    @page { margin: 14mm; }
+    @media print {
+      .mock-banner, #sidebar, .mock-topbar, .mock-toast-host, .no-print { display: none !important; }
+      .mock-shell { display: block; min-height: 0; }
+      .mock-content { max-width: none; padding: 0; margin: 0; }
+      html, body { background: var(--card) !important; }
+      main { max-width: none !important; gap: 14px !important; }
+      .card { box-shadow: none !important; }
+      .print-only { display: block !important; }
+      html { font-size: 11px; }
+      .table-container { overflow: visible !important; }
+      .card { padding-top: 14px !important; padding-bottom: 14px !important; gap: 10px !important; }
+      .card.py-0 { padding-top: 0 !important; padding-bottom: 0 !important; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+    .print-only { display: none; }
+  </style>
+</head>
+<!-- G10 · Term report: printable end-of-term summary for a teaching portfolio or a chair asking "did it help?". -->
+<body data-scope="course" data-nav="term-report" data-title="Term report">
+  <main x-data="page()" x-cloak class="grid gap-6 max-w-5xl">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name} · ${course.term}`"></p>
+        <h1 class="text-2xl font-semibold">Term report</h1>
+        <p class="text-sm text-muted-foreground mt-0.5" x-show="r" x-text="`As of Wed, Sep 30 · week ${r?.week} of ${r?.weeks}. Draft: the final version is generated after the final exam (Dec 16).`"></p>
+      </div>
+      <div class="ml-auto flex gap-2 no-print" x-show="r">
+        <a class="btn" data-variant="outline" :href="Mock.link('insights.html')">Class insights</a>
+        <button type="button" class="btn" onclick="window.print()"><i data-lucide="printer"></i>Print / Save as PDF</button>
+      </div>
+    </div>
+
+    <!-- Empty state: no students, no practice -->
+    <template x-if="!r">
+      <div class="card">
+        <section class="grid justify-items-start gap-3 py-6">
+          <span class="grid size-10 place-items-center rounded-lg tone-muted"><i data-lucide="file-text"></i></span>
+          <div>
+            <h2 class="font-semibold">No term report yet</h2>
+            <p class="text-sm text-muted-foreground max-w-prose" x-text="`${course.code} has no students or practice yet, so there is nothing to summarise. The report fills in once a class is open and students practise; it covers enrolment, weekly activity, assignment completion, mastery and the question work done.`"></p>
+          </div>
+          <div class="flex gap-2">
+            <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('course.html')">Back to setup</a>
+            <a class="btn" data-variant="ghost" data-size="sm" :href="Mock.link('term-report.html', { course: 'python' })">See CS 135's report</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="r">
+      <div class="grid gap-5">
+        <p class="print-only text-xs text-muted-foreground">Adaptive Trainer · generated Sep 30, 2026 for Maya Chen. Draft, week 5 of 15.</p>
+
+        <!-- 1 Enrolment -->
+        <section class="card report-section gap-4">
+          <header><h2>1 · Enrolment</h2><p>Students on the roster of both sections.</p></header>
+          <section class="grid gap-4">
+            <dl class="grid grid-cols-2 md:grid-cols-5 print:grid-cols-5 gap-x-6 gap-y-3 text-sm">
+              <template x-for="k in enrolment" :key="k.label">
+                <div class="grid gap-0.5">
+                  <dt class="text-xs text-muted-foreground" x-text="k.label"></dt>
+                  <dd class="text-xl font-display font-semibold tabular-nums" x-text="k.value"></dd>
+                  <dd class="text-xs text-muted-foreground" x-text="k.sub"></dd>
+                </div>
+              </template>
+            </dl>
+            <p class="text-xs text-muted-foreground" x-text="r.enrolment.dropped_note"></p>
+          </section>
+        </section>
+
+        <!-- 2 Practice activity -->
+        <section class="card report-section gap-4">
+          <header><h2>2 · Practice activity by week</h2><p>Students who answered at least one question that week. Weeks 6–15 haven't happened yet.</p></header>
+          <section class="grid md:grid-cols-[1fr_12rem] print:grid-cols-[1fr_11rem] gap-6 items-center">
+            <div class="rchart" x-html="weeklyChart"></div>
+            <dl class="grid gap-3 text-sm">
+              <div><dt class="text-xs text-muted-foreground">Average per week</dt><dd class="font-medium tabular-nums" x-text="`${avgActive.toFixed(1)} of ${n.students} (${Mock.pct(avgActive / n.students)})`"></dd></div>
+              <div><dt class="text-xs text-muted-foreground">This week (Sep 28 – Oct 4)</dt><dd class="font-medium tabular-nums" x-text="`${ins.students_active} students · ${ins.attempts.toLocaleString()} answers`"></dd></div>
+              <div><dt class="text-xs text-muted-foreground">Answers so far, all students</dt><dd class="font-medium tabular-nums" x-text="totalAttempts.toLocaleString()"></dd></div>
+            </dl>
+          </section>
+        </section>
+
+        <!-- 3 Assignment completion -->
+        <section class="card report-section gap-0 py-0">
+          <header class="px-6 pt-5 pb-3 grid gap-1"><h2>3 · Assignment completion</h2><p class="text-sm text-muted-foreground">Weekly practice assignments, 5% of the course grade. Completion counts done and late.</p></header>
+          <div class="table-container">
+            <table class="table text-sm">
+              <thead><tr><th>Assignment</th><th>Due</th><th class="text-end">Done</th><th class="text-end">Late</th><th class="text-end">Partial</th><th class="text-end">Not done</th><th class="text-end">Excused</th><th class="w-40">Completion</th></tr></thead>
+              <tbody>
+                <template x-for="a in assignments" :key="a.id">
+                  <tr>
+                    <td><a class="hover:underline font-medium" :href="Mock.link('assignment.html', { id: a.id })" x-text="a.name"></a></td>
+                    <td class="tabular-nums whitespace-nowrap" x-text="fmtDate(a.due)"></td>
+                    <template x-if="a.status === 'closed' || a.status === 'open'">
+                      <td class="text-end tabular-nums" x-text="a.c.done"></td>
+                    </template>
+                    <template x-if="a.status === 'closed' || a.status === 'open'">
+                      <td class="text-end tabular-nums" x-text="a.status === 'open' ? '—' : a.c.late"></td>
+                    </template>
+                    <template x-if="a.status === 'closed' || a.status === 'open'">
+                      <td class="text-end tabular-nums" x-text="a.c.partial"></td>
+                    </template>
+                    <template x-if="a.status === 'closed' || a.status === 'open'">
+                      <td class="text-end tabular-nums" x-text="a.c.none"></td>
+                    </template>
+                    <template x-if="a.status === 'closed' || a.status === 'open'">
+                      <td class="text-end tabular-nums" x-text="a.c.excused || '—'"></td>
+                    </template>
+                    <template x-if="a.status === 'closed' || a.status === 'open'">
+                      <td>
+                        <div class="flex items-center gap-2">
+                          <div class="h-1.5 flex-1 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${a.c.rate * 100}%` }"></div></div>
+                          <span class="tabular-nums text-xs w-16 text-end" x-text="a.status === 'open' ? `${Mock.pct(a.c.rate)} so far` : Mock.pct(a.c.rate)"></span>
+                        </div>
+                      </td>
+                    </template>
+                    <template x-if="a.status !== 'closed' && a.status !== 'open'">
+                      <td colspan="6" class="text-muted-foreground" x-text="`Opens ${fmtDate(a.opens)}`"></td>
+                    </template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p class="px-6 py-3 border-t text-xs text-muted-foreground" x-text="`Closed assignments: ${Mock.pct(closedRate)} completed on average. Week 5 is still open (due Fri Oct 2); partial there means in progress.`"></p>
+        </section>
+
+        <!-- 4 Mastery vs practice -->
+        <section class="card report-section gap-4">
+          <header><h2>4 · Mastery and practice volume</h2><p>Each dot is one student: answers submitted so far against average mastery on released topics.</p></header>
+          <section class="grid md:grid-cols-[1fr_15rem] print:grid-cols-[1fr_13rem] gap-6 items-start">
+            <div class="rchart" x-html="scatter"></div>
+            <div class="grid gap-3 text-sm">
+              <div class="flex items-center gap-4 text-xs text-muted-foreground">
+                <span class="inline-flex items-center gap-1.5"><svg width="10" height="10" class="rchart"><circle class="dot-c1" cx="5" cy="5" r="4"/></svg>Section 001</span>
+                <span class="inline-flex items-center gap-1.5"><svg width="10" height="10" class="rchart"><circle class="dot-c2" cx="5" cy="5" r="3.5"/></svg>Section 002</span>
+              </div>
+              <div><div class="text-xs text-muted-foreground">Correlation (Pearson r, n = 28)</div><div class="text-xl font-display font-semibold tabular-nums" x-text="corr.toFixed(2)"></div><div class="text-xs" x-text="Math.abs(corr) < 0.2 ? 'No clear relationship at week 5.' : (corr > 0 ? 'More practice goes with higher mastery.' : 'More practice goes with lower mastery.')"></div></div>
+              <p class="text-xs text-muted-foreground">This is a correlation, not an effect. Students who practise more may already be stronger or more motivated, and there is no comparison group. Don't read it as "practice raised mastery by X".</p>
+              <p class="text-xs text-muted-foreground" x-text="`Top third by answers (${hiGroup.n} students): ${Mock.pct(hiGroup.m)} avg mastery. Bottom third (${loGroup.n}): ${Mock.pct(loGroup.m)}.`"></p>
+            </div>
+          </section>
+        </section>
+
+        <!-- 5 Weak topics -->
+        <section class="card report-section gap-0 py-0">
+          <header class="px-6 pt-5 pb-3 grid gap-1"><h2>5 · Topics that stayed weak</h2><p class="text-sm text-muted-foreground" x-text="`Released topics where the class average is still under the 70% assignment target, weakest first. ${weak.length} of ${released.length} released topics.`"></p></header>
+          <div class="table-container">
+            <table class="table text-sm">
+              <thead><tr><th>Topic</th><th>Released</th><th class="text-end">Class avg.</th><th class="text-end">Students under 70%</th><th>Most-missed subtopic this week</th></tr></thead>
+              <tbody>
+                <template x-for="t in weak" :key="t.id">
+                  <tr>
+                    <td class="font-medium" x-text="t.name"></td>
+                    <td class="text-muted-foreground" x-text="`Week ${t.week}`"></td>
+                    <td class="text-end tabular-nums"><span class="pill" :class="t.avg < 0.5 ? 'tone-critical' : 'tone-warn'" x-text="Mock.pct(t.avg)"></span></td>
+                    <td class="text-end tabular-nums" x-text="`${t.under} of ${n.students}`"></td>
+                    <td>
+                      <span x-show="t.mis" x-text="t.mis ? `${t.mis.subtopic}: ${Mock.pct(t.mis.top_wrong_share)} chose ${t.mis.top_wrong}` : ''"></span>
+                      <span class="text-muted-foreground" x-show="!t.mis">—</span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p class="px-6 py-3 border-t text-xs text-muted-foreground">Dictionaries opened this week (week 5), so its low average is expected. Improved since week 3: while loops (48% → 71%), if / elif / else (62% → 80%).</p>
+        </section>
+
+        <!-- 6 Content work -->
+        <section class="card report-section gap-4">
+          <header><h2>6 · Question bank work</h2><p>Questions generated from Think Python and Python for Everybody, and what happened to them.</p></header>
+          <section class="grid md:grid-cols-2 print:grid-cols-2 gap-6">
+            <dl class="grid grid-cols-3 gap-x-4 gap-y-3 text-sm content-start">
+              <template x-for="k in content" :key="k.label">
+                <div class="grid gap-0.5">
+                  <dt class="text-xs text-muted-foreground" x-text="k.label"></dt>
+                  <dd class="text-xl font-display font-semibold tabular-nums" x-text="k.value"></dd>
+                </div>
+              </template>
+              <div class="col-span-3 text-xs text-muted-foreground" x-text="`Approval rate at first review went from ${Mock.pct(al.approval_rate_trend[0])} to ${Mock.pct(al.approval_rate_trend.at(-1))} over ${al.approval_rate_trend.length} review rounds; ${al.learned_rules.filter((x) => x.enabled).length} rules learned from your rejections are on.`"></div>
+            </dl>
+            <div>
+              <div class="text-xs text-muted-foreground mb-2" x-text="`Judge agreement with your first review (${al.judges[0].reviews} reviews)`"></div>
+              <table class="table text-sm">
+                <tbody>
+                  <template x-for="j in al.judges" :key="j.id">
+                    <tr>
+                      <td class="py-1.5" x-text="MOCK.judge(j.id).label"></td>
+                      <td class="py-1.5 w-40"><div class="h-1.5 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="{ background: j.agreement < 0.75 ? 'var(--warn-solid)' : 'var(--primary)', width: `${j.agreement * 100}%` }"></div></div></td>
+                      <td class="py-1.5 text-end tabular-nums w-14" x-text="Mock.pct(j.agreement)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- 7 Student reports -->
+        <section class="card report-section gap-0 py-0">
+          <header class="px-6 pt-5 pb-3 grid gap-1"><h2>7 · Student reports handled</h2><p class="text-sm text-muted-foreground" x-text="`${reports.length} reports of a wrong or unclear question · ${resolved.length} resolved · ${reports.length - resolved.length} open · median ${r.reports_median_hours} h to resolve.`"></p></header>
+          <div class="table-container">
+            <table class="table text-sm">
+              <thead><tr><th>Reported</th><th>Reason</th><th>Question</th><th>Outcome</th></tr></thead>
+              <tbody>
+                <template x-for="p in reports" :key="p.id">
+                  <tr>
+                    <td class="tabular-nums whitespace-nowrap" x-text="fmtDate(p.at.slice(0, 10))"></td>
+                    <td x-text="MOCK.REPORT_REASONS[p.reason]"></td>
+                    <td><a class="hover:underline" :href="Mock.link('question.html', { id: p.question_id })" x-text="`#${p.question_id} · ${MOCK.question(p.question_id).subtopic}`"></a></td>
+                    <td>
+                      <span class="pill" :class="p.status === 'open' ? 'tone-warn' : 'tone-ok'" x-text="p.status === 'open' ? 'Open' : (p.resolution.action === 'dismissed' ? 'Dismissed with reply' : 'Fixed: schedule')"></span>
+                      <span class="text-xs text-muted-foreground ml-1" x-show="p.resolution" x-text="p.resolution ? `by ${p.resolution.by}` : ''"></span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p class="px-6 py-3 border-t text-xs text-muted-foreground no-print"><a class="underline" :href="Mock.link('reports.html')">Open student reports</a></p>
+        </section>
+
+        <p class="text-xs text-muted-foreground">Mastery is the model's estimate of the chance a student answers a new question on that topic correctly. Figures cover both sections, 28 students, Aug 31 – Sep 30.</p>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-term.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const r = MOCK.term_report[c.id] || null;
+      const base = { course: c, r };
+      if (!r) return base;
+
+      const n = c.numbers;
+      const students = MOCK.students.filter((s) => s.course === c.id);
+      const ins = MOCK.insights[c.id];
+      const sched = MOCK.schedule[c.id];
+      const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const fmtDate = (iso) => { const [, m, d] = iso.split("-").map(Number); return `${MONTHS[m - 1]} ${d}`; };
+
+      // ---- weekly activity bar chart (weeks 1–15, future weeks as empty slots)
+      function weeklyChart() {
+        const W = 640, H = 190, L = 30, R = 8, T = 16, B = 24, pw = W - L - R, ph = H - T - B;
+        const max = n.students, y = (v) => T + ph - (v / max) * ph;
+        const slot = pw / sched.weeks.length, bw = slot - 10;
+        let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Students active per week">`;
+        [0, 7, 14, 21, 28].forEach((t) => {
+          s += `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`;
+        });
+        s += `<line class="ref-line" x1="${L}" x2="${W - R}" y1="${y(max)}" y2="${y(max)}"/><text class="axis-text" x="${W - R}" y="${y(max) - 4}" text-anchor="end">enrolled (${max})</text>`;
+        sched.weeks.forEach((w, i) => {
+          const x = L + i * slot + 5, v = ins.weekly_active[i];
+          if (v != null) {
+            s += `<rect class="bar" x="${x}" y="${y(v)}" width="${bw}" height="${T + ph - y(v)}" rx="2"/>`;
+            s += `<text class="val-text" x="${x + bw / 2}" y="${y(v) - 4}" text-anchor="middle">${v}</text>`;
+          } else {
+            s += `<rect class="slot" x="${x}" y="${T + ph - 18}" width="${bw}" height="18" rx="2"/>`;
+          }
+          s += `<text class="axis-text" x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${w.week}</text>`;
+        });
+        s += `<line class="axis" x1="${L}" x2="${W - R}" y1="${T + ph}" y2="${T + ph}"/>`;
+        return s + "</svg>";
+      }
+
+      // ---- assignment completion
+      const assignments = MOCK.assignments.filter((a) => a.course === c.id).map((a) => {
+        const rs = students.map((s) => MOCK.assignment_results[s.id][a.id]);
+        const k = (st) => rs.filter((x) => st.includes(x.state)).length;
+        const cc = { done: k(["done"]), late: k(["late"]), partial: k(["partial", "in_progress"]), none: k(["missed", "not_started"]), excused: k(["excused"]) };
+        cc.rate = (cc.done + cc.late) / Math.max(1, rs.length - cc.excused);
+        return { ...a, c: cc };
+      });
+      const closed = assignments.filter((a) => a.status === "closed");
+      const closedRate = closed.reduce((s, a) => s + a.c.rate, 0) / closed.length;
+
+      // ---- scatter: attempts vs avg mastery
+      const xs = students.map((s) => s.attempts), ys = students.map((s) => s.avg_mastery);
+      const mean = (a) => a.reduce((p, q) => p + q, 0) / a.length;
+      const mx = mean(xs), my = mean(ys);
+      const cov = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+      const sx = Math.sqrt(xs.reduce((s, x) => s + (x - mx) ** 2, 0)), sy = Math.sqrt(ys.reduce((s, v) => s + (v - my) ** 2, 0));
+      const corr = cov / (sx * sy);
+      const slope = cov / (sx * sx), icpt = my - slope * mx;
+      function scatter() {
+        const W = 560, H = 260, L = 38, R = 10, T = 10, B = 34, pw = W - L - R, ph = H - T - B;
+        const X0 = 0, X1 = 200, Y0 = 0.3, Y1 = 0.8;
+        const x = (v) => L + ((v - X0) / (X1 - X0)) * pw, y = (v) => T + ph - ((v - Y0) / (Y1 - Y0)) * ph;
+        let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Answers submitted against average mastery, one dot per student">`;
+        [0.3, 0.4, 0.5, 0.6, 0.7, 0.8].forEach((t) => {
+          s += `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${Math.round(t * 100)}%</text>`;
+        });
+        [0, 50, 100, 150, 200].forEach((t) => { s += `<text class="axis-text" x="${x(t)}" y="${T + ph + 15}" text-anchor="middle">${t}</text>`; });
+        s += `<text class="axis-text" x="${L + pw / 2}" y="${H - 3}" text-anchor="middle">answers submitted</text>`;
+        s += `<line class="axis" x1="${L}" x2="${W - R}" y1="${T + ph}" y2="${T + ph}"/>`;
+        s += `<line class="trend" x1="${x(20)}" y1="${y(icpt + slope * 20)}" x2="${x(196)}" y2="${y(icpt + slope * 196)}"/>`;
+        students.forEach((st) => {
+          s += `<circle class="${st.class_id === 'c1' ? 'dot-c1' : 'dot-c2'}" cx="${x(st.attempts).toFixed(1)}" cy="${y(st.avg_mastery).toFixed(1)}" r="4"><title>${Mock.esc(st.name)}: ${st.attempts} answers, ${Math.round(st.avg_mastery * 100)}%</title></circle>`;
+        });
+        return s + "</svg>";
+      }
+      const sorted = [...students].sort((a, b) => b.attempts - a.attempts), third = Math.round(students.length / 3);
+      const grp = (arr) => ({ n: arr.length, m: mean(arr.map((s) => s.avg_mastery)) });
+
+      // ---- weak topics (released only)
+      const released = MOCK.releasedTopics(c.id);
+      const weekOf = (tid) => sched.weeks.find((w) => w.topics.includes(tid)).week;
+      const weak = c.taxonomy.filter((t) => released.includes(t.id)).map((t) => {
+        const v = students.map((s) => s.mastery[t.id]);
+        return { id: t.id, name: t.name, week: weekOf(t.id), avg: mean(v), under: v.filter((x) => x < 0.7).length,
+          mis: ins.misconceptions.find((m) => m.topic === t.name) || null };
+      }).filter((t) => t.avg < 0.7).sort((a, b) => a.avg - b.avg);
+
+      const al = MOCK.alignment;
+      const qs = MOCK.questions.filter((q) => q.course === c.id);
+      const cnt = (st) => qs.filter((q) => q.status === st).length;
+      const reports = MOCK.reports.filter((p) => MOCK.question(p.question_id)?.course === c.id);
+      const sec = MOCK.classes.filter((k) => k.course === c.id);
+      const e = r.enrolment;
+
+      return {
+        ...base, n, ins, al, fmtDate, released, weak, reports, assignments, closedRate, corr,
+        resolved: reports.filter((p) => p.status === "resolved"),
+        weeklyChart: weeklyChart(),
+        scatter: scatter(),
+        hiGroup: grp(sorted.slice(0, third)), loGroup: grp(sorted.slice(-third)),
+        avgActive: mean(ins.weekly_active),
+        totalAttempts: students.reduce((s, x) => s + x.attempts, 0),
+        enrolment: [
+          { label: "Enrolled now", value: e.now, sub: `${e.first_day} on the first day` },
+          ...sec.map((k) => ({ label: k.name.split(" (")[0], value: k.students, sub: k.name.match(/\((.*)\)/)[1] })),
+          { label: "Retention", value: Mock.pct((e.first_day - e.dropped) / e.first_day), sub: `${e.first_day - e.dropped} of ${e.first_day} first-day students still enrolled` },
+          { label: "Practised this week", value: ins.students_active, sub: `${Mock.pct(ins.students_active / e.now)} of the class` },
+        ],
+        content: [
+          { label: "Generated", value: qs.length },
+          { label: "Reviewed", value: cnt("approved") + cnt("rejected") },
+          { label: "Approved", value: cnt("approved") },
+          { label: "Rejected", value: cnt("rejected") },
+          { label: "Awaiting review", value: cnt("validation_passed") },
+          { label: "Failed checks", value: cnt("validation_failed") },
+        ],
+      };
+    }
+  </script>
+</body>
+</html>

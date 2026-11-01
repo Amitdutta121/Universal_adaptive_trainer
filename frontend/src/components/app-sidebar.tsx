@@ -2,14 +2,36 @@
 
 /** The persistent professor navigation, driven entirely by `lib/navigation.ts`. */
 
-import { ChevronRight, LogOut, Moon, Sparkles, Sun, SunMoon } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  LayoutDashboard,
+  LogOut,
+  Moon,
+  SlidersHorizontal,
+  Sun,
+  SunMoon,
+} from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, useEffect, useState } from "react";
+import { SettingsDialog } from "@/app/settings/settings-screen";
+import { LogoGlyph } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -26,16 +48,21 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
-import { useCurrentUser, useHealth, useLogout } from "@/lib/api/queries";
+import { useCourse, useCourses, useCurrentUser, useHealth, useLogout } from "@/lib/api/queries";
+import { SetupProgress } from "@/components/course-setup/setup-progress";
+import { courseIdFromPath, coursePath } from "@/lib/course";
 import { NAV_SECTIONS, type NavSection } from "@/lib/navigation";
 
 type AppTheme = "light" | "dark" | "system";
 
+/** The course dashboard, relative to the open course (`app/courses/[courseId]/dashboard`). */
+const DASHBOARD_PATH = "/dashboard";
+
 /** Presentational grouping only — every key still comes from the single `NAV_SECTIONS` source of truth. */
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
-  { label: "Content Pipeline", keys: ["books", "curriculum", "questions", "generate", "review"] },
-  { label: "Calibration", keys: ["instructions", "judges", "coverage"] },
-  { label: "Adaptive Training", keys: ["classrooms", "roster"] },
+  { label: "Content Pipeline", keys: ["books", "curriculum", "tutorials", "questions"] },
+  { label: "Calibration", keys: ["review", "coverage", "judges"] },
+  { label: "Adaptive Training", keys: ["classrooms", "roster", "students"] },
 ];
 
 function sectionsFor(keys: readonly string[]): NavSection[] {
@@ -57,10 +84,80 @@ function pathMatchesSection(pathname: string, path: string): boolean {
 function isSectionActive(pathname: string, section: NavSection): boolean {
   if (!pathMatchesSection(pathname, section.path)) return false;
   return !NAV_SECTIONS.some(
-    (other) =>
-      other.path.length > section.path.length &&
-      pathMatchesSection(pathname, other.path),
+    (other) => other.path.length > section.path.length && pathMatchesSection(pathname, other.path),
   );
+}
+
+/** The way back to the course list, and the open course's name. */
+function CourseSwitcher({ courseId, sectionPath }: { courseId: number; sectionPath: string }) {
+  const course = useCourse(courseId);
+  const courses = useCourses();
+  const name = course.data?.name ?? (course.isError ? "Unknown course" : "Loading…");
+
+  // Same section in the other course. Not the exact page: an id such as
+  // `/books/5` belongs to this course and would be a 404 in the other one.
+  const switchTo = (otherId: number) => {
+    if (otherId === courseId) return;
+    // A full load, not a client push: query keys do not name a course, so a
+    // fresh document is what guarantees nothing of this course's data lingers.
+    window.location.assign(coursePath(otherId, sectionPath));
+  };
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton asChild tooltip="My courses" className="text-[13px]">
+          <Link href={"/courses" as Route}>
+            <ArrowLeft />
+            <span>My courses</span>
+          </Link>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton size="lg" tooltip={`Course: ${name}`}>
+              <span className="flex min-w-0 flex-col text-left leading-tight">
+                <span className="text-[11px] text-muted-foreground">Course</span>
+                <span className="truncate font-medium text-[13px]">{name}</span>
+              </span>
+              <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuLabel className="text-muted-foreground text-xs">
+              Switch course
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={String(courseId)}
+              onValueChange={(value) => switchTo(Number(value))}
+            >
+              {(courses.data?.courses ?? []).map((item) => (
+                <DropdownMenuRadioItem key={item.id} value={String(item.id)}>
+                  <span className="truncate">{item.name}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href={"/courses" as Route}>All courses…</Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
+/** The most specific nav section the path is in, so a course switch lands somewhere real. */
+function sectionOf(pathname: string): string {
+  const match = NAV_SECTIONS.flatMap((section) => [
+    section.path,
+    ...(section.children ?? []).map((child) => child.path),
+  ])
+    .filter((path) => pathMatchesSection(pathname, path))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ?? "/dashboard";
 }
 
 function LlmStatus() {
@@ -134,6 +231,26 @@ function ThemeSwitcher() {
   );
 }
 
+/** App settings (models, providers, appearance), open to every account; model edits are admin-only. */
+function SettingsLink() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="app-sidebar-footer-row text-left text-[13px] hover:underline"
+        onClick={() => setOpen(true)}
+      >
+        <span className="flex items-center gap-2">
+          <SlidersHorizontal className="size-3.5" />
+          Settings
+        </span>
+      </button>
+      <SettingsDialog open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
 function AccountFooter() {
   const router = useRouter();
   const currentUser = useCurrentUser();
@@ -171,23 +288,62 @@ function AccountFooter() {
 }
 
 export function AppSidebar() {
-  const pathname = usePathname();
+  const fullPath = usePathname();
+  const courseId = courseIdFromPath(fullPath);
+  // Sections are declared relative to the course, so match against the part of
+  // the path after `/courses/{id}`.
+  const pathname = courseId === null ? fullPath : fullPath.replace(/^\/courses\/\d+/, "") || "/";
+  const href = (path: string): Route =>
+    courseId === null ? ("/courses" as Route) : coursePath(courseId, path);
 
   return (
     <Sidebar collapsible="icon" className="app-sidebar">
       <SidebarHeader>
-        <Link href="/" className="app-sidebar-brand group-data-[collapsible=icon]:justify-center">
+        <Link
+          href={href("/dashboard")}
+          className="app-sidebar-brand group-data-[collapsible=icon]:justify-center"
+        >
           <span className="app-sidebar-brand-mark">
-            <Sparkles className="size-4" />
+            <LogoGlyph className="size-5" />
           </span>
           <span className="app-sidebar-brand-copy group-data-[collapsible=icon]:hidden">
             <span className="app-sidebar-brand-title">Adaptive Trainer</span>
             <span className="app-sidebar-brand-subtitle">Instructor Studio</span>
           </span>
         </Link>
+        {courseId === null ? null : (
+          <CourseSwitcher courseId={courseId} sectionPath={sectionOf(pathname)} />
+        )}
       </SidebarHeader>
 
       <SidebarContent>
+        {/* The course's dashboard, on its own above the groups: it is not a NAV_SECTIONS entry,
+            because the dashboard draws its cards from that list and would show itself. */}
+        {courseId === null ? null : (
+          <>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === DASHBOARD_PATH}
+                      tooltip="Dashboard"
+                      className="text-[13px]"
+                    >
+                      <Link href={href(DASHBOARD_PATH)}>
+                        <LayoutDashboard />
+                        <span>Dashboard</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+              <SetupProgress courseId={courseId} />
+            </SidebarGroup>
+            <SidebarSeparator />
+          </>
+        )}
         {NAV_GROUPS.map((group, index) => {
           const sections = sectionsFor(group.keys);
           if (sections.length === 0) return null;
@@ -228,7 +384,7 @@ export function AppSidebar() {
                                     return (
                                       <SidebarMenuSubItem key={child.key}>
                                         <SidebarMenuSubButton asChild isActive={childActive}>
-                                          <Link href={child.path}>{child.label}</Link>
+                                          <Link href={href(child.path)}>{child.label}</Link>
                                         </SidebarMenuSubButton>
                                       </SidebarMenuSubItem>
                                     );
@@ -248,7 +404,7 @@ export function AppSidebar() {
                             tooltip={section.label}
                             className="text-[13px]"
                           >
-                            <Link href={section.path}>
+                            <Link href={href(section.path)}>
                               <Icon />
                               <span>{section.label}</span>
                             </Link>
@@ -271,6 +427,7 @@ export function AppSidebar() {
             <ThemeSwitcher />
           </div>
           <LlmStatus />
+          <SettingsLink />
           <SidebarSeparator className="my-0" />
           <AccountFooter />
         </div>

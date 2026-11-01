@@ -1,0 +1,240 @@
+{
+  "$defs": {
+    "Difficulty": {
+      "description": "Question difficulty. Selected from student topic mastery.",
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ],
+      "title": "Difficulty",
+      "type": "string"
+    },
+    "ExampleOption": {
+      "description": "One choice of a choice-type example.",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "correct": {
+          "default": false,
+          "title": "Correct",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ExampleOption",
+      "type": "object"
+    },
+    "ExampleQuestion": {
+      "description": "One worked example shown on a style card, answer key included.\n\nMirrors ``ExampleQuestion`` in ``frontend/src/app/experiments/question-setup/mock-types.ts``.",
+      "properties": {
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/ExampleOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answer"
+        },
+        "tests": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tests"
+        },
+        "solution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Solution"
+        },
+        "test_cases": {
+          "items": {
+            "$ref": "#/$defs/ExampleTestCase"
+          },
+          "title": "Test Cases",
+          "type": "array"
+        },
+        "grounding": {
+          "default": "",
+          "title": "Grounding",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "title": "ExampleQuestion",
+      "type": "object"
+    },
+    "ExampleTestCase": {
+      "description": "One hidden test of a code example. Same shape as a generated question's test case\n(``app.generation.schemas.ExecutableTestCase``), which this pure module cannot import.",
+      "properties": {
+        "stdin": {
+          "default": "",
+          "title": "Stdin",
+          "type": "string"
+        },
+        "stdout": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stdout"
+        },
+        "assert": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assert"
+        }
+      },
+      "title": "ExampleTestCase",
+      "type": "object"
+    },
+    "QuestionType": {
+      "description": "Assessment format (independent of scoring mode).",
+      "enum": [
+        "multiple_choice",
+        "true_false",
+        "output_prediction",
+        "code_completion",
+        "debugging",
+        "parsons",
+        "coding",
+        "numeric_response",
+        "equation_response"
+      ],
+      "title": "QuestionType",
+      "type": "string"
+    }
+  },
+  "description": "One style in a subject's library.\n\n``id`` is stable and namespaced by subject (``py.trace_output``): it is stored on every\nquestion generated in this style and on every approved setup, so renaming a style must not\nchange it.",
+  "properties": {
+    "id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "subject": {
+      "title": "Subject",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "question_type": {
+      "$ref": "#/$defs/QuestionType"
+    },
+    "difficulty_range": {
+      "items": {
+        "$ref": "#/$defs/Difficulty"
+      },
+      "minItems": 1,
+      "title": "Difficulty Range",
+      "type": "array"
+    },
+    "checked_by": {
+      "title": "Checked By",
+      "type": "string"
+    },
+    "applies_to": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Applies To",
+      "type": "array"
+    },
+    "examples": {
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/ExampleQuestion"
+        },
+        {
+          "$ref": "#/$defs/ExampleQuestion"
+        }
+      ],
+      "title": "Examples",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "summary",
+    "question_type",
+    "difficulty_range",
+    "checked_by",
+    "examples"
+  ],
+  "title": "Question style file",
+  "type": "object"
+}

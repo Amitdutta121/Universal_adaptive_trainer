@@ -8,9 +8,10 @@ Responsibility
 
 Status
     Implemented for the whole-corpus report, for the four-cell split of it, and
-    for the per-question-type breakdown (ADR-034). Breakdowns by difficulty or
-    generator, and any automation that would act on the figures, are still
-    deliberately absent -- see ``docs/DECISIONS.md`` ADR-029.
+    for the per-question-type breakdown (ADR-034), and for the per-judge scorecard
+    (ADR-064, m8). Breakdowns by difficulty or generator, and any automation that
+    would act on the figures, are still deliberately absent -- see
+    ``docs/DECISIONS.md`` ADR-029.
 
 Key rules
     * Only ``COMPLETED`` evaluations carrying a derived gate are scored; a
@@ -46,6 +47,8 @@ from app.calibration.schema import (
     CalibrationPair,
     CalibrationReport,
     DifficultyConfusion,
+    JudgeScorecard,
+    JudgeScorecardReport,
     MetricAgreement,
     QuadrantCell,
     QuadrantCounts,
@@ -55,6 +58,13 @@ from app.calibration.schema import (
     judge_label,
     professor_label,
     quadrant_cell,
+)
+from app.calibration.scorecard import (
+    SCORECARD_METRICS,
+    build_judge_scorecard,
+    cohen_kappa,
+    score_from_counts,
+    wilson_interval,
 )
 from app.calibration.service import (
     build_calibration_pairs,
@@ -78,12 +88,15 @@ __all__ = [
     "MIN_INFORMATIVE_SAMPLE",
     "MIN_PANEL_SAMPLE",
     "PROFESSOR_OBJECTIONS",
+    "SCORECARD_METRICS",
     "USABLE_EVAL_STATUSES",
     "AgreementTrend",
     "CalibrationLabel",
     "CalibrationPair",
     "CalibrationReport",
     "DifficultyConfusion",
+    "JudgeScorecard",
+    "JudgeScorecardReport",
     "MetricAgreement",
     "MetricFaults",
     "QuadrantCell",
@@ -94,7 +107,9 @@ __all__ = [
     "build_agreement_trend",
     "build_calibration_pairs",
     "build_calibration_report",
+    "build_judge_scorecard",
     "build_type_calibrations",
+    "cohen_kappa",
     "for_repair",
     "held_out",
     "is_held_out",
@@ -103,4 +118,6 @@ __all__ = [
     "professor_label",
     "quadrant_cell",
     "reports_by_type",
+    "score_from_counts",
+    "wilson_interval",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from alembic import command
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.orm import Session
 
@@ -20,7 +21,12 @@ from app.domain.enums import (
 from app.domain.questions import GenerationAttempt, QuestionValidationReport
 from app.errors import NotFoundError, SchemaOutOfDateError
 from app.feedback import submit_review
-from app.persistence.database import init_db, verify_schema
+from app.persistence.database import (
+    BASELINE_REVISION,
+    _alembic_config,
+    init_db,
+    verify_schema,
+)
 from app.persistence.models import (
     BookRow,
     CurriculumVersionRow,
@@ -58,7 +64,7 @@ def test_init_db_is_idempotent(engine: Engine) -> None:
 
 
 class TestSchemaDriftGuard:
-    """There is no migration tool, so drift must be reported, not discovered later."""
+    """A model column with no migration must be reported, not discovered later."""
 
     def test_a_matching_schema_passes(self, engine: Engine) -> None:
         verify_schema(engine)
@@ -71,7 +77,86 @@ class TestSchemaDriftGuard:
             verify_schema(engine)
 
         assert "books.checksum_sha256" in (exc_info.value.detail or "")
-        assert "delete the database file" in (exc_info.value.detail or "")
+        assert "add one under app/persistence/migrations" in (exc_info.value.detail or "")
+
+    def test_a_missing_table_is_reported(self, engine: Engine) -> None:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE review_outcomes"))
+
+        with pytest.raises(SchemaOutOfDateError) as exc_info:
+            verify_schema(engine)
+
+        assert "review_outcomes (table)" in (exc_info.value.detail or "")
+
+
+class TestMigrations:
+    """ADR-051: a database is upgraded in place, never recreated."""
+
+    def test_a_fresh_database_is_upgraded_to_head(self, engine: Engine) -> None:
+        with engine.connect() as connection:
+            version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert version == "0031_experimental_recipes"
+
+    def test_the_migrations_build_exactly_the_models(self, engine: Engine) -> None:
+        # ADR-057: Alembic is the only schema source, so a model change without a
+        # migration fails here (``alembic check``), not on Postgres later.
+        with engine.begin() as connection:
+            command.check(_alembic_config(connection))
+
+    def test_a_pre_migration_database_is_upgraded_keeping_its_rows(self, engine: Engine) -> None:
+        # Rebuild the shape a pre-Alembic database had -- no courses table, no
+        # course_id columns, no alembic_version -- by running the downgrade, then
+        # put some content in it.
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), BASELINE_REVISION)
+            connection.execute(text("DROP TABLE alembic_version"))
+        assert "course_id" not in {c["name"] for c in inspect(engine).get_columns("books")}
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, original_filename, source_format, status, "
+                    "created_at) VALUES ('Old book', 'old.json', 'book_json', 'imported', "
+                    "'2026-01-01')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO curriculum_versions (label, status, created_at) "
+                    "VALUES ('Old taxonomy', 'approved', '2026-01-01')"
+                )
+            )
+
+        init_db(engine)
+
+        with engine.connect() as connection:
+            courses = connection.execute(text("SELECT id, name FROM courses")).all()
+            assert [name for _, name in courses] == ["Default course"]
+            # 0003: an existing course keeps everything it could generate before.
+            subject, types = connection.execute(
+                text("SELECT subject, question_types_json FROM courses")
+            ).one()
+            assert subject == "intro_python"
+            assert "coding" in types and "multiple_choice" in types
+            (course_id,) = (course_id for course_id, _ in courses)
+            assert connection.execute(text("SELECT course_id, title FROM books")).all() == [
+                (course_id, "Old book")
+            ]
+            assert connection.execute(
+                text("SELECT course_id, label FROM curriculum_versions")
+            ).all() == [(course_id, "Old taxonomy")]
+
+    def test_an_empty_version_table_counts_as_unversioned(self, engine: Engine) -> None:
+        # Seen on a real dev database: tables built by create_all and an alembic_version
+        # table with no row. Plain ``alembic upgrade`` would re-create the baseline tables.
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), BASELINE_REVISION)
+            connection.execute(text("DELETE FROM alembic_version"))
+
+        init_db(engine)
+
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+            assert "courses" in inspect(connection).get_table_names()
 
 
 def test_book_repository_roundtrip(session: Session) -> None:
@@ -261,35 +346,35 @@ def test_list_recent_filters_by_status(session: Session) -> None:
     assert repo.list_recent(statuses=[]) == []
 
 
-def test_count_by_source_section_reports_reuse_per_section(session: Session) -> None:
+def test_count_by_source_chunk_reports_reuse_per_chunk(session: Session) -> None:
     repo = QuestionRepository(session)
-    for section_id in (7, 7, 9):
+    for chunk_id in ("c7", "c7", "c9"):
         repo.add(
             QuestionRow(
                 prompt="Reverse a string.",
                 original_prompt="Reverse a string.",
-                spec={"source_section_ids": [section_id]},
+                spec={"source_chunk_ids": [chunk_id]},
             )
         )
     session.commit()
 
-    assert repo.count_by_source_section() == {7: 2, 9: 1}
+    assert repo.count_by_source_chunk() == {"c7": 2, "c9": 1}
 
 
-def test_count_by_source_section_falls_back_to_the_stored_sources(session: Session) -> None:
+def test_count_by_source_chunk_falls_back_to_the_stored_sources(session: Session) -> None:
     """A row with no frozen spec still reports against its recorded source."""
     repo = QuestionRepository(session)
     repo.add(
         QuestionRow(
             prompt="Sum a list.",
             original_prompt="Sum a list.",
-            content={"sources": [{"section_id": 3, "citation": "Book, Page 1"}]},
+            content={"sources": [{"chunk_id": "c3", "citation": "Book, Page 1"}]},
         )
     )
     repo.add(QuestionRow(prompt="No provenance.", original_prompt="No provenance."))
     session.commit()
 
-    assert repo.count_by_source_section() == {3: 1}
+    assert repo.count_by_source_chunk() == {"c3": 1}
 
 
 def test_submit_review_copies_the_generator_identity(session: Session) -> None:

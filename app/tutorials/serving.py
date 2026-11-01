@@ -1,0 +1,210 @@
+"""The tutorial blocks a student's run shows (Phase 6, Task 27).
+
+Two moments: after an answer (a wrong one gets ``worked`` blocks; a right one lighter ones as
+mastery rises, then none), and before the first question of a topic in the run when the
+student's prior mastery of it is low (pre-teaching). Both compose with a seed from the run and
+the attempt, so a reload shows the same blocks.
+
+With ``tutorials_live`` on (``app/tutorials/live.py``) the blocks come from the course's bank,
+reviewed or not, and a block the moment needs but the bank lacks is queued to be written after
+the response. A recipe the course made itself (recipe builder) counts only once approved.
+Off, only the blocks frozen with the run's question set are read, and a run
+without a set shows none. Either way, with no block the student page keeps today's
+explanation.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.config import get_settings
+from app.domain.enums import MasteryBand
+from app.domain.mastery import mastery_band
+from app.persistence.models import (
+    CurriculumVersionRow,
+    QuestionRow,
+    StudentAttemptRow,
+    TrainingSessionRow,
+    TutorialBlockRow,
+)
+from app.subjects import profile_for_version
+from app.tutorials.approval import decisions
+from app.tutorials.clips import playable
+from app.tutorials.composer import ComposeState, compose, frozen_blocks, guidance_for
+from app.tutorials.experimental import PREFIX as COURSE_RECIPE_PREFIX
+from app.tutorials.generator import course_recipes
+from app.tutorials.live import LiveQueue, bank_blocks, plan_live_block, queue_live_block
+from app.tutorials.schema import ContentKind, TutorialRecipe
+from app.tutorials.stats import recipe_weights, record_outcome, record_views
+
+#: A score that counts as a correct answer, as the student page shows it.
+CORRECT_SCORE = 100.0
+
+_CODE_KEYS = ("code", "starter_code", "reference_solution")
+
+
+_K = ContentKind
+_BEFORE = [_K.CONCEPT, _K.PROCESS, _K.CODE, _K.MISCONCEPTION]
+_AFTER_CODE = [_K.CODE, _K.MISCONCEPTION, _K.PROCESS, _K.CONCEPT]
+_AFTER_OTHER = [_K.MISCONCEPTION, _K.CONCEPT, _K.PROCESS, _K.CODE]
+
+
+def _kinds(question: QuestionRow, *, before: bool) -> list[ContentKind]:
+    """Pre-teaching leads with the idea; after a code question, with the code."""
+    if before:
+        return _BEFORE
+    if any((question.content or {}).get(key) for key in _CODE_KEYS):
+        return _AFTER_CODE
+    return _AFTER_OTHER
+
+
+def servable_recipes(
+    session: Session, subject: str, course_id: int | None, curriculum_version_id: int
+) -> dict[str, TutorialRecipe]:
+    """The recipes a run may show and write blocks for: the library's, and the course's own
+    (made in the recipe builder) only once a professor approved them for the taxonomy."""
+    approved = decisions(session, curriculum_version_id)
+    return {
+        recipe.id: recipe
+        for recipe in course_recipes(session, subject, course_id)
+        if not recipe.id.startswith(COURSE_RECIPE_PREFIX) or approved.get(recipe.id) is True
+    }
+
+
+def _subtopic_id(attempt: StudentAttemptRow, question: QuestionRow) -> int | None:
+    if attempt.subtopic_id is not None:
+        return attempt.subtopic_id
+    return question.subtopic_ids[0] if question.subtopic_ids else None
+
+
+def _compose(
+    session: Session,
+    run: TrainingSessionRow,
+    attempt: StudentAttemptRow,
+    question: QuestionRow,
+    *,
+    mastery: float,
+    last_correct: bool | None,
+    moment: str,
+    live: LiveQueue | None,
+) -> list[TutorialBlockRow]:
+    subtopic_id = _subtopic_id(attempt, question)
+    if subtopic_id is None:
+        return []
+    is_live = get_settings().tutorials_live
+    if is_live:
+        bank = bank_blocks(session, subtopic_id)
+    elif run.set_version_id is not None:
+        bank = frozen_blocks(session, run.set_version_id, subtopic_id)
+    else:
+        return []
+    subject = profile_for_version(session, question.curriculum_version_id).storage_key
+    version = session.get(CurriculumVersionRow, question.curriculum_version_id)
+    course_id = version.course_id if version else None
+    recipes = servable_recipes(session, subject, course_id, question.curriculum_version_id)
+    kinds = _kinds(question, before=last_correct is None)
+    level = guidance_for(mastery, last_correct)
+    if is_live and live is not None and level is not None:
+        planned = plan_live_block(
+            session,
+            course_id=course_id,
+            curriculum_version_id=question.curriculum_version_id,
+            subtopic_id=subtopic_id,
+            level=level,
+            kinds=kinds,
+            recipes=recipes,
+            bank=bank,
+        )
+        if planned is not None:
+            queue_live_block(
+                session,
+                planned,
+                course_id=course_id,
+                curriculum_version_id=question.curriculum_version_id,
+                live=live,
+            )
+    blocks = playable(session, bank)
+    if not blocks:
+        return []
+    return compose(
+        blocks,
+        recipes,
+        ComposeState(
+            mastery=mastery,
+            last_correct=last_correct,
+            content_kinds=kinds,
+            seed=f"{run.rng_seed}:{attempt.id}:{moment}",
+            weights=recipe_weights(session, course_id),
+        ),
+    )
+
+
+def blocks_after_answer(
+    session: Session,
+    attempt: StudentAttemptRow,
+    *,
+    mastery: float | None,
+    live: LiveQueue | None = None,
+) -> list[TutorialBlockRow]:
+    """The blocks for the result card of an answered attempt, logged as shown; the answer is
+    also the outcome of the blocks shown before it (Task 28). ``live`` is where a missing
+    block's job goes; without it nothing is written."""
+    if attempt.score is None:
+        return []
+    correct = attempt.score >= CORRECT_SCORE
+    record_outcome(session, attempt, correct=correct)
+    run = session.get(TrainingSessionRow, attempt.session_id)
+    question = session.get(QuestionRow, attempt.question_id)
+    if run is None or question is None:
+        return []
+    blocks = _compose(
+        session,
+        run,
+        attempt,
+        question,
+        mastery=mastery if mastery is not None else 0.0,
+        last_correct=correct,
+        moment="after",
+        live=live,
+    )
+    record_views(session, attempt, blocks, moment="after")
+    return blocks
+
+
+def preteach_blocks(
+    session: Session, attempt: StudentAttemptRow, *, live: LiveQueue | None = None
+) -> list[TutorialBlockRow]:
+    """Blocks to read before the attempt's question: only for the first question of its topic
+    in the run, and only when the student's prior mastery of the topic is low."""
+    question = session.get(QuestionRow, attempt.question_id)
+    run = session.get(TrainingSessionRow, attempt.session_id)
+    if question is None or run is None or question.topic_id is None:
+        return []
+    prior = attempt.mastery_before
+    if prior is None or mastery_band(prior) is not MasteryBand.LOW:
+        return []
+    earlier = session.scalar(
+        select(StudentAttemptRow.id)
+        .join(QuestionRow, QuestionRow.id == StudentAttemptRow.question_id)
+        .where(
+            StudentAttemptRow.session_id == run.id,
+            StudentAttemptRow.ordinal < attempt.ordinal,
+            QuestionRow.topic_id == question.topic_id,
+        )
+        .limit(1)
+    )
+    if earlier is not None:
+        return []
+    blocks = _compose(
+        session,
+        run,
+        attempt,
+        question,
+        mastery=prior,
+        last_correct=None,
+        moment="before",
+        live=live,
+    )
+    record_views(session, attempt, blocks, moment="before")
+    return blocks

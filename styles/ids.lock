@@ -1,0 +1,12 @@
+# Every style id ever shipped, one <subject>/<id> per line. Questions and approved setups
+# store these ids, so a line is never removed or changed; a new style adds one.
+intro_python/py.concept_check
+intro_python/py.edge_case_bug
+intro_python/py.fill_missing_line
+intro_python/py.fix_one_bug
+intro_python/py.misconception
+intro_python/py.order_lines
+intro_python/py.predict_output
+intro_python/py.subtle_output
+intro_python/py.trace_steps
+intro_python/py.write_function

@@ -1,0 +1,28 @@
+id: py.misconception
+name: Catch a common misconception
+summary: One true-or-false statement built around a mistake beginners often make.
+question_type: true_false
+difficulty_range:
+- easy
+checked_by: True or false
+applies_to:
+- boolean expressions
+- return values
+- variables
+- mutability
+- comparison
+examples:
+- prompt: 'True or false: = and == do the same thing in an if statement.'
+  options:
+  - text: 'True'
+  - text: 'False'
+    correct: true
+  answer: 'False'
+  grounding: Boolean expressions
+- prompt: 'True or false: a function with no return statement returns None.'
+  options:
+  - text: 'True'
+    correct: true
+  - text: 'False'
+  answer: 'True'
+  grounding: Return values

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Section · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .reader { max-width: 44rem; font-size: 0.95rem; line-height: 1.7; }
+    .reader pre { background: var(--muted); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.75rem 1rem; font-size: 0.8rem; line-height: 1.6; overflow-x: auto; }
+  </style>
+</head>
+<!-- C4 · Section reader: the verbatim text a question cites, plus the questions generated from it. -->
+<body data-scope="course" data-nav="materials" data-title="Section">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <nav class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+      <a class="hover:underline" :href="Mock.link('materials.html')">Materials</a>
+      <i data-lucide="chevron-right" class="size-3"></i>
+      <a class="hover:underline" :href="Mock.link('book.html', { book: book?.id || '' })" x-text="book ? book.title : 'Book'"></a>
+      <template x-if="chapter"><span class="inline-flex items-center gap-1.5"><i data-lucide="chevron-right" class="size-3"></i><span x-text="`${chapter.number} ${chapter.title}`"></span></span></template>
+    </nav>
+
+    <template x-if="!section">
+      <div class="card"><section class="py-10 text-center">
+        <p class="font-medium">Section not found</p>
+        <p class="text-sm text-muted-foreground mt-1">The link may point at a section of another book.</p>
+        <a class="btn mt-3" data-variant="outline" :href="Mock.link('materials.html')">Back to materials</a>
+      </section></div>
+    </template>
+
+    <template x-if="section">
+      <div class="grid gap-6">
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold" x-text="section.title"></h1>
+            <p class="text-sm text-muted-foreground" x-text="citation"></p>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <a class="btn" data-variant="outline" data-size="icon-sm" aria-label="Previous section" :class="!prev && 'pointer-events-none opacity-50'" :href="prev ? Mock.link('section.html', { book: book.id, section: prev.id }) : '#'"><i data-lucide="chevron-left"></i></a>
+            <a class="btn" data-variant="outline" data-size="icon-sm" aria-label="Next section" :class="!next && 'pointer-events-none opacity-50'" :href="next ? Mock.link('section.html', { book: book.id, section: next.id }) : '#'"><i data-lucide="chevron-right"></i></a>
+            <a class="btn" data-size="sm" :class="blocked && 'pointer-events-none opacity-50'" :aria-disabled="blocked" :href="Mock.link('generate.html', { book: book.id, section: section.id })"><i data-lucide="wand-sparkles"></i>Generate from this section</a>
+          </div>
+        </div>
+
+        <template x-if="blocked">
+          <div class="alert">
+            <i data-lucide="lock"></i>
+            <h2>Generation opens once the taxonomy is approved</h2>
+            <section class="flex flex-wrap items-center gap-3">
+              <span>The analysis below is already done, so questions can be generated from this section as soon as you approve the AI-drafted taxonomy.</span>
+              <a class="btn ml-auto" data-size="sm" data-variant="outline" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a>
+            </section>
+          </div>
+        </template>
+
+        <!-- What's testable: section analysis cached at import (MOCK.section_analysis). -->
+        <template x-if="analysis">
+          <section class="card gap-0 pb-0">
+            <header class="pb-4">
+              <h2>What's testable in this section</h2>
+              <p x-text="`${analysis.units.length} testable unit${analysis.units.length === 1 ? '' : 's'}${analysis.skipped.length ? `, ${analysis.skipped.length} skipped` : ''}. The kind of each unit decides which answer formats fit; levels are what each format reaches in this ${profile.label} course.`"></p>
+            </header>
+            <section class="p-0">
+              <div class="table-container">
+                <table class="table">
+                  <thead><tr><th class="w-44">Kind</th><th>Testable unit</th><th class="w-[26rem]">Answer formats · verification</th><th class="w-40"></th></tr></thead>
+                  <tbody>
+                    <template x-for="(u, i) in analysis.units" :key="i">
+                      <tr class="align-top">
+                        <td><span class="pill tone-muted" x-text="MOCK.KNOWLEDGE_KINDS[u.kind].label"></span></td>
+                        <td class="text-sm whitespace-normal" x-text="u.text"></td>
+                        <td class="whitespace-normal">
+                          <ul class="grid gap-1.5">
+                            <template x-for="r in formatRows(u)" :key="r.f">
+                              <li class="text-sm">
+                                <div class="flex items-center gap-2">
+                                  <span :class="!r.on && 'text-muted-foreground'" x-text="r.label"></span>
+                                  <span class="pill" :class="r.on ? MOCK.LEVELS[r.level].tone : 'tone-muted'" :title="r.on ? MOCK.LEVELS[r.level].detail : r.why" x-text="r.on ? MOCK.LEVELS[r.level].label : 'Off'"></span>
+                                </div>
+                                <p class="text-xs text-muted-foreground" x-show="!r.on || r.capped" x-text="r.on ? r.capped : r.why"></p>
+                              </li>
+                            </template>
+                          </ul>
+                        </td>
+                        <td class="text-right">
+                          <template x-if="bestOn(u)">
+                            <a class="btn" data-variant="outline" data-size="sm" :class="blocked && 'pointer-events-none opacity-50'" :aria-disabled="blocked"
+                               :href="Mock.link('generate.html', { book: book.id, section: section.id, unit: i, format: bestOn(u).f })">Generate from this</a>
+                          </template>
+                          <template x-if="!bestOn(u)"><span class="text-xs text-muted-foreground">No format on</span></template>
+                        </td>
+                      </tr>
+                    </template>
+                    <template x-for="(k, i) in analysis.skipped" :key="'skip' + i">
+                      <tr class="align-top">
+                        <td><span class="pill tone-warn">Skipped</span></td>
+                        <td class="text-sm text-muted-foreground whitespace-normal" x-text="k.text"></td>
+                        <td class="text-sm text-muted-foreground whitespace-normal" colspan="2" x-text="k.why"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <p class="border-t px-6 py-3 text-xs text-muted-foreground" x-text="`Analysed at import on ${fmtDate(analysis.analysed)}; no AI cost per question. Skipped content gets no questions rather than padded ones.`"></p>
+            </section>
+          </section>
+        </template>
+
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] items-start">
+          <section class="card">
+            <header>
+              <h2>Section text</h2>
+              <p x-text="`${(section.words || 0).toLocaleString()} words, stored exactly as the document declared them. Generated questions quote from this text.`"></p>
+            </header>
+            <section>
+              <template x-if="paragraphs.length">
+                <div class="reader grid gap-4">
+                  <template x-for="(p, i) in paragraphs" :key="i">
+                    <div>
+                      <template x-if="p.code"><pre><code x-text="p.text"></code></pre></template>
+                      <template x-if="!p.code"><p x-text="p.text"></p></template>
+                    </div>
+                  </template>
+                  <p class="text-xs text-muted-foreground">Excerpt shown; the full section continues in the book.</p>
+                </div>
+              </template>
+              <template x-if="!paragraphs.length">
+                <!-- TODO(real): the stored section text is shown here; the mock only has the text of 9.11 Aliasing. -->
+                <p class="text-sm text-muted-foreground py-6 text-center" x-text="`The text of ${section.title} is in ${analysis?.book || book.title}; the app shows the stored text here. This mockup only includes 9.11 Aliasing.`"></p>
+              </template>
+            </section>
+          </section>
+
+          <div class="grid gap-6">
+            <section class="card">
+              <header><h2>Provenance</h2></header>
+              <section>
+                <dl class="text-sm">
+                  <template x-for="r in provenance" :key="r[0]">
+                    <div class="flex justify-between gap-2 border-b py-2 last:border-b-0">
+                      <dt class="text-muted-foreground" x-text="r[0]"></dt>
+                      <dd class="text-end" x-html="r[1]"></dd>
+                    </div>
+                  </template>
+                </dl>
+              </section>
+            </section>
+
+            <section class="card">
+              <header>
+                <h2>Questions from this section</h2>
+                <p x-text="questions.length ? `${questions.length} question${questions.length === 1 ? '' : 's'} cite this section.` : 'No question cites this section yet.'"></p>
+              </header>
+              <section class="p-0">
+                <ul class="divide-y">
+                  <template x-for="q in questions" :key="q.id">
+                    <li class="px-6 py-3 grid gap-1">
+                      <a class="text-sm font-medium hover:underline line-clamp-2" :href="Mock.link('question.html', { id: q.id })" x-html="Mock.esc(q.prompt.split('\n')[0]).replace(/`([^`]+)`/g, '<code class=&quot;font-mono text-xs&quot;>$1</code>')"></a>
+                      <span class="pill tone-warn w-fit" x-show="q.possible_duplicate_of.length" x-text="`Possible duplicate of #${q.possible_duplicate_of[0]?.question_id}`"></span>
+                      <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                        <span class="pill" :class="Mock.tone(q.status)" x-text="Mock.label(q.status)"></span>
+                        <span x-text="`${MOCK.question_types[q.type].label} · ${q.difficulty} · #${q.id}`"></span>
+                      </div>
+                    </li>
+                  </template>
+                </ul>
+                <div class="px-6 pb-6" x-show="!questions.length">
+                  <a class="btn" data-variant="outline" data-size="sm" :class="blocked && 'pointer-events-none opacity-50'" :aria-disabled="blocked" :href="Mock.link('generate.html', { book: book.id, section: section.id })">Generate from this section</a>
+                </div>
+              </section>
+            </section>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const bookId = Mock.param("book") || "b1";
+      const book = MOCK.books.find((b) => b.id === bookId && b.course === c.id) || null;
+      const chapters = book ? MOCK.books_sections[book.id] || [] : [];
+      const flat = chapters.flatMap((ch) => ch.sections.map((s) => ({ ...s, chapter: ch })));
+      const sid = Mock.param("section") || (flat[0] && flat[0].id);
+      const idx = flat.findIndex((s) => s.id === sid);
+      // A section that was analysed but isn't in the outline mock still opens, titled from the analysis entry.
+      const orphan = idx < 0 && MOCK.section_analysis[sid];
+      const section = idx >= 0 ? flat[idx]
+        : orphan ? { id: sid, title: orphan.title, words: 0, confidence: "high", chapter: { number: sid.split("-")[1], title: "" } } : null;
+      // Only 9.11 Aliasing has text in the mock data (MOCK.sample_section_text).
+      const hasText = section && section.id === "b1-9-5";
+      const paragraphs = hasText
+        ? MOCK.sample_section_text.map((t) => ({ text: t, code: t.includes("\n") }))
+        : [];
+      const ids = (section && MOCK.section_questions[section.id]) || [];
+      // Section analysis, cached at import. Formats are filtered by this course's subject profile
+      // and capped at the unit's best level (a statistics fact can be Supported, never Proven).
+      const analysis = (section && MOCK.section_analysis[section.id]) || null;
+      const profile = MOCK.profile(c.subject);
+      const rankOf = (l) => MOCK.LEVELS[l].rank;
+      const src = { pdf_outline: "PDF table of contents", structured_json: "Declared in the book JSON" };
+      return {
+        course: c, book, section, chapter: section ? section.chapter : null, paragraphs,
+        analysis, profile, blocked: !c.taxonomy.length,
+        formatRows(u) {
+          return u.formats.map((f) => {
+            const entry = profile.formats.find(([x]) => x === f);
+            const label = MOCK.FORMATS[f].label;
+            if (!entry) return { f, label, on: false, why: `Not offered in ${profile.label} courses` };
+            const best = rankOf(entry[1]) <= rankOf(u.best) ? entry[1] : u.best;
+            return { label, ...MOCK.formatStatus(profile, [f, best]) };
+          });
+        },
+        bestOn(u) { return this.formatRows(u).filter((r) => r.on).sort((a, b) => rankOf(b.level) - rankOf(a.level))[0] || null; },
+        fmtDate: (d) => new Date(d + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        prev: idx > 0 ? flat[idx - 1] : null,
+        next: idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : null,
+        questions: ids.map((id) => MOCK.question(id)).filter(Boolean),
+        citation: section ? `${book.title}, ch. ${section.chapter.number} ${section.chapter.title}, §${section.title}` : "",
+        provenance: section ? [
+          ["Book", Mock.esc(book.title)],
+          ["Chapter", Mock.esc(`${section.chapter.number} ${section.chapter.title}`)],
+          ["Boundary from", Mock.esc(src[book.structure_source] || book.structure_source)],
+          ["Confidence", section.confidence === "high" ? "high" : `<span class="pill tone-warn">${section.confidence}</span>`],
+          ["Embedded", section.embedded === false ? '<span class="pill tone-muted">not yet</span>' : "yes · 3 chunks"],
+          ["Section id", `<code class="font-mono text-xs">${section.id}</code>`],
+        ] : [],
+      };
+    }
+  </script>
+</body>
+</html>

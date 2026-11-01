@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>All pages · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<body data-scope="public">
+  <main x-data="page()" x-cloak class="max-w-5xl mx-auto px-5 py-8 grid gap-8">
+    <div>
+      <h1 class="text-2xl font-semibold">Product mockup: all pages</h1>
+      <p class="text-muted-foreground mt-1">Clickable, mock data only, nothing is saved. Two courses tell the story:
+        <b>Intro to Python</b> (fully set up) and <b>Intro Statistics</b> (halfway through setup). See <code>PLAN.md</code>.</p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <a class="btn" href="landing.html">Start as a new professor</a>
+        <a class="btn" data-variant="outline" href="course.html?course=statistics">Continue Stats setup</a>
+        <a class="btn" data-variant="outline" href="student-join.html">Start as a student</a>
+      </div>
+    </div>
+    <template x-for="g in groups" :key="g.title">
+      <section class="card">
+        <header><h2 x-text="g.title"></h2></header>
+        <section class="p-0">
+          <table class="table">
+            <tbody>
+              <template x-for="p in g.pages" :key="p[0]">
+                <tr>
+                  <td class="w-14 font-mono text-xs text-muted-foreground" x-text="p[0]"></td>
+                  <td><a class="font-medium hover:underline" :href="p[2]" x-text="p[1]"></a></td>
+                  <td class="text-sm text-muted-foreground" x-text="p[3]"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </section>
+      </section>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      return {
+        groups: [
+          { title: "A · Public and account", pages: [
+            ["A1", "Landing", "landing.html", "What the product does, for a professor deciding to try it"],
+            ["A2", "Sign up", "signup.html", ""], ["A3", "Log in", "login.html", ""],
+            ["A4", "Reset password", "reset-password.html", ""],
+            ["A5", "Accept invite", "accept-invite.html", "Co-instructor invited to a course"],
+            ["A6", "Verify email", "verify-email.html", ""],
+          ] },
+          { title: "B · Professor workspace", pages: [
+            ["B1", "My courses", "courses.html", "Home after log in"],
+            ["B2", "New course", "new-course.html", "Name, code, subject, question types"],
+            ["B3", "Jobs", "jobs.html", "Running, done and failed AI work"],
+            ["B4", "Usage and limits", "usage.html", "LLM spend per course, monthly cap"],
+            ["B5", "Account", "account.html", "Profile, password, team"],
+          ] },
+          { title: "C · Course setup and content", pages: [
+            ["C1", "Course overview", "course.html?course=python", "Setup checklist and key numbers"],
+            ["C2", "Materials", "materials.html?course=python", "Books, upload, import status"],
+            ["C3", "Book", "book.html?course=python&book=b1", "Chapters and sections"],
+            ["C4", "Section", "section.html?course=python&book=b1&section=b1-9-5", "Reader with questions from this section"],
+            ["C5", "Taxonomy", "taxonomy.html?course=python", "Versions; draft with AI, import, or build"],
+            ["C6", "Taxonomy builder", "taxonomy-builder.html?course=python&version=v3", "Edit topics and subtopics"],
+            ["C7", "AI taxonomy draft", "taxonomy-draft.html?course=statistics", "Accept, edit or discard AI-proposed rows"],
+            ["C8", "Coverage", "coverage.html?course=python", "Subtopic × difficulty grid, generate for gaps"],
+            ["C9", "Generate", "generate.html?course=python", "Single question or bulk spec sheet"],
+            ["C10", "Question bank", "questions.html?course=python", "Filterable list of every question"],
+            ["C11", "Question", "question.html?course=python&id=1004", "Surface, checks, judges, history"],
+            ["C12", "Review queue", "review.html?course=python", "Approve, reject, edit"],
+            ["C13", "Alignment", "alignment.html?course=python", "Judge agreement, prompts, learned rules"],
+          ] },
+          { title: "D · Teaching", pages: [
+            ["D1", "Question sets", "question-sets.html?course=python", "Freeze and publish"],
+            ["D2", "Classes", "classes.html?course=python", "Sections and join codes"],
+            ["D3", "Students", "students.html?course=python", "Roster, mastery, export"],
+            ["D4", "Student", "student.html?course=python&id=s5", "One student's progress"],
+          ] },
+          { title: "E · Course settings", pages: [
+            ["E1", "Settings", "settings.html?course=python", "Subject, question types, collaborators, LMS"],
+          ] },
+          { title: "G · Running the course (Phase 2)", pages: [
+            ["G0", "Sample course", "courses.html?new=1", "What a brand-new account sees first"],
+            ["G1", "Schedule", "schedule.html?course=python", "Weeks of the term and the topics each one opens"],
+            ["G2", "Assignments", "assignments.html?course=python", "Graded weekly practice"],
+            ["G3", "Assignment", "assignment.html?course=python&id=a4", "Scope, goal, dates, late policy, points"],
+            ["G4", "Gradebook", "gradebook.html?course=python", "Students × assignments, extensions, send to Canvas"],
+            ["G5", "Insights", "insights.html?course=python", "What the class got wrong this week"],
+            ["G6", "Import questions", "import-questions.html?course=python", "Canvas / QTI / CSV into the review queue"],
+            ["G7", "Student reports", "reports.html?course=python", "\"This question is wrong\" inbox"],
+            ["G8", "Exam export", "exam-export.html?course=python", "Pick, export, hold out of practice"],
+            ["G9", "Copy to a new term", "copy-course.html?course=python", "Start Fall 2027 from this course"],
+            ["G10", "Term report", "term-report.html?course=python", "Printable end-of-term summary"],
+            ["G11", "Weekly digest", "email-digest.html", "The Monday email"],
+          ] },
+          { title: "H · Design references", pages: [
+            ["H11", "Rubrics", "rubrics.html?course=python", "Rubric grader: AI-drafted rubrics you approve, calibration against your grading, graded answers with evidence"],
+            ["H10", "Checking tools (Web runner example)", "checking-tools.html", "A course's tools = how it checks answers; three Web Development questions checked for real in a sandboxed page"],
+            ["H4", "Lessons", "lessons.html?course=python", "Edit 5–6 example lessons; the rest are generated in your style and spot-checked"],
+            ["H5", "Lesson editor (Plate)", "lesson.html?course=python", "AI draft of the Slicing lesson: edit blocks, run code, preview as a student"],
+            ["H6", "Student lesson player", "student-lesson.html?sub=27", "Adaptive 3-minute lesson on Aliasing (phone): step-through, memory diagram, misconception check"],
+            ["H7", "Lesson results", "lesson-results.html?course=python&sub=27", "How a lesson performs: drop-off per block, wrong answers, holdout comparison"],
+            ["H8", "Fine-tuning lesson (outside the course)", "student-lesson.html?lesson=finetuning", "Same lesson format on an ML topic, with loss curves from real runs; editor: lesson.html?course=python&lesson=finetuning"],
+            ["H1", "Question types", "question-types.html", "6 subjects × 6 questions, answerable, with answer keys and how each was verified"],
+            ["H2", "Checking health (internal)", "subjects.html", "For the team running the checks: each tool's self-test, version, readiness and the questions that depend on it"],
+            ["H3", "What's testable in a section", "section.html?course=statistics&book=b3&section=b3-5-2", "Section analysis on a statistics section"],
+          ] },
+          { title: "F · Student app (phone-first)", pages: [
+            ["F1s", "Join", "student-join.html", "Enter a join code"],
+            ["F2s", "My courses", "student-home.html", ""],
+            ["F3s", "Practice", "student-practice.html", "Adaptive question loop"],
+            ["F4s", "Session summary", "student-summary.html", ""],
+          ] },
+        ],
+      };
+    }
+  </script>
+</body>
+</html>

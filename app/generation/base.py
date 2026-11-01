@@ -10,19 +10,28 @@ from app.domain.enums import GeneratorKind, QuestionType
 from app.domain.questions import Question
 from app.errors import DomainRuleError
 from app.generation import GeneratorDescriptor
-from app.generation.attempts import QuestionValidator, generate_with_retries
+from app.generation.attempts import (
+    MAX_GENERATION_ATTEMPTS,
+    QuestionReview,
+    QuestionValidator,
+    generate_with_retries,
+)
 from app.generation.prompts import (
+    RoundExamples,
     base_type_instruction,
     build_prompt,
     instruction_fingerprint,
+    render_round_target,
     render_taxonomy,
 )
 from app.generation.schemas import (
-    RESPONSE_MODEL_FOR,
+    MultipleChoiceDraft,
     TaxonomyClaim,
     build_content,
     prompt_fields_from_draft,
+    response_model_for,
     scoring_kind_for,
+    shuffle_options,
 )
 from app.generation.spec import (
     QuestionSpec,
@@ -32,8 +41,10 @@ from app.generation.spec import (
 )
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
+from app.memory import active_guidelines, generator_target, render_with_guidelines
 from app.persistence.models import CurriculumVersionRow
-from app.persistence.repositories import TypeInstructionRepository
+from app.question_types.output_prediction import observed_expected_output
+from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_course_id
 
 if TYPE_CHECKING:
     from app.generation import GenerationRequest
@@ -42,7 +53,7 @@ DESCRIPTOR = GeneratorDescriptor(kind=GeneratorKind.BASE, name="base", version="
 
 
 class BaseQuestionGenerator:
-    """Generate unpersisted textbook-grounded questions from one section each."""
+    """Generate unpersisted textbook-grounded questions from one chunk each."""
 
     def __init__(
         self,
@@ -65,41 +76,49 @@ class BaseQuestionGenerator:
         return DESCRIPTOR
 
     def _type_instruction(
-        self, question_type: QuestionType
+        self, question_type: QuestionType, profile: SubjectProfile = PYTHON_PROFILE
     ) -> tuple[str | None, dict[str, object]]:
-        """The instruction to send, and the stamp naming it (ADR-033, ADR-040).
+        """The instruction to send, and the stamp naming it (ADR-033, ADR-040, ADR-063).
 
-        Read per generation rather than cached, so a refresh takes effect on the
-        next question instead of the next process.
+        The shipped instruction plus this subject's **active** guidelines for the type
+        (:mod:`app.memory`); pending ones are not sent. Read per generation rather than
+        cached, so a lesson run or a professor's confirm takes effect on the next question.
 
-        Returns the learned override or ``None`` for the shipped text, plus a
-        record of which one was used. The stamp fingerprints the text that will
-        actually be sent, not the row it came from: what a question was generated
-        from is the only thing worth recording, and a question generated before a
-        refresh must not later appear to have used the newer instruction.
+        Returns the rendered text, or ``None`` for the shipped text alone, plus a record of
+        which one was used. The stamp fingerprints the text that will actually be sent and
+        names the guidelines in it: a question generated before a guideline changed must
+        not later appear to have used the newer instruction.
         """
-        row = (
-            TypeInstructionRepository(self._session).get(question_type)
+        guidelines = (
+            active_guidelines(
+                self._session,
+                target=generator_target(question_type),
+                subject=profile.personal_key,
+            )
             if self._session is not None
-            else None
+            else []
         )
-        effective = row.instruction if row is not None else base_type_instruction(question_type)
+        base = base_type_instruction(question_type)
+        effective = render_with_guidelines(base, [row.text for row in guidelines])
         stamp = {
             "type_instruction": {
-                "source": "learned" if row is not None else "shipped",
+                "source": "learned" if guidelines else "shipped",
                 "fingerprint": instruction_fingerprint(effective),
-                "rule_count": len(row.rules or []) if row is not None else 0,
-                "review_count": row.review_count if row is not None else 0,
+                "rule_count": len(guidelines),
+                "guideline_ids": [row.id for row in guidelines],
+                "review_count": len(
+                    {review for row in guidelines for review in row.review_ids or []}
+                ),
             }
         }
-        return (row.instruction if row is not None else None), stamp
+        return (effective if guidelines else None), stamp
 
     def generate(self, request: GenerationRequest) -> list[Question]:
-        """Generate one unpersisted question for every requested source section.
+        """Generate one unpersisted question for every requested source chunk.
 
         ``request.count`` remains part of the selection boundary, but the
-        section-first base generator deliberately emits exactly one question per
-        source section. Persisting results remains :class:`GenerationService`'s
+        chunk-first base generator deliberately emits exactly one question per
+        source chunk. Persisting results remains :class:`GenerationService`'s
         responsibility.
         """
         client = self._client or get_structured_client()
@@ -117,9 +136,9 @@ class BaseQuestionGenerator:
                 curriculum_version_id=request.curriculum_version_id,
                 question_type=request.question_type,
                 difficulty=request.difficulty,
-                source_section_ids=[section_id],
+                source_chunk_ids=[chunk_id],
             )
-            for section_id in request.source_section_ids
+            for chunk_id in request.source_chunk_ids
         ]
         return [self.generate_one(spec, version=version) for spec in specs]
 
@@ -129,8 +148,12 @@ class BaseQuestionGenerator:
         *,
         version: CurriculumVersionRow,
         instructor_feedback: str | None = None,
+        review: QuestionReview | None = None,
+        examples: RoundExamples | None = None,
+        follow_up: str | None = None,
+        max_attempts: int = MAX_GENERATION_ATTEMPTS,
     ) -> Question:
-        """Generate a typed question grounded in the spec's sole source section.
+        """Generate a typed question grounded in the spec's sole source chunk.
 
         A classification the approved tree refuses is retried with the violation
         stated, and the question is returned either way (ADR-032). It carries the
@@ -142,6 +165,11 @@ class BaseQuestionGenerator:
 
         ``instructor_feedback`` is forwarded to :func:`build_prompt` when an
         instructor asked for a new version of an existing question.
+
+        A round spec (``spec.target_subtopic_id`` set) adds the target subtopic, its style
+        and the ``examples`` retrieved for it (:class:`RoundExamples`) to the prompt;
+        ``review`` judges each clean attempt inside the retry loop
+        (:func:`generate_with_retries`). Both are unused on a chunk-only spec.
         """
         if self._retrieval is None:
             raise DomainRuleError(
@@ -149,23 +177,48 @@ class BaseQuestionGenerator:
                 detail="Construct it with session=... or retrieval=....",
             )
 
-        section_id = spec.source_section_ids[0]
-        section = self._retrieval.get_section(section_id)
-        source = self._retrieval.section_source(section_id)
-        citation = source.citation()
-        type_instruction, instruction_stamp = self._type_instruction(spec.question_type)
+        chunk_id = spec.source_chunk_ids[0]
+        chunk = self._retrieval.get_chunk(chunk_id)
+        citation = chunk.citation()
+        # The course's subject decides the system text and whose learned instruction applies.
+        profile = (
+            profile_for_course_id(self._session, version.course_id)
+            if self._session is not None
+            else PYTHON_PROFILE
+        )
+        type_instruction, instruction_stamp = self._type_instruction(spec.question_type, profile)
+        target_block = (
+            self._round_target(spec, version, profile, examples) if spec.is_round_spec else None
+        )
         system, prompt = build_prompt(
             spec,
-            section_text=section.text,
+            section_text=chunk.text,
             citation=citation,
             taxonomy=render_taxonomy(version),
             type_instruction=type_instruction,
             instructor_feedback=instructor_feedback,
+            profile=profile,
+            target_block=target_block,
+            follow_up=follow_up,
         )
         client = self._client or get_structured_client()
 
         def build(draft: TaxonomyClaim, outcome: TaxonomyClaimOutcome) -> Question:
+            if isinstance(draft, MultipleChoiceDraft):
+                # Before any check sees it: the model's own answer position is not random.
+                draft = shuffle_options(draft)
             question_prompt, reference_solution, tests = prompt_fields_from_draft(draft)
+            content = build_content(
+                draft,
+                sources=[{"chunk_id": chunk_id, "citation": citation}],
+                model=client.description,
+            )
+            if spec.question_type is QuestionType.OUTPUT_PREDICTION:
+                code = content.get("code")
+                observed = observed_expected_output(code) if isinstance(code, str) else None
+                if observed is not None:
+                    content["expected_output"] = observed
+                    reference_solution = observed
             return Question(
                 curriculum_version_id=spec.curriculum_version_id,
                 topic_id=outcome.storable_topic_id,
@@ -176,12 +229,8 @@ class BaseQuestionGenerator:
                 prompt=question_prompt,
                 reference_solution=reference_solution,
                 tests=tests,
-                spec=spec.model_dump(mode="json"),
-                content=build_content(
-                    draft,
-                    sources=[{"section_id": section_id, "citation": citation}],
-                    model=client.description,
-                ),
+                spec=spec.stored(),
+                content=content,
                 generator_kind=DESCRIPTOR.kind,
                 generator_name=DESCRIPTOR.name,
                 generator_version=DESCRIPTOR.version,
@@ -195,9 +244,52 @@ class BaseQuestionGenerator:
             client,
             system=system,
             prompt=prompt,
-            response_model=RESPONSE_MODEL_FOR[spec.question_type],
+            response_model=response_model_for(spec.question_type),
             version=version,
             build_question=build,
             validator=self._validator,
+            review=review,
+            max_attempts=max_attempts,
         )
         return question
+
+    def _round_target(
+        self,
+        spec: QuestionSpec,
+        version: CurriculumVersionRow,
+        profile: SubjectProfile,
+        examples: RoundExamples | None,
+    ) -> str:
+        """The target block of a round spec: subtopic, library style, accepted examples."""
+        from app.styles import styles_for
+
+        found = next(
+            (
+                (topic, subtopic)
+                for topic in version.topics
+                for subtopic in topic.subtopics
+                if subtopic.id == spec.target_subtopic_id
+            ),
+            None,
+        )
+        if found is None:
+            raise DomainRuleError(
+                "The target subtopic is not part of this taxonomy.",
+                detail=f"Subtopic {spec.target_subtopic_id} is not in version {version.id}.",
+            )
+        topic, subtopic = found
+        style = (
+            next(
+                (row for row in styles_for(self._session, profile) if row.id == spec.style_id),
+                None,
+            )
+            if spec.style_id
+            else None
+        )
+        return render_round_target(
+            subtopic=subtopic,
+            topic_name=topic.name,
+            style=style,
+            examples=examples,
+            facet=spec.facet,
+        )

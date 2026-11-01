@@ -1,0 +1,109 @@
+"use client";
+
+/** Type + difficulty for the one question about to be generated from a chunk. */
+
+import type * as React from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import type { Difficulty, QuestionType } from "@/lib/api/types";
+import { questionTypeUI } from "@/lib/question-types/registry";
+import { DIFFICULTIES, QUESTION_TYPE_LABEL } from "../../spec-sheet-types";
+import { useCourseQuestionTypes } from "../../use-course-question-types";
+
+function Pill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        active
+          ? "rounded-full bg-primary px-3 py-1.5 font-medium text-primary-foreground text-sm"
+          : "rounded-full border px-3 py-1.5 text-sm hover:bg-muted"
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+export function GenerateControls({
+  type,
+  onTypeChange,
+  difficulty,
+  onDifficultyChange,
+  onGenerate,
+  isGenerating,
+}: {
+  type: QuestionType;
+  onTypeChange: (value: QuestionType) => void;
+  difficulty: Difficulty;
+  onDifficultyChange: (value: Difficulty) => void;
+  onGenerate: () => void;
+  isGenerating: boolean;
+}) {
+  // Only the types this course chose; the backend refuses any other (ADR-054).
+  const offered = useCourseQuestionTypes();
+  return (
+    <Card className="border">
+      <CardHeader>
+        <CardTitle>Generate</CardTitle>
+        <CardDescription>One question, from the chunk selected on the left.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <span className="font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
+            Question type
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {offered.map((value) => (
+              <Pill key={value} active={value === type} onClick={() => onTypeChange(value)}>
+                {QUESTION_TYPE_LABEL[value]}
+              </Pill>
+            ))}
+          </div>
+          <p className="text-[0.7rem] text-muted-foreground">
+            Question kind{" "}
+            <span className="rounded bg-muted px-1 py-0.5 font-mono">
+              {questionTypeUI(type)?.kind}
+            </span>{" "}
+            — set automatically from the type, matching how the grader executes it.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="font-mono text-[0.67rem] text-muted-foreground uppercase tracking-[0.16em]">
+            Difficulty
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {DIFFICULTIES.map((value) => (
+              <Pill
+                key={value}
+                active={value === difficulty}
+                onClick={() => onDifficultyChange(value)}
+              >
+                {value[0].toUpperCase()}
+                {value.slice(1)}
+              </Pill>
+            ))}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={isGenerating}
+          className="w-full rounded-md bg-primary py-2 font-medium text-primary-foreground text-sm disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isGenerating ? "Generating…" : "Generate one question"}
+        </button>
+      </CardContent>
+    </Card>
+  );
+}

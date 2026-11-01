@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify email · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- A6 · Verify email. After sign up: "check your inbox". From the email link (?token=...): verified -> courses.html.
+     ?token=expired shows the expired-link state. -->
+<body data-scope="public" data-title="Verify email">
+  <main x-data="page()" x-cloak class="mx-auto w-full max-w-md px-5 py-12">
+    <div class="card" x-show="state === 'pending'">
+      <header>
+        <h2>Check your inbox</h2>
+        <p>We sent a link to <span class="font-medium text-foreground" x-text="email"></span>. Open it to finish creating your account.</p>
+      </header>
+      <section class="grid gap-2 text-sm text-muted-foreground">
+        <p>The link works for 24 hours. Until you verify, you can't upload books or generate questions.</p>
+        <p>Wrong address? <a class="underline underline-offset-4" href="signup.html">Sign up again</a> with the right one.</p>
+      </section>
+      <footer class="grid gap-3">
+        <button class="btn w-full" data-variant="outline" :disabled="cooldown > 0" @click="resend()" x-text="cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend email'"></button>
+        <a class="btn w-full" data-variant="ghost" :href="`verify-email.html?token=mock-ok&email=${encodeURIComponent(email)}`">Open the link from the email (mockup)</a>
+      </footer>
+    </div>
+
+    <div class="card" x-show="state === 'verified'">
+      <header>
+        <h2>Email verified</h2>
+        <p><span x-text="email"></span> is confirmed. Next, create your first course and upload the book you teach from.</p>
+      </header>
+      <footer><a class="btn w-full" href="courses.html">Continue to my courses</a></footer>
+    </div>
+
+    <div class="card" x-show="state === 'expired'">
+      <header>
+        <h2>This link has expired</h2>
+        <p>Verification links work for 24 hours. Send a new one to <span x-text="email"></span>.</p>
+      </header>
+      <footer><button class="btn w-full" @click="resend(); state = 'pending'">Send a new link</button></footer>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const token = Mock.param("token");
+      return {
+        email: Mock.param("email") || MOCK.me.email,
+        state: token === "expired" ? "expired" : token ? "verified" : "pending",
+        cooldown: 0,
+        resend() {
+          Mock.toast(`Sent a new link to ${this.email}`);
+          this.cooldown = 30;
+          const t = setInterval(() => { if (--this.cooldown <= 0) clearInterval(t); }, 1000);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,12 +1,12 @@
 """Question generation boundary.
 
 Responsibility
-    Produce assessment questions for a requested source section, difficulty and
+    Produce assessment questions for a requested source chunk, difficulty and
     format, grounded in the approved curriculum and the ingested books, and
     classify each one into the taxonomy.
 
 Status
-    The section-first base generator and personalized-context generator are
+    The chunk-first base generator and personalized-context generator are
     implemented. :class:`GenerationService` selects between them via an explicit
     ``generator`` flag; callers use it for persisted generation.
 
@@ -20,14 +20,14 @@ Key rules
       :class:`GeneratorDescriptor` (kind + name + version), which is stamped on
       each produced question. Base and personalized generators must therefore
       remain distinguishable in stored data.
-    * Generator selection is explicit on :meth:`GenerationService.generate_for_sections`
+    * Generator selection is explicit on :meth:`GenerationService.generate_for_chunks`
       (``generator="base"`` or ``"personalized"``). The UI flag drives selection;
       ``professor_id`` on :class:`GenerationRequest` is reserved and does not
       switch generators here.
 
 Allowed dependencies
     ``app.config``, ``app.domain``, ``app.errors``, ``app.evaluation``, ``app.ingestion``,
-    ``app.llm``, ``app.persistence``, ``app.personalization``, ``app.validation``.
+    ``app.llm``, ``app.memory``, ``app.persistence``, ``app.personalization``, ``app.validation``.
     Must not import ``app.adaptive`` or ``app.web``.
 """
 
@@ -53,19 +53,19 @@ class GeneratorDescriptor(BaseModel):
 
 
 class GenerationRequest(BaseModel):
-    """Public request shape for unpersisted, section-first base generation.
+    """Public request shape for unpersisted, chunk-first base generation.
 
     ``BaseQuestionGenerator.generate`` makes one question for each supplied
-    source section; ``count`` is retained for generator-selection compatibility.
+    source chunk; ``count`` is retained for generator-selection compatibility.
 
     Carries no subtopic: the professor chooses the source, the difficulty and
-    the format, and the generator decides which part of the taxonomy the section
+    the format, and the generator decides which part of the taxonomy the chunk
     can actually assess.
     """
 
     curriculum_version_id: int
     question_type: QuestionType
-    source_section_ids: list[int] = Field(min_length=1)
+    source_chunk_ids: list[str] = Field(min_length=1)
     difficulty: Difficulty
     kind: QuestionKind = QuestionKind.TESTABLE_PROGRAM
     count: int = Field(default=1, ge=1, le=50)
@@ -87,7 +87,7 @@ def get_question_generator(professor_id: int | None = None):
     """Return an unconfigured base generator for descriptor and selection checks.
 
     ``professor_id`` is ignored for v1: generator selection happens explicitly
-    on :meth:`GenerationService.generate_for_sections` via the ``generator``
+    on :meth:`GenerationService.generate_for_chunks` via the ``generator``
     flag (UI-driven), not through this helper. The LLM client is not constructed
     here, so an application can start without its credentials. ``generate``
     requires a generator constructed with ``session``; use

@@ -3,65 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from app.domain.enums import QuestionType
-from app.generation.principles import COMMON_SYSTEM
+from app.evaluation.prompts import difficulty_bands
+from app.generation.principles import common_system
 from app.generation.spec import MAX_CLAIMED_SUBTOPICS, QuestionSpec
-from app.persistence.models import CurriculumVersionRow
-
-#: How the validator runs the tests a draft declares. Stated for every executable
-#: type because the model consistently got it wrong without it: it would write a
-#: solution that only *defines* functions, then declare a ``stdout`` expectation
-#: as though the function had been called and printed. Four of six hard debugging
-#: questions failed that way; spelling out the contract took them to six of six,
-#: with declared stdout cases falling from 14 to 1.
-_EXECUTABLE_CONTRACT = """
-How your tests will be run:
-* reference_solution is written to a file and executed as a whole program.
-* For each test, its `assert` code is APPENDED to the end of your solution and
-  runs after it, in the same scope.
-* Its `stdin` is piped to the program as standard input. It is NOT executed as
-  Python -- never put code in stdin.
-* A test passes if the program exits cleanly and, when `stdout` is set, its
-  printed output matches exactly.
-So: if your solution only defines functions and prints nothing, leave `stdout`
-unset and put every check in `assert`. Only set `stdout` if the program really
-prints that text when run. Before answering, run your reference_solution against
-every test in your head and confirm it does what you declared."""
-
-_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
-    QuestionType.MULTIPLE_CHOICE: (
-        "Write a multiple-choice question with plausible alternatives. "
-        "Set correct_option_index to the zero-based index of the one correct option."
-    ),
-    QuestionType.TRUE_FALSE: (
-        "Write one unambiguous true-or-false statement. Set correct_answer to its truth value."
-    ),
-    QuestionType.OUTPUT_PREDICTION: (
-        "Provide a short runnable code snippet and ask for its exact output. "
-        "Set expected_output exactly, including line breaks."
-    ),
-    QuestionType.CODE_COMPLETION: (
-        "Provide incomplete code to finish, a complete reference_solution, "
-        "and executable test cases." + _EXECUTABLE_CONTRACT
-    ),
-    QuestionType.DEBUGGING: (
-        "Provide buggy code, ask the learner to diagnose or fix it, and provide a correct "
-        "reference_solution plus executable test cases.\n"
-        "The code must contain exactly one defect, and one a learner plausibly writes. "
-        "reference_solution is the complete corrected program, runnable as-is -- code, never "
-        "an explanation of the fix." + _EXECUTABLE_CONTRACT
-    ),
-    QuestionType.PARSONS: (
-        "Create a Parsons puzzle. Each block must have an id, text, and correct indent level; "
-        "correct_order must list the block ids in solution order."
-    ),
-    QuestionType.CODING: (
-        "Ask for a small implementation, then provide a complete reference_solution and "
-        "executable test cases. Name the function, its parameters and what it returns, so "
-        "one correct implementation is obvious in shape." + _EXECUTABLE_CONTRACT
-    ),
-}
+from app.persistence.models import CurriculumVersionRow, SubtopicRow
+from app.styles.schema import QuestionStyle
+from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 CLASSIFICATION_INSTRUCTION = f"""Classify your own question.
 Choose the one topic it belongs to and set topic_id to that topic's numeric id.
@@ -74,8 +25,21 @@ bend the question toward a subtopic that reads as a neater fit."""
 
 
 def base_type_instruction(question_type: QuestionType) -> str:
-    """The shipped instruction for a type, before anything is learned."""
-    return _TYPE_INSTRUCTIONS[question_type]
+    """The shipped instruction for a type, before anything is learned (its module's).
+
+    Raises:
+        FeatureNotAvailableError: the type is in the enum but its module has not landed.
+    """
+    from app.errors import FeatureNotAvailableError
+    from app.question_types import get_type
+
+    try:
+        return get_type(question_type).instruction
+    except KeyError as error:
+        raise FeatureNotAvailableError(
+            f"The {question_type.value} question type is not built yet.",
+            detail=str(error),
+        ) from error
 
 
 #: Hex characters of the digest that names one instruction. Short enough to read
@@ -115,6 +79,154 @@ def render_taxonomy(version: CurriculumVersionRow) -> str:
     return "\n".join(lines)
 
 
+#: Characters of one accepted example question shown to the generator. Enough to show the
+#: level and shape the professor accepted, not so much that it is copied.
+EXAMPLE_PROMPT_CHARS = 600
+
+
+#: Characters of the professor's comment shown with an example or a rejected question.
+COMMENT_CHARS = 300
+
+
+@dataclass(frozen=True)
+class ShownExample:
+    """An example question with the professor's comment on it, if they left one."""
+
+    text: str
+    comment: str | None = None
+
+
+@dataclass(frozen=True)
+class RejectedExample:
+    """A similar question the professor rejected, and why (reasons, then comment)."""
+
+    text: str
+    because: str
+
+
+@dataclass(frozen=True)
+class RoundExamples:
+    """What a round target is shown from memory and the bank (ADR-063 point 3), as prompt text.
+
+    ``accepted``: approved questions of the same type, subtopic and difficulty -- match their
+    level. ``style_only``: approved questions of the same type from elsewhere -- match their
+    form, not their content or level. Either may carry the professor's comment. ``in_bank``:
+    the nearest existing questions of the cell, which the new question must not repeat.
+    ``rejected``: at most one similar question the professor rejected, with why. ``avoid``:
+    what failed attempts of approved questions of this type and subtopic got wrong.
+    """
+
+    accepted: Sequence[str | ShownExample] = ()
+    style_only: Sequence[str | ShownExample] = ()
+    in_bank: Sequence[str] = ()
+    rejected: RejectedExample | None = None
+    avoid: Sequence[str] = ()
+
+
+def _shown(texts: Sequence[str]) -> list[str]:
+    return [text.strip()[:EXAMPLE_PROMPT_CHARS] for text in texts if text and text.strip()]
+
+
+def _shown_examples(items: Sequence[str | ShownExample]) -> list[tuple[str, str | None]]:
+    """``(text, comment)`` per non-empty example, both trimmed to their limits."""
+    shown = []
+    for item in items:
+        example = item if isinstance(item, ShownExample) else ShownExample(item)
+        for text in _shown([example.text]):
+            comment = (example.comment or "").strip()[:COMMENT_CHARS] or None
+            shown.append((text, comment))
+    return shown
+
+
+def _with_comment(line: str, comment: str | None) -> list[str]:
+    return [line] + ([f"  Professor's comment: {comment}"] if comment else [])
+
+
+def render_round_target(
+    *,
+    subtopic: SubtopicRow,
+    topic_name: str,
+    style: QuestionStyle | None,
+    examples: RoundExamples | None = None,
+    facet: str | None = None,
+) -> str:
+    """The block a round spec adds: the subtopic, the style, examples, what not to repeat.
+
+    A round is aimed (docs/QUESTION_SETUP_PLAN.md): unlike section-only generation, the
+    subtopic is part of the request, and the topic judge then checks the question really
+    assesses it. The model still classifies its own question; it is told the target id must
+    be among the ones it names.
+    """
+    description = f" -- {subtopic.description}" if subtopic.description else ""
+    lines = [
+        "--- target ---",
+        f"The question must assess this subtopic: [subtopic {subtopic.id}] {subtopic.name}"
+        f"{description} (topic: {topic_name}).",
+        f"Set topic_id to its topic and include {subtopic.id} in subtopic_ids.",
+    ]
+    if facet:
+        lines.append(
+            f"Assess this facet of the subtopic: {facet}. Other questions cover its other facets."
+        )
+    if style is not None:
+        lines += [
+            "",
+            f"Write it in this question style: {style.name}.",
+            f"What the student does: {style.summary}",
+            f"How the answer is checked: {style.checked_by}",
+        ]
+    examples = examples or RoundExamples()
+    number = 0
+    accepted = _shown_examples(examples.accepted)
+    if accepted:
+        lines += [
+            "",
+            "The professor accepted these questions for the same subtopic and difficulty. "
+            "Match their level and quality; do not copy or paraphrase them.",
+        ]
+        for number, (text, comment) in enumerate(accepted, start=1):
+            lines += _with_comment(f"Example {number}: {text}", comment)
+    style_only = _shown_examples(examples.style_only)
+    if style_only:
+        lines += [
+            "",
+            "Style only: the professor accepted these questions of the same type for other "
+            "subtopics or difficulties. Match their form only, not their content or level.",
+        ]
+        for offset, (text, comment) in enumerate(style_only, start=1):
+            lines += _with_comment(f"Example {number + offset} (style only): {text}", comment)
+    rejected = examples.rejected
+    rejected_text = _shown([rejected.text]) if rejected else []
+    because = rejected.because.strip()[:COMMENT_CHARS] if rejected else ""
+    if rejected_text and because:
+        lines += [
+            "",
+            f"The professor rejected a similar question because: {because}",
+            "Do not repeat that mistake.",
+            f"Rejected: {rejected_text[0]}",
+        ]
+    avoid = _shown(examples.avoid)
+    if avoid:
+        lines += [
+            "",
+            "Earlier drafts for this subtopic failed these checks before a fixed version was "
+            "approved. Avoid the same mistakes:",
+        ]
+        for index, text in enumerate(avoid, start=1):
+            lines.append(f"Avoid {index}: {text}")
+    in_bank = _shown(examples.in_bank)
+    if in_bank:
+        lines += [
+            "",
+            "Already in the bank for this subtopic and difficulty -- assess something "
+            "different from each of these:",
+        ]
+        for index, text in enumerate(in_bank, start=1):
+            lines.append(f"Existing {index}: {text}")
+    lines.append("--- end target ---")
+    return "\n".join(lines)
+
+
 def build_prompt(
     spec: QuestionSpec,
     *,
@@ -123,6 +235,9 @@ def build_prompt(
     taxonomy: str,
     type_instruction: str | None = None,
     instructor_feedback: str | None = None,
+    profile: SubjectProfile = PYTHON_PROFILE,
+    target_block: str | None = None,
+    follow_up: str | None = None,
 ) -> tuple[str, str]:
     """Build the shared system instruction and one format-specific user prompt.
 
@@ -138,6 +253,13 @@ def build_prompt(
     prompt rather than seeded into the retry loop's ``--- correction ---`` block
     (:mod:`app.generation.attempts`), which is framed as "your previous answer
     was rejected" and is the wrong lifecycle for instructor intent.
+
+    ``target_block`` (:func:`render_round_target`) is set only for a round spec and goes
+    after the source text, before classification. Absent, the prompt is byte-for-byte the
+    section-only prompt.
+
+    ``follow_up`` is the hard-cell second step: a question that already passed the answer
+    check, with the instruction to make it harder. Absent, the prompt is unchanged.
     """
     feedback_block = ""
     if instructor_feedback and instructor_feedback.strip():
@@ -152,21 +274,32 @@ rule above. Do not reproduce the earlier question.
 {instructor_feedback.strip()}
 --- end instructor feedback ---"""
 
+    target_text = f"\n\n{target_block}" if target_block else ""
+    follow_up_block = ""
+    if follow_up and follow_up.strip():
+        follow_up_block = f"""
+
+--- make it harder ---
+{follow_up.strip()}
+--- end make it harder ---"""
     user = f"""Create a {spec.difficulty.value} {spec.question_type.value} question.
+
+Difficulty, for a student who has just studied the section below and nothing beyond it:
+{difficulty_bands(profile)}
 
 Source citation: {citation}
 
 Type-specific requirements:
-{type_instruction or _TYPE_INSTRUCTIONS[spec.question_type]}
+{type_instruction or base_type_instruction(spec.question_type)}
 
 Use this section text as the grounding source:
 --- section text ---
 {section_text}
---- end section text ---{feedback_block}
+--- end section text ---{feedback_block}{target_text}{follow_up_block}
 
 {CLASSIFICATION_INSTRUCTION}
 
 --- taxonomy ---
 {taxonomy}
 --- end taxonomy ---"""
-    return COMMON_SYSTEM, user
+    return common_system(profile), user

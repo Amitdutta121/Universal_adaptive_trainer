@@ -1,6 +1,6 @@
 """Managing an imported book: renaming it, and deleting it.
 
-The rule under test is what deletion costs. A question stores the sections it was
+The rule under test is what deletion costs. A question stores the chunks it was
 generated from inside its frozen spec rather than as a foreign key, so deleting a
 book cannot cascade to the questions that cite it. Refusing by default, naming the
 count, and proceeding only on an explicit override is the whole point of this
@@ -13,40 +13,40 @@ from pathlib import Path
 
 import book_documents as docs
 import pytest
+from book_uploads import upload_book
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.errors import DomainRuleError, NotFoundError, ResourceInUseError
 from app.ingestion import BookImportService, BookLibraryService
-from app.persistence.models import BookRow, BookSectionRow, QuestionRow
+from app.persistence.models import BookRow, ChunkRow, QuestionRow
 
 
-def _import(session: Session, document: dict | None = None, filename: str = "book.json") -> BookRow:
+def _import(session: Session, document: dict | None = None, filename: str = "book.pdf") -> BookRow:
     book = BookImportService(session).import_upload(
-        filename=filename, data=docs.to_bytes(document or docs.think_python())
+        filename=filename, data=docs.to_pdf(document or docs.think_python())
     )
     session.commit()
     return book
 
 
-def _question_grounded_in(session: Session, section_id: int) -> QuestionRow:
-    """A question whose frozen spec cites one section, as generation writes it."""
-    question = QuestionRow(
-        prompt="What does this print?", spec={"source_section_ids": [section_id]}
-    )
+def _question_grounded_in(session: Session, chunk_id: str) -> QuestionRow:
+    """A question whose frozen spec cites one chunk, as generation writes it."""
+    question = QuestionRow(prompt="What does this print?", spec={"source_chunk_ids": [chunk_id]})
     session.add(question)
     session.commit()
     return question
 
 
-def _upload(client: TestClient, document: dict | None = None) -> dict:
-    response = client.post(
-        "/api/books",
-        files={"file": ("book.json", docs.to_bytes(document or docs.think_python()))},
+def _upload(client: TestClient) -> dict:
+    return upload_book(
+        client, files={"file": ("book.pdf", docs.to_pdf(docs.think_python()), "application/pdf")}
     )
-    assert response.status_code == 201, response.text
-    return response.json()
+
+
+def _first_chunk_id(client: TestClient, book_id: int) -> str:
+    return client.get("/api/chunks", params={"book_id": book_id}).json()["chunks"][0]["id"]
 
 
 class TestUpdateMetadata:
@@ -81,15 +81,16 @@ class TestUpdateMetadata:
 
 
 class TestDelete:
-    def test_it_removes_the_book_and_its_structure(self, session: Session) -> None:
+    def test_it_removes_the_book_and_its_chunks(self, session: Session) -> None:
         book = _import(session)
         book_id = book.id
+        assert session.query(ChunkRow).count() == 4
         assert BookLibraryService(session).delete(book_id) == 0
         session.commit()
         with pytest.raises(NotFoundError):
             BookLibraryService(session).delete(book_id)
         assert session.get(BookRow, book_id) is None
-        assert session.query(BookSectionRow).count() == 0
+        assert session.query(ChunkRow).count() == 0
 
     def test_it_removes_the_retained_document(self, session: Session, settings: Settings) -> None:
         """The file exists to reproduce an import; the import is going with it."""
@@ -116,7 +117,7 @@ class TestDeleteWithQuestionsCitingTheBook:
     @pytest.fixture
     def book_with_question(self, session: Session) -> BookRow:
         book = _import(session)
-        _question_grounded_in(session, book.sections[0].id)
+        _question_grounded_in(session, book.chunks[0].id)
         return book
 
     def test_the_citing_questions_are_counted(
@@ -125,9 +126,9 @@ class TestDeleteWithQuestionsCitingTheBook:
         assert BookLibraryService(session).grounded_question_count(book_with_question.id) == 1
 
     def test_a_question_from_another_book_is_not_counted(self, session: Session) -> None:
-        first = _import(session, filename="a.json")
-        second = _import(session, docs.minimal(), filename="b.json")
-        _question_grounded_in(session, first.sections[0].id)
+        first = _import(session, filename="a.pdf")
+        second = _import(session, docs.minimal(), filename="b.pdf")
+        _question_grounded_in(session, first.chunks[0].id)
         assert BookLibraryService(session).grounded_question_count(second.id) == 0
 
     def test_deletion_is_refused_and_says_how_many(
@@ -172,7 +173,7 @@ class TestOverHttp:
         assert response.json()["error"]["code"] == "domain_rule_violation"
 
     def test_patch_refuses_an_unknown_field(self, client: TestClient) -> None:
-        """Structure is declared by the document; it is not editable here."""
+        """Pages and chunks come from the parsed file; they are not editable here."""
         book = _upload(client)
         response = client.patch(f"/api/books/{book['id']}", json={"page_count": 12})
         assert response.status_code == 422
@@ -195,8 +196,8 @@ class TestOverHttp:
         self, client: TestClient, session: Session
     ) -> None:
         book = _upload(client)
-        section_id = client.get(f"/api/books/{book['id']}/sections").json()["sections"][0]["id"]
-        _question_grounded_in(session, section_id)
+        chunk_id = _first_chunk_id(client, book["id"])
+        _question_grounded_in(session, chunk_id)
 
         response = client.delete(f"/api/books/{book['id']}")
         assert response.status_code == 409
@@ -207,8 +208,8 @@ class TestOverHttp:
         self, client: TestClient, session: Session
     ) -> None:
         book = _upload(client)
-        section_id = client.get(f"/api/books/{book['id']}/sections").json()["sections"][0]["id"]
-        _question_grounded_in(session, section_id)
+        chunk_id = _first_chunk_id(client, book["id"])
+        _question_grounded_in(session, chunk_id)
 
         response = client.delete(f"/api/books/{book['id']}", params={"force": True})
         assert response.status_code == 200
@@ -218,7 +219,7 @@ class TestOverHttp:
         self, client: TestClient, session: Session
     ) -> None:
         book = _upload(client)
-        section_id = client.get(f"/api/books/{book['id']}/sections").json()["sections"][0]["id"]
+        chunk_id = _first_chunk_id(client, book["id"])
         assert client.get(f"/api/books/{book['id']}").json()["grounded_question_count"] == 0
-        _question_grounded_in(session, section_id)
+        _question_grounded_in(session, chunk_id)
         assert client.get(f"/api/books/{book['id']}").json()["grounded_question_count"] == 1

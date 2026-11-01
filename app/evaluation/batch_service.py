@@ -27,16 +27,19 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.domain.enums import EvaluationTrigger, JudgeBatchStatus, JudgeMetricId
 from app.domain.questions import Question
 from app.errors import AdaptiveTrainerError, ConfigurationError, DomainRuleError
+from app.evaluation.custom import CustomJudgeResult
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
 from app.evaluation.prompts import RUBRIC_VERSION, build_user_prompt
 from app.evaluation.schema import (
@@ -50,12 +53,18 @@ from app.evaluation.schema import (
 from app.evaluation.service import build_judge_context, result_from_verdict
 from app.llm import batch as batch_transport
 from app.llm.batch import BatchRequestItem, BatchResultLine
-from app.persistence.models import JudgeBatchRunRow, QuestionEvaluationRow, QuestionRow
+from app.persistence.models import (
+    CurriculumVersionRow,
+    JudgeBatchRunRow,
+    QuestionEvaluationRow,
+    QuestionRow,
+)
 from app.persistence.repositories import (
     JudgeBatchRunRepository,
     QuestionEvaluationRepository,
     QuestionRepository,
 )
+from app.subjects import PYTHON_PROFILE, SubjectProfile, profile_for_course_id
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +101,13 @@ def record_evaluation(
     *,
     run_id: str,
     trigger: EvaluationTrigger,
+    custom_results: Sequence[CustomJudgeResult] = (),
 ) -> QuestionEvaluationRow:
     """Append one evaluation to a question's history, and usually make it current.
+
+    ``custom_results`` are the professor's rule judges on the same question
+    (:func:`app.evaluation.custom.run_custom_judges`), stored beside the metric
+    evaluation on the history row because they are not ``JudgeMetricId`` metrics.
 
     History is always appended: every evaluation is retained, including the
     failures, because "the judge could not answer on this date" is part of the
@@ -124,6 +138,7 @@ def record_evaluation(
             run_id=run_id,
             trigger=trigger,
             created_at=evaluation.created_at,
+            custom_results=[result.model_dump(mode="json") for result in custom_results],
         )
     )
     question = session.get(QuestionRow, question_id)
@@ -224,6 +239,7 @@ def submit_bank_rerun(
     *,
     settings: Settings | None = None,
     question_ids: list[int] | None = None,
+    course_id: int | None = None,
 ) -> SubmissionResult:
     """Submit the eligible question bank for re-judging as a batch run.
 
@@ -252,7 +268,10 @@ def submit_bank_rerun(
 
     backfilled = backfill_generation_history(session)
 
-    candidates = QuestionRepository(session).list_judgeable()
+    # One run records one rubric version, so it judges one course's subject: the requesting
+    # course's questions (all of them without a course, as before courses existed).
+    profile = profile_for_course_id(session, course_id)
+    candidates = judgeable_questions(session, course_id)
     if question_ids is not None:
         wanted = set(question_ids)
         candidates = [row for row in candidates if row.id in wanted]
@@ -267,7 +286,9 @@ def submit_bank_rerun(
         )
 
     run_id = new_run_id()
-    items_by_metric, skipped = _build_request_items(session, candidates, run_id=run_id)
+    items_by_metric, skipped = _build_request_items(
+        session, candidates, run_id=run_id, profile=profile
+    )
     if not any(items_by_metric.values()):
         session.rollback()
         raise DomainRuleError(
@@ -291,10 +312,11 @@ def submit_bank_rerun(
     run = JudgeBatchRunRepository(session).add(
         JudgeBatchRunRow(
             run_id=run_id,
+            course_id=course_id,
             provider_batch_ids=batch_ids,
             status=JudgeBatchStatus.SUBMITTED,
             model=settings.judge_batch_route,
-            rubric_version=effective_rubric_version(session),
+            rubric_version=effective_rubric_version(session, profile=profile),
             submitted_at=_now(),
             question_count=submitted,
         )
@@ -310,8 +332,29 @@ def submit_bank_rerun(
     return SubmissionResult(run=run, submitted=submitted, skipped=skipped, backfilled=backfilled)
 
 
+def judgeable_questions(session: Session, course_id: int | None) -> list[QuestionRow]:
+    """The questions a re-run of this course would submit (all of them without a course)."""
+    candidates = QuestionRepository(session).list_judgeable()
+    if course_id is not None:
+        in_course = _version_ids_of_course(session, course_id)
+        candidates = [row for row in candidates if row.curriculum_version_id in in_course]
+    return candidates
+
+
+def _version_ids_of_course(session: Session, course_id: int) -> set[int]:
+    return set(
+        session.scalars(
+            select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course_id)
+        )
+    )
+
+
 def _build_request_items(
-    session: Session, questions: list[QuestionRow], *, run_id: str
+    session: Session,
+    questions: list[QuestionRow],
+    *,
+    run_id: str,
+    profile: SubjectProfile = PYTHON_PROFILE,
 ) -> tuple[dict[JudgeMetricId, list[BatchRequestItem]], int]:
     """Build one request per metric per question, grouped by metric.
 
@@ -319,7 +362,7 @@ def _build_request_items(
     provider job: they share a response schema, and a job may only carry one.
     """
     items: dict[JudgeMetricId, list[BatchRequestItem]] = {metric: [] for metric in JudgeMetricId}
-    prompts = resolve_system_prompts(session)
+    prompts = resolve_system_prompts(session, profile=profile)
     skipped = 0
     for row in questions:
         try:

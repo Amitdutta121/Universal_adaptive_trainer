@@ -7,14 +7,18 @@ here rather than in routes or services.
 
 from __future__ import annotations
 
+import hashlib
+import uuid
 from collections import Counter
 from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import NamedTuple
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.assessment.catalog import LEGACY_SUBJECT
+from app.domain.chunks import make_chunk_id
 from app.domain.enums import (
     BookStatus,
     CurriculumItemStatus,
@@ -24,21 +28,26 @@ from app.domain.enums import (
     QuadrantCell,
     QuestionStatus,
     QuestionType,
+    RoundStatus,
 )
 from app.domain.mastery import DEFAULT_BKT_PARAMETERS, INITIAL_SUBTOPIC_WEAKNESS
 from app.errors import NotFoundError
 from app.persistence.models import (
-    BookChapterRow,
     BookRow,
-    BookSectionRow,
+    ChunkRow,
+    CourseRow,
     CurriculumVersionRow,
+    CustomJudgeRow,
+    GenerationRoundRow,
     JudgeBatchRunRow,
     JudgePromptRow,
+    LiveQuestionJobRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
-    QuestionSetMemberRow,
     QuestionSetAliasRow,
+    QuestionSetMemberRow,
+    QuestionSetupRow,
     QuestionSetVersionRow,
     QuestionSubtopicRow,
     ReviewOutcomeRow,
@@ -54,20 +63,105 @@ from app.persistence.models import (
 )
 
 
-class BookRepository:
-    """Uploaded textbooks."""
+def _version_ids_of(course_id: int) -> Select[tuple[int]]:
+    """The ids of the course's curriculum versions, as a subquery."""
+    return select(CurriculumVersionRow.id).where(CurriculumVersionRow.course_id == course_id)
+
+
+def questions_in_course(course_id: int) -> ColumnElement[bool]:
+    """Questions whose curriculum version belongs to this course.
+
+    A question has no ``course_id`` of its own: generation always grounds it in a
+    curriculum version (``app/generation/spec.py``), and the version carries the
+    course. A question with no version belongs to no course.
+    """
+    return QuestionRow.curriculum_version_id.in_(_version_ids_of(course_id))
+
+
+class CourseRepository:
+    """Courses: the workspace books and taxonomies are created in."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(BookRow)) or 0
-
-    def list_recent(self, limit: int = 50) -> list[BookRow]:
-        stmt = select(BookRow).order_by(BookRow.created_at.desc(), BookRow.id.desc()).limit(limit)
+    def list_all(self, *, owner_id: uuid.UUID | None = None) -> list[CourseRow]:
+        """Every course, newest first; only ``owner_id``'s when given."""
+        stmt = select(CourseRow).order_by(CourseRow.created_at.desc(), CourseRow.id.desc())
+        if owner_id is not None:
+            stmt = stmt.where(CourseRow.owner_id == owner_id)
         return list(self._session.scalars(stmt))
 
-    def list_usable(self) -> list[BookRow]:
+    def get(self, course_id: int) -> CourseRow:
+        row = self._session.get(CourseRow, course_id)
+        if row is None:
+            raise NotFoundError(f"Course {course_id} does not exist.")
+        return row
+
+    def get_owned(self, course_id: int, owner_id: uuid.UUID) -> CourseRow:
+        """The course, or the same not-found as a missing one when someone else owns it.
+
+        Not-found rather than forbidden, so a guessed id does not reveal that the course exists.
+        """
+        row = self._session.get(CourseRow, course_id)
+        if row is None or row.owner_id != owner_id:
+            raise NotFoundError(f"Course {course_id} does not exist.")
+        return row
+
+    def add(self, course: CourseRow) -> CourseRow:
+        self._session.add(course)
+        self._session.flush()
+        return course
+
+    def content_counts(self) -> dict[int, tuple[int, int, int]]:
+        """``(books, curriculum versions, questions)`` per course id, in three queries."""
+        books = dict(
+            self._session.execute(
+                select(BookRow.course_id, func.count()).group_by(BookRow.course_id)
+            ).all()
+        )
+        versions = dict(
+            self._session.execute(
+                select(CurriculumVersionRow.course_id, func.count()).group_by(
+                    CurriculumVersionRow.course_id
+                )
+            ).all()
+        )
+        questions = dict(
+            self._session.execute(
+                select(CurriculumVersionRow.course_id, func.count(QuestionRow.id))
+                .join(QuestionRow, QuestionRow.curriculum_version_id == CurriculumVersionRow.id)
+                .group_by(CurriculumVersionRow.course_id)
+            ).all()
+        )
+        ids = {key for key in (*books, *versions, *questions) if key is not None}
+        return {
+            key: (books.get(key, 0), versions.get(key, 0), questions.get(key, 0)) for key in ids
+        }
+
+
+class BookRepository:
+    """Uploaded textbooks.
+
+    ``course_id`` on a list or count narrows it to one course; ``None`` means
+    every course, which is what scripts and unit tests rely on.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(BookRow)
+        if course_id is not None:
+            stmt = stmt.where(BookRow.course_id == course_id)
+        return self._session.scalar(stmt) or 0
+
+    def list_recent(self, limit: int = 50, *, course_id: int | None = None) -> list[BookRow]:
+        stmt = select(BookRow).order_by(BookRow.created_at.desc(), BookRow.id.desc()).limit(limit)
+        if course_id is not None:
+            stmt = stmt.where(BookRow.course_id == course_id)
+        return list(self._session.scalars(stmt))
+
+    def list_usable(self, *, course_id: int | None = None) -> list[BookRow]:
         """Books whose text may ground curriculum work.
 
         Every stored book validated on import, so this is all of them; the filter
@@ -78,26 +172,12 @@ class BookRepository:
             .where(BookRow.status.in_((BookStatus.IMPORTED, BookStatus.PARTIAL)))
             .order_by(BookRow.created_at.desc(), BookRow.id.desc())
         )
+        if course_id is not None:
+            stmt = stmt.where(BookRow.course_id == course_id)
         return list(self._session.scalars(stmt))
 
     def get(self, book_id: int) -> BookRow:
         row = self._session.get(BookRow, book_id)
-        if row is None:
-            raise NotFoundError(f"Book {book_id} does not exist.")
-        return row
-
-    def get_with_structure(self, book_id: int) -> BookRow:
-        """Load a book with its chapters and their sections eagerly.
-
-        Section ``text`` is included: it is what the professor came to read, and
-        loading it lazily per section would mean one query per section.
-        """
-        stmt = (
-            select(BookRow)
-            .options(selectinload(BookRow.chapters).selectinload(BookChapterRow.sections))
-            .where(BookRow.id == book_id)
-        )
-        row = self._session.scalars(stmt).first()
         if row is None:
             raise NotFoundError(f"Book {book_id} does not exist.")
         return row
@@ -108,7 +188,7 @@ class BookRepository:
         return book
 
     def delete(self, book: BookRow) -> None:
-        """Remove a book and, by cascade, its chapters and sections.
+        """Remove a book and, by cascade, its chunks (and any old chapters and sections).
 
         Questions are not touched: they hold their grounding as data rather than
         as a foreign key, so the caller is responsible for warning about the
@@ -117,89 +197,115 @@ class BookRepository:
         self._session.delete(book)
         self._session.flush()
 
-    def section_ids(self, book_id: int) -> list[int]:
-        """Every section id belonging to one book, for reference counting."""
-        stmt = select(BookSectionRow.id).where(BookSectionRow.book_id == book_id)
+    def chunk_ids(self, book_id: int) -> list[str]:
+        """Every chunk id of every version of one book, for reference counting."""
+        stmt = select(ChunkRow.id).where(ChunkRow.book_id == book_id)
         return list(self._session.scalars(stmt))
 
 
-class BookStructureRepository:
-    """Extracted chapters and sections.
+class ChunkRepository:
+    """A book's chunks (:mod:`app.domain.chunks`).
 
-    This is the retrieval surface later question generation uses to fetch and
-    cite grounding text, so every read here can be traced back to a book,
-    chapter, section and page range.
+    Listing reads the book's ``current_version`` unless a version is named; getting by id
+    reads any version, so an id stored on a question or frozen set always resolves.
     """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def section_count(self, book_id: int | None = None) -> int:
-        stmt = select(func.count()).select_from(BookSectionRow)
-        if book_id is not None:
-            stmt = stmt.where(BookSectionRow.book_id == book_id)
-        return self._session.scalar(stmt) or 0
+    def get(self, chunk_id: str) -> ChunkRow:
+        """One chunk, with its book loaded for citation.
 
-    def get_section(self, section_id: int) -> BookSectionRow:
-        """One section, with its chapter and book loaded for citation."""
-        stmt = (
-            select(BookSectionRow)
-            .options(
-                joinedload(BookSectionRow.chapter),
-                joinedload(BookSectionRow.book),
-            )
-            .where(BookSectionRow.id == section_id)
-        )
+        Raises:
+            NotFoundError: if no such chunk exists.
+        """
+        stmt = select(ChunkRow).options(joinedload(ChunkRow.book)).where(ChunkRow.id == chunk_id)
         row = self._session.scalars(stmt).first()
         if row is None:
-            raise NotFoundError(f"Section {section_id} does not exist.")
+            raise NotFoundError(f"Chunk {chunk_id} does not exist.")
         return row
 
-    def sections_in_chapter(self, chapter_id: int) -> list[BookSectionRow]:
+    def get_many(self, chunk_ids: Collection[str]) -> dict[str, ChunkRow]:
+        """The chunks among ``chunk_ids`` that exist, by id."""
+        if not chunk_ids:
+            return {}
         stmt = (
-            select(BookSectionRow)
-            .where(BookSectionRow.chapter_id == chapter_id)
-            .order_by(BookSectionRow.position, BookSectionRow.id)
+            select(ChunkRow)
+            .options(joinedload(ChunkRow.book))
+            .where(ChunkRow.id.in_(list(chunk_ids)))
         )
-        return list(self._session.scalars(stmt))
+        return {row.id: row for row in self._session.scalars(stmt)}
 
-    def sections_in_book(self, book_id: int) -> list[BookSectionRow]:
-        stmt = (
-            select(BookSectionRow)
-            .where(BookSectionRow.book_id == book_id)
-            .order_by(BookSectionRow.position, BookSectionRow.id)
-        )
-        return list(self._session.scalars(stmt))
+    def list_for_book(
+        self, book_id: int, *, version: int | None = None, page: int | None = None
+    ) -> list[ChunkRow]:
+        """A book version's chunks in reading order; with ``page``, only those covering it.
 
-    def chapters_in_book(self, book_id: int) -> list[BookChapterRow]:
-        stmt = (
-            select(BookChapterRow)
-            .options(selectinload(BookChapterRow.sections))
-            .where(BookChapterRow.book_id == book_id)
-            .order_by(BookChapterRow.position, BookChapterRow.id)
-        )
-        return list(self._session.scalars(stmt))
-
-    def get_chapter(self, chapter_id: int) -> BookChapterRow:
-        row = self._session.get(BookChapterRow, chapter_id)
-        if row is None:
-            raise NotFoundError(f"Chapter {chapter_id} does not exist.")
-        return row
-
-    def replace_structure(
-        self, book: BookRow, chapters: list[BookChapterRow], sections: list[BookSectionRow]
-    ) -> None:
-        """Attach a freshly extracted structure to ``book``, discarding any prior one.
-
-        Re-extraction is expected to be idempotent from the professor's point of
-        view, so this replaces rather than appends.
+        ``version`` defaults to the book's current one. A book with no chunks yet (imported
+        before chunks existed) lists nothing.
         """
-        book.chapters.clear()
-        book.sections.clear()
+        if version is None:
+            version = self._session.scalar(
+                select(BookRow.current_version).where(BookRow.id == book_id)
+            )
+            if version is None:
+                return []
+        stmt = (
+            select(ChunkRow)
+            .options(joinedload(ChunkRow.book))
+            .where(ChunkRow.book_id == book_id, ChunkRow.book_version == version)
+            .order_by(ChunkRow.ordinal)
+        )
+        if page is not None:
+            stmt = stmt.where(
+                ChunkRow.page_start <= page,
+                func.coalesce(ChunkRow.page_end, ChunkRow.page_start) >= page,
+            )
+        return list(self._session.scalars(stmt))
+
+    def current_ids(self, book_ids: Collection[int] | None = None) -> Select[tuple[str]]:
+        """A select of the ids of every current-version chunk, optionally in some books."""
+        stmt = select(ChunkRow.id).join(
+            BookRow,
+            (BookRow.id == ChunkRow.book_id) & (BookRow.current_version == ChunkRow.book_version),
+        )
+        if book_ids is not None:
+            stmt = stmt.where(ChunkRow.book_id.in_(list(book_ids)))
+        return stmt
+
+    def count(self, book_id: int) -> int:
+        """How many chunks the book's current version has."""
+        stmt = (
+            select(func.count())
+            .select_from(ChunkRow)
+            .join(BookRow, BookRow.id == ChunkRow.book_id)
+            .where(ChunkRow.book_id == book_id, ChunkRow.book_version == BookRow.current_version)
+        )
+        return self._session.scalar(stmt) or 0
+
+    def add_version(self, book: BookRow, chunks: list[ChunkRow]) -> int:
+        """Write ``chunks`` (in reading order) as the book's next version and make it current.
+
+        Fills in each chunk's book, version, ordinal, id and content hash; the caller sets
+        only the text, pages and heading path.
+
+        Returns:
+            The new version number.
+        """
+        latest = self._session.scalar(
+            select(func.max(ChunkRow.book_version)).where(ChunkRow.book_id == book.id)
+        )
+        version = (latest or 0) + 1
+        for ordinal, chunk in enumerate(chunks):
+            chunk.book_id = book.id
+            chunk.book_version = version
+            chunk.ordinal = ordinal
+            chunk.id = make_chunk_id(book.id, version, ordinal, chunk.text)
+            chunk.content_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+        book.chunks.extend(chunks)
+        book.current_version = version
         self._session.flush()
-        book.chapters.extend(chapters)
-        book.sections.extend(sections)
-        self._session.flush()
+        return version
 
 
 def _visible(*rows: type[TopicRow] | type[SubtopicRow]) -> list[ColumnElement[bool]]:
@@ -211,29 +317,38 @@ def _visible(*rows: type[TopicRow] | type[SubtopicRow]) -> list[ColumnElement[bo
     return [row.review_status != CurriculumItemStatus.DELETED for row in rows]
 
 
+def _versions_in(course_id: int | None) -> list[ColumnElement[bool]]:
+    """The condition narrowing curriculum versions to one course, or none for every course."""
+    return [] if course_id is None else [CurriculumVersionRow.course_id == course_id]
+
+
 class CurriculumRepository:
     """Curriculum versions and their Topic -> Subtopic trees."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(CurriculumVersionRow)) or 0
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(CurriculumVersionRow)
+        return self._session.scalar(stmt.where(*_versions_in(course_id))) or 0
 
-    def list_versions(self, limit: int = 50) -> list[CurriculumVersionRow]:
+    def list_versions(
+        self, limit: int = 50, *, course_id: int | None = None
+    ) -> list[CurriculumVersionRow]:
         stmt = (
             select(CurriculumVersionRow)
             .options(selectinload(CurriculumVersionRow.topics))
             .order_by(CurriculumVersionRow.created_at.desc(), CurriculumVersionRow.id.desc())
             .limit(limit)
         )
-        return list(self._session.scalars(stmt))
+        return list(self._session.scalars(stmt.where(*_versions_in(course_id))))
 
-    def get_approved(self) -> CurriculumVersionRow | None:
+    def get_approved(self, *, course_id: int | None = None) -> CurriculumVersionRow | None:
         """Return the most recently approved version, if any.
 
         Question generation must ground itself in an approved version; callers
-        treat ``None`` as "curriculum not approved yet".
+        treat ``None`` as "curriculum not approved yet". Each course has its own
+        approved version; ``course_id=None`` looks across every course.
         """
         stmt = (
             select(CurriculumVersionRow)
@@ -241,9 +356,9 @@ class CurriculumRepository:
             .order_by(CurriculumVersionRow.approved_at.desc(), CurriculumVersionRow.id.desc())
             .limit(1)
         )
-        return self._session.scalars(stmt).first()
+        return self._session.scalars(stmt.where(*_versions_in(course_id))).first()
 
-    def get_latest(self) -> CurriculumVersionRow | None:
+    def get_latest(self, *, course_id: int | None = None) -> CurriculumVersionRow | None:
         """The most recently created version, approved or not.
 
         What the Curriculum page shows by default: the professor's last proposal
@@ -254,7 +369,7 @@ class CurriculumRepository:
             .order_by(CurriculumVersionRow.created_at.desc(), CurriculumVersionRow.id.desc())
             .limit(1)
         )
-        return self._session.scalars(stmt).first()
+        return self._session.scalars(stmt.where(*_versions_in(course_id))).first()
 
     def get_with_tree(self, version_id: int) -> CurriculumVersionRow:
         """One version with its topics, subtopics and evidence loaded eagerly.
@@ -291,7 +406,7 @@ class CurriculumRepository:
             .options(
                 joinedload(SubtopicRow.topic),
                 selectinload(SubtopicRow.evidence).joinedload(SubtopicEvidenceRow.book),
-                selectinload(SubtopicRow.evidence).joinedload(SubtopicEvidenceRow.section),
+                selectinload(SubtopicRow.evidence).joinedload(SubtopicEvidenceRow.chunk),
             )
             .where(SubtopicRow.id == subtopic_id)
         )
@@ -498,15 +613,18 @@ class CurriculumRepository:
 #: stay in the bank, where the generator's failure modes are meant to be read.
 NOT_REVIEWABLE_STATUSES = (QuestionStatus.VALIDATION_FAILED,)
 
+#: Pending audit drafts wait in the review queue, not the bank (ADR-064, m9).
+_IN_BANK = or_(QuestionRow.audit.is_(False), QuestionRow.status == QuestionStatus.APPROVED)
 
-def _spec_sections(spec: object) -> set[int]:
-    """The section ids a stored ``QuestionSpec`` names, tolerating older rows."""
+
+def _spec_chunks(spec: object) -> set[str]:
+    """The chunk ids a stored ``QuestionSpec`` names; none for a pre-chunk question."""
     if not isinstance(spec, dict):
         return set()
-    section_ids = spec.get("source_section_ids")
-    if not isinstance(section_ids, list):
+    chunk_ids = spec.get("source_chunk_ids")
+    if not isinstance(chunk_ids, list):
         return set()
-    return {item for item in section_ids if isinstance(item, int)}
+    return {item for item in chunk_ids if isinstance(item, str)}
 
 
 class QuestionRepository:
@@ -515,14 +633,21 @@ class QuestionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(QuestionRow)) or 0
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(QuestionRow).where(_IN_BANK)
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        return self._session.scalar(stmt) or 0
 
-    def count_by_status(self) -> dict[str, int]:
-        stmt = select(QuestionRow.status, func.count()).group_by(QuestionRow.status)
+    def count_by_status(self, *, course_id: int | None = None) -> dict[str, int]:
+        stmt = select(QuestionRow.status, func.count()).where(_IN_BANK).group_by(QuestionRow.status)
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         return {str(status): count for status, count in self._session.execute(stmt)}
 
-    def count_reviewable(self) -> int:
+    def count_reviewable(
+        self, *, course_id: int | None = None, curriculum_version_id: int | None = None
+    ) -> int:
         """Questions a professor could be asked to rule on.
 
         Excludes the same statuses :meth:`list_unreviewed` excludes, so the review
@@ -535,27 +660,31 @@ class QuestionRepository:
             .select_from(QuestionRow)
             .where(QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES))
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return self._session.scalar(stmt) or 0
 
-    def count_grounded_in_sections(self, section_ids: Collection[int]) -> int:
-        """How many questions were generated from any of these sections.
+    def count_grounded_in_chunks(self, chunk_ids: Collection[str]) -> int:
+        """How many questions were generated from any of these chunks.
 
         A question records its grounding inside the frozen ``QuestionSpec`` it was
         generated from, not as a foreign key, so this reads specs rather than
-        joining. Deleting those sections therefore would not delete the questions:
+        joining. Deleting those chunks therefore would not delete the questions:
         it would leave their citation pointing at nothing, which is exactly what
         the caller needs to warn about before it happens.
         """
-        wanted = set(section_ids)
+        wanted = set(chunk_ids)
         if not wanted:
             return 0
         stmt = select(QuestionRow.spec).where(QuestionRow.spec.is_not(None))
-        return sum(1 for spec in self._session.scalars(stmt) if wanted & _spec_sections(spec))
+        return sum(1 for spec in self._session.scalars(stmt) if wanted & _spec_chunks(spec))
 
     def count_for_curriculum_version(self, version_id: int) -> int:
         """Questions whose grounding names this curriculum version.
 
-        A plain column read, unlike :meth:`count_grounded_in_sections`: a
+        A plain column read, unlike :meth:`count_grounded_in_chunks`: a
         question's curriculum version *is* a column, even though nothing enforces
         it. Deleting the version leaves this integer pointing at nothing.
         """
@@ -589,8 +718,10 @@ class QuestionRepository:
         *,
         statuses: Collection[QuestionStatus] | None = None,
         curriculum_version_id: int | None = None,
-        section_id: int | None = None,
+        topic_ids: Collection[int] | None = None,
+        chunk_id: str | None = None,
         run_id: str | None = None,
+        course_id: int | None = None,
     ) -> list[QuestionRow]:
         """The newest questions, optionally narrowed to particular statuses.
 
@@ -598,24 +729,33 @@ class QuestionRepository:
         themselves what to show, and an empty collection means "nothing matches"
         rather than "no filter". ``curriculum_version_id`` narrows the same way,
         so a taxonomy filter applies to the whole bank rather than only to
-        whatever page ``limit`` happened to load.
+        whatever page ``limit`` happened to load. ``topic_ids`` keeps a question
+        whose topic is any of these, applied the same way.
 
         ``run_id`` narrows to questions carrying an evaluation from that
         generation run (coverage Generate m4's "Review these" link) -- a join
         through :class:`QuestionEvaluationRow`, the only place a run id is
         stored, rather than a direct column on the question.
 
-        ``section_id`` narrows to questions grounded in that one section. Like
-        :meth:`count_grounded_in_sections`, this reads the frozen spec rather than
+        ``chunk_id`` narrows to questions grounded in that one chunk. Like
+        :meth:`count_grounded_in_chunks`, this reads the frozen spec rather than
         a foreign key, so it is applied by scanning candidates in Python after the
-        other filters and before ``limit`` is taken -- a section rarely produces
+        other filters and before ``limit`` is taken -- a chunk rarely produces
         more than a handful of questions, so this stays cheap in practice.
         """
-        stmt = select(QuestionRow).order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
+        stmt = (
+            select(QuestionRow)
+            .where(_IN_BANK)
+            .order_by(QuestionRow.created_at.desc(), QuestionRow.id.desc())
+        )
         if statuses is not None:
             stmt = stmt.where(QuestionRow.status.in_(list(statuses)))
         if curriculum_version_id is not None:
             stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
+        if topic_ids is not None:
+            stmt = stmt.where(QuestionRow.topic_id.in_(list(topic_ids)))
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         if run_id is not None:
             stmt = stmt.where(
                 QuestionRow.id.in_(
@@ -624,10 +764,10 @@ class QuestionRepository:
                     )
                 )
             )
-        if section_id is not None:
+        if chunk_id is not None:
             rows = []
             for row in self._session.scalars(stmt):
-                if section_id not in _spec_sections(row.spec):
+                if chunk_id not in _spec_chunks(row.spec):
                     continue
                 rows.append(row)
                 if len(rows) >= limit:
@@ -635,15 +775,19 @@ class QuestionRepository:
             return rows
         return list(self._session.scalars(stmt.limit(limit)))
 
-    def count_by_curriculum_version(self) -> dict[str, int]:
+    def count_by_curriculum_version(self, *, course_id: int | None = None) -> dict[str, int]:
         """How many questions each curriculum version grounds, whole bank.
 
         A question generated before this column existed has no version to name;
         those are counted under ``"none"`` rather than dropped.
         """
-        stmt = select(QuestionRow.curriculum_version_id, func.count()).group_by(
-            QuestionRow.curriculum_version_id
+        stmt = (
+            select(QuestionRow.curriculum_version_id, func.count())
+            .where(_IN_BANK)
+            .group_by(QuestionRow.curriculum_version_id)
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         return {
             (str(version_id) if version_id is not None else "none"): count
             for version_id, count in self._session.execute(stmt)
@@ -665,12 +809,13 @@ class QuestionRepository:
         stmt = select(QuestionRow).where(
             QuestionRow.topic_id == topic_id,
             QuestionRow.status.in_((QuestionStatus.APPROVED, QuestionStatus.VALIDATION_PASSED)),
+            _IN_BANK,
         )
         if exclude_ids:
             stmt = stmt.where(QuestionRow.id.not_in(exclude_ids))
         return list(self._session.scalars(stmt))
 
-    def list_reviewed_with_evaluation(self) -> list[QuestionRow]:
+    def list_reviewed_with_evaluation(self, *, course_id: int | None = None) -> list[QuestionRow]:
         """Questions carrying both a stored judge evaluation and a review.
 
         The reviews are eager-loaded in one further query, because calibration
@@ -685,9 +830,38 @@ class QuestionRepository:
             .options(selectinload(QuestionRow.reviews))
             .order_by(QuestionRow.id)
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
         return list(self._session.scalars(stmt))
 
-    def count_reviewed(self) -> int:
+    def list_round_questions(self, *, course_id: int | None = None) -> list[QuestionRow]:
+        """Questions a setup round produced, including drafts whose last attempt failed.
+
+        The scorecard attributes retries and drops from ``generation_attempts`` on these
+        rows. Unbounded: a sample of recent rounds would under-count a judge that failed
+        early and recovered.
+        """
+        stmt = (
+            select(QuestionRow)
+            .where(QuestionRow.round_id.is_not(None), QuestionRow.audit.is_(False))
+            .order_by(QuestionRow.id)
+        )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        return list(self._session.scalars(stmt))
+
+    def count_audit_for_round(self, round_id: int) -> int:
+        """How many audit drafts this round has already kept (capped at two)."""
+        stmt = (
+            select(func.count())
+            .select_from(QuestionRow)
+            .where(QuestionRow.round_id == round_id, QuestionRow.audit.is_(True))
+        )
+        return self._session.scalar(stmt) or 0
+
+    def count_reviewed(
+        self, *, course_id: int | None = None, curriculum_version_id: int | None = None
+    ) -> int:
         """How many reviewable questions carry at least one professor verdict.
 
         Restricted to the same set as :meth:`count_reviewable` so the two can be
@@ -703,10 +877,19 @@ class QuestionRepository:
                 QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES),
             )
         )
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return self._session.scalar(stmt) or 0
 
     def list_unreviewed(
-        self, *, after_id: int | None = None, require_evaluation: bool = False
+        self,
+        *,
+        after_id: int | None = None,
+        require_evaluation: bool = False,
+        course_id: int | None = None,
+        curriculum_version_id: int | None = None,
     ) -> list[QuestionRow]:
         """Questions no professor has ruled on yet, lowest id first.
 
@@ -730,12 +913,18 @@ class QuestionRepository:
                 ~QuestionRow.reviews.any(),
                 QuestionRow.status.not_in(NOT_REVIEWABLE_STATUSES),
             )
-            .order_by(QuestionRow.id)
+            .order_by(QuestionRow.audit.desc(), QuestionRow.id)
         )
         if after_id is not None:
-            stmt = stmt.where(QuestionRow.id > after_id)
+            # Audits stay at the front until reviewed; the cursor only advances
+            # ordinary items so skipping one cannot hide an earlier audit.
+            stmt = stmt.where(or_(QuestionRow.audit.is_(True), QuestionRow.id > after_id))
         if require_evaluation:
             stmt = stmt.where(QuestionRow.pedagogical_eval.is_not(None))
+        if course_id is not None:
+            stmt = stmt.where(questions_in_course(course_id))
+        if curriculum_version_id is not None:
+            stmt = stmt.where(QuestionRow.curriculum_version_id == curriculum_version_id)
         return list(self._session.scalars(stmt))
 
     def list_judgeable(self) -> list[QuestionRow]:
@@ -776,19 +965,18 @@ class QuestionRepository:
         )
         return list(self._session.scalars(stmt))
 
-    def count_by_source_section(self) -> dict[int, int]:
-        """How many questions each source section has already produced.
+    def count_by_source_chunk(self) -> dict[str, int]:
+        """How many questions each source chunk has already produced.
 
-        Read in Python rather than in SQL because the section ids live inside a
+        Read in Python rather than in SQL because the chunk ids live inside a
         JSON column, and SQLite's JSON support is not worth depending on for a
         count this small. The frozen spec is authoritative; ``content`` is the
-        fallback for a row stored before a spec was persisted, so an early
-        question still reports against the section it actually came from.
+        fallback for a row stored without one.
         """
-        counts: dict[int, int] = {}
+        counts: dict[str, int] = {}
         for row in self._session.scalars(select(QuestionRow)):
-            for section_id in _source_section_ids(row):
-                counts[section_id] = counts.get(section_id, 0) + 1
+            for chunk_id in source_chunk_ids(row):
+                counts[chunk_id] = counts.get(chunk_id, 0) + 1
         return counts
 
     def add(self, question: QuestionRow) -> QuestionRow:
@@ -797,19 +985,22 @@ class QuestionRepository:
         return question
 
 
-def _source_section_ids(row: QuestionRow) -> list[int]:
-    """The section ids one question was generated from, or an empty list."""
+def source_chunk_ids(row: QuestionRow) -> list[str]:
+    """The chunk ids one question was generated from, or an empty list.
+
+    Empty for a question generated from a section, before chunks existed (Task 7).
+    """
     spec = row.spec or {}
-    ids = spec.get("source_section_ids")
+    ids = spec.get("source_chunk_ids")
     if isinstance(ids, list):
-        return [section_id for section_id in ids if isinstance(section_id, int)]
+        return [chunk_id for chunk_id in ids if isinstance(chunk_id, str)]
     sources = (row.content or {}).get("sources")
     if not isinstance(sources, list):
         return []
     return [
-        source["section_id"]
+        source["chunk_id"]
         for source in sources
-        if isinstance(source, dict) and isinstance(source.get("section_id"), int)
+        if isinstance(source, dict) and isinstance(source.get("chunk_id"), str)
     ]
 
 
@@ -885,12 +1076,16 @@ class JudgeBatchRunRepository:
         stmt = select(JudgeBatchRunRow).where(JudgeBatchRunRow.run_id == run_id)
         return self._session.scalars(stmt).first()
 
-    def list_recent(self, limit: int = 20) -> list[JudgeBatchRunRow]:
+    def list_recent(
+        self, limit: int = 20, *, course_id: int | None = None
+    ) -> list[JudgeBatchRunRow]:
         stmt = (
             select(JudgeBatchRunRow)
             .order_by(JudgeBatchRunRow.created_at.desc(), JudgeBatchRunRow.id.desc())
             .limit(limit)
         )
+        if course_id is not None:
+            stmt = stmt.where(JudgeBatchRunRow.course_id == course_id)
         return list(self._session.scalars(stmt))
 
 
@@ -900,8 +1095,13 @@ class ProfessorReviewRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def count(self) -> int:
-        return self._session.scalar(select(func.count()).select_from(ProfessorReviewRow)) or 0
+    def count(self, *, course_id: int | None = None) -> int:
+        stmt = select(func.count()).select_from(ProfessorReviewRow)
+        if course_id is not None:
+            stmt = stmt.join(QuestionRow, ProfessorReviewRow.question_id == QuestionRow.id).where(
+                questions_in_course(course_id)
+            )
+        return self._session.scalar(stmt) or 0
 
     def list_recent(self, limit: int = 50) -> list[ProfessorReviewRow]:
         stmt = (
@@ -957,11 +1157,28 @@ class ReviewOutcomeRepository:
         stmt = select(ReviewOutcomeRow).where(ReviewOutcomeRow.review_id == review_id)
         return self._session.scalars(stmt).first()
 
-    def list_recent(self, limit: int = 50) -> list[ReviewOutcomeRow]:
+    def list_recent(
+        self, limit: int = 50, *, course_id: int | None = None
+    ) -> list[ReviewOutcomeRow]:
         stmt = (
             select(ReviewOutcomeRow)
             .order_by(ReviewOutcomeRow.created_at.desc(), ReviewOutcomeRow.id.desc())
             .limit(limit)
+        )
+        if course_id is not None:
+            stmt = stmt.where(
+                ReviewOutcomeRow.question_id.in_(
+                    select(QuestionRow.id).where(questions_in_course(course_id))
+                )
+            )
+        return list(self._session.scalars(stmt))
+
+    def list_pending_lessons(self) -> list[ReviewOutcomeRow]:
+        """Rows no lesson run has learned from yet (ADR-063), oldest first."""
+        stmt = (
+            select(ReviewOutcomeRow)
+            .where(ReviewOutcomeRow.lessons_round_id.is_(None))
+            .order_by(ReviewOutcomeRow.created_at, ReviewOutcomeRow.id)
         )
         return list(self._session.scalars(stmt))
 
@@ -1046,23 +1263,35 @@ class ReviewOutcomeRepository:
 
 
 class JudgePromptRepository:
-    """Professor-edited judge prompts, and the version they imply (ADR-038)."""
+    """Professor-edited judge prompts, and the version they imply (ADR-038).
+
+    Every method is scoped to one subject preset: an override saved for one subject
+    is invisible to every other. ``subject`` defaults to the legacy subject, which
+    is what every row written before subjects existed belongs to.
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(self, metric: JudgeMetricId) -> JudgePromptRow | None:
-        stmt = select(JudgePromptRow).where(JudgePromptRow.metric == metric)
+    def get(self, metric: JudgeMetricId, *, subject: str = LEGACY_SUBJECT) -> JudgePromptRow | None:
+        stmt = select(JudgePromptRow).where(
+            JudgePromptRow.subject == subject, JudgePromptRow.metric == metric
+        )
         return self._session.scalars(stmt).first()
 
-    def list_all(self) -> list[JudgePromptRow]:
-        stmt = select(JudgePromptRow).order_by(JudgePromptRow.metric)
+    def list_all(self, *, subject: str = LEGACY_SUBJECT) -> list[JudgePromptRow]:
+        stmt = (
+            select(JudgePromptRow)
+            .where(JudgePromptRow.subject == subject)
+            .order_by(JudgePromptRow.metric)
+        )
         return list(self._session.scalars(stmt))
 
     def save(
         self,
         metric: JudgeMetricId,
         *,
+        subject: str = LEGACY_SUBJECT,
         system_prompt: str,
         note: str | None,
         rules: list[dict] | None = None,
@@ -1083,9 +1312,9 @@ class JudgePromptRepository:
         the rules were rendered into, so continuing to claim those rules produced
         it would be false.
         """
-        row = self.get(metric)
+        row = self.get(metric, subject=subject)
         if row is None:
-            row = JudgePromptRow(metric=metric, revision=1)
+            row = JudgePromptRow(subject=subject, metric=metric, revision=1)
             self._session.add(row)
         else:
             row.revision += 1
@@ -1101,9 +1330,9 @@ class JudgePromptRepository:
         self._session.flush()
         return row
 
-    def delete(self, metric: JudgeMetricId) -> bool:
+    def delete(self, metric: JudgeMetricId, *, subject: str = LEGACY_SUBJECT) -> bool:
         """Drop one override, returning that judge to its shipped prompt."""
-        row = self.get(metric)
+        row = self.get(metric, subject=subject)
         if row is None:
             return False
         self._session.delete(row)
@@ -1112,35 +1341,50 @@ class JudgePromptRepository:
 
 
 class TypeInstructionRepository:
-    """The learned generation instruction for each question type (ADR-033)."""
+    """The learned generation instruction for each question type (ADR-033).
+
+    Scoped per subject preset like :class:`JudgePromptRepository`: a rule learned
+    for one subject is never returned for another. ``subject`` defaults to the
+    legacy subject every pre-existing row belongs to.
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(self, question_type: QuestionType) -> TypeInstructionRow | None:
+    def get(
+        self, question_type: QuestionType, *, subject: str = LEGACY_SUBJECT
+    ) -> TypeInstructionRow | None:
         """The stored instruction for this type, or ``None`` if none was learned.
 
         ``None`` is a normal answer, not an error: a type nobody has reviewed
         keeps the shipped instruction, and the caller decides that fallback.
         """
-        stmt = select(TypeInstructionRow).where(TypeInstructionRow.question_type == question_type)
+        stmt = select(TypeInstructionRow).where(
+            TypeInstructionRow.subject == subject,
+            TypeInstructionRow.question_type == question_type,
+        )
         return self._session.scalars(stmt).first()
 
-    def list_all(self) -> list[TypeInstructionRow]:
-        stmt = select(TypeInstructionRow).order_by(TypeInstructionRow.question_type)
+    def list_all(self, *, subject: str = LEGACY_SUBJECT) -> list[TypeInstructionRow]:
+        stmt = (
+            select(TypeInstructionRow)
+            .where(TypeInstructionRow.subject == subject)
+            .order_by(TypeInstructionRow.question_type)
+        )
         return list(self._session.scalars(stmt))
 
     def upsert(
         self,
         question_type: QuestionType,
         *,
+        subject: str = LEGACY_SUBJECT,
         instruction: str,
         rules: list[dict],
         review_count: int,
     ) -> TypeInstructionRow:
-        row = self.get(question_type)
+        row = self.get(question_type, subject=subject)
         if row is None:
-            row = TypeInstructionRow(question_type=question_type)
+            row = TypeInstructionRow(subject=subject, question_type=question_type)
             self._session.add(row)
         else:
             row.updated_at = datetime.now(UTC)
@@ -1150,9 +1394,9 @@ class TypeInstructionRepository:
         self._session.flush()
         return row
 
-    def delete(self, question_type: QuestionType) -> bool:
+    def delete(self, question_type: QuestionType, *, subject: str = LEGACY_SUBJECT) -> bool:
         """Drop one learned row, returning that type to its shipped instruction."""
-        row = self.get(question_type)
+        row = self.get(question_type, subject=subject)
         if row is None:
             return False
         self._session.delete(row)
@@ -1204,7 +1448,10 @@ class QuestionSetRepository:
         self._session.flush()
         return row
 
-    def list_versions(self, limit: int = 50) -> list[QuestionSetVersionRow]:
+    def list_versions(
+        self, limit: int = 50, *, course_id: int | None = None
+    ) -> list[QuestionSetVersionRow]:
+        """Frozen sets, newest first; ``course_id`` narrows through the set's curriculum."""
         stmt = (
             select(QuestionSetVersionRow)
             .options(
@@ -1214,6 +1461,14 @@ class QuestionSetRepository:
             .order_by(QuestionSetVersionRow.created_at.desc(), QuestionSetVersionRow.id.desc())
             .limit(limit)
         )
+        if course_id is not None:
+            stmt = stmt.where(
+                QuestionSetVersionRow.curriculum_version_id.in_(
+                    select(CurriculumVersionRow.id).where(
+                        CurriculumVersionRow.course_id == course_id
+                    )
+                )
+            )
         return list(self._session.scalars(stmt))
 
     def get(self, set_version_id: int) -> QuestionSetVersionRow:
@@ -1249,8 +1504,12 @@ class QuestionSetRepository:
         stmt = (
             select(QuestionSetAliasRow)
             .options(
-                selectinload(QuestionSetAliasRow.set_version).selectinload(QuestionSetVersionRow.members),
-                selectinload(QuestionSetAliasRow.set_version).selectinload(QuestionSetVersionRow.aliases),
+                selectinload(QuestionSetAliasRow.set_version).selectinload(
+                    QuestionSetVersionRow.members
+                ),
+                selectinload(QuestionSetAliasRow.set_version).selectinload(
+                    QuestionSetVersionRow.aliases
+                ),
             )
             .where(QuestionSetAliasRow.alias == alias)
         )
@@ -1512,21 +1771,24 @@ class StudentStateRepository:
         return list(self._session.scalars(stmt))
 
     def list_weakness_all(
-        self, curriculum_version_id: int | None = None
+        self, curriculum_version_id: int | None = None, *, course_id: int | None = None
     ) -> list[StudentSubtopicWeaknessRow]:
         """Every learner's subtopic weakness, for the cohort weakness heatmap.
 
         ``curriculum_version_id`` narrows to subtopics owned by that taxonomy
         (via the subtopic's topic), so switching the roster's taxonomy filter
         re-scopes the heatmap instead of mixing subtopics from every version.
+        ``course_id`` narrows the same way to every taxonomy of that course.
         """
         stmt = select(StudentSubtopicWeaknessRow).order_by(StudentSubtopicWeaknessRow.subtopic_id)
+        if curriculum_version_id is not None or course_id is not None:
+            stmt = stmt.join(
+                SubtopicRow, SubtopicRow.id == StudentSubtopicWeaknessRow.subtopic_id
+            ).join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
         if curriculum_version_id is not None:
-            stmt = (
-                stmt.join(SubtopicRow, SubtopicRow.id == StudentSubtopicWeaknessRow.subtopic_id)
-                .join(TopicRow, TopicRow.id == SubtopicRow.topic_id)
-                .where(TopicRow.curriculum_version_id == curriculum_version_id)
-            )
+            stmt = stmt.where(TopicRow.curriculum_version_id == curriculum_version_id)
+        if course_id is not None:
+            stmt = stmt.where(TopicRow.curriculum_version_id.in_(_version_ids_of(course_id)))
         return list(self._session.scalars(stmt))
 
     def count_students_measured_on(
@@ -1651,6 +1913,23 @@ class TrainingSessionRepository:
         row.ended_at = datetime.now(UTC)
         self._session.flush()
         return row
+
+    def student_ids_for_course(self, course_id: int) -> set[int]:
+        """Every student who has run a session on a set built from one of the course's taxonomies.
+
+        The course-wide form of :meth:`student_ids_for_curriculum_version`: this is what makes a
+        student part of a course, since a student is never tagged with one directly.
+        """
+        stmt = (
+            select(TrainingSessionRow.student_id)
+            .join(
+                QuestionSetVersionRow,
+                QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+            )
+            .where(QuestionSetVersionRow.curriculum_version_id.in_(_version_ids_of(course_id)))
+            .distinct()
+        )
+        return set(self._session.scalars(stmt))
 
     def student_ids_for_curriculum_version(self, curriculum_version_id: int) -> set[int]:
         """Every student who has run a session against this taxonomy.
@@ -1857,13 +2136,12 @@ class StudentAttemptRepository:
             recent = values[-limit:]
             running = 0.0
             series[student_id] = [
-                (running := running + score) / (index + 1)
-                for index, score in enumerate(recent)
+                (running := running + score) / (index + 1) for index, score in enumerate(recent)
             ]
         return series
 
     def scored_attempts_all(
-        self, curriculum_version_id: int | None = None
+        self, curriculum_version_id: int | None = None, *, course_id: int | None = None
     ) -> list[ClassTrendAttempt]:
         """Every scored attempt across the cohort, oldest first: the class trend.
 
@@ -1874,6 +2152,7 @@ class StudentAttemptRepository:
         whose frozen set was built off that taxonomy (mirrors
         :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`),
         so the trend line reflects only the selected taxonomy's questions.
+        ``course_id`` narrows the same way to every taxonomy of that course.
         """
         ordering = func.coalesce(StudentAttemptRow.answered_at, StudentAttemptRow.created_at)
         stmt = (
@@ -1887,14 +2166,18 @@ class StudentAttemptRepository:
             .where(StudentAttemptRow.score.is_not(None))
             .order_by(ordering, StudentAttemptRow.ordinal)
         )
+        if curriculum_version_id is not None or course_id is not None:
+            stmt = stmt.join(
+                TrainingSessionRow, TrainingSessionRow.id == StudentAttemptRow.session_id
+            ).join(
+                QuestionSetVersionRow,
+                QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
+            )
         if curriculum_version_id is not None:
-            stmt = (
-                stmt.join(TrainingSessionRow, TrainingSessionRow.id == StudentAttemptRow.session_id)
-                .join(
-                    QuestionSetVersionRow,
-                    QuestionSetVersionRow.id == TrainingSessionRow.set_version_id,
-                )
-                .where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+            stmt = stmt.where(QuestionSetVersionRow.curriculum_version_id == curriculum_version_id)
+        if course_id is not None:
+            stmt = stmt.where(
+                QuestionSetVersionRow.curriculum_version_id.in_(_version_ids_of(course_id))
             )
         return [
             ClassTrendAttempt(
@@ -1906,3 +2189,194 @@ class StudentAttemptRepository:
             )
             for student_id, score, answered_at, created_at, ordinal in self._session.execute(stmt)
         ]
+
+
+# ------------------------------------------------------------------ question setup
+
+
+class QuestionSetupRepository:
+    """Approved question setups (docs/QUESTION_SETUP_PLAN.md). Append-only.
+
+    The newest row for a curriculum version is its current setup; saving again adds a row
+    rather than editing one, so a round always points at the setup it was planned from.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: QuestionSetupRow) -> QuestionSetupRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, setup_id: int) -> QuestionSetupRow:
+        row = self._session.get(QuestionSetupRow, setup_id)
+        if row is None:
+            raise NotFoundError(f"Question setup {setup_id} does not exist.")
+        return row
+
+    def current(self, curriculum_version_id: int) -> QuestionSetupRow | None:
+        """The newest setup for this taxonomy, or ``None`` when it was never set up."""
+        stmt = (
+            select(QuestionSetupRow)
+            .where(QuestionSetupRow.curriculum_version_id == curriculum_version_id)
+            .order_by(QuestionSetupRow.created_at.desc(), QuestionSetupRow.id.desc())
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def list_for_version(self, curriculum_version_id: int) -> list[QuestionSetupRow]:
+        stmt = (
+            select(QuestionSetupRow)
+            .where(QuestionSetupRow.curriculum_version_id == curriculum_version_id)
+            .order_by(QuestionSetupRow.created_at.desc(), QuestionSetupRow.id.desc())
+        )
+        return list(self._session.scalars(stmt))
+
+
+class GenerationRoundRepository:
+    """Background generation rounds of a setup, and their progress counters."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: GenerationRoundRow) -> GenerationRoundRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, round_id: int) -> GenerationRoundRow:
+        row = self._session.get(GenerationRoundRow, round_id)
+        if row is None:
+            raise NotFoundError(f"Generation round {round_id} does not exist.")
+        return row
+
+    def list_for_setup(self, setup_id: int) -> list[GenerationRoundRow]:
+        stmt = (
+            select(GenerationRoundRow)
+            .where(GenerationRoundRow.setup_id == setup_id)
+            .order_by(GenerationRoundRow.number)
+        )
+        return list(self._session.scalars(stmt))
+
+    def latest(self, setup_id: int) -> GenerationRoundRow | None:
+        stmt = (
+            select(GenerationRoundRow)
+            .where(GenerationRoundRow.setup_id == setup_id)
+            .order_by(GenerationRoundRow.number.desc())
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def next_number(self, setup_id: int) -> int:
+        """The number the next round of this setup takes: 1 for the first."""
+        highest = self._session.scalar(
+            select(func.max(GenerationRoundRow.number)).where(
+                GenerationRoundRow.setup_id == setup_id
+            )
+        )
+        return (highest or 0) + 1
+
+    def update(self, round_id: int, **fields: object) -> GenerationRoundRow:
+        """Set the named columns (``status``, ``produced``, ``dropped``, ``error``, ...)."""
+        row = self.get(round_id)
+        for name, value in fields.items():
+            if not hasattr(GenerationRoundRow, name):
+                raise AttributeError(f"GenerationRoundRow has no column {name!r}.")
+            setattr(row, name, value)
+        self._session.flush()
+        return row
+
+
+class LiveQuestionJobRepository:
+    """On-demand questions for one training session, newest last."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: LiveQuestionJobRow) -> LiveQuestionJobRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, job_id: int) -> LiveQuestionJobRow:
+        row = self._session.get(LiveQuestionJobRow, job_id)
+        if row is None:
+            raise NotFoundError(f"Live question job {job_id} does not exist.")
+        return row
+
+    def latest(self, training_session_id: int) -> LiveQuestionJobRow | None:
+        stmt = (
+            select(LiveQuestionJobRow)
+            .where(LiveQuestionJobRow.training_session_id == training_session_id)
+            .order_by(LiveQuestionJobRow.id.desc())
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def active(self, training_session_id: int) -> LiveQuestionJobRow | None:
+        stmt = (
+            select(LiveQuestionJobRow)
+            .where(
+                LiveQuestionJobRow.training_session_id == training_session_id,
+                LiveQuestionJobRow.status.in_((RoundStatus.QUEUED, RoundStatus.RUNNING)),
+            )
+            .order_by(LiveQuestionJobRow.id)
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+    def ready(self, training_session_id: int) -> LiveQuestionJobRow | None:
+        """A finished job whose question has not been served yet."""
+        stmt = (
+            select(LiveQuestionJobRow)
+            .where(
+                LiveQuestionJobRow.training_session_id == training_session_id,
+                LiveQuestionJobRow.status == RoundStatus.DONE,
+                LiveQuestionJobRow.question_id.is_not(None),
+                LiveQuestionJobRow.attempt_id.is_(None),
+            )
+            .order_by(LiveQuestionJobRow.id)
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()
+
+
+class CustomJudgeRepository:
+    """Professor-written rule judges, per taxonomy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, row: CustomJudgeRow) -> CustomJudgeRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def get(self, judge_id: int) -> CustomJudgeRow:
+        row = self._session.get(CustomJudgeRow, judge_id)
+        if row is None:
+            raise NotFoundError(f"Custom judge {judge_id} does not exist.")
+        return row
+
+    def list_for_version(
+        self, curriculum_version_id: int, *, enabled_only: bool = False
+    ) -> list[CustomJudgeRow]:
+        stmt = select(CustomJudgeRow).where(
+            CustomJudgeRow.curriculum_version_id == curriculum_version_id
+        )
+        if enabled_only:
+            stmt = stmt.where(CustomJudgeRow.enabled.is_(True))
+        stmt = stmt.order_by(CustomJudgeRow.created_at, CustomJudgeRow.id)
+        return list(self._session.scalars(stmt))
+
+    def update(self, judge_id: int, **fields: object) -> CustomJudgeRow:
+        """Set the named columns (``rule_text``, ``kind``, ``pattern``, ``enabled``)."""
+        row = self.get(judge_id)
+        for name, value in fields.items():
+            if not hasattr(CustomJudgeRow, name):
+                raise AttributeError(f"CustomJudgeRow has no column {name!r}.")
+            setattr(row, name, value)
+        row.updated_at = datetime.now(UTC)
+        self._session.flush()
+        return row

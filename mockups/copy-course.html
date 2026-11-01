@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Copy to a new term · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- G9 · Copy to a new term: choose what carries over (taxonomy, approved questions, rules, shifted schedule and assignments), and what doesn't (students, attempts). -->
+<body data-scope="course" data-nav="settings" data-title="Copy to a new term">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <nav class="text-sm text-muted-foreground flex items-center gap-1">
+      <a class="hover:underline" :href="Mock.link('settings.html')">Settings</a>
+      <i data-lucide="chevron-right" class="size-3.5"></i>
+      <span>Copy to a new term</span>
+    </nav>
+    <div>
+      <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.term}`"></p>
+      <h1 class="text-2xl font-semibold" x-text="`Copy ${course.name} to a new term`"></h1>
+      <p class="text-sm text-muted-foreground max-w-3xl" x-text="`Creates a new course with your setup and none of this term's students. ${course.code} · ${course.term} stays as it is.`"></p>
+    </div>
+
+    <!-- ============ Done ============ -->
+    <template x-if="phase === 'done'">
+      <div class="card">
+        <header>
+          <h2 x-text="`${form.code} · ${term.label} is ready`"></h2>
+          <p x-text="`${form.name}. Week 1 starts ${G.date(term.week1, true)}. Students can't join until you publish a question set to a section.`"></p>
+        </header>
+        <section class="grid gap-3">
+          <ul class="grid gap-1.5 text-sm">
+            <template x-for="i in items.filter((i) => i.on && i.available)" :key="i.key">
+              <li class="flex items-start gap-2"><span class="pill tone-ok shrink-0">Copied</span><span x-text="`${i.label}: ${i.count}`"></span></li>
+            </template>
+          </ul>
+          <p class="text-xs text-muted-foreground">Ran as a Copy course job; it is listed in <a class="underline" href="jobs.html">Jobs</a>. Assignments are drafts: open each one to check its dates before publishing.</p>
+        </section>
+        <footer class="flex gap-2">
+          <button type="button" class="btn" @click="openNew()" x-text="`Open ${form.code} · ${term.label}`"></button>
+          <a class="btn" data-variant="outline" :href="Mock.link('course.html')" x-text="`Back to ${course.term}`"></a>
+        </footer>
+      </div>
+    </template>
+
+    <template x-if="phase !== 'done'">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class="grid gap-6 content-start min-w-0">
+          <!-- New course -->
+          <div class="card">
+            <header><h2>New course</h2></header>
+            <section>
+              <fieldset class="grid gap-4 sm:grid-cols-3" :disabled="phase === 'running'">
+                <div role="group" class="field">
+                  <label for="c-term">Term</label>
+                  <select id="c-term" class="select w-full" x-model="form.term">
+                    <template x-for="t in G.terms" :key="t.id"><option :value="t.id" :selected="t.id === form.term" x-text="t.label"></option></template>
+                  </select>
+                </div>
+                <div role="group" class="field">
+                  <label for="c-code">Course code</label>
+                  <input id="c-code" class="input" type="text" x-model="form.code">
+                </div>
+                <div role="group" class="field">
+                  <label for="c-name">Name</label>
+                  <input id="c-name" class="input" type="text" x-model="form.name">
+                </div>
+              </fieldset>
+              <p class="mt-3 text-sm"><span class="text-muted-foreground">Week 1</span> <span class="font-medium" x-text="`${G.date(oldWeek1)} → ${G.date(term.week1, true)}`"></span> <span class="text-muted-foreground" x-text="`· every date moves ${shiftLabel}`"></span></p>
+            </section>
+          </div>
+
+          <!-- Carries over -->
+          <div class="card gap-0 py-0">
+            <header class="py-5 border-b">
+              <h2>What carries over</h2>
+              <p x-text="`${items.filter((i) => i.on && i.available).length} of ${items.length} selected`"></p>
+            </header>
+            <ul class="divide-y">
+              <template x-for="i in items" :key="i.key">
+                <li class="flex items-start gap-3 px-6 py-3.5" :class="!i.available && 'opacity-60'">
+                  <input type="checkbox" class="input mt-0.5" :id="`ci-${i.key}`" x-model="i.on" :disabled="i.required || !i.available || phase === 'running'">
+                  <div class="min-w-0 flex-1">
+                    <label :for="`ci-${i.key}`" class="flex flex-wrap items-center gap-2">
+                      <span class="font-medium text-sm" x-text="i.label"></span>
+                      <span class="pill tone-muted" x-text="i.count"></span>
+                      <span class="text-xs text-muted-foreground" x-show="i.required">Required</span>
+                    </label>
+                    <p class="text-xs text-muted-foreground mt-0.5" x-text="i.detail"></p>
+                    <template x-if="i.key === 'questions' && i.available && usedOnExam">
+                      <label class="mt-1.5 flex items-center gap-2 text-xs">
+                        <input type="checkbox" class="input" x-model="skipExamQs" :disabled="!i.on">
+                        <span x-text="`Leave out the ${usedOnExam} questions used on an exam this term (students may have kept copies)`"></span>
+                      </label>
+                    </template>
+                    <template x-if="i.key === 'schedule' && i.available">
+                      <div class="mt-1.5 grid gap-0.5 text-xs font-mono">
+                        <template x-for="w in schedulePreview" :key="w.week">
+                          <div><span class="text-muted-foreground" x-text="`Week ${w.week}`"></span> <span x-text="`${G.date(w.starts)} → ${G.date(G.addDays(w.starts, shift), true)}`"></span> <span class="text-muted-foreground font-sans" x-text="w.title"></span></div>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="i.key === 'assignments' && i.available">
+                      <div class="mt-1.5 grid gap-0.5 text-xs">
+                        <template x-for="a in assignmentPreview" :key="a.id">
+                          <div><span x-text="a.name"></span> <span class="text-muted-foreground font-mono" x-text="`due ${G.date(a.due)} → ${G.date(G.addDays(a.due, shift), true)}`"></span></div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </div>
+
+        <div class="grid gap-6 content-start">
+          <div class="card">
+            <header>
+              <h2>What doesn't carry over</h2>
+              <p x-text="`It stays with ${course.term}.`"></p>
+            </header>
+            <section>
+              <ul class="grid gap-2.5 text-sm">
+                <template x-for="n in notCopied" :key="n.label">
+                  <li class="grid gap-0.5">
+                    <div class="flex gap-2"><span x-text="n.label"></span><span class="ml-auto tabular-nums text-muted-foreground" x-text="n.count"></span></div>
+                    <div class="text-xs text-muted-foreground" x-text="n.detail" x-show="n.detail"></div>
+                  </li>
+                </template>
+              </ul>
+            </section>
+          </div>
+
+          <div class="card">
+            <header>
+              <h2>Create the course</h2>
+              <p x-text="`${form.code} · ${term.label} · ${form.name}`"></p>
+            </header>
+            <section class="grid gap-3">
+              <template x-if="phase === 'running'">
+                <div class="grid gap-3">
+                  <ol class="grid gap-2 text-sm">
+                    <template x-for="(s, k) in runSteps" :key="s">
+                      <li class="flex items-center gap-2">
+                        <span class="grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold" :class="k < runStep ? 'tone-ok' : k === runStep ? 'tone-accent' : 'tone-muted'" x-text="k < runStep ? '✓' : k + 1"></span>
+                        <span :class="k > runStep && 'text-muted-foreground'" x-text="s"></span>
+                      </li>
+                    </template>
+                  </ol>
+                  <div class="progress" role="progressbar" :aria-valuenow="Math.round(runStep / runSteps.length * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.min(100, runStep / runSteps.length * 100)}%` }"></span></div>
+                  <p class="text-xs text-muted-foreground">Runs as a Copy course job and appears in <a class="underline" href="jobs.html">Jobs</a>.</p>
+                </div>
+              </template>
+              <p class="text-xs text-muted-foreground" x-show="phase !== 'running'">No AI calls; this doesn't count toward usage. Nothing is sent to Canvas.</p>
+              <p class="text-xs" style="color:var(--critical-solid)" x-show="!valid" x-text="form.code.trim() && form.name.trim() ? `${form.code} · ${term.label} already exists` : 'Course code and name are required'"></p>
+            </section>
+            <footer>
+              <button type="button" class="btn w-full" :disabled="!valid || phase === 'running'" @click="create()" x-text="phase === 'running' ? 'Copying…' : `Create ${form.code} · ${term.label}`"></button>
+            </footer>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-content.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const G = MOCK.gContent;
+      const sched = MOCK.schedule[c.id];
+      const oldWeek1 = sched ? sched.term.starts : "2026-08-31";
+      const days = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${a}T12:00:00`)) / 86400000);
+      const qs = MOCK.questions.filter((q) => q.course === c.id);
+      const approved = qs.filter((q) => q.status === "approved");
+      const sets = MOCK.question_sets.filter((s) => s.course === c.id);
+      const rules = c.id === MOCK.alignment.course ? MOCK.alignment.learned_rules : [];
+      const assignments = MOCK.assignments.filter((a) => a.course === c.id);
+      const books = MOCK.books.filter((b) => b.course === c.id);
+      const coInstructors = c.collaborators.map((id) => MOCK.users.find((u) => u.id === id)).filter(Boolean);
+      const students = MOCK.students.filter((s) => s.course === c.id);
+      const classes = MOCK.classes.filter((k) => k.course === c.id);
+      const active = c.taxonomy_versions.find((v) => v.active);
+      const draft = c.taxonomy_versions[0];
+      const usedOnExam = new Set(MOCK.exams.filter((e) => e.course === c.id).flatMap((e) => e.questions)).size;
+      const reports = (MOCK.reports || []).filter((r) => MOCK.question(r.question_id)?.course === c.id);
+      const I = (o) => ({ required: false, available: true, ...o, on: o.available !== false });
+      return {
+        course: c, G, oldWeek1, usedOnExam, skipExamQs: false,
+        form: { term: "fall2027", code: c.code, name: c.name },
+        phase: Mock.param("state") === "done" ? "done" : "form", runStep: 0,
+        get term() { return G.terms.find((t) => t.id === this.form.term); },
+        get shift() { return days(oldWeek1, this.term.week1); },
+        get shiftLabel() { const w = Math.round(this.shift / 7); return `${w} weeks later (${this.shift} days), same weekday`; },
+        get valid() { return this.form.code.trim() && this.form.name.trim() && !(this.form.code.trim() === c.code && this.term.label === c.term); },
+        items: [
+          I({ key: "taxonomy", label: "Taxonomy", required: true,
+              count: active ? `${active.label.split(" ")[0]} · ${active.topics} topics / ${active.subtopics} subtopics` : `draft · ${draft.topics} topics / ${draft.subtopics} subtopics`,
+              detail: active ? `${active.label}, the active version. Older versions stay here. Questions and the schedule refer to it.` : "Not approved yet; copied as a draft you still need to review." }),
+          I({ key: "questions", label: "Approved questions and question sets", available: approved.length > 0,
+              count: `${approved.length} questions · ${sets.length} sets`,
+              detail: approved.length
+                ? `Question sets: ${sets.map((s) => s.name).join(", ")}. The ${qs.length - approved.length} questions you haven't approved stay here. Exam holds don't carry over.`
+                : "No approved questions yet." }),
+          I({ key: "rules", label: "Judge learned rules", available: rules.length > 0,
+              count: `${rules.length} rules · ${rules.filter((r) => r.enabled).length} on`,
+              detail: rules.length ? `Learned from ${rules.reduce((a, r) => a + r.from_reviews, 0)} of your reject reasons; on/off state is kept. Judge agreement starts over in the new course.` : "No rules learned yet." }),
+          I({ key: "schedule", label: "Schedule", available: !!sched,
+              count: sched ? `${sched.weeks.length} weeks` : "none",
+              detail: sched ? "Dates shift to the new term's week 1. Week notes (Midterm exam, Thanksgiving) are copied as they are; check them against the new calendar." : "No schedule yet: it needs an approved taxonomy." }),
+          I({ key: "assignments", label: "Assignments", available: assignments.length > 0,
+              count: `${assignments.length}, as drafts`,
+              detail: assignments.length ? "Open, due and late dates shift with the schedule. Nothing is published or sent to Canvas until you open each one." : "No assignments yet." }),
+          I({ key: "books", label: "Books", available: books.length > 0,
+              count: `${books.length}, shared`,
+              detail: `Shared with the new course, not re-uploaded or re-embedded: ${books.map((b) => b.title).join("; ")}` }),
+          I({ key: "people", label: "Co-instructors", available: coInstructors.length > 0,
+              count: coInstructors.length ? coInstructors.map((u) => u.name).join(", ") : "none",
+              detail: coInstructors.length ? `${coInstructors.map((u) => `${u.name} (${u.role})`).join(", ")} gets the same role. TAs and graders change each term; invite them in the new course's Settings.` : "Only you on this course." }),
+        ],
+        notCopied: [
+          { label: "Students", count: students.length, detail: "They join the new course with its new join codes." },
+          { label: "Attempts", count: students.reduce((a, s) => a + s.attempts, 0).toLocaleString("en-US"), detail: "" },
+          { label: "Mastery", count: students.length ? `${students.length} students` : "—", detail: "Everyone starts at zero." },
+          { label: "Gradebook, extensions, notes", count: assignments.length ? `${assignments.length} assignments` : "—", detail: "" },
+          { label: "Student reports", count: reports.length, detail: "" },
+          { label: "Join codes", count: classes.length ? classes.map((k) => k.join_code).join(", ") : "—", detail: classes.length ? `Sections are recreated empty with new codes.` : "" },
+        ],
+        get schedulePreview() { return sched ? [sched.weeks[0], sched.weeks.find((w) => /Midterm/.test(w.title)), sched.weeks[sched.weeks.length - 1]].filter(Boolean) : []; },
+        get assignmentPreview() { return assignments.filter((a) => ["a1", "a4", "a6"].includes(a.id)); },
+        get runSteps() {
+          const on = (k) => this.items.find((i) => i.key === k && i.on && i.available);
+          return [
+            `Create ${this.form.code} · ${this.term.label}`,
+            "Copy the taxonomy",
+            on("questions") && `Copy ${approved.length - (this.skipExamQs ? usedOnExam : 0)} questions and ${sets.length} question sets`,
+            on("rules") && `Copy ${rules.length} learned rules`,
+            on("schedule") && `Shift the schedule${on("assignments") ? ` and ${assignments.length} assignments` : ""}`,
+            on("books") && `Share ${books.length} books`,
+            on("people") && "Add co-instructors",
+          ].filter(Boolean);
+        },
+        create() {
+          this.phase = "running"; this.runStep = 0;
+          const tick = () => {
+            this.runStep++;
+            if (this.runStep < this.runSteps.length) return setTimeout(tick, 550);
+            this.phase = "done";
+            Mock.toast(`Created ${this.form.code} · ${this.term.label}`);
+          };
+          setTimeout(tick, 550);
+        },
+        openNew() {
+          // TODO(real): opens the new course; the mockup has no second Python course, so it opens this one.
+          Mock.toast(`Mockup: opening ${c.code} · ${c.term} in place of the new course`);
+          setTimeout(() => (location.href = Mock.link("course.html")), 1100);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

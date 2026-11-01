@@ -1,0 +1,1059 @@
+{
+  "about": "Retrieval gold set, Agah 'Introduction to Data Science Using Python'. Built by scripts/build_retrieval_gold.py; entries with source=manual were set or corrected by hand and say why in manual_edit. Matching is by page overlap.",
+  "book": {
+    "title": "Intro to Data Science",
+    "checksum_sha256": "b20cf84ae5cd8e8decc7ec63a8d01d9c904a217e80e1cc9c3345b8f0deeba8dd",
+    "page_count": 117,
+    "source_book_id": 4
+  },
+  "sections": {
+    "419": {
+      "heading": "1. Installing Python",
+      "start_page": 8,
+      "end_page": 9
+    },
+    "420": {
+      "heading": "2.1. Variables",
+      "start_page": 11,
+      "end_page": 12
+    },
+    "421": {
+      "heading": "2.1.1. Boolean Variables",
+      "start_page": 13,
+      "end_page": 14
+    },
+    "422": {
+      "heading": "2.1.2. Random Variables",
+      "start_page": 15,
+      "end_page": 15
+    },
+    "423": {
+      "heading": "2.2. Strings",
+      "start_page": 15,
+      "end_page": 15
+    },
+    "424": {
+      "heading": "2.3. ASCII Code",
+      "start_page": 16,
+      "end_page": 20
+    },
+    "426": {
+      "heading": "3.1. Nested Decision Structures",
+      "start_page": 23,
+      "end_page": 24
+    },
+    "428": {
+      "heading": "4.1. While Loops",
+      "start_page": 27,
+      "end_page": 28
+    },
+    "429": {
+      "heading": "4.2. For Loops",
+      "start_page": 29,
+      "end_page": 31
+    },
+    "431": {
+      "heading": "4.4. Nested Loops",
+      "start_page": 33,
+      "end_page": 33
+    },
+    "433": {
+      "heading": "5.1. Void and Value Returning Functions",
+      "start_page": 38,
+      "end_page": 38
+    },
+    "434": {
+      "heading": "5.2. Passing Data to and From Functions",
+      "start_page": 39,
+      "end_page": 39
+    },
+    "435": {
+      "heading": "5.3. Mathematical Built-in Functions",
+      "start_page": 40,
+      "end_page": 41
+    },
+    "437": {
+      "heading": "6. Recursion",
+      "start_page": 43,
+      "end_page": 44
+    },
+    "438": {
+      "heading": "7.1. Read From a File",
+      "start_page": 46,
+      "end_page": 46
+    },
+    "439": {
+      "heading": "7.2. Write to a File",
+      "start_page": 46,
+      "end_page": 46
+    },
+    "440": {
+      "heading": "7.2.1. New File",
+      "start_page": 47,
+      "end_page": 47
+    },
+    "441": {
+      "heading": "7.2.2. An Existing File",
+      "start_page": 47,
+      "end_page": 47
+    },
+    "442": {
+      "heading": "7.3. Notable Built-in Functions",
+      "start_page": 47,
+      "end_page": 48
+    },
+    "446": {
+      "heading": "10. Plotting Graphs",
+      "start_page": 58,
+      "end_page": 64
+    },
+    "447": {
+      "heading": "11.1 Constructor",
+      "start_page": 66,
+      "end_page": 66
+    },
+    "448": {
+      "heading": "11.2 Inheritance",
+      "start_page": 66,
+      "end_page": 66
+    },
+    "449": {
+      "heading": "11.3 Polymorphism",
+      "start_page": 67,
+      "end_page": 68
+    },
+    "450": {
+      "heading": "12. Using Python Packages",
+      "start_page": 69,
+      "end_page": 70
+    },
+    "451": {
+      "heading": "13.1 Networkx",
+      "start_page": 72,
+      "end_page": 74
+    },
+    "452": {
+      "heading": "13.2 Matplotlib",
+      "start_page": 75,
+      "end_page": 76
+    },
+    "453": {
+      "heading": "14.1 Supervised Learning",
+      "start_page": 78,
+      "end_page": 78
+    },
+    "454": {
+      "heading": "14.1.2 Regression",
+      "start_page": 78,
+      "end_page": 78
+    },
+    "455": {
+      "heading": "14.1.3 Linear Functions",
+      "start_page": 78,
+      "end_page": 78
+    },
+    "456": {
+      "heading": "14.1.4 Polynomial Functions",
+      "start_page": 79,
+      "end_page": 80
+    },
+    "457": {
+      "heading": "14.2. Unsupervised Learning",
+      "start_page": 81,
+      "end_page": 83
+    },
+    "458": {
+      "heading": "15.1 Standardizing Data by Scaling",
+      "start_page": 86,
+      "end_page": 86
+    },
+    "459": {
+      "heading": "15.2 T-Test",
+      "start_page": 87,
+      "end_page": 88
+    }
+  },
+  "entries": [
+    {
+      "query": "Installing Python",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        8,
+        9
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        419
+      ]
+    },
+    {
+      "query": "Variables",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        11,
+        12
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        420
+      ]
+    },
+    {
+      "query": "Boolean Variables",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        13
+      ],
+      "manual_edit": "draft pages [13, 14] -> [13]: section runs on into f-string formatting (p14); booleans are only on p13",
+      "relevant_section_ids": [
+        421
+      ]
+    },
+    {
+      "query": "Random Variables",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        15
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        422,
+        423
+      ]
+    },
+    {
+      "query": "Strings",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        15,
+        16
+      ],
+      "manual_edit": "draft pages [15] -> [15, 16]: strings continue on p16 (string * int, int(input()))",
+      "relevant_section_ids": [
+        422,
+        423,
+        424
+      ]
+    },
+    {
+      "query": "ASCII Code",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        424
+      ]
+    },
+    {
+      "query": "Nested Decision Structures",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        23,
+        24
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        426
+      ]
+    },
+    {
+      "query": "While Loops",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        27,
+        28,
+        29
+      ],
+      "manual_edit": "draft pages [27, 28] -> [27, 28, 29]: the while-loop summation example ends on p29",
+      "relevant_section_ids": [
+        428,
+        429
+      ]
+    },
+    {
+      "query": "For Loops",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        29,
+        30,
+        31
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        429
+      ]
+    },
+    {
+      "query": "Nested Loops",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        33
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        431
+      ]
+    },
+    {
+      "query": "Void and Value Returning Functions",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        38
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        433
+      ]
+    },
+    {
+      "query": "Passing Data to and From Functions",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        39
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        434
+      ]
+    },
+    {
+      "query": "Mathematical Built-in Functions",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        40,
+        41
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        435
+      ]
+    },
+    {
+      "query": "Recursion",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        43,
+        44
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        437
+      ]
+    },
+    {
+      "query": "Read From a File",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        46
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        438,
+        439
+      ]
+    },
+    {
+      "query": "Write to a File",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        46,
+        47
+      ],
+      "manual_edit": "draft pages [46] -> [46, 47]: write() with open(..., 'w') is on p47",
+      "relevant_section_ids": [
+        438,
+        439,
+        440,
+        441,
+        442
+      ]
+    },
+    {
+      "query": "An Existing File",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        47
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        440,
+        441,
+        442
+      ]
+    },
+    {
+      "query": "Notable Built-in Functions",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        47,
+        48
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        440,
+        441,
+        442
+      ]
+    },
+    {
+      "query": "Plotting Graphs",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        446
+      ]
+    },
+    {
+      "query": "Constructor",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        65,
+        66
+      ],
+      "manual_edit": "draft pages [66] -> [65, 66]: first __init__ example is in the chapter intro (p65)",
+      "relevant_section_ids": [
+        447,
+        448
+      ]
+    },
+    {
+      "query": "Inheritance",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        66,
+        67
+      ],
+      "manual_edit": "draft pages [66] -> [66, 67]: inheritance example continues on p67",
+      "relevant_section_ids": [
+        447,
+        448,
+        449
+      ]
+    },
+    {
+      "query": "Polymorphism",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        67,
+        68
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        449
+      ]
+    },
+    {
+      "query": "Using Python Packages",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        69,
+        70
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        450
+      ]
+    },
+    {
+      "query": "Networkx",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        72,
+        73,
+        74,
+        75
+      ],
+      "manual_edit": "draft pages [72, 73, 74] -> [72, 73, 74, 75]: number_of_nodes/remove_edge are on p75",
+      "relevant_section_ids": [
+        451,
+        452
+      ]
+    },
+    {
+      "query": "Matplotlib",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        75,
+        76
+      ],
+      "manual_edit": "draft pages [75, 76] -> [58, 59, 60, 61, 62, 63, 64, 75, 76]: chapter 10 (Plotting Graphs) teaches matplotlib too",
+      "relevant_section_ids": [
+        446,
+        452
+      ]
+    },
+    {
+      "query": "Supervised Learning",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        78
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        453,
+        454,
+        455
+      ]
+    },
+    {
+      "query": "Linear Functions",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        78,
+        79
+      ],
+      "manual_edit": "draft pages [78] -> [78, 79]: the linregress example is on p79",
+      "relevant_section_ids": [
+        453,
+        454,
+        455,
+        456
+      ]
+    },
+    {
+      "query": "Polynomial Functions",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        79,
+        80
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        456
+      ]
+    },
+    {
+      "query": "Unsupervised Learning",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        81,
+        82,
+        83
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        457
+      ]
+    },
+    {
+      "query": "Standardizing Data by Scaling",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        86
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        458
+      ]
+    },
+    {
+      "query": "T-Test",
+      "kind": "heading",
+      "source": "draft",
+      "relevant_pages": [
+        87,
+        88
+      ],
+      "manual_edit": null,
+      "relevant_section_ids": [
+        459
+      ]
+    },
+    {
+      "query": "Introduction to Programming",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        10
+      ],
+      "manual_edit": "chapter intro: these pages are in no imported section",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "Decision Structures",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        22,
+        23
+      ],
+      "manual_edit": "chapter intro: these pages are in no imported section",
+      "relevant_section_ids": [
+        426
+      ]
+    },
+    {
+      "query": "Lists",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        50,
+        51,
+        52,
+        53,
+        54
+      ],
+      "manual_edit": "chapter intro: these pages are in no imported section",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "Arrays",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        56
+      ],
+      "manual_edit": "chapter intro: these pages are in no imported section",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "Python and Statistics",
+      "kind": "heading",
+      "source": "manual",
+      "relevant_pages": [
+        84,
+        85
+      ],
+      "manual_edit": "chapter intro: these pages are in no imported section",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "Print statements and formatted printing",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        10,
+        13,
+        14
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        421
+      ]
+    },
+    {
+      "query": "Arithmetic operators and expression evaluation",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        12,
+        13
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        420,
+        421
+      ]
+    },
+    {
+      "query": "input() and interactive programs",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        12,
+        16
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        420,
+        424
+      ]
+    },
+    {
+      "query": "Boolean expressions and comparison operators",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        13,
+        23
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        421,
+        426
+      ]
+    },
+    {
+      "query": "if-elif-else chains",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        24
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        426
+      ]
+    },
+    {
+      "query": "Creating, indexing, and slicing lists",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        50
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "List methods (append, insert, remove, sort, len)",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        51,
+        52,
+        54
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "Variable scope (local vs. global)",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        38
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        433
+      ]
+    },
+    {
+      "query": "Accumulator patterns (sum, count, running total)",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        28,
+        29,
+        31
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        428,
+        429
+      ]
+    },
+    {
+      "query": "Common recursive patterns (factorial, sum, simple traversal)",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        43,
+        44
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        437
+      ]
+    },
+    {
+      "query": "Opening/reading/closing text files",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        45,
+        46
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        438,
+        439
+      ]
+    },
+    {
+      "query": "Writing and appending data",
+      "kind": "subtopic",
+      "source": "manual",
+      "relevant_pages": [
+        46,
+        47
+      ],
+      "manual_edit": "curriculum subtopic name (taxonomy 'Python for Data Science'); pages read from the PDF",
+      "relevant_section_ids": [
+        438,
+        439,
+        440,
+        441,
+        442
+      ]
+    },
+    {
+      "query": "how do I make a random whole number between 1 and 6?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        15
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        422,
+        423
+      ]
+    },
+    {
+      "query": "why does '1' + '2' give 12 instead of 3?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        15
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        422,
+        423
+      ]
+    },
+    {
+      "query": "how do I get the number code for a letter like A?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        20
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        424
+      ]
+    },
+    {
+      "query": "my while loop never stops, why?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        28
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        428
+      ]
+    },
+    {
+      "query": "how does range(5, 0, -1) count down?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        29,
+        30
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        429
+      ]
+    },
+    {
+      "query": "how many times does the inner loop run in a nested loop?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        33
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        431
+      ]
+    },
+    {
+      "query": "how do I round a number down to an integer?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        40
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        435
+      ]
+    },
+    {
+      "query": "how do I show a number with two decimal places?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        14
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        421
+      ]
+    },
+    {
+      "query": "how do I remove the newline at the end of a line I read from a file?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        47
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        440,
+        441,
+        442
+      ]
+    },
+    {
+      "query": "how do I save a list to a file and read it back?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        53
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "what is the difference between a list and a numpy array?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        56
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "how do I draw a pie chart?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        59,
+        63,
+        64
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        446
+      ]
+    },
+    {
+      "query": "what does self mean in a class?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        66
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        447,
+        448
+      ]
+    },
+    {
+      "query": "how do I find which node is most central in a network?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        74
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        451
+      ]
+    },
+    {
+      "query": "how do I fit a straight line through my data?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        78,
+        79
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        453,
+        454,
+        455,
+        456
+      ]
+    },
+    {
+      "query": "how do I group data points into clusters?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        81,
+        82
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        457
+      ]
+    },
+    {
+      "query": "how do I find the mean, median and mode of a list?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        84,
+        85
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": []
+    },
+    {
+      "query": "how do I check if two groups are significantly different?",
+      "kind": "student",
+      "source": "manual",
+      "relevant_pages": [
+        87,
+        88
+      ],
+      "manual_edit": "student-style question; pages read from the PDF",
+      "relevant_section_ids": [
+        459
+      ]
+    }
+  ]
+}

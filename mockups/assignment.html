@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assignment · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- G3 · Assignment editor: scope, goal, dates and late policy, points, sections, LMS. ?id=a4 edits, ?new=1 creates. -->
+<body data-scope="course" data-nav="assignments" data-title="Assignment">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <!-- No schedule (statistics): nothing to assign. -->
+    <template x-if="!s">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="calendar-check"></i></span>
+          <h2 class="font-semibold">No topics to assign</h2>
+          <p class="text-sm text-muted-foreground max-w-md">Assignments are built from scheduled topics. This course has no approved taxonomy yet.</p>
+          <div class="flex gap-2 mt-2">
+            <a class="btn" data-size="sm" :href="Mock.link('taxonomy-draft.html')">Review the drafted taxonomy</a>
+            <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('assignments.html')">Assignments</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="s">
+      <div class="grid gap-6">
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="min-w-0">
+            <p class="text-sm text-muted-foreground"><a class="hover:underline" :href="Mock.link('assignments.html')">Assignments</a> <span>/</span> <span x-text="isNew ? 'New' : saved.name"></span></p>
+            <div class="flex items-center gap-2">
+              <h1 class="text-2xl font-semibold truncate" x-text="f.name || 'New assignment'"></h1>
+              <span class="pill" :class="statusTone(status)" x-text="statusLabel(status)"></span>
+            </div>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <button type="button" class="btn" data-variant="ghost" x-show="!isNew" @click="$refs.del.showModal()"><i data-lucide="trash-2"></i>Delete</button>
+            <button type="button" class="btn" :data-variant="canPublish ? 'outline' : null" @click="save()" :disabled="!f.name.trim()" x-text="isNew ? 'Save draft' : 'Save'"></button>
+            <button type="button" class="btn" x-show="canPublish" @click="publish()" :disabled="problems.length > 0" :title="problems.join(' ')">Publish</button>
+          </div>
+          <p class="basis-full text-right text-sm" style="color:var(--critical-solid)" x-show="canPublish && problems.length" x-cloak>
+            <span x-text="`Can't publish: ${(problems[0] || '').replace(/\.$/, '')}.`"></span>
+            <a class="underline ml-1" x-show="f.topics.length && !qualifying[f.minLevel]" :href="Mock.link('generate.html')">Generate for these topics</a>
+          </p>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-6 items-start">
+          <!-- Form -->
+          <div class="lg:col-span-2 grid gap-6">
+            <section class="card">
+              <header><h2>Name and scope</h2><p>Students see the name on their home page. Only topics on the schedule can be picked.</p></header>
+              <section class="grid gap-4">
+                <div role="group" class="field">
+                  <label for="a-name">Name</label>
+                  <input id="a-name" class="input" type="text" x-model="f.name" placeholder="Week 9: Files">
+                </div>
+                <div class="grid gap-2">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span class="font-medium">Topics</span>
+                    <span class="text-muted-foreground" x-text="`${f.topics.length} selected`"></span>
+                    <span class="ml-auto text-muted-foreground">All topics in weeks 1 to</span>
+                    <select class="select w-28" aria-label="Select all topics through week" @change="throughWeek(Number($event.target.value)); $event.target.value = ''">
+                      <option value="" selected disabled>week…</option>
+                      <template x-for="w in topicWeeks" :key="w.week"><option :value="w.week" x-text="`Week ${w.week}`"></option></template>
+                    </select>
+                    <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="f.topics = []" :disabled="!f.topics.length">Clear</button>
+                  </div>
+                  <div class="rounded-lg border divide-y" style="border-color:var(--border)">
+                    <template x-for="w in topicWeeks" :key="w.week">
+                      <div class="grid grid-cols-[8.5rem_1fr] gap-3 px-3 py-2 items-center">
+                        <div class="text-sm">
+                          <span class="font-medium" x-text="`Week ${w.week}`"></span>
+                          <span class="text-xs text-muted-foreground" x-text="` · ${fmt(w.starts)}`"></span>
+                        </div>
+                        <div class="flex flex-wrap gap-x-5 gap-y-1">
+                          <template x-for="tid in w.topics" :key="tid">
+                            <label class="label gap-2 text-sm font-normal">
+                              <input type="checkbox" class="input" :value="tid" x-model="f.topics">
+                              <span x-text="topicName(tid)"></span>
+                              <span class="text-xs text-muted-foreground" x-show="w.week > s.current_week" x-text="`opens ${fmt(w.starts)}`"></span>
+                            </label>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                  <p class="text-xs" style="color:var(--warn-solid)" x-show="lateTopics.length" x-text="`${lateTopics.join(', ')} ${lateTopics.length === 1 ? 'opens' : 'open'} after this assignment opens (${fmt(f.opens, true)}). Students can't practise ${lateTopics.length === 1 ? 'it' : 'them'} before then.`"></p>
+                </div>
+              </section>
+            </section>
+
+            <section class="card">
+              <header><h2>Goal</h2><p>What a student has to do to earn full points. Pick something you can state in the syllabus.</p></header>
+              <section class="grid gap-3">
+                <label class="flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="f.goalType === 'mastery' ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                  <input type="radio" class="input" name="goal" value="mastery" x-model="f.goalType">
+                  <span class="text-sm font-medium">Reach</span>
+                  <select class="select w-24" aria-label="Mastery target" x-model.number="f.target" @focus="f.goalType = 'mastery'">
+                    <template x-for="t in [0.5, 0.6, 0.7, 0.8, 0.9]" :key="t"><option :value="t" :selected="t === f.target" x-text="`${Math.round(t * 100)}%`"></option></template>
+                  </select>
+                  <span class="text-sm font-medium">mastery on each topic in scope</span>
+                </label>
+                <label class="flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="f.goalType === 'count' ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                  <input type="radio" class="input" name="goal" value="count" x-model="f.goalType">
+                  <span class="text-sm font-medium">Answer</span>
+                  <input type="number" class="input w-24" min="5" max="200" aria-label="Number of questions" x-model.number="f.n" @focus="f.goalType = 'count'">
+                  <span class="text-sm font-medium">questions from the topics in scope</span>
+                </label>
+                <p class="text-sm text-muted-foreground" x-text="scoreRule"></p>
+              </section>
+            </section>
+
+            <section class="card">
+              <header><h2>Question quality</h2><p>Use only questions whose answer key was verified at least this strongly. Counts are approved questions on the topics in scope.</p></header>
+              <section class="grid gap-3">
+                <template x-for="l in ['proven', 'supported', 'judged']" :key="l">
+                  <label class="flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="f.minLevel === l ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                    <input type="radio" class="input" name="min-level" :value="l" x-model="f.minLevel">
+                    <span class="w-20 text-sm font-medium">At least</span>
+                    <span class="pill w-24 justify-center" :class="MOCK.LEVELS[l].tone" :style="{ boxShadow: 'inset 0 0 0 1px color-mix(in oklch, currentColor 25%, transparent)' }" x-text="MOCK.LEVELS[l].label"></span>
+                    <span class="min-w-0 flex-1 text-sm text-muted-foreground" x-text="MOCK.LEVELS[l].detail"></span>
+                    <span class="text-sm tabular-nums whitespace-nowrap" :style="f.topics.length && !qualifying[l] ? { color: 'var(--critical-solid)' } : {}" x-text="f.topics.length ? `${qualifying[l]} of ${qualifying.total} qualify` : 'no topics yet'"></span>
+                  </label>
+                </template>
+                <p class="text-sm text-muted-foreground">Graded work should use Computed or Quoted questions: their answers were worked out by a program or stated in your book, so a wrong key is unlikely to cost a student points. Keep AI-reviewed-only questions for ungraded practice.</p>
+                <!-- TODO(real): the "fewer than 10" repeat threshold is invented. -->
+                <p class="text-xs" style="color:var(--warn-solid)" x-show="f.topics.length && qualifying[f.minLevel] && qualifying[f.minLevel] < 10" x-text="`Only ${qualifying[f.minLevel]} questions qualify. Students working toward the goal will see repeats; generate more for these topics or lower the bar.`"></p>
+                <p class="text-xs" style="color:var(--critical-solid)" x-show="f.topics.length && !qualifying[f.minLevel]">No approved question on these topics qualifies, so students would have nothing to answer. <a class="underline" :href="Mock.link('generate.html')">Generate for these topics</a></p>
+              </section>
+            </section>
+
+            <section class="card">
+              <header><h2>Dates</h2><p>Times are in the course time zone (America/Los_Angeles).</p></header>
+              <section class="grid gap-4">
+                <div class="grid sm:grid-cols-3 gap-4">
+                  <div role="group" class="field"><label for="a-opens">Opens</label><input id="a-opens" class="input" type="date" x-model="f.opens"></div>
+                  <div role="group" class="field"><label for="a-due">Due</label><input id="a-due" class="input" type="date" x-model="f.due"></div>
+                  <div role="group" class="field"><label for="a-time">Due time</label><input id="a-time" class="input" type="time" x-model="f.time"></div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                  <label class="label gap-2 text-sm font-normal"><input type="checkbox" class="input" x-model="f.lateOn">Accept late work for</label>
+                  <input type="number" class="input w-16" min="1" max="14" aria-label="Late days" x-model.number="f.lateDays" :disabled="!f.lateOn">
+                  <span>days at</span>
+                  <input type="number" class="input w-16" min="0" max="100" step="5" aria-label="Late penalty percent" x-model.number="f.latePct" :disabled="!f.lateOn">
+                  <span>% off</span>
+                </div>
+                <p class="text-xs text-muted-foreground" x-text="f.lateOn
+                  ? `Last accepted ${fmt(addDays(f.due, f.lateDays), true)} ${f.time}; finishing late earns at most ${round1(f.points * (1 - f.latePct / 100))} of ${f.points} points. Extensions for individual students are set in the gradebook.`
+                  : `Progress after ${fmt(f.due, true)} ${f.time} doesn't count. Extensions for individual students are set in the gradebook.`"></p>
+              </section>
+            </section>
+
+            <section class="card">
+              <header><h2>Grading</h2></header>
+              <section class="grid gap-5">
+                <div class="grid sm:grid-cols-[10rem_1fr] gap-4">
+                  <div role="group" class="field"><label for="a-points">Points</label><input id="a-points" class="input" type="number" min="1" x-model.number="f.points"></div>
+                  <div class="grid gap-2">
+                    <span class="text-sm font-medium">Sections</span>
+                    <div class="flex flex-wrap gap-x-6 gap-y-1">
+                      <template x-for="k in classes" :key="k.id">
+                        <label class="label gap-2 text-sm font-normal">
+                          <input type="checkbox" class="input" :value="k.id" x-model="f.sections">
+                          <span x-text="k.name"></span><span class="text-xs text-muted-foreground" x-text="`${k.students} students`"></span>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <div role="group" class="field" data-orientation="horizontal">
+                  <input type="checkbox" role="switch" class="input" id="a-lms" x-model="f.lms">
+                  <section>
+                    <label for="a-lms">Send grades to Canvas</label>
+                    <p>
+                      <span x-text="`Creates the column “${f.name || 'New assignment'}” (${f.points} points) and sends scores after the due date, and again when late work comes in. Needs the LTI 1.3 connection in `"></span><a class="underline underline-offset-4" :href="Mock.link('settings.html', { tab: 'lms' })">Settings · LMS</a><span>, which is connected.</span>
+                    </p>
+                  </section>
+                </div>
+              </section>
+            </section>
+          </div>
+
+          <!-- Right column -->
+          <div class="grid gap-6 lg:sticky lg:top-4">
+            <section class="card">
+              <header>
+                <h2>What a typical student would face</h2>
+                <p x-text="`At the median mastery of ${selectedStudents.length} students in ${f.sections.length === classes.length ? 'both sections' : f.sections.map(sectionShort).join(', ') || 'no section'}.`"></p>
+              </header>
+              <section class="grid gap-3">
+                <p class="text-sm text-muted-foreground" x-show="!f.topics.length || !selectedStudents.length" x-text="!f.topics.length ? 'Pick at least one topic to see an estimate.' : 'Pick at least one section.'"></p>
+                <template x-if="f.topics.length && selectedStudents.length">
+                  <div class="grid gap-3">
+                    <div class="flex items-baseline gap-2">
+                      <span class="text-3xl font-display font-semibold" x-text="`~${preview.questions}`"></span>
+                      <span class="text-sm text-muted-foreground" x-text="`questions, about ${preview.minutes} min over ${preview.sessions} session${preview.sessions === 1 ? '' : 's'}`"></span>
+                    </div>
+                    <table class="w-full text-sm" x-show="f.goalType === 'mastery'">
+                      <thead><tr class="text-xs text-muted-foreground"><th class="text-left font-normal pb-1">Topic</th><th class="text-right font-normal pb-1">Median now</th><th class="text-right font-normal pb-1">Questions</th></tr></thead>
+                      <tbody>
+                        <template x-for="r in preview.rows" :key="r.id">
+                          <tr>
+                            <td class="py-0.5 truncate max-w-[10rem]" x-text="r.name"></td>
+                            <td class="py-0.5 text-right font-mono" :style="{ color: r.median >= f.target ? 'var(--ok-solid)' : 'inherit' }" x-text="Mock.pct(r.median)"></td>
+                            <td class="py-0.5 text-right font-mono" x-text="r.questions || 'at goal'"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                    <p class="text-sm" x-text="f.goalType === 'mastery'
+                      ? `${preview.atGoal} of ${selectedStudents.length} students already meet the goal; the weakest quarter would need about ${preview.q75} questions.`
+                      : `Answers are counted, not graded: a student who answers ${f.n} questions in scope gets full points whatever their mastery.`"></p>
+                    <!-- TODO(real): estimate comes from P.questionsToGoal (invented), not a simulation of the selector. -->
+                    <p class="text-xs text-muted-foreground" x-text="`Estimate from each student's current mastery and the class's typical pace (${MOCK.plan.questionsPerSession} answers per session).`"></p>
+                  </div>
+                </template>
+              </section>
+            </section>
+
+            <!-- Results so far (existing, opened assignments only) -->
+            <template x-if="results">
+              <section class="card">
+                <header>
+                  <h2>Results so far</h2>
+                  <p x-text="`${results.total} students · ${status === 'closed' ? 'closed ' + fmt(saved.due, true) : 'due ' + fmt(saved.due, true)}`"></p>
+                </header>
+                <section class="grid gap-3">
+                  <div class="flex h-2 overflow-hidden rounded-full" style="background:var(--muted)">
+                    <template x-for="b in results.bars" :key="b.key">
+                      <div :style="{ background: b.color, width: `${100 * b.n / results.total}%` }" :title="`${b.label}: ${b.n}`"></div>
+                    </template>
+                  </div>
+                  <ul class="grid gap-1 text-sm">
+                    <template x-for="b in results.bars" :key="b.key">
+                      <li class="flex items-center gap-2" x-show="b.n">
+                        <span class="size-2 rounded-full" :style="{ background: b.color }"></span>
+                        <span x-text="b.label"></span>
+                        <span class="ml-auto font-mono" x-text="b.n"></span>
+                      </li>
+                    </template>
+                  </ul>
+                  <div class="grid gap-1 text-sm" x-show="results.extensions.length">
+                    <div class="text-xs text-muted-foreground">Extensions</div>
+                    <template x-for="e in results.extensions" :key="e.student">
+                      <div class="flex gap-2"><a class="hover:underline" :href="Mock.link('student.html', { id: e.student })" x-text="MOCK.student(e.student).name"></a><span class="ml-auto text-muted-foreground" x-text="`to ${fmt(e.due)} · ${e.reason}`"></span></div>
+                    </template>
+                  </div>
+                </section>
+                <footer>
+                  <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('gradebook.html', { assignment: saved.id })">Open in gradebook</a>
+                </footer>
+              </section>
+            </template>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Delete dialog -->
+    <dialog x-ref="del" class="dialog" aria-labelledby="del-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-md">
+        <header>
+          <h2 id="del-title" x-text="`Delete “${saved.name}”?`"></h2>
+          <p x-text="deleteText"></p>
+        </header>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="button" class="btn" data-variant="destructive" @click="remove()">Delete assignment</button>
+        </footer>
+        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" onclick="this.closest('dialog').close()"><i data-lucide="x"></i></button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-plan.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const s = MOCK.schedule[c.id];
+      const P = MOCK.plan;
+      const isNew = !!Mock.param("new");
+      const found = !isNew && MOCK.assignment(Mock.param("id") || "a4");
+      // New assignment defaults: the next week with topics and no assignment yet (week 9, Files).
+      // TODO(real): the server would suggest this from the schedule.
+      const blank = { id: null, course: c.id, name: "", topics: [], goal: { type: "mastery", target: 0.7 },
+        opens: "2026-10-26", due: "2026-10-30", points: 10, sections: MOCK.classes.filter((k) => k.course === c.id).map((k) => k.id),
+        late: { days: 3, penalty: 0.2 }, lms: { synced: null }, status: "new" };
+      const a = found && found.course === c.id ? found : blank;
+      const students = MOCK.students.filter((x) => x.course === c.id);
+      const form = (x) => ({
+        name: x.name, topics: [...x.topics], goalType: x.goal.type, target: x.goal.target || 0.7, n: x.goal.n || 30,
+        opens: x.opens, due: x.due, time: "23:59", lateOn: x.late.days > 0, lateDays: x.late.days || 3,
+        latePct: Math.round((x.late.penalty || 0.2) * 100), points: x.points, sections: [...x.sections], lms: !!x.lms,
+        minLevel: x.min_level || MOCK.assignment_min_level[x.id] || "supported",
+      });
+      // Approved questions and the verification level each reached (MOCK.verification).
+      const approved = MOCK.questions.filter((q) => q.course === c.id && q.status === "approved")
+        .map((q) => ({ topic: q.topic_id, level: MOCK.verification(q).level }));
+      return {
+        course: c,
+        s,
+        isNew: a === blank,
+        saved: { ...a },
+        status: a.status,
+        f: form(a),
+        classes: MOCK.classes.filter((k) => k.course === c.id),
+        topicWeeks: s ? s.weeks.filter((w) => w.topics.length) : [],
+        fmt(d, weekday) {
+          return new Date(d + "T12:00").toLocaleDateString("en-US", weekday ? { weekday: "short", month: "short", day: "numeric" } : { month: "short", day: "numeric" });
+        },
+        addDays(d, n) { const x = new Date(d + "T12:00"); x.setDate(x.getDate() + Number(n || 0)); return x.toISOString().slice(0, 10); },
+        round1(x) { return Math.round(x * 10) / 10; },
+        topicName(id) { return (c.taxonomy.find((t) => t.id === id) || {}).name || id; },
+        sectionShort(id) { return (MOCK.classes.find((k) => k.id === id) || {}).name.split(" (")[0]; },
+        statusTone(x) { return { closed: "tone-muted", open: "tone-ok", draft: "tone-warn", scheduled: "tone-accent", new: "tone-muted" }[x]; },
+        statusLabel(x) { return { closed: "Closed", open: "Open", draft: "Draft", scheduled: "Scheduled", new: "Not saved" }[x]; },
+        get canPublish() { return this.status === "draft" || this.status === "new"; },
+        get lateTopics() {
+          const weeks = P.topicWeeks(c.id);
+          return this.f.topics.filter((t) => s.weeks[weeks[t] - 1].starts > this.f.opens).map((t) => this.topicName(t));
+        },
+        get problems() {
+          const p = [];
+          if (!this.f.name.trim()) p.push("Add a name.");
+          if (!this.f.topics.length) p.push("Pick at least one topic.");
+          if (!this.f.sections.length) p.push("Pick at least one section.");
+          if (this.f.due < this.f.opens) p.push("The due date is before the open date.");
+          if (this.f.topics.length && !this.qualifying[this.f.minLevel]) p.push("No approved question in scope meets the quality bar.");
+          return p;
+        },
+        get scoreRule() {
+          const pts = this.f.points || 0;
+          if (this.f.goalType === "count") {
+            return `Score = ${pts} points × (answers in scope ÷ ${this.f.n}), capped at ${pts}. Correct or not, each answer counts once; answers on other topics don't count.`;
+          }
+          const t = Math.round(this.f.target * 100);
+          const ex = Math.round(this.f.target * 70) / 100; // a student 70% of the way to the target
+          const first = this.f.topics.length ? this.topicName(this.f.topics[0]) : "a topic";
+          return `Score = ${pts} points × progress toward the goal: each topic's mastery ÷ ${t}%, capped at 1, averaged over the topics in scope. A student at ${Math.round(ex * 100)}% on ${first}${this.f.topics.length > 1 ? " and at the goal on the rest" : ""} earns ${this.round1(pts * (this.f.topics.length > 1 ? (0.7 + this.f.topics.length - 1) / this.f.topics.length : 0.7))} of ${pts}.`;
+        },
+        // Mastery a student has now on a topic. For an assignment that has opened, the per-student
+        // result is the source of truth (progress = mastery / target), so the preview agrees with
+        // "Results so far". TODO(real): both come from the same BKT state on the server.
+        masteryFor(x, t) {
+          const base = x.mastery[t] || 0;
+          const r = !this.isNew && this.saved.topics.includes(t) && MOCK.assignment_results[x.id]?.[this.saved.id];
+          const tgt0 = this.saved.goal?.target;
+          if (!r || this.saved.goal?.type !== "mastery") return base;
+          if (["done", "late", "excused"].includes(r.state)) return Math.max(base, tgt0);
+          if (["in_progress", "partial"].includes(r.state)) return Math.round(r.progress * tgt0 * 100) / 100;
+          return Math.min(base, tgt0 - 0.01);
+        },
+        get qualifying() {
+          const pool = approved.filter((q) => this.f.topics.includes(q.topic));
+          const n = (l) => pool.filter((q) => MOCK.levelAtLeast(q.level, l)).length;
+          return { total: pool.length, proven: n("proven"), supported: n("supported"), judged: n("judged") };
+        },
+        get selectedStudents() { return students.filter((x) => this.f.sections.includes(x.class_id)); },
+        get preview() {
+          const tgt = this.f.target;
+          const ss = this.selectedStudents;
+          const m = (x, t) => this.masteryFor(x, t);
+          const perStudent = ss.map((x) => this.f.topics.reduce((n, t) => n + P.questionsToGoal(m(x, t), tgt), 0)).sort((a, b) => a - b);
+          const rows = this.f.topics.map((t) => {
+            const median = P.median(ss.map((x) => m(x, t)));
+            return { id: t, name: this.topicName(t), median, questions: P.questionsToGoal(median, tgt) };
+          });
+          const questions = this.f.goalType === "count" ? this.f.n : rows.reduce((n, r) => n + r.questions, 0);
+          return {
+            rows, questions,
+            minutes: Math.round(questions * P.minutesPerQuestion),
+            sessions: Math.max(1, Math.ceil(questions / P.questionsPerSession)),
+            atGoal: ss.filter((x) => this.f.topics.every((t) => m(x, t) >= tgt)).length,
+            q75: perStudent[Math.floor(perStudent.length * 0.75)] || 0,
+          };
+        },
+        // Results for an assignment that has opened. TODO(real): from the server's per-student records.
+        get results() {
+          if (this.isNew || !["open", "closed"].includes(this.status)) return null;
+          const rs = students.map((x) => MOCK.assignment_results[x.id][this.saved.id]);
+          const n = (states) => rs.filter((r) => states.includes(r.state)).length;
+          return {
+            total: rs.length,
+            bars: [
+              { key: "done", label: "Done", n: n(["done"]), color: "var(--ok-solid)" },
+              { key: "late", label: "Done late", n: n(["late"]), color: "var(--chart-3)" },
+              { key: "excused", label: "Excused", n: n(["excused"]), color: "var(--chart-5)" },
+              { key: "prog", label: this.status === "closed" ? "Partial credit" : "In progress", n: n(["in_progress", "partial"]), color: "var(--primary)" },
+              { key: "none", label: this.status === "closed" ? "Missed" : "Not started", n: n(["not_started", "missed"]), color: "var(--hairline-2)" },
+            ],
+            extensions: MOCK.extensions.filter((e) => e.assignment === this.saved.id),
+          };
+        },
+        get deleteText() {
+          if (!this.results) return "It hasn't opened, so no student has progress on it. This can't be undone.";
+          const started = this.results.total - this.results.bars.find((b) => b.key === "none").n;
+          return `${started} students have progress on it. Their practice and mastery are kept; only this grade is removed. ${this.saved.lms ? "The Canvas column is left for you to delete in Canvas. " : ""}This can't be undone.`;
+        },
+        throughWeek(n) {
+          const add = s.weeks.filter((w) => w.week <= n).flatMap((w) => w.topics);
+          this.f.topics = [...new Set([...this.f.topics, ...add])];
+          Mock.toast(`Added all ${add.length} topics from weeks 1–${n}`);
+        },
+        apply() {
+          const f = this.f;
+          Object.assign(this.saved, { name: f.name.trim(), topics: [...f.topics], opens: f.opens, due: f.due, points: f.points, sections: [...f.sections],
+            goal: f.goalType === "mastery" ? { type: "mastery", target: f.target } : { type: "count", n: f.n }, min_level: f.minLevel,
+            late: f.lateOn ? { days: f.lateDays, penalty: f.latePct / 100 } : { days: 0, penalty: 0 } });
+        },
+        save() {
+          this.apply();
+          if (this.status === "new") { this.status = "draft"; this.isNew = false; this.saved.id = `a${MOCK.assignments.length + 1}`; Mock.toast(`Saved “${this.saved.name}” as a draft. Students don't see drafts.`); return; }
+          Mock.toast(["open", "closed"].includes(this.status)
+            ? `Saved. Scores for “${this.saved.name}” are recomputed for the ${students.length} students${this.f.lms ? " and resent to Canvas" : ""}.`
+            : `Saved “${this.saved.name}”`);
+        },
+        publish() {
+          this.apply();
+          if (this.isNew) { this.isNew = false; this.saved.id = `a${MOCK.assignments.length + 1}`; }
+          this.status = this.f.opens <= MOCK.today ? "open" : "scheduled";
+          const who = this.f.sections.map(this.sectionShort).join(" and ");
+          Mock.toast(this.status === "open" ? `Published. ${who} see it on their home page now.` : `Published. ${who} see it from ${this.fmt(this.f.opens, true)}.`);
+        },
+        remove() {
+          this.$refs.del.close();
+          Mock.toast(`Deleted “${this.saved.name}”`);
+          setTimeout(() => { location.href = Mock.link("assignments.html"); }, 1200);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

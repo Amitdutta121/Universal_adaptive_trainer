@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../schema.json
+name: Map how the ideas connect
+summary: A small diagram of the subtopic's steps or ideas and how one leads to the next.
+renderer: mermaid
+prompt: |
+  Draw the subtopic as a small Mermaid flowchart (flowchart TD), 4 to 9 nodes, using only ideas
+  and terms the book excerpts use. Node labels are short phrases in double quotes. Add a one
+  sentence caption saying what to notice in the diagram.
+fits: [process, concept]
+guidance_levels: [worked, faded, cue]
+inputs: [subtopic, chunks]
+checks: []

@@ -11,13 +11,17 @@ Enum-valued fields serialise as their string value because every enum in
 
 from __future__ import annotations
 
-import random
 from collections.abc import Iterable, Sequence
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from app.assessment.catalog import (
+    LEGACY_SUBJECT,
+    capabilities_for,
+    course_question_types,
+)
 from app.calibration import (
     MIN_PANEL_SAMPLE,
     AgreementTrend,
@@ -25,12 +29,14 @@ from app.calibration import (
     CalibrationPair,
     CalibrationReport,
     DifficultyConfusion,
+    JudgeScorecardReport,
     MetricAgreement,
     QuadrantCell,
     QuadrantCounts,
     SubtopicConfusion,
     TypeCalibration,
 )
+from app.config import LLMRoute
 from app.coverage import CoverageReport, SubtopicCoverage, TopicCoverage
 from app.curriculum import (
     DESCRIPTION_MAX_LENGTH,
@@ -40,15 +46,19 @@ from app.curriculum import (
     FieldLimit,
 )
 from app.curriculum.display import DisplayExtractionMetadata, DisplayProposalWarning
-from app.domain.books import BookChapter, BookSection, ExtractionWarning, SectionSource
+from app.domain.books import ExtractionWarning
+from app.domain.chunks import Chunk
 from app.domain.enums import (
     BookStatus,
     ConceptConfidence,
     CurriculumItemStatus,
     CurriculumStatus,
+    CustomJudgeKind,
     Difficulty,
     EvaluationTrigger,
     GeneratorKind,
+    GuidanceLevel,
+    GuidelineStatus,
     JudgeBatchStatus,
     JudgeMetricId,
     MasteryBand,
@@ -57,22 +67,30 @@ from app.domain.enums import (
     QuestionType,
     RejectionReason,
     ReviewDecision,
+    RoundStatus,
     SourceFormat,
-    StructureConfidence,
-    StructureSource,
+    TutorialBlockStatus,
+    TutorialRenderer,
+    VideoAvailability,
 )
 from app.domain.feedback import REJECTION_REASON_LABELS
 from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
+from app.evaluation.custom import CustomJudgeResult
+from app.evaluation.trust import TrustReport
 from app.generation import ChunkQuestionRequest, PlannedQuestion
-from app.ingestion import VocabularyTerm
 from app.persistence.models import (
     BookRow,
+    CourseRow,
     CurriculumVersionRow,
+    CustomJudgeRow,
+    GenerationRoundRow,
     JudgeBatchRunRow,
+    MemoryGuidelineRow,
     ProfessorReviewRow,
     QuestionEvaluationRow,
     QuestionRow,
+    QuestionSetupRow,
     QuestionSetVersionRow,
     ReviewOutcomeRow,
     StudentAttemptRow,
@@ -82,7 +100,10 @@ from app.persistence.models import (
     TopicRow,
     TrainingSessionRow,
 )
-from app.retrieval import RetrievedSection
+from app.retrieval.chunks import RetrievedChunk
+from app.settings_store import ModelRole
+from app.styles import CellTarget, QuestionStyle, SetupSuggestion
+from app.tutorials.schema import TutorialRecipe
 
 
 class EnumOption(BaseModel):
@@ -100,6 +121,12 @@ def _options(values: Any, labels: dict[Any, str] | None = None) -> list[EnumOpti
         )
         for value in values
     ]
+
+
+def _built_question_types() -> list[QuestionType]:
+    from app.question_types import implemented_types
+
+    return implemented_types()
 
 
 # --------------------------------------------------------------------------- system
@@ -126,7 +153,6 @@ class ConfigResponse(BaseModel):
     llm_status: str
     llm_model: str
     embedding_model: str
-    book_schema_version: str
     taxonomy_schema_version: str
     supported_book_extensions: list[str]
     max_book_upload_mb: int
@@ -151,7 +177,6 @@ class ConfigResponse(BaseModel):
         llm_status: str,
         llm_model: str,
         embedding_model: str,
-        book_schema_version: str,
         taxonomy_schema_version: str,
         supported_book_extensions: tuple[str, ...],
         max_book_upload_mb: int,
@@ -164,12 +189,12 @@ class ConfigResponse(BaseModel):
             llm_status=llm_status,
             llm_model=llm_model,
             embedding_model=embedding_model,
-            book_schema_version=book_schema_version,
             taxonomy_schema_version=taxonomy_schema_version,
             supported_book_extensions=list(supported_book_extensions),
             max_book_upload_mb=max_book_upload_mb,
             difficulties=_options(Difficulty),
-            question_types=_options(QuestionType),
+            # Built types only: an enum value whose module has not landed is not offered.
+            question_types=_options(_built_question_types()),
             question_statuses=_options(QuestionStatus),
             review_decisions=_options(ReviewDecision),
             rejection_reasons=_options(RejectionReason, REJECTION_REASON_LABELS),
@@ -192,6 +217,203 @@ class CountsResponse(BaseModel):
 # --------------------------------------------------------------------------- books
 
 
+class TaxonomyDraftRequest(BaseModel):
+    """What the professor tells the AI about the taxonomy they want (ADR-052)."""
+
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=4000)
+    audience: str = Field(default="", max_length=1000)
+    #: Topics or outcomes that must appear, one per line; a pasted syllabus works.
+    must_cover: str = Field(default="", max_length=8000)
+    leave_out: str = Field(default="", max_length=2000)
+    #: A preset, used when neither count below is given.
+    size: Literal["compact", "standard", "detailed"] = "standard"
+    #: The professor's own numbers; the AI is asked to match them exactly.
+    topic_count: int | None = Field(default=None, ge=1, le=20)
+    subtopic_count: int | None = Field(default=None, ge=1, le=80)
+
+    @model_validator(mode="after")
+    def _counts_fit(self) -> TaxonomyDraftRequest:
+        if (
+            self.topic_count is not None
+            and self.subtopic_count is not None
+            and self.subtopic_count < self.topic_count
+        ):
+            raise ValueError("Every topic needs at least one subtopic.")
+        return self
+
+
+class TaxonomyDraftResponse(BaseModel):
+    """An AI-proposed taxonomy that has not been saved (ADR-052)."""
+
+    #: Provider and model that drafted it, e.g. "openrouter/openai/gpt-4o".
+    drafted_by: str
+    document: dict[str, Any]
+    #: The model's chapter-by-chapter notes, written before the taxonomy.
+    analysis: str
+
+
+class CourseOut(BaseModel):
+    """One course, with how much has been built in it so far."""
+
+    id: int
+    name: str
+    description: str | None
+    created_at: datetime
+    book_count: int = 0
+    curriculum_version_count: int = 0
+    question_count: int = 0
+    #: Subject preset id (``app.assessment.catalog``); the legacy subject when none was recorded.
+    subject: str
+    #: The question types the AI may generate for this course.
+    question_types: list[str]
+    #: Worked out from ``question_types``; never chosen directly (ADR-054).
+    capabilities: list[str]
+
+    @classmethod
+    def from_row(cls, row: CourseRow, counts: tuple[int, int, int] = (0, 0, 0)) -> CourseOut:
+        books, versions, questions = counts
+        subject = row.subject or LEGACY_SUBJECT
+        types = course_question_types(row.subject, row.question_types)
+        return cls(
+            id=row.id,
+            name=row.name,
+            description=row.description,
+            created_at=row.created_at,
+            book_count=books,
+            curriculum_version_count=versions,
+            question_count=questions,
+            subject=subject,
+            question_types=types,
+            capabilities=capabilities_for(types),
+        )
+
+
+class MostMissedOut(BaseModel):
+    subtopic: str
+    topic: str
+    miss_rate: float
+    attempts: int
+
+
+class CourseProgressOut(BaseModel):
+    """One course card on the course list: what is built, and what is next."""
+
+    course: CourseOut
+    owner_email: str | None
+    owned_by_you: bool
+    proposed_curriculum_count: int
+    approved_question_count: int
+    awaiting_review_count: int
+    question_set_count: int
+    student_count: int
+    coverage: float | None
+    avg_mastery: float | None
+    most_missed: MostMissedOut | None
+    #: Setup steps in build order, each done or not.
+    setup: list[SetupStepOut]
+
+
+class SetupStepOut(BaseModel):
+    key: str
+    done: bool
+
+
+class ActivityEventOut(BaseModel):
+    kind: str
+    text: str
+    at: datetime
+    course_id: int | None
+    course_name: str | None
+
+
+class CoursesOverviewResponse(BaseModel):
+    courses: list[CourseProgressOut]
+    activity: list[ActivityEventOut]
+
+
+class CapabilityOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    deterministic: bool
+    built: bool
+
+
+class QuestionTypeOut(BaseModel):
+    id: str
+    label: str
+    widget: str
+    group: str
+    graded_by: list[str]
+    also_needs: list[str]
+    #: Built end to end and its graders exist: a professor may pick it.
+    offerable: bool
+    #: Graded by AI only, so its scores never count toward mastery.
+    ai_graded: bool
+
+
+class QuestionTypeGroupOut(BaseModel):
+    id: str
+    title: str
+    hint: str
+
+
+class SubjectPresetOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    #: Offerable types ticked by default.
+    default_types: list[str]
+    #: Default types that are not built yet, shown as "coming soon".
+    coming_soon_types: list[str]
+    primary_groups: list[str]
+    #: An example question per type id, in this subject's terms.
+    examples: dict[str, str]
+    #: Whether the subject has a question style library. Question setup offers only library
+    #: (and course-added) styles, so a course of a subject without one cannot set up questions.
+    ready: bool = True
+
+
+class AssessmentCatalogResponse(BaseModel):
+    """What a course can assess: the registry option D's course creation reads."""
+
+    capabilities: list[CapabilityOut]
+    question_types: list[QuestionTypeOut]
+    groups: list[QuestionTypeGroupOut]
+    subjects: list[SubjectPresetOut]
+
+
+class CourseListResponse(BaseModel):
+    courses: list[CourseOut]
+
+
+class CourseCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    #: A subject preset id. Omitted: the legacy Intro Python subject.
+    subject: str | None = Field(default=None, max_length=50)
+    #: The question types to allow. Omitted: the subject's defaults. Each must be offerable.
+    question_types: list[str] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("A course needs a name.")
+        return clean
+
+
+class CourseUpdate(BaseModel):
+    """Omitted fields are left as they are."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    #: The question types to allow; each must be offerable. The capabilities follow (ADR-054).
+    question_types: list[str] | None = None
+
+
 class BookSummary(BaseModel):
     """One book, without its structure."""
 
@@ -210,6 +432,10 @@ class BookSummary(BaseModel):
     defect_count: int
     created_at: datetime
     imported_at: datetime | None
+    #: A YouTube source only (Task 30).
+    video_id: str | None = None
+    video_availability: VideoAvailability | None = None
+    availability_checked_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: BookRow) -> BookSummary:
@@ -230,91 +456,22 @@ class BookSummary(BaseModel):
             defect_count=sum(1 for warning in warnings if warning.is_defect),
             created_at=row.created_at,
             imported_at=row.imported_at,
-        )
-
-
-class SectionSummary(BaseModel):
-    """One section's identity and location, without its text."""
-
-    id: int
-    book_id: int
-    chapter_id: int | None
-    number: str | None
-    title: str | None
-    display_title: str
-    position: int
-    char_count: int
-    start_page: int | None
-    end_page: int | None
-    location_label: str | None
-    is_unlabelled: bool
-    is_empty: bool
-    structure_source: StructureSource
-    structure_confidence: StructureConfidence
-
-    @classmethod
-    def from_section(cls, section: BookSection) -> SectionSummary:
-        return cls(
-            id=section.id or 0,
-            book_id=section.book_id or 0,
-            chapter_id=section.chapter_id,
-            number=section.number,
-            title=section.title,
-            display_title=section.display_title(),
-            position=section.position,
-            char_count=section.char_count,
-            start_page=section.start_page,
-            end_page=section.end_page,
-            location_label=section.location_label,
-            is_unlabelled=section.is_unlabelled,
-            is_empty=section.is_empty,
-            structure_source=section.structure_source,
-            structure_confidence=section.structure_confidence,
-        )
-
-
-class ChapterOut(BaseModel):
-    """One chapter and the sections beneath it."""
-
-    id: int
-    book_id: int
-    number: str | None
-    title: str | None
-    position: int
-    start_page: int | None
-    end_page: int | None
-    location_label: str | None
-    is_unlabelled: bool
-    structure_source: StructureSource
-    structure_confidence: StructureConfidence
-    sections: list[SectionSummary]
-
-    @classmethod
-    def from_chapter(cls, chapter: BookChapter) -> ChapterOut:
-        return cls(
-            id=chapter.id or 0,
-            book_id=chapter.book_id or 0,
-            number=chapter.number,
-            title=chapter.title,
-            position=chapter.position,
-            start_page=chapter.start_page,
-            end_page=chapter.end_page,
-            location_label=chapter.location_label,
-            is_unlabelled=chapter.is_unlabelled,
-            structure_source=chapter.structure_source,
-            structure_confidence=chapter.structure_confidence,
-            sections=[SectionSummary.from_section(item) for item in chapter.sections],
+            video_id=row.video_id,
+            video_availability=row.video_availability,
+            availability_checked_at=row.availability_checked_at,
         )
 
 
 class BookDetail(BaseModel):
-    """One book with its chapter/section hierarchy and import warnings."""
+    """One book with its chunk count and import warnings."""
 
     book: BookSummary
-    section_count: int
-    chapters: list[ChapterOut]
+    #: Chunks in the current version; ``current_version`` is ``None`` for a book imported
+    #: before chunks existed (re-import it to chunk it).
+    chunk_count: int = 0
+    current_version: int | None = None
     warnings: list[ExtractionWarning]
-    #: Questions generated from this book's sections. Deleting the book would
+    #: Questions generated from this book's chunks (any version). Deleting the book would
     #: strand their grounding citation, so the count is shown before it happens.
     grounded_question_count: int = 0
 
@@ -345,55 +502,6 @@ class BookDeletion(BaseModel):
     deleted_book_id: int
     #: Questions whose stored grounding now cites sections that no longer exist.
     stranded_question_count: int
-
-
-class VocabularyTermOut(BaseModel):
-    """One closed-vocabulary value, and what it means to a professor."""
-
-    value: str
-    meaning: str
-
-    @classmethod
-    def from_terms(cls, terms: Iterable[VocabularyTerm]) -> list[VocabularyTermOut]:
-        return [cls(value=str(term.value), meaning=term.meaning) for term in terms]
-
-
-class BookDocumentGuide(BaseModel):
-    """Everything a professor needs to obtain a valid book document.
-
-    The prompt and the example are rendered from the ingestion contract itself,
-    so a client that shows them cannot describe a document the validator would
-    refuse.
-    """
-
-    schema_version: str
-    supported_extensions: list[str]
-    max_upload_mb: int
-    #: The copy-and-paste instruction for an assistant. Advisory: it grants
-    #: nothing, and the upload is still validated in full.
-    prompt: str
-    example_json: str
-    structure_sources: list[VocabularyTermOut]
-    warning_codes: list[VocabularyTermOut]
-    warning_severities: list[VocabularyTermOut]
-
-
-class SectionDetail(BaseModel):
-    """One section's full text plus the citation that makes it traceable."""
-
-    section: SectionSummary
-    text: str
-    warnings: list[ExtractionWarning]
-    source: SectionSource
-    citation: str
-
-
-class SectionListResponse(BaseModel):
-    sections: list[SectionSummary]
-    total: int
-
-
-# ----------------------------------------------------------------------- curriculum
 
 
 class SubtopicSummary(BaseModel):
@@ -506,7 +614,9 @@ class SubtopicEvidenceOut(BaseModel):
 
     id: int
     book_id: int
-    section_id: int
+    #: Set on evidence written since chunks; ``section_id`` on older evidence.
+    chunk_id: str | None
+    section_id: int | None
     candidate_label: str
     definition: str | None
     citation: str
@@ -517,6 +627,7 @@ class SubtopicEvidenceOut(BaseModel):
         return cls(
             id=row.id,
             book_id=row.book_id,
+            chunk_id=row.chunk_id,
             section_id=row.section_id,
             candidate_label=row.candidate_label,
             definition=row.definition,
@@ -749,6 +860,21 @@ class QuestionSummary(BaseModel):
     possible_duplicate_of: list[PossibleDuplicateOut]
     created_at: datetime
     updated_at: datetime | None
+    #: Question setup provenance (docs/QUESTION_SETUP_PLAN.md): the library style, the round
+    #: and the subtopic the generator was asked for. ``None`` outside setup rounds.
+    style_id: str | None = None
+    round_id: int | None = None
+    target_subtopic_id: int | None = None
+    trust_provenance: str | None = None
+    #: Generated on demand for a student who had nothing left to answer; that student may
+    #: have seen it before the professor did.
+    live_generated: bool = False
+    #: A judge-rejected draft kept so the professor can say whether they agree (m9).
+    audit: bool = False
+    audit_metric: str | None = None
+    audit_reason: str | None = None
+    #: Other models, answering without the key, disagreed with it on the last attempt.
+    solve_flag: str | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
@@ -786,6 +912,15 @@ class QuestionSummary(BaseModel):
             ],
             created_at=row.created_at,
             updated_at=row.updated_at,
+            style_id=row.style_id,
+            round_id=row.round_id,
+            target_subtopic_id=row.target_subtopic_id,
+            trust_provenance=row.trust_provenance,
+            live_generated=bool(row.live_generated),
+            audit=bool(row.audit),
+            audit_metric=row.audit_metric,
+            audit_reason=row.audit_reason,
+            solve_flag=row.solve_flag,
         )
 
 
@@ -825,11 +960,18 @@ class QuestionDetail(BaseModel):
     generation_attempts: list[GenerationAttempt]
     pedagogical_eval: PedagogicalEvaluation | None
     pedagogical_error_message: str | None
+    #: Custom rule judge results of the current evaluation (``app.evaluation.custom``). Empty
+    #: until the detail builder fills it (Phase 1, agent C) and for questions judged before
+    #: custom judges existed.
+    custom_results: list[CustomJudgeResult] = Field(default_factory=list)
+    judge_trust: TrustReport | None = None
     personalization: PersonalizationEvidence | None
     original_prompt: str | None
     original_reference_solution: str | None
     original_tests: str | None
     reviews: list[ReviewOut]
+    #: Judge failures that were kept as borderline rather than retried (m10).
+    borderline_notes: list[str] = Field(default_factory=list)
 
 
 class QuestionListResponse(BaseModel):
@@ -840,10 +982,12 @@ class QuestionListResponse(BaseModel):
     #: generated before that column existed is counted under ``"none"``.
     curriculum_version_counts: dict[str, int]
     total: int
-    #: The status filter that produced ``questions``, echoed back so a client can
-    #: tell a narrowed listing from a bank that happens to hold only these rows.
-    status: QuestionStatus | None = None
+    #: The status filter that produced ``questions`` (any of these), echoed back so a
+    #: client can tell a narrowed listing from a bank that happens to hold only these rows.
+    status: list[QuestionStatus] | None = None
     curriculum_version_id: int | None = None
+    #: The topic filter (any of these), echoed back like ``status``.
+    topic_id: list[int] | None = None
     run_id: str | None = None
 
 
@@ -869,44 +1013,6 @@ class ReviewQueueResponse(BaseModel):
     question: QuestionDetail | None
 
 
-class GenerateQuestionsRequest(BaseModel):
-    """A generation request.
-
-    Exactly one source selection is required: either ``section_ids`` or
-    ``all_sections_of_book``. One question is generated per resolved section.
-
-    No topic or subtopic: the generator reads the section and classifies its own
-    question against the approved taxonomy (ADR-031).
-    """
-
-    curriculum_version_id: int | None = None
-    question_type: QuestionType
-    difficulty: Difficulty
-    book_id: int | None = None
-    section_ids: list[int] | None = None
-    all_sections_of_book: bool = False
-    seed: str | None = None
-
-
-class GenerateQuestionsResponse(BaseModel):
-    created: int
-    question_ids: list[int]
-    questions: list[QuestionSummary]
-
-
-class RegenerateQuestionRequest(BaseModel):
-    """Regenerate one existing question with instructor feedback.
-
-    The feedback is threaded into the generation prompt. The source question is
-    never modified -- a new question is produced (ADR-002).
-    """
-
-    feedback: str = Field(min_length=1, max_length=4000)
-    #: Parity with ``ReviewRequest.professor_id``; recorded for provenance only,
-    #: not used to switch generators.
-    professor_id: int | None = None
-
-
 class RegenerateQuestionResponse(BaseModel):
     question_id: int
     regenerated_from_question_id: int
@@ -922,7 +1028,7 @@ class ChunkGenerationSpec(BaseModel):
     still two questions.
     """
 
-    section_id: int
+    chunk_id: str
     easy: int = Field(default=0, ge=0, le=20)
     medium: int = Field(default=0, ge=0, le=20)
     hard: int = Field(default=0, ge=0, le=20)
@@ -930,7 +1036,7 @@ class ChunkGenerationSpec(BaseModel):
 
     def to_request(self) -> ChunkQuestionRequest:
         return ChunkQuestionRequest(
-            section_id=self.section_id,
+            chunk_id=self.chunk_id,
             counts={
                 Difficulty.EASY: self.easy,
                 Difficulty.MEDIUM: self.medium,
@@ -951,14 +1057,14 @@ class GenerateBatchRequest(BaseModel):
 class PlannedQuestionOut(BaseModel):
     """One question a compiled run will ask for, in the order it will be asked."""
 
-    section_id: int
+    chunk_id: str
     difficulty: Difficulty
     question_type: QuestionType
 
     @classmethod
     def from_planned(cls, planned: PlannedQuestion) -> PlannedQuestionOut:
         return cls(
-            section_id=planned.section_id,
+            chunk_id=planned.chunk_id,
             difficulty=planned.difficulty,
             question_type=planned.question_type,
         )
@@ -1002,52 +1108,6 @@ class GenerateBatchResponse(BaseModel):
     planned: list[PlannedQuestionOut]
 
 
-class GenerationPlanSection(BaseModel):
-    """One candidate source section, and what generating from it would mean."""
-
-    section: SectionSummary
-    #: How many questions this section has already produced. Re-generating is
-    #: allowed; the count is here so it is a decision rather than an accident.
-    existing_question_count: int
-    selected: bool
-    #: False for a section with no text: the generator would receive nothing, so
-    #: the UI disables it rather than letting the run fail one call in.
-    selectable: bool
-
-
-class GenerationPlanChapter(BaseModel):
-    """One chapter, and the candidate sections beneath it."""
-
-    id: int
-    label: str
-    location_label: str | None
-    sections: list[GenerationPlanSection]
-
-
-class GenerationPlanTotals(BaseModel):
-    """What the selected run costs, before any model call is made."""
-
-    sections_available: int
-    sections_selected: int
-    questions_to_create: int
-    generation_calls: int
-    #: ``sections_selected`` times the number of advisory metrics, because the
-    #: judge makes one call per metric per question (ADR-031).
-    judge_calls: int
-    source_chars: int
-
-
-class GenerationPlanResponse(BaseModel):
-    """The chunk plan: every candidate section, and the cost of the selection."""
-
-    book: BookSummary
-    chapters: list[GenerationPlanChapter]
-    totals: GenerationPlanTotals
-    #: Selected sections that cannot be generated from, named so the professor
-    #: can deselect them rather than discovering the problem mid-run.
-    blockers: list[str]
-
-
 # ------------------------------------------------------------------------- feedback
 
 
@@ -1065,6 +1125,12 @@ class ReviewRequest(BaseModel):
     reference_solution: str | None = None
     tests: str | None = None
     professor_id: int | None = None
+    #: The difficulty the professor says the question really is. Omitted by older clients;
+    #: when present, the difficulty judge is at fault iff its verdict differs.
+    corrected_difficulty: Difficulty | None = None
+    #: The subtopic ids the professor says the question exercises. Omitted by older clients;
+    #: when present it must name at least one subtopic.
+    corrected_subtopic_ids: list[int] | None = Field(default=None, min_length=1)
 
 
 class ReviewOutcomeOut(BaseModel):
@@ -1079,8 +1145,8 @@ class ReviewOutcomeOut(BaseModel):
     held_out: bool
     #: What the cell calls for, stated rather than left for the client to map.
     action: str
-    #: Only the confirmed-bad cell relearns the generator, and only if the model
-    #: answered.
+    #: Filled by the next round's lesson run (ADR-063), so always unset when the
+    #: review is submitted.
     instruction_refreshed: bool = False
     refresh_error: str | None = None
     refresh_rule_count: int | None = None
@@ -1113,16 +1179,16 @@ CELL_ACTIONS: dict[QuadrantCell, str] = {
     ),
     QuadrantCell.MISSED: (
         "Two things went wrong: the generator wrote a question you would not keep, and the "
-        "judge passed it. So this type's instruction relearns and the named judge relearns. "
+        "judge passed it. So this type's instruction and the named judge relearn next round. "
         "The only cell that makes auto-acceptance unsafe."
     ),
     QuadrantCell.FALSE_ALARM: (
-        "The judge flagged a question you approved, so the named judge relearns. This costs "
-        "review time, never a student."
+        "The judge flagged a question you approved, so the named judge relearns next round. "
+        "This costs review time, never a student."
     ),
     QuadrantCell.CONFIRMED_BAD: (
         "The judge was right and the question was not good enough. The generator is what "
-        "to fix, so this type's instruction is relearned from your reviews."
+        "to fix, so this type's instruction is relearned from your reviews next round."
     ),
 }
 
@@ -1145,6 +1211,9 @@ class ReviewOut(BaseModel):
     #: Absent when the question carried no completed judge evaluation, so there
     #: was no judge verdict for this review to agree or disagree with.
     outcome: ReviewOutcomeOut | None = None
+    #: The professor's corrections, when the review carried any.
+    corrected_difficulty: Difficulty | None = None
+    corrected_subtopic_ids: list[int] | None = None
 
     @classmethod
     def from_row(cls, row: ProfessorReviewRow) -> ReviewOut:
@@ -1166,6 +1235,10 @@ class ReviewOut(BaseModel):
                 else "unknown"
             ),
             created_at=row.created_at,
+            corrected_difficulty=row.corrected_difficulty,
+            corrected_subtopic_ids=(
+                list(row.corrected_subtopic_ids) if row.corrected_subtopic_ids is not None else None
+            ),
         )
 
 
@@ -1305,6 +1378,83 @@ class JudgePromptListResponse(BaseModel):
     shipped_rubric_version: str
 
 
+class MetricTrustOut(BaseModel):
+    observations: int
+    agreements: int
+    agreement_rate: float
+    trusted: bool
+    audit_revoked: bool
+    #: Topic only: the reviews from this row's own Curriculum version (the window above pools
+    #: the whole course). Trust needs ``min_topic_local`` of them.
+    local_observations: int | None = None
+
+
+class StyleTrustOut(BaseModel):
+    """One (taxonomy, style) scope: whether its questions skip review, and why not."""
+
+    curriculum_version_id: int
+    style_id: str
+    style_name: str | None
+    trusted: bool
+    #: ``difficulty``, ``subtopic``, ``acceptance`` and ``custom:<id>`` windows.
+    metrics: dict[str, MetricTrustOut]
+
+
+class JudgeStatsOut(BaseModel):
+    """Step 13: how often the professor agreed with one judge, pooled over styles' windows."""
+
+    metric: JudgeMetricId
+    observations: int
+    agreements: int
+    agreement_rate: float | None
+
+
+class JudgeStatsResponse(BaseModel):
+    rubric_version: str
+    judges: list[JudgeStatsOut]
+    styles: list[StyleTrustOut]
+    held_out_pairs: int
+    held_out_needed: int
+    learning_enabled: bool
+    #: True while any style of this subject is trusted; the judges' round learning waits.
+    learning_paused: bool
+    trusted_style_count: int
+    min_observations: int
+    min_agreement: float
+    min_acceptance: float
+    min_topic_local: int
+
+
+class JudgeScorecardOut(BaseModel):
+    """One judge on ``GET /api/judges/scorecard`` (ADR-064, m8)."""
+
+    metric: JudgeMetricId
+    n: int
+    agreements: int
+    agreement: float | None
+    kappa: float | None
+    agreement_low: float | None
+    agreement_high: float | None
+    missed: int
+    false_alarms: int
+    flags: int
+    flag_rate: float | None
+    retries: int
+    drops: int
+
+
+class JudgeScorecardResponse(BaseModel):
+    """Per-judge agreement, κ, Wilson 95% range, and round retries/drops."""
+
+    judges: list[JudgeScorecardOut]
+
+    @classmethod
+    def from_report(cls, report: JudgeScorecardReport) -> JudgeScorecardResponse:
+        return cls(
+            judges=[JudgeScorecardOut.model_validate(row.model_dump()) for row in report.judges]
+        )
+
+
 class JudgePromptRequest(BaseModel):
     """A professor's replacement text for one judge."""
 
@@ -1351,12 +1501,11 @@ class JudgePromptRefreshResponse(BaseModel):
 
 
 class TypeInstructionOut(BaseModel):
-    """What the generator is told for one question type (ADR-033).
+    """What the generator is told for one question type (ADR-033, ADR-063).
 
-    ``learned`` distinguishes an instruction built from reviews from the shipped
-    default, so a professor can see at a glance which types their feedback has
-    actually reached. ``available_reviews`` is how many reviews a refresh would
-    draw on now, which is what makes a stale instruction visible.
+    ``instruction`` is the shipped text plus the type's **active** guidelines, ``rules`` their
+    texts, and ``learned`` whether there is any. ``review_count`` is the distinct reviews
+    behind them; ``available_reviews`` how many reviews of the type exist.
     """
 
     question_type: QuestionType
@@ -1372,13 +1521,52 @@ class TypeInstructionListResponse(BaseModel):
     instructions: list[TypeInstructionOut]
 
 
-class TypeInstructionRefreshResponse(BaseModel):
-    question_type: QuestionType
-    #: False when the type has no reviews yet, leaving the shipped text in place.
-    learned: bool
-    rule_count: int
-    review_count: int
-    instruction: str
+class GuidelineOut(BaseModel):
+    """One learned guideline (ADR-063): pending until two reviews or a confirm, then sent."""
+
+    id: int
+    #: ``generator:<question type>`` (``judge:<metric>`` from m11).
+    target: str
+    #: The question type of a generator guideline, else ``None``.
+    question_type: QuestionType | None
+    text: str
+    status: GuidelineStatus
+    #: Distinct reviews supporting it; two make it active.
+    support_count: int
+    review_ids: list[int]
+    confirmed_by_professor: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: MemoryGuidelineRow) -> GuidelineOut:
+        kind, _, name = row.target.partition(":")
+        question_type = (
+            QuestionType(name)
+            if kind == "generator" and name in {item.value for item in QuestionType}
+            else None
+        )
+        review_ids = list(dict.fromkeys(row.review_ids or []))
+        return cls(
+            id=row.id,
+            target=row.target,
+            question_type=question_type,
+            text=row.text,
+            status=row.status,
+            support_count=len(review_ids),
+            review_ids=review_ids,
+            confirmed_by_professor=row.confirmed_by_professor,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class GuidelineListResponse(BaseModel):
+    """``GET /api/guidelines``: the course subject's pending and active guidelines."""
+
+    #: Distinct supporting reviews that make a guideline active without a confirm.
+    active_support: int
+    guidelines: list[GuidelineOut]
 
 
 # ---------------------------------------------------------------------- calibration
@@ -1741,22 +1929,11 @@ class CoverageTargetRef(BaseModel):
     difficulty: Difficulty
 
 
-class FillGapsRequest(BaseModel):
-    """The gaps a professor selected on the coverage page.
-
-    Deliberately a list of *targets*, not a question count. The generator picks
-    its own topic and subtopics from the chunk it is given (ADR-031), so asking
-    for "seven questions" would promise an aim the generator does not accept.
-    """
-
-    targets: list[CoverageTargetRef] = Field(min_length=1)
-
-
 class GeneratedRunQuestion(BaseModel):
     """One question a generation run produced, and how its aim landed.
 
     ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
-    what the generator classified the question as after reading the section
+    what the generator classified the question as after reading the chunk
     (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
     never used to filter, so a drift is visible in the review queue instead.
     """
@@ -1766,7 +1943,7 @@ class GeneratedRunQuestion(BaseModel):
     requested_difficulty: Difficulty
     claimed_topic_id: int | None
     claimed_subtopic_ids: list[int]
-    section_id: int
+    chunk_id: str
     status: QuestionStatus
     aim_matched: bool
 
@@ -1782,14 +1959,14 @@ class SkippedRunTarget(BaseModel):
 class FailedRunTarget(BaseModel):
     """A gap target whose generation call reached the provider and failed.
 
-    The section was retrieved and the request was well formed; the model call
+    The chunk was retrieved and the request was well formed; the model call
     itself did not return a usable question. What the run already produced is
     kept (ADR-032), so this is reported beside ``generated`` rather than raised.
     """
 
     subtopic_id: int
     difficulty: Difficulty
-    section_id: int
+    chunk_id: str
     error: str
 
 
@@ -1806,6 +1983,21 @@ class GenerationRunResponse(BaseModel):
     skipped: list[SkippedRunTarget]
     failed: list[FailedRunTarget]
     possible_duplicates: int
+
+
+class TaxonomyLinkOut(BaseModel):
+    """One taxonomy and the classroom link it has, if any (ADR-053)."""
+
+    curriculum_version_id: int
+    label: str
+    #: Approved questions it has now -- what creating or updating the link would freeze.
+    approved_question_count: int
+    #: The snapshot its link serves; ``None`` until the link is created.
+    classroom: QuestionSetOut | None
+
+
+class TaxonomyLinkListResponse(BaseModel):
+    links: list[TaxonomyLinkOut]
 
 
 class QuestionSetOut(BaseModel):
@@ -2041,6 +2233,18 @@ class ParsonsBlockOut(BaseModel):
     indent: int = Field(ge=0)
 
 
+class StudentTutorialBlockOut(BaseModel):
+    """A tutorial block as a student sees it: what to draw, nothing about how it was made."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+    renderer: TutorialRenderer
+    payload: dict[str, Any]
+
+
 class ServedQuestionOut(BaseModel):
     """One question as the student sees it.
 
@@ -2058,6 +2262,8 @@ class ServedQuestionOut(BaseModel):
     resumed: bool
     #: True when the requested difficulty was unavailable (ADR-041).
     fallback_used: bool
+    #: True when the question was generated on demand for this student.
+    live: bool = False
     requested_difficulty: Difficulty
     served_difficulty: Difficulty
     subtopic_id: int | None
@@ -2071,18 +2277,24 @@ class ServedQuestionOut(BaseModel):
     code: str | None = None
     #: Parsons only, in a shuffled order the student has to fix.
     blocks: list[ParsonsBlockOut] | None = None
+    #: How to write the answer, for types that need it (e.g. "a number with its unit").
+    answer_hint: str | None = None
+    #: Read before answering: the first question of a topic whose prior mastery is low
+    #: (Phase 6). Empty otherwise.
+    preteach_blocks: list[StudentTutorialBlockOut] = Field(default_factory=list)
 
     @classmethod
     def from_served(cls, served: Any, *, subtopic_name: str | None = None) -> ServedQuestionOut:
         attempt = served.attempt
         question = served.question
-        content = question.content or {}
+        view = _student_view(question.question_type, question.content or {}, seed=attempt.id)
         return cls(
             training_session_id=attempt.session_id,
             attempt_id=attempt.id,
             ordinal=attempt.ordinal,
             resumed=served.resumed,
             fallback_used=served.fallback_used,
+            live=getattr(served, "live", False),
             requested_difficulty=attempt.requested_difficulty,
             served_difficulty=attempt.served_difficulty,
             subtopic_id=attempt.subtopic_id,
@@ -2090,58 +2302,25 @@ class ServedQuestionOut(BaseModel):
             question_id=question.id,
             question_type=question.question_type,
             prompt=question.prompt,
-            options=_presentable_options(question.question_type, content),
-            code=_presentable_code(question.question_type, content),
-            blocks=_presentable_blocks(question.question_type, content, seed=attempt.id),
+            options=view.options,
+            code=view.code,
+            blocks=None
+            if view.blocks is None
+            else [ParsonsBlockOut(**block) for block in view.blocks],
+            answer_hint=view.answer_hint,
         )
 
 
-def _presentable_options(question_type: QuestionType | None, content: dict) -> list[str] | None:
-    if question_type is not QuestionType.MULTIPLE_CHOICE:
-        return None
-    options = content.get("options")
-    if not isinstance(options, list):
-        return None
-    return [str(option) for option in options]
+def _student_view(question_type: QuestionType | None, content: dict, *, seed: int):
+    """The type module's whitelist of what a student may see (T0a)."""
+    from app.question_types import StudentView, get_type
 
-
-def _presentable_code(question_type: QuestionType | None, content: dict) -> str | None:
-    """The code a student reads or edits -- never the reference solution."""
-    if question_type not in {
-        QuestionType.OUTPUT_PREDICTION,
-        QuestionType.CODE_COMPLETION,
-        QuestionType.DEBUGGING,
-    }:
-        return None
-    code = content.get("code")
-    return code if isinstance(code, str) else None
-
-
-def _presentable_blocks(
-    question_type: QuestionType | None, content: dict, *, seed: int
-) -> list[ParsonsBlockOut] | None:
-    """Parsons blocks, shuffled.
-
-    Stored order is the correct order, so publishing it unshuffled would answer
-    the puzzle. The shuffle is seeded on the attempt id so a reload shows the
-    same arrangement rather than silently re-posing the question.
-    """
-    if question_type is not QuestionType.PARSONS:
-        return None
-    blocks = content.get("blocks")
-    if not isinstance(blocks, list):
-        return None
-    presentable = [
-        ParsonsBlockOut(
-            id=str(block.get("id")),
-            text=str(block.get("text")),
-            indent=block.get("indent", 0) if isinstance(block.get("indent", 0), int) else 0,
-        )
-        for block in blocks
-        if isinstance(block, dict) and block.get("id") is not None and block.get("text") is not None
-    ]
-    random.Random(seed).shuffle(presentable)
-    return presentable
+    if question_type is None:
+        return StudentView()
+    try:
+        return get_type(question_type).student_view(content, seed=seed)
+    except KeyError:
+        return StudentView()
 
 
 class AnswerRequest(BaseModel):
@@ -2161,6 +2340,9 @@ class AnsweredOut(BaseModel):
     detail: str | None
     mastery_before: float | None
     mastery_after: float | None
+    #: Composed from the run's frozen tutorial blocks (Phase 6): worked after a wrong answer,
+    #: fading as mastery rises. Empty when the set has none; the card keeps ``detail``.
+    tutorial_blocks: list[StudentTutorialBlockOut] = Field(default_factory=list)
 
     @classmethod
     def from_result(cls, result: Any) -> AnsweredOut:
@@ -2258,31 +2440,767 @@ class StudentProgressOut(BaseModel):
     sessions: list[TrainingSessionOut]
 
 
-class RetrievedSectionOut(BaseModel):
-    """One book section returned by semantic retrieval, with its citation."""
+class ChunkSummary(BaseModel):
+    """One chunk's identity and location, without its text."""
 
-    section_id: int
+    id: str
+    book_id: int
+    ordinal: int
+    page_start: int | None
+    page_end: int | None
+    heading_path: list[str]
+    label: str
+    location_label: str | None
+    char_count: int
+
+    @classmethod
+    def from_chunk(cls, chunk: Chunk) -> ChunkSummary:
+        return cls(
+            id=chunk.id,
+            book_id=chunk.book_id,
+            ordinal=chunk.ordinal,
+            page_start=chunk.page_start,
+            page_end=chunk.page_end,
+            heading_path=chunk.heading_path,
+            label=chunk.label,
+            location_label=chunk.location_label,
+            char_count=len(chunk.text),
+        )
+
+
+class ChunkOut(BaseModel):
+    """One chunk of a book version, with the citation that makes it traceable."""
+
+    id: str
+    book_id: int
+    book_version: int
+    ordinal: int
+    page_start: int | None
+    page_end: int | None
+    heading_path: list[str]
+    citation: str
+    text: str
+
+    @classmethod
+    def from_chunk(cls, chunk: Chunk) -> ChunkOut:
+        return cls(
+            id=chunk.id,
+            book_id=chunk.book_id,
+            book_version=chunk.book_version,
+            ordinal=chunk.ordinal,
+            page_start=chunk.page_start,
+            page_end=chunk.page_end,
+            heading_path=chunk.heading_path,
+            citation=chunk.citation(),
+            text=chunk.text,
+        )
+
+
+class ChunkListResponse(BaseModel):
+    chunks: list[ChunkOut]
+    total: int
+
+
+class ChunkOutlineEntry(BaseModel):
+    """One chunk without its text, and how many questions it has already produced."""
+
+    chunk: ChunkSummary
+    #: Re-generating is allowed; the count is here so it is a decision, not an accident.
+    existing_question_count: int
+
+
+class ChunkOutlineResponse(BaseModel):
+    """``GET /chunks/outline``: a book's current chunks in reading order, for a chunk picker."""
+
+    book: BookSummary
+    chunks: list[ChunkOutlineEntry]
+
+
+class RetrievedChunkOut(BaseModel):
+    """One chunk returned by semantic retrieval."""
+
+    chunk_id: str
     book_id: int
     book_title: str
-    chapter_title: str | None
-    section_number: str | None
-    section_title: str | None
+    heading_path: list[str]
+    page_start: int | None
+    page_end: int | None
     score: float
     snippet: str
 
     @classmethod
-    def from_result(cls, result: RetrievedSection) -> RetrievedSectionOut:
+    def from_result(cls, result: RetrievedChunk) -> RetrievedChunkOut:
+        return cls(**result.__dict__)
+
+
+class StyleListResponse(BaseModel):
+    """``GET /api/styles``: one subject's style library, then the course's own styles."""
+
+    subject: str
+    styles: list[QuestionStyle]
+    #: Which of ``styles`` belong to this course only (the rest ship with the library).
+    course_style_ids: list[str] = Field(default_factory=list)
+
+
+class CreateCourseStyleRequest(BaseModel):
+    """``POST /api/styles``: one style in the library's YAML format (CONTRIBUTING-styles.md)."""
+
+    yaml: str = Field(min_length=1, max_length=50_000)
+
+
+class SuggestSetupRequest(BaseModel):
+    """``POST /api/setup/suggest``."""
+
+    curriculum_version_id: int
+
+
+#: ``POST /api/setup/suggest`` returns the suggester's own model unchanged.
+SetupSuggestionResponse = SetupSuggestion
+
+
+class SubtopicStyles(BaseModel):
+    """The styles approved for one subtopic."""
+
+    subtopic_id: int
+    style_ids: list[str]
+
+
+class SaveSetupRequest(BaseModel):
+    """``POST /api/setup``: the professor's approved setup.
+
+    ``cell_targets`` is the suggester's, passed back unchanged -- the professor does not edit
+    counts. A subtopic with no approved styles is simply absent from ``approved_styles``.
+    """
+
+    curriculum_version_id: int
+    approved_styles: list[SubtopicStyles]
+    cell_targets: list[CellTarget]
+    round_size: int = Field(default=10, ge=1, le=50)
+
+
+class SaveSetupResponse(BaseModel):
+    """The saved setup and the first round it started."""
+
+    setup_id: int
+    round_id: int
+
+
+class GenerationRoundOut(BaseModel):
+    """``GET /api/rounds/{id}``: one round's status and progress."""
+
+    id: int
+    setup_id: int
+    number: int
+    status: RoundStatus
+    requested: int
+    produced: int
+    dropped: int
+    skipped: int = 0
+    skip_reason: str | None = None
+    #: Reviews the round learned from before generating, and why some were not (ADR-063).
+    lessons_applied: int = 0
+    lessons_error: str | None = None
+    #: What the drift check saw in the round's questions, if anything looked off (ADR-063).
+    drift_warning: str | None = None
+    #: Targets whose first attempt passed, out of ``produced + dropped``; ``None`` for rounds
+    #: generated before it was counted (m6).
+    first_attempt_passed: int | None = None
+    #: Cells not generated because every facet of their subtopic is covered (m7).
+    saturated: str | None = None
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: GenerationRoundRow) -> GenerationRoundOut:
         return cls(
-            section_id=result.section_id,
-            book_id=result.book_id,
-            book_title=result.book_title,
-            chapter_title=result.chapter_title,
-            section_number=result.section_number,
-            section_title=result.section_title,
-            score=result.score,
-            snippet=result.snippet,
+            id=row.id,
+            setup_id=row.setup_id,
+            number=row.number,
+            status=row.status,
+            requested=row.requested,
+            produced=row.produced,
+            dropped=row.dropped,
+            skipped=row.skipped,
+            skip_reason=row.skip_reason,
+            lessons_applied=row.lessons_applied or 0,
+            lessons_error=row.lessons_error,
+            drift_warning=row.drift_warning,
+            first_attempt_passed=row.first_attempt_passed,
+            saturated=row.saturated,
+            error=row.error,
+            created_at=row.created_at,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
         )
 
 
-SubtopicDetail.model_rebuild()
-QuestionDetail.model_rebuild()
+class QuestionSetupOut(BaseModel):
+    """A saved setup, with its newest round."""
+
+    id: int
+    curriculum_version_id: int
+    approved_styles: list[SubtopicStyles]
+    cell_targets: list[CellTarget]
+    created_at: datetime
+    latest_round: GenerationRoundOut | None
+
+    @classmethod
+    def from_row(
+        cls, row: QuestionSetupRow, *, latest_round: GenerationRoundRow | None
+    ) -> QuestionSetupOut:
+        return cls(
+            id=row.id,
+            curriculum_version_id=row.curriculum_version_id,
+            approved_styles=[
+                SubtopicStyles(subtopic_id=int(subtopic_id), style_ids=list(style_ids))
+                for subtopic_id, style_ids in (row.approved_styles or {}).items()
+            ],
+            cell_targets=[CellTarget.model_validate(cell) for cell in row.cell_targets or []],
+            created_at=row.created_at,
+            latest_round=(
+                GenerationRoundOut.from_row(latest_round) if latest_round is not None else None
+            ),
+        )
+
+
+class CurrentSetupResponse(BaseModel):
+    """``GET /api/setup``: the current setup of a taxonomy, ``None`` when never set up."""
+
+    setup: QuestionSetupOut | None
+
+
+class StartRoundResponse(BaseModel):
+    round_id: int
+
+
+class CustomJudgeOut(BaseModel):
+    """One custom rule judge."""
+
+    id: int
+    curriculum_version_id: int
+    rule_text: str
+    kind: CustomJudgeKind
+    pattern: str | None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+    @classmethod
+    def from_row(cls, row: CustomJudgeRow) -> CustomJudgeOut:
+        return cls(
+            id=row.id,
+            curriculum_version_id=row.curriculum_version_id,
+            rule_text=row.rule_text,
+            kind=row.kind,
+            pattern=row.pattern,
+            enabled=row.enabled,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class CustomJudgeListResponse(BaseModel):
+    judges: list[CustomJudgeOut]
+
+
+class CreateCustomJudgeRequest(BaseModel):
+    """``POST /api/custom-judges``. ``pattern`` is required for a ``pattern`` rule."""
+
+    curriculum_version_id: int
+    rule_text: str = Field(min_length=1, max_length=2000)
+    kind: CustomJudgeKind = CustomJudgeKind.LLM
+    pattern: str | None = None
+    enabled: bool = True
+
+
+class UpdateCustomJudgeRequest(BaseModel):
+    """``PATCH /api/custom-judges/{id}``: only the fields sent are changed."""
+
+    rule_text: str | None = Field(default=None, min_length=1, max_length=2000)
+    kind: CustomJudgeKind | None = None
+    pattern: str | None = None
+    enabled: bool | None = None
+
+
+class JobStartedResponse(BaseModel):
+    """``202`` from a route that queued a background job; follow it in ``GET /api/jobs``."""
+
+    job_id: str
+
+
+class YouTubeImportRequest(BaseModel):
+    """A YouTube video to import from its transcript (Task 30).
+
+    ``transcript`` is the professor's paste, used when fetching it failed; empty means fetch.
+    """
+
+    url: str = Field(min_length=1, max_length=500)
+    title: str = Field(default="", max_length=500)
+    transcript: str = Field(default="", max_length=2_000_000)
+
+
+class BookImportResult(BaseModel):
+    """What a book import job produced: the book, as ``POST /books`` used to return it."""
+
+    book: BookSummary
+
+
+class JobOut(BaseModel):
+    """One entry of the Jobs panel, whichever table the job lives in.
+
+    ``id`` is ``job-<n>`` (bulk generation, coverage fill), ``round-<n>`` (question round) or
+    ``judge-<run id>`` (judge re-run). ``link`` is a course-relative page holding the job's
+    output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
+    ``result`` is what the old blocking response returned, for the kinds that had one:
+    :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
+    coverage fill, :class:`BookImportResult` for a book import,
+    :class:`RegenerateQuestionResponse` for a regeneration.
+    """
+
+    id: str
+    kind: Literal[
+        "bulk_generation",
+        "coverage_fill",
+        "book_import",
+        "embedding_switch",
+        "regeneration",
+        "tutorial_pregeneration",
+        "question_round",
+        "judge_run",
+    ]
+    title: str
+    status: Literal["queued", "running", "done", "failed", "cancelled"]
+    done: int
+    total: int
+    counts: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+    link: str | None = None
+    result: (
+        GenerateBatchResponse
+        | GenerationRunResponse
+        | BookImportResult
+        | RegenerateQuestionResponse
+        | None
+    ) = None
+    #: Whether ``POST /jobs/{id}/cancel`` would stop it (queued or running, not yet asked).
+    can_cancel: bool = False
+    #: A stop was asked for; a running job ends after the question in flight.
+    cancel_requested: bool = False
+    #: What ``POST /jobs/{id}/retry`` would start, e.g. "Retry the remaining 14";
+    #: ``None`` when retrying would do nothing.
+    retry_label: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobOut]
+
+
+class JudgeRerunPreviewOut(BaseModel):
+    """What "Run judges" would do for the course right now."""
+
+    enabled: bool
+    #: Why a re-run cannot be started, in the professor's terms; ``None`` when it can.
+    disabled_reason: str | None = None
+    #: Questions a re-run would submit (passed deterministic validation, in this course).
+    eligible: int
+    #: A run of this course still being judged; a second one is refused until it ends.
+    active_run_id: str | None = None
+
+
+# -- Model settings (Task 42) ---------------------------------------------------------------
+
+SettingSource = Literal["db", "env"]
+
+
+class EmbeddingSwitchOut(BaseModel):
+    """The latest embedding model switch (Task 43); the old model serves until it is done."""
+
+    job_id: str
+    model: str
+    status: Literal["queued", "running", "done", "failed", "cancelled"]
+    done: int
+    total: int
+    error: str | None = None
+
+
+class RoleSettingsResponse(BaseModel):
+    """One role's effective model settings. The key is only ever masked."""
+
+    role: ModelRole
+    provider: str
+    model: str
+    base_url: str | None
+    api_key_masked: str | None
+    #: Where each value comes from: a saved setting (``db``) or ``.env``.
+    sources: dict[Literal["provider", "model", "base_url", "api_key"], SettingSource]
+    configured: bool
+    #: False for a role whose Test is not available yet (transcription, until Task 29).
+    testable: bool
+    #: Embeddings only: the latest switch to a new model, until a later one replaces it.
+    switch: EmbeddingSwitchOut | None = None
+
+
+class ProviderOut(BaseModel):
+    """One provider as the app calls it (ADR-068). The key is only ever masked."""
+
+    id: LLMRoute
+    label: str
+    base_url: str | None
+    #: True for Azure and custom: the endpoint is the account's own and has to be entered.
+    base_url_required: bool
+    api_key_masked: str | None
+    #: The chat model a role on this provider uses when it names none.
+    chat_model: str | None
+    #: The embedding model it offers by default, if any.
+    embedding_model: str | None
+    #: Whether a role can embed with it at all.
+    embeds: bool
+    lists_models: bool
+    #: Has a URL and key, so roles can use it and it can be the default.
+    configured: bool
+    #: Which values were saved on the Settings screen rather than coming from ``.env``.
+    saved: list[Literal["base_url", "api_key", "chat_model"]]
+
+
+class ProviderUpdate(BaseModel):
+    """A provider's values to test and save. Empty or ``null`` keeps what is there."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=500)
+    chat_model: str | None = Field(default=None, max_length=200)
+
+
+class ModelSettingsResponse(BaseModel):
+    roles: list[RoleSettingsResponse]
+    providers: list[ProviderOut]
+    #: Whether the current account may test and save (a superuser).
+    can_edit: bool
+    #: The default provider every role without its own saved settings calls, and where that
+    #: choice comes from: the Settings screen (``db``) or ``LLM_ROUTE`` (``env``).
+    route: LLMRoute
+    route_source: SettingSource
+
+
+class RouteUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route: LLMRoute
+
+
+class RoleSettingsUpdate(BaseModel):
+    """A role's settings to test or save. ``null`` means "use .env" for that field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = None
+    model: str | None = Field(default=None, max_length=200)
+    base_url: str | None = Field(default=None, max_length=500)
+    #: A new key. ``null`` keeps the saved key (or ``.env``'s); see ``clear_api_key``.
+    api_key: str | None = Field(default=None, max_length=500)
+    clear_api_key: bool = False
+
+    @field_validator("provider", "model", "base_url", "api_key")
+    @classmethod
+    def _blank_is_none(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class RoleSettingsSave(RoleSettingsUpdate):
+    #: From a passing ``POST /settings/{role}/test`` of exactly this configuration.
+    test_token: str
+
+
+class SettingsTestResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    dimension: int | None = None
+    test_token: str | None = None
+
+
+class ProviderModel(BaseModel):
+    id: str
+    name: str
+    # What the picker shows beside each model; None when the provider does not say.
+    context_length: int | None = None
+    prompt_price: float | None = None  # USD per million input tokens
+    completion_price: float | None = None  # USD per million output tokens
+
+
+# --------------------------------------------------------------- generation runs (ADR-066)
+
+
+class WholeBookSpec(BaseModel):
+    """One instruction for every chunk of a book's current version."""
+
+    book_id: int
+    easy: int = Field(default=0, ge=0, le=20)
+    medium: int = Field(default=0, ge=0, le=20)
+    hard: int = Field(default=0, ge=0, le=20)
+    question_types: list[QuestionType] = Field(default_factory=list)
+
+    def for_chunk(self, chunk_id: str) -> ChunkGenerationSpec:
+        return ChunkGenerationSpec(chunk_id=chunk_id, **self.model_dump(exclude={"book_id"}))
+
+
+class ChunksRunTarget(BaseModel):
+    """Questions from chosen chunks: a spec sheet, or one instruction for a whole book."""
+
+    kind: Literal["chunks"] = "chunks"
+    chunks: list[ChunkGenerationSpec] = Field(default_factory=list)
+    whole_book: WholeBookSpec | None = None
+    curriculum_version_id: int | None = None
+    seed: str | None = None
+
+    @model_validator(mode="after")
+    def _one_selection(self) -> ChunksRunTarget:
+        if bool(self.chunks) == (self.whole_book is not None):
+            raise ValueError("Give either chunks or whole_book, not both and not neither.")
+        return self
+
+
+class GapsRunTarget(BaseModel):
+    """One multiple-choice question per coverage gap (``POST /coverage/generation-runs``)."""
+
+    kind: Literal["gaps"] = "gaps"
+    targets: list[CoverageTargetRef] = Field(min_length=1)
+
+
+class SetupCellsRunTarget(BaseModel):
+    """The next round of a question setup, for cells still below target (``POST /rounds``)."""
+
+    kind: Literal["setup_cells"] = "setup_cells"
+    setup_id: int
+    size: int = Field(default=10, ge=1, le=50)
+
+
+class RegenerateRunTarget(BaseModel):
+    """A new question from an existing one, with instructor feedback (ADR-002)."""
+
+    kind: Literal["regenerate"] = "regenerate"
+    question_id: int
+    feedback: str = Field(min_length=1, max_length=4000)
+    professor_id: int | None = None
+
+
+RunTarget = Annotated[
+    ChunksRunTarget | GapsRunTarget | SetupCellsRunTarget | RegenerateRunTarget,
+    Field(discriminator="kind"),
+]
+
+
+class GenerationRunRequest(BaseModel):
+    """``POST /api/generation-runs``: one target kind per run (ADR-066)."""
+
+    target: RunTarget
+    #: Plan and price the run: no model call, no row written.
+    dry_run: bool = False
+
+
+class GenerationRunStarted(BaseModel):
+    """``202``: the run is queued. Follow ``job_id`` in ``GET /api/jobs``."""
+
+    kind: str
+    #: ``job-N`` for a background job, ``round-N`` for a question round, as Jobs lists them.
+    job_id: str
+    #: Set for ``setup_cells``: poll ``GET /api/rounds/{round_id}``.
+    round_id: int | None = None
+
+
+class PlannedRunQuestion(BaseModel):
+    """One question a run would ask for. Which fields are set depends on the kind."""
+
+    difficulty: Difficulty | None = None
+    question_type: QuestionType | None = None
+    chunk_id: str | None = None
+    subtopic_id: int | None = None
+    style_id: str | None = None
+    question_id: int | None = None
+
+
+class GenerationRunTotals(BaseModel):
+    """What a run costs on the first attempt of every question.
+
+    A question that fails a check is retried, up to ``max_attempts_per_question`` times, so
+    the real count can be higher. ``judge_calls`` is ``None`` for a round: its judges are
+    the setup's enabled judges and rules, run inside the retry loop.
+    """
+
+    questions_to_create: int
+    generation_calls: int
+    judge_calls: int | None
+    max_attempts_per_question: int
+    identical_repeats: int = 0
+
+
+class GenerationRunPlan(BaseModel):
+    """``200`` for ``dry_run``: the planned questions and their cost. Nothing was run."""
+
+    kind: str
+    planned: list[PlannedRunQuestion]
+    totals: GenerationRunTotals
+
+
+# ------------------------------------------------------------------ tutorials (Phase 5)
+
+
+class TutorialRecipeListResponse(BaseModel):
+    """``GET /api/tutorial-recipes``: the recipes of the course's subject."""
+
+    subject: str
+    recipes: list[TutorialRecipe]
+    #: ``recipe_id -> approved`` in the taxonomy asked about (``curriculum_version_id``);
+    #: a recipe missing here is undecided.
+    decisions: dict[str, bool] = Field(default_factory=dict)
+    #: Per-recipe stats in this course (Task 28); a recipe missing here has none yet.
+    stats: dict[str, TutorialRecipeStatsOut] = Field(default_factory=dict)
+    #: Live tutorials (``app/tutorials/live.py``): students get bank blocks as soon as they
+    #: pass their checks, with no approval step, and missing ones are written on demand.
+    live: bool = False
+
+
+class TutorialRecipeStatsOut(BaseModel):
+    """How a recipe has done: professors' decisions and students' next answers."""
+
+    decided: int
+    approval_rate: float | None
+    #: Blocks shown whose next answer is known.
+    outcomes: int
+    next_correct_rate: float | None
+    #: What the composer weighs it by; 0 means it is no longer chosen.
+    weight: float
+
+
+class TutorialPregenerationRequest(BaseModel):
+    """``POST /api/tutorial-pregeneration``: every missing block of a taxonomy."""
+
+    curriculum_version_id: int
+    #: Only these recipes; all of the subject's when omitted.
+    recipe_ids: list[str] | None = None
+    #: Plan and price it: no model call, no row written.
+    dry_run: bool = False
+
+
+class PlannedTutorialBlock(BaseModel):
+    subtopic_id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+
+
+class TutorialPregenerationPlan(BaseModel):
+    """``200`` for ``dry_run``. ``generation_calls`` counts first attempts; an invalid block
+    gets one repair retry, so at most ``generation_calls * max_attempts_per_block``."""
+
+    planned: list[PlannedTutorialBlock]
+    blocks_to_create: int
+    #: Blocks of the plan the bank already holds, skipped.
+    already_made: int
+    generation_calls: int
+    max_attempts_per_block: int
+
+
+class TutorialRecipeDecisionRequest(BaseModel):
+    """``PUT /api/tutorial-recipes/{recipe_id}/decision``: approve or reject a recipe."""
+
+    curriculum_version_id: int
+    approved: bool
+
+
+class TutorialRecipeDecisionOut(BaseModel):
+    recipe_id: str
+    curriculum_version_id: int
+    approved: bool
+    #: Bank blocks whose status the decision changed.
+    blocks_changed: int
+
+
+class GenerateTutorialBlockRequest(BaseModel):
+    """``POST /api/tutorial-blocks``: generate one block of a recipe for a subtopic."""
+
+    subtopic_id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+    #: For a recipe that traces code: this program instead of one the model writes.
+    code: str | None = None
+
+
+class ExperimentalRecipeOut(BaseModel):
+    """A recipe from the experimental recipe builder: its YAML and the fields a list shows."""
+
+    id: int
+    recipe_id: str
+    name: str
+    summary: str
+    renderer: TutorialRenderer
+    yaml: str
+    updated_at: datetime
+    #: The parsed recipe, so the page can show it without reading YAML.
+    recipe: TutorialRecipe
+
+
+class ExperimentalRecipeYaml(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    yaml: str = Field(min_length=1, max_length=20_000)
+
+
+class ExperimentalRecipeDraftRequest(BaseModel):
+    """What the professor asks for; with ``current_yaml``, a revision of that recipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=3, max_length=4_000)
+    current_yaml: str | None = Field(default=None, max_length=20_000)
+
+
+class ExperimentalRecipeDraftOut(BaseModel):
+    yaml: str
+    #: Empty when the draft is valid; otherwise what is still wrong after the repair retry.
+    problems: list[str]
+    #: The parsed recipe; ``None`` while the draft is invalid.
+    recipe: TutorialRecipe | None
+
+
+class ExperimentalRecipeTryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    yaml: str = Field(min_length=1, max_length=20_000)
+    subtopic_id: int
+    guidance_level: GuidanceLevel
+
+
+class ExperimentalRecipeTryOut(BaseModel):
+    """One block written from the recipe, never saved. ``error`` when it stayed invalid."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    renderer: TutorialRenderer
+    guidance_level: GuidanceLevel
+    payload: dict[str, Any]
+    chunk_ids: list[str]
+    error: str | None
+    model: str
+
+
+class TutorialBlockOut(BaseModel):
+    """One generated tutorial block; ``payload`` follows ``renderer``'s contract."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    subtopic_id: int
+    recipe_id: str
+    guidance_level: GuidanceLevel
+    renderer: TutorialRenderer
+    payload: dict[str, Any]
+    chunk_ids: list[str]
+    status: TutorialBlockStatus
+    error: str | None
+    model: str
+    created_at: datetime

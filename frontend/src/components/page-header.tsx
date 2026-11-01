@@ -1,5 +1,6 @@
 /** The heading block every section page opens with. */
 
+import { HeaderJobs } from "@/components/jobs/jobs-menu";
 import { TaxonomySelector } from "@/components/taxonomy-selector";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -8,7 +9,8 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 // them: the sidebar trigger to open/close the app nav, the taxonomy
 // selector to switch the curriculum version generation targets. Neither
 // belongs on a page a student can reach, so the student join screen is the
-// one caller that turns both off.
+// one caller that turns both off. The Jobs button shows on every page inside a
+// course (it renders nothing elsewhere), next to the taxonomy selector.
 export function PageHeader({
   title,
   summary,
@@ -34,6 +36,7 @@ export function PageHeader({
         <h1>{title}</h1>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {showTaxonomySelector ? <TaxonomySelector /> : null}
+          {showSidebarTrigger ? <HeaderJobs /> : null}
           {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
       </div>

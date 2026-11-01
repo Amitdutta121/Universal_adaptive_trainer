@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Weekly digest · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* The email itself: plain, 600px, system fonts, one link color. */
+    .email { max-width: 600px; margin: 0 auto; background: var(--card); color: var(--foreground);
+      font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; }
+    .email a { color: var(--primary); text-decoration: underline; }
+    .email h2 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+    .email .sec { padding: 18px 28px; border-top: 1px solid var(--border); }
+    .email .meta { color: var(--muted-foreground); font-size: 12px; }
+    .email code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; background: var(--muted); padding: 0 3px; border-radius: 3px; }
+    .email ol, .email ul { margin: 0; padding-left: 18px; }
+    .email li + li { margin-top: 8px; }
+  </style>
+</head>
+<!-- G11 · Weekly digest: preview of the Monday email, plus its settings (also in Account › Email notifications). -->
+<body data-scope="workspace" data-nav="account" data-title="Weekly digest">
+  <main x-data="page()" x-cloak class="grid gap-6 max-w-4xl">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground"><a class="hover:underline" href="account.html">Account</a> › Email notifications</p>
+        <h1 class="text-2xl font-semibold">Weekly digest</h1>
+        <p class="text-sm text-muted-foreground" x-text="on ? `Next one: ${day === 'Monday' ? 'Mon, Oct 5' : 'next ' + day}, ${time} (Pacific), to ${me.email}. Last sent ${d.last_sent}.` : 'Off. You won’t get the Monday email until you turn it back on.'"></p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <header><h2>Digest settings</h2><p>The same switch as the weekly digest in <a class="underline" href="account.html">Account › Email notifications</a>. Changing it here changes it there.</p></header>
+      <section class="grid md:grid-cols-[1fr_10rem_8rem] gap-4 items-start">
+        <fieldset class="fieldset" :disabled="!on">
+          <legend>Courses in the digest</legend>
+          <div class="grid gap-2 mt-1">
+            <template x-for="c in courses" :key="c.id">
+              <label class="label gap-2 font-normal">
+                <input type="checkbox" class="input" :checked="picked.includes(c.id)" @change="toggle(c.id, $event.target.checked)">
+                <span x-text="`${c.code} · ${c.name}`"></span>
+                <span class="text-xs text-muted-foreground" x-show="!c.numbers.students">no students yet</span>
+              </label>
+            </template>
+          </div>
+        </fieldset>
+        <div role="group" class="field">
+          <label for="d-day">Day</label>
+          <select class="select w-full" id="d-day" x-model="day" :disabled="!on" @change="Mock.toast(`Digest moved to ${day}s`)">
+            <template x-for="x in days" :key="x"><option :value="x" x-text="x" :selected="x === day"></option></template>
+          </select>
+        </div>
+        <div role="group" class="field">
+          <label for="d-time">Time</label>
+          <select class="select w-full" id="d-time" x-model="time" :disabled="!on">
+            <template x-for="x in times" :key="x"><option :value="x" x-text="x" :selected="x === time"></option></template>
+          </select>
+        </div>
+      </section>
+      <footer class="border-t pt-4 flex flex-wrap items-center gap-2">
+        <span class="text-xs text-muted-foreground" x-text="`Times are in your time zone, ${tz}.`"></span>
+        <button type="button" class="btn ml-auto" data-variant="outline" :disabled="!on || !picked.length" @click="Mock.toast(`Test digest sent to ${me.email}`)"><i data-lucide="send"></i>Send a test</button>
+        <button type="button" class="btn" :data-variant="on ? 'ghost' : null" @click="on = !on; Mock.toast(on ? 'Weekly digest turned on' : 'Weekly digest turned off')" x-text="on ? 'Turn off' : 'Turn on'"></button>
+      </footer>
+    </div>
+
+    <p class="text-sm text-muted-foreground -mb-3" x-show="on && picked.length">Preview, with this week's numbers. Every line links to the page it comes from.</p>
+    <div class="card" x-show="!picked.length && on"><section class="text-sm text-muted-foreground">No courses selected, so there is nothing to send. Pick at least one course above.</section></div>
+
+    <!-- The email -->
+    <div class="rounded-lg border overflow-hidden" x-show="on && picked.length" style="background:var(--muted)">
+      <div class="px-4 py-3 border-b text-xs grid gap-0.5" style="background:var(--card)">
+        <div><span class="text-muted-foreground inline-block w-14">From</span><span x-text="d.from"></span></div>
+        <div><span class="text-muted-foreground inline-block w-14">To</span><span x-text="`${me.name} <${me.email}>`"></span></div>
+        <div><span class="text-muted-foreground inline-block w-14">Date</span><span x-text="`${day === 'Monday' ? 'Mon, Oct 5' : day}, ${time}`"></span></div>
+        <div><span class="text-muted-foreground inline-block w-14">Subject</span><span class="font-medium" x-text="subject"></span></div>
+      </div>
+      <div class="py-6 px-3">
+        <div class="email border" style="border-color:var(--border)">
+          <div style="padding:22px 28px 14px">
+            <div class="meta">Adaptive Trainer · weekly digest</div>
+            <div style="font-size:18px;font-weight:600;margin-top:2px">Week of Oct 5</div>
+            <p style="margin:8px 0 0">Hi Maya, here's what happened in week 5 (Sep 28 – Oct 4) and what's due this week.</p>
+          </div>
+
+          <template x-if="picked.includes('python')">
+            <div>
+              <div class="sec" style="padding-top:10px;padding-bottom:6px;background:var(--muted)"><strong>CS 135 · Intro to Python</strong> <span class="meta">· 28 students, 2 sections</span></div>
+
+              <div class="sec">
+                <h2>What the class got wrong most</h2>
+                <ol>
+                  <template x-for="m in weakest" :key="m.question_id">
+                    <li>
+                      <a :href="Mock.link('insights.html', { course: 'python' })" x-text="`${m.subtopic} (${m.topic})`"></a>: <span x-text="`${Mock.pct(m.correct)} correct over ${m.attempts} answers.`"></span><br>
+                      <span x-text="`${Mock.pct(m.top_wrong_share)} answered`"></span> <code x-text="m.top_wrong"></code> <span>on</span> <a :href="Mock.link('question.html', { course: 'python', id: m.question_id })" x-text="`#${m.question_id}`"></a><span x-text="` “${short(MOCK.question(m.question_id).prompt)}”`"></span>
+                      <div class="meta" x-text="`Likely: ${m.reading}`"></div>
+                    </li>
+                  </template>
+                </ol>
+                <p style="margin:10px 0 0"><a :href="Mock.link('insights.html', { course: 'python' })">Open class insights</a> <span class="meta">for the "Show in lecture" view.</span></p>
+              </div>
+
+              <div class="sec">
+                <h2>Due this Friday</h2>
+                <p style="margin:0"><a :href="Mock.link('assignment.html', { course: 'python', id: due.id })" x-text="due.name"></a>: <span x-text="`reach 70% on Tuples and sets, due Fri Oct 9, ${due.points} points. Opens today at 8:00.`"></span></p>
+              </div>
+
+              <div class="sec">
+                <h2 x-text="`Didn't start last week's assignment (${notStarted.length})`"></h2>
+                <p style="margin:0 0 4px" x-text="`${last.name}, due Fri Oct 2:`"></p>
+                <p style="margin:0">
+                  <template x-for="(s, i) in notStarted" :key="s.id"><span><a :href="Mock.link('student.html', { course: 'python', id: s.id })" x-text="s.name"></a><span class="meta" x-text="` (${s.class_id === 'c1' ? '001' : '002'})`"></span><span x-text="i < notStarted.length - 1 ? ', ' : ''"></span></span></template>
+                </p>
+                <p class="meta" style="margin:4px 0 0"><span x-text="exts"></span> <a :href="Mock.link('gradebook.html', { course: 'python' })">Gradebook</a></p>
+              </div>
+
+              <div class="sec">
+                <h2 x-text="`Student reports waiting (${openReports.length})`"></h2>
+                <p style="margin:0" x-show="firstReport">
+                  <span x-text="`${MOCK.student(firstReport.student).name}, ${MOCK.REPORT_REASONS[firstReport.reason].toLowerCase()} on #${firstReport.question_id}:`"></span>
+                  <span x-text="`“${firstReport.text}”`"></span>
+                </p>
+                <p style="margin:6px 0 0"><a :href="Mock.link('reports.html', { course: 'python', id: firstReport.id })">Answer this report</a> · <a :href="Mock.link('reports.html', { course: 'python' })" x-text="`All ${openReports.length} open reports`"></a></p>
+              </div>
+
+              <div class="sec">
+                <h2>Questions awaiting review</h2>
+                <p style="margin:0"><span x-text="`${py.numbers.awaiting_review} questions passed the checks and are waiting for you or Daniel.`"></span> <a :href="Mock.link('review.html', { course: 'python' })">Open the review queue</a></p>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="picked.includes('biology')">
+            <div>
+              <div class="sec" style="padding-top:10px;padding-bottom:6px;background:var(--muted)"><strong>BIOL 190 · Intro Biology</strong> <span class="meta">· 61 students, 3 sections</span></div>
+              <div class="sec">
+                <h2>What the class got wrong most</h2>
+                <p style="margin:0"><a :href="Mock.link('insights.html', { course: 'biology' })">Glycolysis (Energy in cells)</a>: 44% think it needs oxygen. <a :href="Mock.link('insights.html', { course: 'biology' })">Open class insights</a></p>
+              </div>
+              <div class="sec">
+                <p style="margin:0">Week 5: Cellular respiration closed Friday: 21 of 61 reached the goal, 13 didn't start. <a :href="Mock.link('gradebook.html', { course: 'biology' })">Gradebook</a></p>
+                <p class="meta" style="margin:4px 0 0">11 questions awaiting review · 1 student report. <a :href="Mock.link('review.html', { course: 'biology' })">Open the review queue</a></p>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="picked.includes('statistics')">
+            <div>
+              <div class="sec" style="padding-top:10px;padding-bottom:6px;background:var(--muted)"><strong>STAT 152 · Intro Statistics</strong> <span class="meta">· no students yet</span></div>
+              <div class="sec">
+                <p style="margin:0">The AI-drafted taxonomy (8 topics, 29 subtopics) is still waiting for your approval. <a :href="Mock.link('taxonomy-draft.html', { course: 'statistics' })">Review the draft</a></p>
+              </div>
+            </div>
+          </template>
+
+          <div class="sec">
+            <h2>AI spend</h2>
+            <p style="margin:0"><span x-text="`${u.month} closed at ${Mock.usd(u.spent_usd)} of your ${Mock.usd(u.cap_usd)} monthly cap (${Mock.pct(u.spent_usd / u.cap_usd)}). The count resets for October.`"></span> <a href="usage.html">Usage and limits</a></p>
+          </div>
+
+          <div class="sec meta">
+            You get this because the weekly digest is on for your account.
+            <a href="email-digest.html">Change what's in it</a> · <a href="account.html">Turn it off</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-term.js"></script>
+  <script src="assets/data-b.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const d = MOCK.digest;
+      const py = MOCK.course("python");
+      const ins = MOCK.insights.python;
+      const last = MOCK.assignment("a4");
+      // TODO(real): "didn't start" is computed at send time; the mock uses today's not-started list.
+      const notStarted = MOCK.students.filter((s) => s.course === "python" && MOCK.assignment_results[s.id][last.id].state === "not_started");
+      const openReports = MOCK.reports.filter((r) => r.status === "open" && MOCK.question(r.question_id)?.course === "python");
+      const weakest = [...ins.misconceptions].sort((a, b) => a.correct - b.correct).slice(0, 3);
+      return {
+        d, py, me: MOCK.me, u: MOCK.usage, tz: MOCK.me_profile.timezone,
+        courses: MOCK.courses,
+        on: true,
+        picked: [...d.courses],
+        day: d.send_day, time: "7:00 AM",
+        days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sunday"],
+        times: ["6:00 AM", "7:00 AM", "8:00 AM", "12:00 PM", "5:00 PM"],
+        weakest, last, notStarted, openReports,
+        firstReport: openReports[0],
+        exts: "Extensions still running: " + MOCK.extensions.filter((e) => e.assignment === last.id)
+          .map((e) => `${MOCK.student(e.student).name} to ${e.due.slice(5).replace("10-0", "Oct ").replace("10-", "Oct ")}`).join(", ") + ".",
+        due: MOCK.assignment("a5"),
+        get subject() {
+          const bits = [];
+          if (this.picked.includes("python")) bits.push(`CS 135: ${weakest[0].subtopic.toLowerCase()} trips up ${Mock.pct(weakest[0].top_wrong_share)}, ${openReports.length} reports waiting`);
+          if (this.picked.includes("biology")) bits.push("BIOL 190: glycolysis trips up 44%");
+          if (this.picked.includes("statistics")) bits.push("STAT 152 taxonomy to approve");
+          return `Your week: ${bits.join(" · ")}`;
+        },
+        short: (p) => { const line = p.split("\n")[0].replace(/`/g, ""); return line.length > 70 ? line.slice(0, 67) + "…" : line; },
+        toggle(id, on) { this.picked = on ? [...new Set([...this.picked, id])] : this.picked.filter((x) => x !== id); },
+      };
+    }
+  </script>
+</body>
+</html>

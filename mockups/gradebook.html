@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gradebook · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    /* Sticky student column inside the scrolling table. */
+    .gb th.stick, .gb td.stick { position: sticky; left: 0; z-index: 1; background: var(--card); box-shadow: 1px 0 0 var(--border); }
+    .gb th.acol { min-width: 11rem; vertical-align: bottom; white-space: normal; line-height: 1.25; }
+    .gb td.acol { padding-top: 0.3rem; padding-bottom: 0.3rem; }
+    .gcell { display: flex; align-items: center; gap: 0.4rem; width: 100%; padding: 0.3rem 0.45rem; border-radius: 0.45rem; border: 1px solid transparent; text-align: left; cursor: pointer; }
+    .gcell:hover { border-color: var(--border); background: var(--muted); }
+    .gcell .score { margin-left: auto; font-family: var(--font-mono); font-size: 0.78rem; }
+    .gb tfoot td { background: var(--muted); font-size: 0.8rem; }
+    .gb tfoot td.stick { background: var(--muted); }
+  </style>
+</head>
+<!-- G4 · Gradebook: students x practice assignments, extensions and excusals, CSV export, Canvas passback. -->
+<body data-scope="course" data-nav="gradebook" data-title="Gradebook">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name} · ${course.term}`"></p>
+        <h1 class="text-2xl font-semibold">Gradebook</h1>
+        <p class="text-sm text-muted-foreground max-w-2xl">Each student's result on the practice assignments that have opened. Scores are recorded at the due date (or the student's extended date); late work loses the assignment's late penalty.</p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="assignments.length">
+        <button type="button" class="btn" data-variant="outline" @click="exportCsv()"><i data-lucide="download"></i>Export CSV</button>
+        <button type="button" class="btn" @click="sendToCanvas()"><i data-lucide="upload"></i>Send to Canvas</button>
+      </div>
+    </div>
+
+    <!-- Empty state (statistics) -->
+    <template x-if="!assignments.length">
+      <div class="card">
+        <section class="grid place-items-center gap-2 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="table-2"></i></span>
+          <h2 class="font-semibold">No assignments or students yet</h2>
+          <p class="text-sm text-muted-foreground max-w-md">The gradebook fills in once an assignment opens and students join a class. This course still needs an approved taxonomy, a frozen question set and a class.</p>
+          <div class="mt-2 flex gap-2">
+            <a class="btn" data-size="sm" data-variant="outline" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a>
+            <a class="btn" data-size="sm" :href="Mock.link('assignments.html')">Assignments</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="assignments.length">
+      <div class="grid gap-6">
+        <!-- Numbers -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Behind on a closed assignment</div>
+            <div class="text-2xl font-display font-semibold" x-text="`${scoped.filter((s) => behind(s)).length} / ${scoped.length}`"></div>
+            <button type="button" class="text-xs text-left hover:underline" style="color:var(--primary)" @click="behindOnly = !behindOnly" x-text="behindOnly ? 'Show everyone' : 'Show only these'"></button>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground" x-text="`${current.name.split(':')[0]} · due ${fmt(current.due)}`"></div>
+            <div class="text-2xl font-display font-semibold" x-text="`${colStats(current).done} done`"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${countState(current, 'in_progress')} in progress · ${countState(current, 'not_started')} not started`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Extensions</div>
+            <div class="text-2xl font-display font-semibold" x-text="extCount"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${studentsWithExt} students · ${excusedCount} excused`"></div>
+          </div>
+          <div class="card p-4 gap-1">
+            <div class="text-xs text-muted-foreground">Class average, closed assignments</div>
+            <div class="text-2xl font-display font-semibold" x-text="Mock.pct(classAvg)"></div>
+            <div class="text-xs text-muted-foreground" x-text="`${closed.length} assignments · ${closed.reduce((a, x) => a + x.points, 0)} pts so far`"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <header class="flex flex-wrap items-center gap-3">
+            <div>
+              <h2>Practice assignments</h2>
+              <p x-text="`${rows.length} of ${scoped.length} students shown · click a cell to see the result, extend or excuse`"></p>
+            </div>
+            <div class="ml-auto flex flex-wrap items-center gap-2">
+              <input class="input w-44" type="search" placeholder="Search students" aria-label="Search students" x-model="q">
+              <select class="select" aria-label="Filter by section" x-model="section">
+                <option value="all">All sections</option>
+                <template x-for="k in classes" :key="k.id"><option :value="k.id" x-text="k.name"></option></template>
+              </select>
+              <label class="label gap-2 text-sm font-normal"><input type="checkbox" class="input" x-model="behindOnly">Only behind</label>
+            </div>
+          </header>
+          <section class="p-0">
+            <div class="overflow-x-auto">
+              <table class="table gb">
+                <thead>
+                  <tr>
+                    <th class="stick pl-6 min-w-[13rem]">Student</th>
+                    <template x-for="a in assignments" :key="a.id">
+                      <th class="acol">
+                        <a class="font-semibold hover:underline" :href="Mock.link('assignment.html', { id: a.id })" :title="a.name" x-text="a.name.split(':')[0]"></a>
+                        <span class="pill ml-1" :class="a.status === 'open' ? 'tone-accent' : 'tone-muted'" x-text="a.status === 'open' ? 'Open' : 'Closed'"></span>
+                        <div class="text-xs font-normal text-muted-foreground truncate" :title="a.name" x-text="a.name.split(': ')[1]"></div>
+                        <div class="text-xs font-normal text-muted-foreground" x-text="`Due ${fmt(a.due)} · ${a.points} pts`"></div>
+                        <div class="text-xs font-normal flex items-center gap-1" :class="a.lms && a.lms.synced ? 'text-muted-foreground' : ''" :style="a.lms && a.lms.synced ? {} : { color: 'var(--warn-solid)' }">
+                          <span class="inline-flex"><i data-lucide="refresh-cw" class="size-3"></i></span>
+                          <span x-text="a.lms && a.lms.synced ? `Canvas ${fmtDT(a.lms.synced)}` : (a.status === 'open' ? 'Not sent (still open)' : 'Not sent')"></span>
+                        </div>
+                      </th>
+                    </template>
+                    <th class="text-end pr-6 min-w-[8rem] align-bottom">
+                      Total
+                      <div class="text-xs font-normal text-muted-foreground">closed only</div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="s in rows" :key="s.id">
+                    <tr>
+                      <td class="stick pl-6">
+                        <a class="font-medium hover:underline" :href="Mock.link('student.html', { id: s.id })" x-text="s.name"></a>
+                        <div class="text-xs text-muted-foreground flex items-center gap-1.5">
+                          <span x-text="shortClass(s.class_id)"></span>
+                          <span x-show="notes[s.id]" :title="notes[s.id]" class="inline-flex items-center gap-0.5"><span class="inline-flex"><i data-lucide="sticky-note" class="size-3"></i></span>note</span>
+                        </div>
+                      </td>
+                      <template x-for="a in assignments" :key="a.id">
+                        <td class="acol">
+                          <button type="button" class="gcell" @click="open(s, a)" :title="cellTitle(s, a)">
+                            <span class="pill" :class="tone(res(s, a).state)" x-text="stateLabel(res(s, a).state)"></span>
+                            <span class="inline-flex" x-show="res(s, a).extension" style="color:var(--accent-text)"><i data-lucide="calendar-clock" class="size-3.5"></i></span>
+                            <span class="score" x-text="scoreText(res(s, a), a)"></span>
+                          </button>
+                        </td>
+                      </template>
+                      <td class="text-end pr-6 whitespace-nowrap">
+                        <span class="font-mono text-sm" x-text="total(s).text"></span>
+                        <span class="block text-xs text-muted-foreground" x-text="Mock.pct(total(s).pct)"></span>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr x-show="!rows.length">
+                    <td :colspan="assignments.length + 2" class="py-10 text-center text-sm text-muted-foreground">No students match. Clear the search or turn off "Only behind".</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td class="stick pl-6 font-medium">Average score</td>
+                    <template x-for="a in assignments" :key="a.id">
+                      <td class="acol font-mono" x-text="colStats(a).avg == null ? '—' : `${colStats(a).avg.toFixed(1)} / ${a.points}`"></td>
+                    </template>
+                    <td class="pr-6 text-end font-mono" x-text="Mock.pct(classAvg)"></td>
+                  </tr>
+                  <tr>
+                    <td class="stick pl-6 font-medium">Completed</td>
+                    <template x-for="a in assignments" :key="a.id">
+                      <td class="acol">
+                        <div class="flex items-center gap-2">
+                          <div class="h-1.5 w-16 rounded-full" style="background:var(--border)"><div class="h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${colStats(a).rate * 100}%` }"></div></div>
+                          <span class="font-mono" x-text="`${colStats(a).done} / ${colStats(a).n}`"></span>
+                        </div>
+                      </td>
+                    </template>
+                    <td class="pr-6"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+          <footer class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span><span class="pill tone-ok">Done</span> goal reached by the due date</span>
+            <span><span class="pill tone-warn">Late</span> reached within 3 days, −20%</span>
+            <span><span class="pill tone-warn">Partial</span> credit for progress toward the goal</span>
+            <span><span class="pill tone-critical">Missed</span> nothing by the late cutoff</span>
+            <span class="inline-flex items-center gap-1"><span class="inline-flex" style="color:var(--accent-text)"><i data-lucide="calendar-clock" class="size-3.5"></i></span>extension (hover for the date)</span>
+            <span class="ml-auto">Completed counts Done and Late; excused students are left out of averages.</span>
+          </footer>
+        </section>
+
+        <p class="text-xs text-muted-foreground -mt-3">
+          Send to Canvas pushes scores of closed assignments to the matching Canvas assignment columns. Grade passback needs the Canvas connection in
+          <a class="underline" :href="Mock.link('settings.html')">Settings · LMS</a>; open assignments are sent after they close.
+        </p>
+      </div>
+    </template>
+
+    <!-- Cell detail -->
+    <template x-if="assignments.length">
+    <dialog x-ref="cell" class="dialog" aria-labelledby="cell-title" onclick="if (event.target === this) this.close()">
+      <div class="sm:max-w-lg">
+            <header>
+              <h2 id="cell-title" x-text="`${sel.s.name} · ${sel.a.name.split(':')[0]}`"></h2>
+              <p x-text="`${sel.a.name.split(': ')[1]} · ${goalText(sel.a)} · ${shortClass(sel.s.class_id)}`"></p>
+            </header>
+            <section class="grid gap-4">
+              <dl class="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
+                <dt class="text-muted-foreground">Status</dt>
+                <dd><span class="pill" :class="tone(selRes.state)" x-text="stateLabel(selRes.state)"></span></dd>
+                <dt class="text-muted-foreground">Score</dt>
+                <dd class="font-mono" x-text="selRes.state === 'excused' ? 'Excused (not counted)' : selRes.score == null ? 'Not scored yet' : `${selRes.score} / ${sel.a.points}`"></dd>
+                <dt class="text-muted-foreground">Toward the goal</dt>
+                <dd class="flex items-center gap-2">
+                  <div class="h-1.5 w-32 rounded-full" style="background:var(--muted)"><div class="h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${Math.min(1, selRes.progress) * 100}%` }"></div></div>
+                  <span class="font-mono text-xs" x-text="Mock.pct(Math.min(1, selRes.progress))"></span>
+                </dd>
+                <dt class="text-muted-foreground">Submitted</dt>
+                <dd x-text="selRes.submitted || '—'"></dd>
+                <dt class="text-muted-foreground">Due</dt>
+                <dd>
+                  <span :class="selRes.extension ? 'line-through text-muted-foreground' : ''" x-text="fmtLong(sel.a.due)"></span>
+                  <template x-if="selRes.extension"><span class="ml-1" x-text="`→ ${fmtLong(selRes.extension)} (extension${extReason ? ': ' + extReason : ''})`"></span></template>
+                </dd>
+                <dt class="text-muted-foreground">Late policy</dt>
+                <dd x-text="sel.a.late.days ? `Accepted up to ${sel.a.late.days} days late, −${Math.round(sel.a.late.penalty * 100)}%` : 'No late work'"></dd>
+              </dl>
+              <p class="text-xs text-muted-foreground" x-show="notes[sel.s.id]" x-text="`Note: ${notes[sel.s.id]}`"></p>
+
+              <div class="grid gap-3 border-t pt-4" x-show="selRes.state !== 'excused'">
+                <div class="text-sm font-medium">Grant extension</div>
+                <div class="grid grid-cols-[1fr_1.4fr] gap-2">
+                  <div role="group" class="field">
+                    <label for="ext-date">New due date</label>
+                    <input id="ext-date" type="date" class="input" x-model="extDate" :min="sel.a.opens">
+                  </div>
+                  <div role="group" class="field">
+                    <label for="ext-reason">Reason</label>
+                    <input id="ext-reason" type="text" class="input" x-model="extReasonInput" placeholder="e.g. Accommodation letter">
+                  </div>
+                </div>
+                <p class="text-xs text-muted-foreground" x-text="sel.a.status === 'closed' ? 'The assignment reopens for this student until the new date; the score is recorded again then.' : 'The student sees the new due date on their home page.'"></p>
+              </div>
+            </section>
+            <footer>
+              <a class="btn mr-auto" data-variant="ghost" :href="Mock.link('student.html', { id: sel.s.id })">Open student</a>
+              <button type="button" class="btn" data-variant="outline" x-show="selRes.state !== 'excused'" @click="excuse()">Excuse</button>
+              <button type="button" class="btn" data-variant="outline" x-show="selRes.state === 'excused'" @click="unexcuse()">Remove excuse</button>
+              <button type="button" class="btn" x-show="selRes.state !== 'excused'" :disabled="!extDate" @click="grant()" x-text="selRes.extension ? 'Change extension' : 'Grant extension'"></button>
+            </footer>
+            <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" onclick="this.closest('dialog').close()"><i data-lucide="x"></i></button>
+      </div>
+    </dialog>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-run.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    const STATE = {
+      done: ["Done", "tone-ok"], late: ["Late", "tone-warn"], partial: ["Partial", "tone-warn"], missed: ["Missed", "tone-critical"],
+      in_progress: ["In progress", "tone-accent"], not_started: ["Not started", "tone-muted"], excused: ["Excused", "tone-muted"],
+    };
+    function page() {
+      const c = Mock.course;
+      const assignments = MOCK.assignments.filter((a) => a.course === c.id && (a.status === "closed" || a.status === "open"))
+        .map((a) => ({ ...a, lms: a.lms ? { ...a.lms } : null }));
+      const students = MOCK.students.filter((s) => s.course === c.id);
+      // Local copy of every result so extensions and excusals can change it.
+      const results = {};
+      students.forEach((s) => { results[s.id] = {}; assignments.forEach((a) => { results[s.id][a.id] = { ...MOCK.assignment_results[s.id][a.id] }; }); });
+      const reasons = {};
+      MOCK.extensions.forEach((e) => { reasons[`${e.student}:${e.assignment}`] = e.reason; });
+      const d = (iso) => new Date(iso + "T12:00");
+      return {
+        course: c, assignments, students, results, reasons,
+        notes: { ...MOCK.student_notes },
+        classes: MOCK.classes.filter((k) => k.course === c.id),
+        q: "", section: "all", behindOnly: false,
+        sel: { s: students[0], a: assignments[0] }, extDate: "", extReasonInput: "",
+
+        get closed() { return this.assignments.filter((a) => a.status === "closed"); },
+        get current() { return this.assignments.find((a) => a.status === "open") || this.assignments[this.assignments.length - 1]; },
+        get scoped() { return this.students.filter((s) => this.section === "all" || s.class_id === this.section); },
+        get rows() {
+          const q = this.q.trim().toLowerCase();
+          return this.scoped.filter((s) => (!q || s.name.toLowerCase().includes(q)) && (!this.behindOnly || this.behind(s)));
+        },
+        res(s, a) { return this.results[s.id][a.id]; },
+        get selRes() { return this.sel.s && this.sel.a ? this.res(this.sel.s, this.sel.a) : { progress: 0 }; },
+        get extReason() { return this.sel.s ? this.reasons[`${this.sel.s.id}:${this.sel.a.id}`] : ""; },
+        behind(s) { return this.closed.some((a) => ["partial", "missed"].includes(this.res(s, a).state)); },
+        tone(st) { return STATE[st][1]; },
+        stateLabel(st) { return STATE[st][0]; },
+        scoreText(r, a) {
+          if (r.state === "excused") return "—";
+          // Mastery goals show the student's mastery against the target (same number as their home page).
+          if (r.state === "in_progress") return a.goal.type === "mastery"
+            ? `${Mock.pct(Math.min(1, r.progress) * a.goal.target)}/${Mock.pct(a.goal.target)}`
+            : `${Math.round(Math.min(1, r.progress) * a.goal.n)}/${a.goal.n}`;
+          if (r.score == null) return "";
+          return `${Number.isInteger(r.score) ? r.score : r.score.toFixed(1)}`;
+        },
+        cellTitle(s, a) {
+          const r = this.res(s, a);
+          let t = `${s.name}, ${a.name}: ${this.stateLabel(r.state)}`;
+          if (r.score != null) t += `, ${r.score} / ${a.points}`;
+          if (r.extension) t += `. Extended to ${this.fmtLong(r.extension)}`;
+          return t;
+        },
+        total(s) {
+          let got = 0, max = 0;
+          this.closed.forEach((a) => { const r = this.res(s, a); if (r.state === "excused") return; got += r.score || 0; max += a.points; });
+          return { text: `${got.toFixed(1)} / ${max}`, pct: max ? got / max : null };
+        },
+        colStats(a) {
+          const rs = this.scoped.map((s) => this.res(s, a)).filter((r) => r.state !== "excused");
+          const scored = rs.filter((r) => r.score != null);
+          const done = rs.filter((r) => r.state === "done" || r.state === "late").length;
+          return { n: rs.length, done, rate: rs.length ? done / rs.length : 0, avg: a.status === "closed" && scored.length ? scored.reduce((x, r) => x + r.score, 0) / scored.length : null };
+        },
+        countState(a, st) { return this.scoped.filter((s) => this.res(s, a).state === st).length; },
+        get classAvg() {
+          const t = this.scoped.map((s) => this.total(s).pct).filter((v) => v != null);
+          return t.length ? t.reduce((a, b) => a + b, 0) / t.length : null;
+        },
+        get extCount() { return this.students.reduce((n, s) => n + this.assignments.filter((a) => this.res(s, a).extension).length, 0); },
+        get studentsWithExt() { return this.students.filter((s) => this.assignments.some((a) => this.res(s, a).extension)).length; },
+        get excusedCount() { return this.students.reduce((n, s) => n + this.assignments.filter((a) => this.res(s, a).state === "excused").length, 0); },
+        goalText(a) { return a.goal.type === "mastery" ? `reach ${Mock.pct(a.goal.target)} on each topic` : `answer ${a.goal.n} questions`; },
+        shortClass(id) { return ((this.classes.find((k) => k.id === id) || {}).name || "").split(" (")[0]; },
+        fmt(iso) { return d(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }); },
+        fmtLong(iso) { return d(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); },
+        fmtDT(t) { const [day, hm] = t.split(" "); return `${this.fmt(day)}, ${hm}`; },
+
+        open(s, a) {
+          this.sel = { s, a };
+          const r = this.res(s, a);
+          const base = d(r.extension || (a.due > MOCK.today ? a.due : MOCK.today));
+          base.setDate(base.getDate() + 3);
+          this.extDate = r.extension || base.toISOString().slice(0, 10);
+          this.extReasonInput = this.reasons[`${s.id}:${a.id}`] || "";
+          this.$refs.cell.showModal();
+        },
+        grant() {
+          const { s, a } = this.sel;
+          const r = this.res(s, a);
+          r.extension = this.extDate;
+          this.reasons[`${s.id}:${a.id}`] = this.extReasonInput.trim();
+          if (a.status === "closed" && (r.state === "missed" || r.state === "partial") && this.extDate > MOCK.today) r.state = "in_progress";
+          this.$refs.cell.close();
+          Mock.toast(`Extension granted: ${s.name}, ${a.name.split(":")[0]} now due ${this.fmtLong(this.extDate)}`);
+        },
+        excuse() {
+          const { s, a } = this.sel;
+          Object.assign(this.res(s, a), { state: "excused", score: null, extension: null, progress: 1 });
+          this.$refs.cell.close();
+          Mock.toast(`${s.name} excused from ${a.name.split(":")[0]}; it no longer counts toward their total`);
+        },
+        unexcuse() {
+          const { s, a } = this.sel;
+          Object.assign(this.res(s, a), { ...MOCK.assignment_results[s.id][a.id], state: MOCK.assignment_results[s.id][a.id].state === "excused" ? (a.status === "closed" ? "missed" : "not_started") : MOCK.assignment_results[s.id][a.id].state, score: a.status === "closed" ? 0 : null, progress: 0 });
+          this.$refs.cell.close();
+          Mock.toast(`Excuse removed: ${s.name}, ${a.name.split(":")[0]}`);
+        },
+        sendToCanvas() {
+          const now = new Date();
+          const stamp = `${MOCK.today} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+          const cols = this.closed;
+          cols.forEach((a) => { a.lms = { synced: stamp }; });
+          const grades = cols.length * this.students.length;
+          Mock.toast(`Sent ${grades} grades for ${cols.length} closed assignments to Canvas. Week 5 goes after it closes.`);
+        },
+        exportCsv() {
+          const esc = (v) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+          const head = ["name", "email", "section", ...this.assignments.flatMap((a) => [`${a.name} (${a.points})`, `${a.name.split(":")[0]} status`, `${a.name.split(":")[0]} extended to`]), "total", "total_pct"];
+          const lines = this.rows.map((s) => [s.name, s.email, this.shortClass(s.class_id),
+            ...this.assignments.flatMap((a) => { const r = this.res(s, a); return [r.score ?? "", this.stateLabel(r.state), r.extension || ""]; }),
+            this.total(s).text, this.total(s).pct == null ? "" : Math.round(this.total(s).pct * 1000) / 10].map(esc).join(","));
+          const csv = [head.map(esc).join(","), ...lines].join("\r\n");
+          const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+          const link = document.createElement("a");
+          link.href = url; link.download = `${c.code.replace(/\s+/g, "")}-gradebook-${MOCK.today}.csv`;
+          document.body.appendChild(link); link.click(); link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          Mock.toast(`Exported ${this.rows.length} students × ${this.assignments.length} assignments`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

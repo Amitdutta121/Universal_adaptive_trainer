@@ -1,0 +1,35 @@
+VERDICT: NEEDS-REVIEW
+REASON: working diff changed since last tick
+TIME: 2026-08-31 07:51:16   HEAD: 8426a02
+MARKERS: 0
+DIVERGENCE: ahead 10 behind 0   MERGE: clean
+DIFF: CHANGED  (hash 8a98d9a7f153, prev da7e53e0e555)
+WINDOW_EDITS(15m): 27
+  - app/config.py
+  - app/domain/enums.py
+  - app/domain/questions.py
+  - app/evaluation/judge_relearn_worker.py
+  - app/generation/base.py
+  - app/generation/prompts.py
+  - app/generation/service.py
+  - app/main.py
+  - app/persistence/models.py
+  - app/persistence/repositories.py
+  - app/web/routes/api/judge_prompts.py
+  - app/web/routes/api/questions.py
+  - app/web/routes/api/schemas.py
+  - frontend/src/app/coverage/components/coverage-grid.tsx
+  - frontend/src/app/coverage/components/freeze-set-card.tsx
+  - frontend/src/app/coverage/components/frozen-sets-table.tsx
+  - frontend/src/app/coverage/components/readiness-summary-card.tsx
+  - frontend/src/app/coverage/coverage-display.test.ts
+  - frontend/src/app/coverage/coverage-display.ts
+  - frontend/src/app/coverage/coverage-screen.tsx
+  - frontend/src/app/questions/generate/single/components/pdf-page-viewer.tsx
+  - frontend/src/app/questions/generate/single/components/question-review.tsx
+  - frontend/src/app/questions/generate/single/generate-single-screen.tsx
+  - frontend/src/app/questions/questions-browser.tsx
+  - frontend/src/app/review/components/review-action-bar.tsx
+  - frontend/src/lib/api/queries.ts
+  - tests/conftest.py
+TRACKED_CHANGED: 47 files

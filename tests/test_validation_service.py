@@ -14,7 +14,6 @@ from app.domain.enums import Difficulty, QuestionStatus, QuestionType
 from app.domain.questions import Question
 from app.generation.schemas import OutputPredictionDraft
 from app.generation.service import GenerationService
-from app.ingestion import BookImportService
 from app.persistence.repositories import QuestionRepository
 from app.validation import DeterministicQuestionValidator
 
@@ -36,8 +35,9 @@ class FakeClient:
         system: str,
         prompt: str,
         response_model: type[BaseModel],
+        history: Any = (),
     ) -> BaseModel:
-        del system, prompt
+        del system, prompt, history
         if response_model is not OutputPredictionDraft:
             return _verdict(response_model, self.topic_id, self.subtopic_ids)
         return OutputPredictionDraft(
@@ -51,7 +51,11 @@ class FakeClient:
 
 
 class FailingFakeClient:
-    """Return one output-prediction draft that fails deterministic validation."""
+    """Return one output-prediction draft that fails deterministic validation.
+
+    Its code crashes: a wrong ``expected_output`` alone would be replaced by the output of a
+    real run (``observed_expected_output``) and pass.
+    """
 
     def __init__(self, topic_id: int = 1, subtopic_ids: list[int] | None = None) -> None:
         self.topic_id = topic_id
@@ -67,24 +71,23 @@ class FailingFakeClient:
         system: str,
         prompt: str,
         response_model: type[BaseModel],
+        history: Any = (),
     ) -> BaseModel:
-        del system, prompt
+        del system, prompt, history
         if response_model is not OutputPredictionDraft:
             return _verdict(response_model, self.topic_id, self.subtopic_ids)
         return OutputPredictionDraft(
             topic_id=self.topic_id,
             subtopic_ids=self.subtopic_ids,
             prompt="What is printed?",
-            code="print(4)",
+            code="print(1 / 0)",
             expected_output="3",
             explanation="The literal integer is printed.",
         )
 
 
-def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+def _seed(session: Session, settings: Any) -> tuple[object, object, object, str]:
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json",
         data=(
@@ -97,7 +100,7 @@ def _seed(session: Session, settings: Any) -> tuple[object, object, object, int]
         version,
         version.topics[0],
         version.topics[0].subtopics[0],
-        book.chapters[0].sections[0].id,
+        book.chunks[0].id,
     )
 
 
@@ -113,15 +116,15 @@ def test_validator_reports_unreadable_content_without_type_checks() -> None:
 
 
 def test_generation_persists_passing_validation_report(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
 
     rows = GenerationService(
         session, client=FakeClient(topic.id, [subtopic.id])
-    ).generate_for_sections(
+    ).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
 
     loaded = QuestionRepository(session).get(rows[0].id)
@@ -130,15 +133,15 @@ def test_generation_persists_passing_validation_report(session: Session, setting
 
 
 def test_generation_persists_failing_validation_report(session: Session, settings: Any) -> None:
-    version, topic, subtopic, section_id = _seed(session, settings)
+    version, topic, subtopic, chunk_id = _seed(session, settings)
 
     rows = GenerationService(
         session, client=FailingFakeClient(topic.id, [subtopic.id])
-    ).generate_for_sections(
+    ).generate_for_chunks(
         curriculum_version_id=version.id,
         question_type=QuestionType.OUTPUT_PREDICTION,
         difficulty=Difficulty.EASY,
-        source_section_ids=[section_id],
+        source_chunk_ids=[chunk_id],
     )
 
     loaded = QuestionRepository(session).get(rows[0].id)

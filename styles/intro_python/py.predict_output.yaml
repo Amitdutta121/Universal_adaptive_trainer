@@ -1,0 +1,29 @@
+id: py.predict_output
+name: Predict the output of a short snippet
+summary: Students read up to five lines and type exactly what is printed.
+question_type: output_prediction
+difficulty_range:
+- easy
+checked_by: Runs the code when the question is made and compares the exact output
+applies_to:
+- print
+- strings
+- slicing
+- indexing
+- for loops
+- arithmetic
+examples:
+- prompt: What does this code print?
+  code: |-
+    word = "banana"
+    print(word[1:4])
+  answer: ana
+  grounding: String slices
+- prompt: What does this code print?
+  code: |-
+    total = 0
+    for n in [3, 1, 4]:
+        total = total + n
+    print(total)
+  answer: '8'
+  grounding: Traversing a list

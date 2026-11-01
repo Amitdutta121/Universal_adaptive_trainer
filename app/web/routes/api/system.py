@@ -10,18 +10,19 @@ from sqlalchemy import text
 from app import __version__
 from app.config import get_settings
 from app.curriculum.taxonomy_schema import SCHEMA_VERSION as TAXONOMY_SCHEMA_VERSION
-from app.ingestion import SCHEMA_VERSION as BOOK_SCHEMA_VERSION
+from app.domain.enums import GuidelineStatus
 from app.ingestion import SUPPORTED_EXTENSIONS
 from app.llm import describe_availability
+from app.memory import MemoryGuidelineRepository
 from app.persistence.repositories import (
     BookRepository,
     CurriculumRepository,
     ProfessorReviewRepository,
     QuestionRepository,
     StudentRepository,
-    TypeInstructionRepository,
+    TrainingSessionRepository,
 )
-from app.web.routes.api.deps import DbSession
+from app.web.routes.api.deps import CourseProfile, CourseScope, DbSession
 from app.web.routes.api.schemas import ConfigResponse, CountsResponse, HealthResponse
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,6 @@ def config() -> ConfigResponse:
         llm_status=llm_status,
         llm_model=settings.llm_model,
         embedding_model=settings.embedding_model,
-        book_schema_version=BOOK_SCHEMA_VERSION,
         taxonomy_schema_version=TAXONOMY_SCHEMA_VERSION,
         supported_book_extensions=SUPPORTED_EXTENSIONS,
         max_book_upload_mb=settings.max_book_upload_mb,
@@ -73,13 +73,27 @@ def config() -> ConfigResponse:
 
 
 @router.get("/counts", response_model=CountsResponse)
-def counts(session: DbSession) -> CountsResponse:
-    """One count per section."""
+def counts(session: DbSession, course: CourseScope, profile: CourseProfile) -> CountsResponse:
+    """One count per section, every one of them the course's own (ADR-060).
+
+    Learned instructions are the professor's (ADR-059), and a student counts once they have
+    run a session in the course.
+    """
+    students = (
+        len(TrainingSessionRepository(session).student_ids_for_course(course))
+        if course is not None
+        else StudentRepository(session).count()
+    )
     return CountsResponse(
-        books=BookRepository(session).count(),
-        curriculum_versions=CurriculumRepository(session).count(),
-        questions=QuestionRepository(session).count(),
-        reviews=ProfessorReviewRepository(session).count(),
-        learned_instructions=len(TypeInstructionRepository(session).list_all()),
-        students=StudentRepository(session).count(),
+        books=BookRepository(session).count(course_id=course),
+        curriculum_versions=CurriculumRepository(session).count(course_id=course),
+        questions=QuestionRepository(session).count(course_id=course),
+        reviews=ProfessorReviewRepository(session).count(course_id=course),
+        # Active guidelines: what the generator is actually told beyond the shipped text.
+        learned_instructions=len(
+            MemoryGuidelineRepository(session).list_for(
+                subject=profile.personal_key, statuses=[GuidelineStatus.ACTIVE]
+            )
+        ),
+        students=students,
     )

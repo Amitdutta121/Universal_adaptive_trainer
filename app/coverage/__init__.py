@@ -46,7 +46,10 @@ from app.coverage.service import (
     build_coverage_report,
     create_question_set,
     get_prod_question_set,
+    get_taxonomy_question_set,
     sync_prod_question_set,
+    sync_taxonomy_question_set,
+    taxonomy_alias,
 )
 
 __all__ = [
@@ -59,7 +62,10 @@ __all__ = [
     "build_coverage_report",
     "create_question_set",
     "get_prod_question_set",
+    "get_taxonomy_question_set",
     "needed_for",
     "state_for",
     "sync_prod_question_set",
+    "sync_taxonomy_question_set",
+    "taxonomy_alias",
 ]

@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Exam export · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .ex-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pick-row { cursor: pointer; }
+    .pick-row:hover td { background: var(--muted); }
+    .cov-cell { font-variant-numeric: tabular-nums; text-align: center; }
+    .cov-zero { color: var(--muted-foreground); }
+  </style>
+</head>
+<!-- G8 · Exam export: pick approved questions by rule or by hand, export to the LMS or a document, hold them out of practice. -->
+<body data-scope="course" data-nav="exams" data-title="Exam export">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Exam export</h1>
+        <p class="text-sm text-muted-foreground max-w-3xl">Build an exam from approved questions and export it to your LMS or a document. Exported questions are marked as used on that exam and can be held out of practice until it's over.</p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="approved.length">
+        <a class="btn" data-variant="outline" :href="Mock.link('questions.html', { status: 'held' })">Held questions in the bank</a>
+      </div>
+    </div>
+
+    <!-- Statistics: nothing approved yet -->
+    <template x-if="!approved.length">
+      <div class="card">
+        <section class="grid place-items-center gap-3 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="file-output"></i></span>
+          <div>
+            <div class="font-medium">No approved questions to put on an exam</div>
+            <p class="text-sm text-muted-foreground max-w-md">Only questions you have approved can be exported. This course has none yet: generation is blocked until the AI taxonomy draft from OpenIntro Statistics is approved.</p>
+          </div>
+          <div class="flex gap-2">
+            <a class="btn" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="approved.length">
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <!-- ============ Builder ============ -->
+        <div class="grid gap-6 content-start min-w-0">
+          <div class="card">
+            <header><h2>Exam</h2></header>
+            <section class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
+              <div role="group" class="field">
+                <label for="ex-name">Name</label>
+                <input id="ex-name" class="input" type="text" x-model="name">
+              </div>
+              <div role="group" class="field">
+                <label for="ex-date">Exam date</label>
+                <input id="ex-date" class="input" type="date" x-model="date" @change="if (!holdTouched) holdUntil = G.addDays(date, 1)">
+              </div>
+            </section>
+          </div>
+
+          <div class="card gap-0 py-0">
+            <header class="py-5 border-b">
+              <h2>Questions</h2>
+              <p x-text="`From the ${approved.length} approved questions in this course.`"></p>
+            </header>
+            <div class="tabs w-full" id="pick-tabs">
+              <nav role="tablist" aria-orientation="horizontal" class="mx-6 mt-4">
+                <button type="button" role="tab" id="pick-tab-rule" aria-controls="pick-panel-rule" :aria-selected="mode === 'rule'" :tabindex="mode === 'rule' ? 0 : -1" @click="mode = 'rule'">By rule</button>
+                <button type="button" role="tab" id="pick-tab-hand" aria-controls="pick-panel-hand" :aria-selected="mode === 'hand'" :tabindex="mode === 'hand' ? 0 : -1" @click="toHand()">Hand-pick</button>
+              </nav>
+
+              <!-- By rule -->
+              <div role="tabpanel" id="pick-panel-rule" aria-labelledby="pick-tab-rule" tabindex="-1" x-show="mode === 'rule'">
+                <div class="grid gap-4 p-6 pt-4">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <input id="r-count" class="input w-20" type="number" min="1" max="60" x-model.number="rule.count" aria-label="Number of questions">
+                    <span>questions from the topics of week</span>
+                    <select id="r-from" class="select w-24" x-model.number="rule.from" aria-label="From week">
+                      <template x-for="w in weeks" :key="w.week"><option :value="w.week" :selected="w.week === rule.from" x-text="w.week"></option></template>
+                    </select>
+                    <span>to week</span>
+                    <select id="r-to" class="select w-24" x-model.number="rule.to" aria-label="To week">
+                      <template x-for="w in weeks" :key="w.week"><option :value="w.week" :selected="w.week === rule.to" x-text="w.week"></option></template>
+                    </select>
+                  </div>
+                  <p class="text-xs text-muted-foreground -mt-2" x-text="`${scopeTopics.length} topics from the schedule: ${scopeTopics.map((t) => t.name).join(', ') || 'none'}.`"></p>
+
+                  <div class="grid gap-2">
+                    <div class="text-sm font-medium">Difficulty mix</div>
+                    <div class="flex flex-wrap items-end gap-3">
+                      <template x-for="d in DIFFS" :key="d">
+                        <div role="group" class="field w-24">
+                          <label :for="`mix-${d}`" class="text-xs text-muted-foreground" x-text="`${d[0].toUpperCase()}${d.slice(1)} %`"></label>
+                          <input :id="`mix-${d}`" class="input" type="number" min="0" max="100" step="5" x-model.number="rule.mix[d]">
+                        </div>
+                      </template>
+                      <span class="pb-2 text-xs" :class="mixSum === 100 ? 'text-muted-foreground' : ''" :style="mixSum === 100 ? {} : { color: 'var(--critical-solid)' }" x-text="mixSum === 100 ? `${targets.easy} easy · ${targets.medium} medium · ${targets.hard} hard` : `Adds up to ${mixSum}%, not 100%`"></span>
+                    </div>
+                  </div>
+
+                  <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" class="input" x-model="rule.excludeUsed">
+                    <span x-text="`Leave out questions already on an exam (${usedCount})`"></span>
+                  </label>
+
+                  <template x-if="shortfall.length && mixSum === 100">
+                    <div class="alert">
+                      <i data-lucide="circle-alert"></i>
+                      <h2 x-text="`${selected.length} of ${rule.count} found`"></h2>
+                      <section>
+                        <p x-text="`Not enough approved questions in scope: ${shortfall.map((s) => `${s.d} ${s.have} of ${s.want}`).join(', ')}. ${course.numbers.awaiting_review} questions are awaiting review; approving some may close the gap.`"></p>
+                        <p class="mt-2 flex flex-wrap gap-2">
+                          <a class="btn" data-size="sm" data-variant="outline" :href="Mock.link('review.html')">Open the review queue</a>
+                          <a class="btn" data-size="sm" data-variant="outline" :href="Mock.link('coverage.html')">Show coverage gaps</a>
+                          <button type="button" class="btn" data-size="sm" data-variant="ghost" @click="toHand()">Hand-pick instead</button>
+                        </p>
+                      </section>
+                    </div>
+                  </template>
+                  <p class="text-xs text-muted-foreground">Questions are spread across the topics in scope, one topic at a time, lowest id first. Switch to Hand-pick to change individual questions; the rule's picks carry over.</p>
+                </div>
+              </div>
+
+              <!-- Hand-pick -->
+              <div role="tabpanel" id="pick-panel-hand" aria-labelledby="pick-tab-hand" tabindex="-1" x-show="mode === 'hand'">
+                <div class="flex flex-wrap items-center gap-2 px-6 pt-4 pb-3 border-b">
+                  <select class="select w-48" x-model="hf.topic" aria-label="Filter by topic">
+                    <option value="">All topics</option>
+                    <template x-for="t in bankTopics" :key="t.id"><option :value="t.id" x-text="t.name"></option></template>
+                  </select>
+                  <select class="select w-40" x-model="hf.difficulty" aria-label="Filter by difficulty">
+                    <option value="">All difficulties</option>
+                    <template x-for="d in DIFFS" :key="d"><option :value="d" x-text="d"></option></template>
+                  </select>
+                  <span class="text-sm text-muted-foreground" x-text="`${handRows.length} shown · ${picked.length} picked`"></span>
+                  <button type="button" class="btn ml-auto" data-variant="ghost" data-size="sm" x-show="picked.length" @click="picked = []">Clear picks</button>
+                </div>
+                <div class="table-container">
+                  <table class="table">
+                    <thead>
+                      <tr><th class="w-10"></th><th class="w-14">ID</th><th>Question</th><th>Topic / subtopic</th><th>Difficulty</th></tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="q in handRows" :key="q.id">
+                        <tr class="pick-row" @click="toggle(q.id)">
+                          <td><input type="checkbox" class="input" :checked="picked.includes(q.id)" @click.stop="toggle(q.id)" :aria-label="`Pick question ${q.id}`"></td>
+                          <td class="font-mono text-xs"><a class="hover:underline" :href="Mock.link('question.html', { id: q.id })" @click.stop x-text="q.id"></a></td>
+                          <td class="max-w-0 w-full">
+                            <div class="flex items-center gap-1.5">
+                              <span x-show="heldFor(q.id)" class="shrink-0" style="color:var(--warn-solid)" :title="heldTitle(q.id)"><i data-lucide="lock" class="size-3.5"></i></span>
+                              <span class="ex-prompt text-sm" :title="q.prompt" x-text="q.prompt.split('\n')[0].replaceAll('`', '')"></span>
+                            </div>
+                            <div class="text-xs text-muted-foreground" x-text="MOCK.question_types[q.type].label"></div>
+                          </td>
+                          <td class="text-xs whitespace-nowrap"><div x-text="q.subtopic"></div><div class="text-muted-foreground" x-text="q.topic"></div></td>
+                          <td class="text-xs" x-text="q.difficulty"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="px-6 py-3 text-xs text-muted-foreground border-t">A lock means the question is already on an exam. You can reuse it, but students who sat that exam have seen it.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <header>
+              <h2>Hold out of practice</h2>
+            </header>
+            <section class="grid gap-3">
+              <div class="flex flex-wrap items-center gap-3">
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="checkbox" role="switch" class="input" x-model="hold">
+                  <span>Hold these questions out of practice until</span>
+                </label>
+                <input class="input w-44" type="date" x-model="holdUntil" :disabled="!hold" @change="holdTouched = true" aria-label="Hold until">
+              </div>
+              <p class="text-sm text-muted-foreground">Students practising in the week before the exam would otherwise meet the exact exam questions. Held questions stay in the bank and in question sets, but aren't served in practice or assignments until the date. The default is the day after the exam.</p>
+            </section>
+          </div>
+
+          <div class="card">
+            <header><h2>Format</h2></header>
+            <section class="grid gap-2 sm:grid-cols-2">
+              <template x-for="f in G.formats" :key="f.id">
+                <label class="flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer" :style="format === f.id ? { borderColor: 'var(--primary)', background: 'var(--accent)' } : {}">
+                  <input type="radio" class="input mt-0.5" name="format" :value="f.id" x-model="format">
+                  <span class="grid gap-0.5">
+                    <span class="text-sm font-medium"><span x-text="f.label"></span> <span class="font-mono text-xs text-muted-foreground" x-text="f.ext"></span></span>
+                    <span class="text-xs text-muted-foreground" x-text="f.note"></span>
+                  </span>
+                </label>
+              </template>
+            </section>
+            <footer class="flex flex-wrap items-center gap-3">
+              <button type="button" class="btn" :disabled="!selected.length || !name.trim()" @click="exportExam()"><i data-lucide="download"></i><span x-text="`Export ${selected.length} question${selected.length === 1 ? '' : 's'}`"></span></button>
+              <span class="text-xs text-muted-foreground" x-text="hold ? `Held out of practice until ${G.date(holdUntil)}.` : 'Not held: students may see these in practice.'"></span>
+            </footer>
+          </div>
+        </div>
+
+        <!-- ============ The picked set ============ -->
+        <div class="grid gap-6 content-start">
+          <div class="card gap-4">
+            <header>
+              <h2 x-text="name.trim() || 'Untitled exam'"></h2>
+              <p x-text="`${G.date(date, true)} · ${selected.length} questions`"></p>
+            </header>
+            <section class="grid gap-4">
+              <div class="grid grid-cols-3 gap-2 text-center">
+                <template x-for="d in DIFFS" :key="d">
+                  <div class="rounded-lg border py-2">
+                    <div class="text-lg font-display font-semibold tabular-nums" x-text="byDiff[d]"></div>
+                    <div class="text-xs text-muted-foreground" x-text="d"></div>
+                  </div>
+                </template>
+              </div>
+              <div class="grid gap-1">
+                <div class="text-xs font-medium text-muted-foreground">Coverage by topic</div>
+                <table class="w-full text-xs">
+                  <thead><tr class="text-muted-foreground"><th class="text-left font-normal py-1">Topic</th><th class="font-normal w-8">E</th><th class="font-normal w-8">M</th><th class="font-normal w-8">H</th><th class="font-normal w-10">All</th></tr></thead>
+                  <tbody>
+                    <template x-for="r in coverage" :key="r.topic.id">
+                      <tr class="border-t">
+                        <td class="py-1.5" :class="!r.total && 'text-muted-foreground'" x-text="r.topic.name"></td>
+                        <template x-for="d in DIFFS" :key="d"><td class="cov-cell" :class="!r[d] && 'cov-zero'" x-text="r[d] || '·'"></td></template>
+                        <td class="cov-cell font-medium" :style="r.total ? {} : { color: 'var(--warn-solid)' }" :title="r.total ? '' : 'Not on this exam'" x-text="r.total"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <div class="grid gap-1" x-show="selected.length">
+                <div class="text-xs font-medium text-muted-foreground">Questions</div>
+                <ol class="grid gap-1 text-xs">
+                  <template x-for="(q, i) in selectedQs" :key="q.id">
+                    <li class="flex items-center gap-2 min-w-0">
+                      <span class="w-4 text-right text-muted-foreground tabular-nums" x-text="i + 1"></span>
+                      <a class="font-mono hover:underline" :href="Mock.link('question.html', { id: q.id })" x-text="q.id"></a>
+                      <span class="ex-prompt min-w-0 flex-1" :title="q.prompt" x-text="q.prompt.split('\n')[0].replaceAll('`', '')"></span>
+                      <span class="text-muted-foreground" x-text="q.difficulty[0].toUpperCase()"></span>
+                    </li>
+                  </template>
+                </ol>
+              </div>
+              <p class="text-sm text-muted-foreground" x-show="!selected.length">No questions picked yet.</p>
+            </section>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ Past exports ============ -->
+    <section class="card gap-0 py-0" x-show="approved.length || exports.length">
+      <header class="py-5 border-b">
+        <h2>Past exports</h2>
+        <p>Each export marks its questions as used on that exam.</p>
+      </header>
+      <div class="table-container" x-show="exports.length">
+        <table class="table">
+          <thead>
+            <tr><th>Exam</th><th>Exam date</th><th>Exported</th><th>Format</th><th>Questions</th><th>Held out of practice</th><th class="w-56"></th></tr>
+          </thead>
+          <tbody>
+            <template x-for="e in exports" :key="e.id">
+              <tr>
+                <td class="font-medium" x-text="e.name"></td>
+                <td class="text-sm" x-text="G.date(e.date, true)"></td>
+                <td class="text-sm text-muted-foreground" x-text="`${G.date(e.exported)} · ${e.by}`"></td>
+                <td class="text-xs" x-text="e.format"></td>
+                <td class="text-xs">
+                  <span class="tabular-nums" x-text="e.questions.length"></span>
+                  <span class="font-mono text-muted-foreground" x-text="`#${e.questions.slice(0, 4).join(', #')}${e.questions.length > 4 ? '…' : ''}`"></span>
+                </td>
+                <td>
+                  <span class="pill tone-warn" x-show="e.held_until"><i data-lucide="lock" class="size-3"></i><span x-text="`until ${G.date(e.held_until)}`"></span></span>
+                  <span class="pill tone-muted" x-show="!e.held_until" x-text="e.released ? `Released ${G.date(e.released)}` : 'Not held'"></span>
+                </td>
+                <td class="text-right whitespace-nowrap">
+                  <button type="button" class="btn" data-variant="ghost" data-size="sm" @click="Mock.toast(`Downloaded ${e.name} again (${e.format})`)"><i data-lucide="download"></i>Download</button>
+                  <button type="button" class="btn" data-variant="outline" data-size="sm" x-show="e.held_until" @click="release(e)" :title="e.date >= MOCK.today ? 'The exam has not happened yet' : ''">Release now</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <p class="px-6 py-8 text-sm text-muted-foreground text-center" x-show="!exports.length">No exams exported from this course yet.</p>
+    </section>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-g-content.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const G = MOCK.gContent;
+      const DIFFS = ["easy", "medium", "hard"];
+      const approved = MOCK.questions.filter((q) => q.course === c.id && q.status === "approved");
+      const sched = MOCK.schedule[c.id];
+      const weeks = sched ? sched.weeks : [];
+      const topicById = (id) => c.taxonomy.find((t) => t.id === id);
+      return {
+        course: c, G, DIFFS, approved, weeks,
+        name: "Midterm makeup", date: "2026-10-23",
+        mode: "rule",
+        rule: { count: 20, from: 1, to: 7, mix: { easy: 30, medium: 50, hard: 20 }, excludeUsed: true },
+        picked: [], hf: { topic: "", difficulty: "" },
+        hold: true, holdUntil: "2026-10-24", holdTouched: false,
+        format: "qti",
+        exports: MOCK.exams.filter((e) => e.course === c.id).map((e) => ({ ...e, questions: [...e.questions], by: "Maya Chen", released: null })),
+        heldFor(id) { return this.exports.find((e) => e.held_until && e.questions.includes(id)) || null; },
+        usedOn(id) { return this.exports.find((e) => e.questions.includes(id)) || null; },
+        heldTitle(id) { const e = this.heldFor(id); return e ? `Held for ${e.name} until ${G.date(e.held_until)}` : ""; },
+        get usedCount() { return approved.filter((q) => this.usedOn(q.id)).length; },
+        get scopeTopics() {
+          const ids = weeks.filter((w) => w.week >= this.rule.from && w.week <= this.rule.to).flatMap((w) => w.topics);
+          return ids.map(topicById).filter(Boolean);
+        },
+        get bankTopics() { return c.taxonomy.filter((t) => approved.some((q) => q.topic_id === t.id)); },
+        get mixSum() { return DIFFS.reduce((a, d) => a + (Number(this.rule.mix[d]) || 0), 0); },
+        get targets() {
+          const n = Math.max(0, Number(this.rule.count) || 0);
+          const easy = Math.round(n * this.rule.mix.easy / 100), medium = Math.round(n * this.rule.mix.medium / 100);
+          return { easy, medium, hard: Math.max(0, n - easy - medium) };
+        },
+        get pool() {
+          const ids = this.scopeTopics.map((t) => t.id);
+          return approved.filter((q) => ids.includes(q.topic_id) && !(this.rule.excludeUsed && this.usedOn(q.id)));
+        },
+        // Round-robin over topics within each difficulty, so one topic can't take every slot.
+        get rulePick() {
+          const out = {};
+          DIFFS.forEach((d) => {
+            const byTopic = this.scopeTopics.map((t) => this.pool.filter((q) => q.topic_id === t.id && q.difficulty === d));
+            const got = [];
+            for (let round = 0; got.length < this.targets[d] && byTopic.some((l) => l.length > round); round++)
+              byTopic.forEach((l) => { if (l[round] && got.length < this.targets[d]) got.push(l[round].id); });
+            out[d] = got;
+          });
+          return out;
+        },
+        get shortfall() {
+          return DIFFS.filter((d) => this.rulePick[d].length < this.targets[d]).map((d) => ({ d, have: this.rulePick[d].length, want: this.targets[d] }));
+        },
+        get selected() {
+          if (this.mode === "hand") return this.picked;
+          return this.mixSum === 100 ? DIFFS.flatMap((d) => this.rulePick[d]) : [];
+        },
+        get selectedQs() { return this.selected.map((id) => MOCK.question(id)).sort((a, b) => a.topic_id.localeCompare(b.topic_id, undefined, { numeric: true })); },
+        get byDiff() {
+          const o = { easy: 0, medium: 0, hard: 0 };
+          this.selectedQs.forEach((q) => o[q.difficulty]++);
+          return o;
+        },
+        get coverage() {
+          const topics = this.mode === "rule" ? this.scopeTopics : c.taxonomy.filter((t) => this.bankTopics.includes(t) || this.selectedQs.some((q) => q.topic_id === t.id));
+          return topics.map((t) => {
+            const r = { topic: t, easy: 0, medium: 0, hard: 0, total: 0 };
+            this.selectedQs.filter((q) => q.topic_id === t.id).forEach((q) => { r[q.difficulty]++; r.total++; });
+            return r;
+          });
+        },
+        get handRows() {
+          return approved.filter((q) => (!this.hf.topic || q.topic_id === this.hf.topic) && (!this.hf.difficulty || q.difficulty === this.hf.difficulty));
+        },
+        toHand() { if (this.mode === "rule") this.picked = [...this.selected]; this.mode = "hand"; },
+        toggle(id) { this.picked = this.picked.includes(id) ? this.picked.filter((x) => x !== id) : [...this.picked, id]; },
+        exportExam() {
+          const f = G.formats.find((x) => x.id === this.format);
+          const n = this.selected.length;
+          this.exports.unshift({
+            id: "e" + Date.now(), course: c.id, name: this.name.trim(), date: this.date, exported: MOCK.today, format: f.label,
+            questions: [...this.selected], held_until: this.hold ? this.holdUntil : null, by: MOCK.me.name, released: null,
+          });
+          this.picked = this.mode === "hand" ? [] : this.picked;
+          Mock.toast(`Exported ${this.name.trim()}: ${n} questions as ${f.label}${this.hold ? `, held out of practice until ${G.date(this.holdUntil)}` : ""}`);
+        },
+        release(e) {
+          const n = e.questions.length;
+          e.held_until = null; e.released = MOCK.today;
+          Mock.toast(`Released ${e.name}: ${n} questions are back in practice from today`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

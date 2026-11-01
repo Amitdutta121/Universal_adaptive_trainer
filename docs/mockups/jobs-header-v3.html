@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jobs — popover + run detail</title>
+<!-- Combines version A (header popover, jobs-header.html) with version H (run detail,
+     jobs-header-v2.html): header "Jobs" → popover → "View all jobs" / a row → run detail.
+     TODO(real): every job below is mock data. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* Tokens copied from frontend/src/app/globals.css */
+  :root {
+    --paper:#f4f6f6; --surface:#fff; --surface-2:#ecefef; --surface-3:#e4e9e8;
+    --ink:#131a1c; --ink-2:#3d4a4d; --muted-ink:#6b797c; --hairline:#dbe0e0; --hairline-2:#c7cfcf;
+    --accent-solid:#2e6f6a; --accent-text:#1d4a47; --accent-wash:#dceae8;
+    --ok-solid:#2f7d57; --ok-wash:#d9ede3; --critical-solid:#b4531f; --critical-wash:#f6e1d5; --sidebar:#eef2f1;
+    --shadow-panel:0 1px 2px rgb(19 26 28/.06),0 8px 18px -8px rgb(19 26 28/.2),0 28px 56px -28px rgb(19 26 28/.34);
+    --r:0.85rem;
+  }
+  :root[data-theme="dark"] {
+    --paper:#0d1214; --surface:#151c1e; --surface-2:#1d2528; --surface-3:#263033;
+    --ink:#e7ecec; --ink-2:#b4c0c1; --muted-ink:#7e8d8f; --hairline:#26312f; --hairline-2:#35423f;
+    --accent-solid:#66b8b0; --accent-text:#9ad6d0; --accent-wash:#17322f;
+    --ok-solid:#5cb786; --ok-wash:#163126; --critical-solid:#e5924f; --critical-wash:#3c2518; --sidebar:#111719;
+    --shadow-panel:0 1px 2px rgb(0 0 0/.45),0 8px 18px -8px rgb(0 0 0/.5),0 28px 56px -28px rgb(0 0 0/.8);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body { background:var(--paper); color:var(--ink); font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  .mono { font-family:"IBM Plex Mono",monospace; font-size:12px; }
+  svg { width:16px; height:16px; flex:none; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* mockup-only theme toggle */
+  .theme { position:fixed; z-index:100; bottom:14px; right:14px; border:0; background:#131a1c; color:#cfd8d8; border-radius:999px; padding:7px 13px; font-size:12.5px; box-shadow:var(--shadow-panel); }
+
+  /* app replica */
+  .app { display:flex; height:100vh; }
+  .sidebar { width:236px; flex:none; background:var(--sidebar); border-right:1px solid var(--hairline); padding:14px 10px; display:flex; flex-direction:column; gap:14px; }
+  .brand { display:flex; gap:10px; align-items:center; padding:4px 6px; }
+  .brand-mark { width:30px; height:30px; border-radius:9px; background:var(--accent-solid); color:var(--surface); display:grid; place-items:center; }
+  .brand b { display:block; font:700 14px "Archivo",sans-serif; }
+  .brand span { font-size:12px; color:var(--muted-ink); }
+  .nav-label { font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-ink); padding:0 8px; margin-bottom:4px; }
+  .nav a { display:flex; align-items:center; gap:9px; padding:6px 8px; border-radius:8px; color:var(--ink-2); text-decoration:none; font-size:13.5px; }
+  .nav a.active { background:var(--surface); color:var(--ink); font-weight:500; box-shadow:0 1px 2px rgb(0 0 0/.06); }
+  .main { flex:1; min-width:0; overflow:auto; }
+  .shell { max-width:1120px; margin:0 auto; padding:28px 24px; display:flex; flex-direction:column; gap:20px; }
+  .page-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .page-header h1 { font:700 22px "Archivo",sans-serif; margin:0; }
+  .sep { width:1px; height:16px; background:var(--hairline-2); margin:0 4px; }
+  .actions { margin-left:auto; display:flex; gap:8px; align-items:center; position:relative; }
+  .btn { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px; border-radius:8px; border:1px solid var(--hairline); background:var(--surface); font-size:13px; }
+  .btn:hover, .btn[aria-expanded="true"] { background:var(--surface-2); }
+  .btn.ghost { border-color:transparent; background:transparent; }
+  .btn.primary { background:var(--accent-solid); border-color:var(--accent-solid); color:var(--surface); }
+  .select { min-width:210px; justify-content:space-between; color:var(--ink-2); }
+  .summary { color:var(--muted-ink); margin:-12px 0 0; }
+  .card { background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r); }
+  .placeholder { padding:18px; display:grid; gap:10px; }
+  .placeholder i { display:block; height:12px; border-radius:6px; background:var(--surface-2); }
+
+  /* shared job pieces */
+  .badge { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 7px; border-radius:999px; font-size:11.5px; font-weight:500; white-space:nowrap; }
+  .b-run { background:var(--accent-wash); color:var(--accent-text); }
+  .b-queue { background:var(--surface-2); color:var(--ink-2); }
+  .b-ok { background:var(--ok-wash); color:var(--ok-solid); }
+  .b-fail { background:var(--critical-wash); color:var(--critical-solid); }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spin { animation:spin 1s linear infinite; }
+  .bar { height:5px; border-radius:3px; background:var(--surface-3); overflow:hidden; }
+  .bar > span { display:block; height:100%; background:var(--accent-solid); border-radius:3px; transition:width .6s; }
+  .muted { color:var(--muted-ink); }
+  .err { color:var(--critical-solid); }
+  .link { color:var(--accent-text); font-size:12.5px; font-weight:500; background:none; border:0; padding:0; }
+  .link:hover { text-decoration:underline; }
+  .kind { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-ink); }
+  .count { min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:var(--accent-solid); color:var(--surface); font-size:11px; font-weight:600; display:inline-grid; place-items:center; }
+  .ico-run { color:var(--accent-solid); } .ico-ok { color:var(--ok-solid); } .ico-fail { color:var(--critical-solid); } .ico-q { color:var(--muted-ink); }
+
+  /* popover (from version A) */
+  .pop { position:absolute; top:40px; right:0; width:420px; background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r); box-shadow:var(--shadow-panel); z-index:20; }
+  .pop-head { display:flex; align-items:center; justify-content:space-between; padding:12px 14px 10px; border-bottom:1px solid var(--hairline); }
+  .pop-head b { font:600 14px "Archivo",sans-serif; }
+  .pop-list { max-height:400px; overflow:auto; padding-bottom:4px; }
+  .pop-group { padding:8px 14px 4px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-ink); }
+  .pop-row { display:grid; grid-template-columns:20px 1fr auto; gap:10px; padding:9px 14px; align-items:start; cursor:pointer; }
+  .pop-row:hover { background:var(--surface-2); }
+  .pop-row .t { font-weight:500; font-size:13px; }
+  .pop-row .s { font-size:12px; color:var(--muted-ink); }
+  .pop-row .bar { margin-top:6px; }
+  .pop-foot { border-top:1px solid var(--hairline); padding:9px 14px; display:flex; justify-content:space-between; }
+
+  /* run detail (from version H) */
+  .scrim { position:fixed; inset:0; background:rgb(13 18 20/.32); z-index:40; }
+  .modal { position:fixed; inset:7vh 6vw; background:var(--surface); border:1px solid var(--hairline); border-radius:12px; box-shadow:var(--shadow-panel); z-index:41; display:grid; grid-template-columns:330px 1fr; overflow:hidden; }
+  .runs { border-right:1px solid var(--hairline); overflow:auto; background:var(--paper); display:flex; flex-direction:column; }
+  .runs-head { padding:14px 16px 10px; border-bottom:1px solid var(--hairline); display:flex; flex-direction:column; gap:10px; position:sticky; top:0; background:var(--paper); z-index:1; }
+  .runs-head .title { font:700 16px "Archivo",sans-serif; display:flex; justify-content:space-between; align-items:center; }
+  .tabs { display:flex; gap:2px; padding:3px; background:var(--surface-2); border-radius:9px; }
+  .tabs button { flex:1; border:0; background:transparent; padding:4px 6px; border-radius:7px; font-size:12px; color:var(--ink-2); }
+  .tabs button[aria-selected="true"] { background:var(--surface); color:var(--ink); font-weight:500; box-shadow:0 1px 2px rgb(0 0 0/.08); }
+  .tabs .n { color:var(--muted-ink); margin-left:3px; }
+  .run { display:grid; grid-template-columns:18px 1fr; gap:10px; padding:11px 16px; border-bottom:1px solid var(--hairline); cursor:pointer; }
+  .run:hover { background:var(--surface-2); }
+  .run.sel { background:var(--surface); box-shadow:inset 0 0 0 1px var(--hairline-2); }
+  .run.sel .t { color:var(--accent-text); }
+  .run .t { font-size:13px; font-weight:500; }
+  .run .s { font-size:12px; color:var(--muted-ink); }
+  .detail { overflow:auto; padding:22px 28px; display:flex; flex-direction:column; gap:18px; }
+  .detail h2 { margin:0; font:700 20px "Archivo",sans-serif; }
+  .facts { display:flex; gap:28px; flex-wrap:wrap; font-size:12.5px; }
+  .facts div span { display:block; color:var(--muted-ink); font-size:11.5px; }
+  .steps { border:1px solid var(--hairline); border-radius:10px; }
+  .step { display:grid; grid-template-columns:22px 1fr auto; gap:12px; padding:12px 14px; border-bottom:1px solid var(--hairline); align-items:center; }
+  .step:last-child { border-bottom:0; }
+  .step.pending { color:var(--muted-ink); }
+  .step .ring { width:14px; height:14px; border-radius:50%; border:2px solid var(--hairline-2); margin-left:1px; }
+  .step .s { font-size:12px; color:var(--muted-ink); }
+  .console { background:#0f1517; color:#c9d4d4; border-radius:10px; padding:12px 14px; white-space:pre-wrap; margin:0; line-height:1.6; }
+  .console .ts { color:#7b9193; }
+  .back { display:none; }
+
+  @media (max-width:900px) {
+    .sidebar { display:none; }
+    .shell { padding:20px 16px; }
+    .pop { width:calc(100vw - 32px); }
+    .modal { inset:0; border-radius:0; grid-template-columns:1fr; }
+    .modal.has-detail .runs { display:none; }
+    .modal:not(.has-detail) .detail { display:none; }
+    .back { display:inline-flex; }
+  }
+</style>
+</head>
+<body>
+<button class="theme" id="theme">◐ Dark mode</button>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8L20 10l-6.1 1.2L12 17l-1.9-5.8L4 10l6.1-1.2z"/></svg></span>
+      <div><b>Adaptive Trainer</b><span>Instructor Studio</span></div></div>
+    <div><div class="nav-label">Content Pipeline</div>
+      <nav class="nav"><a href="#">Books</a><a href="#">Curriculum</a><a href="#">Questions</a><a href="#" class="active">Generate</a><a href="#">Review</a></nav></div>
+    <div><div class="nav-label">Calibration</div>
+      <nav class="nav"><a href="#">Instructions</a><a href="#">Judges</a><a href="#">Coverage</a></nav></div>
+    <div><div class="nav-label">Adaptive Training</div>
+      <nav class="nav"><a href="#">Classrooms</a><a href="#">Roster</a></nav></div>
+  </aside>
+
+  <main class="main">
+    <div class="shell">
+      <header class="page-header">
+        <button class="btn ghost" style="padding:0 6px" title="Toggle sidebar"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <span class="sep"></span>
+        <h1>Generate</h1>
+        <div class="actions">
+          <button class="btn select">Intro Python · v3 <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+          <span id="jobs-slot" style="position:relative"></span>
+        </div>
+      </header>
+      <p class="summary">Generate questions for a curriculum topic and send them to review.</p>
+      <div class="card placeholder">
+        <i style="width:40%"></i><i style="width:85%"></i><i style="width:70%"></i><i style="width:55%"></i>
+        <div style="margin-top:8px"><button class="btn primary">Generate 40 questions</button></div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="overlay"></div>
+
+<script>
+// TODO(real): mock data — replace with a jobs API.
+const now = Date.now(), min = 60e3, hr = 60*min;
+const JOBS = [
+  { id:"job_8f21", kind:"Generation", title:"Generate 40 questions · Loops & iteration", status:"running", done:18, total:40, unit:"questions", started:now-6*min,
+    steps:[["Plan topics","done","4 subtopics"],["Generate questions","running",""],["Sandbox validation","running",""],["Send to review","pending",""]],
+    log:[["12:04:11","Q17 passed sandbox (3/3 tests)"],["12:04:19","Q18 passed sandbox (3/3 tests)"],["12:04:22","Q19 generating…"]] },
+  { id:"job_8f1c", kind:"Ingestion", title:"Ingest “Think Python 2e.pdf”", status:"running", pct:58, started:now-2*min,
+    steps:[["Upload PDF","done","4.1 MB"],["Read outline","done","21 chapters"],["Extract sections","running",""],["Chunk & embed","pending",""],["Index for retrieval","pending",""]],
+    log:[["12:06:02","PDF outline found (21 chapters)"],["12:07:40","Extracting sections…"]] },
+  { id:"job_8f0a", kind:"Judge batch", title:"Judge 120 questions · rubric v2", status:"queued", done:0, total:120, unit:"questions", queuedAt:now-1*min,
+    steps:[["Wait for job_8f21","running",""],["Score with rubric v2","pending",""],["Summarize disagreements","pending",""]], log:[] },
+  { id:"job_8e77", kind:"Coverage", title:"Freeze coverage set “Midterm”", status:"done", started:now-14*min, finished:now-4*min, result:"212 questions · 18 topics",
+    steps:[["Snapshot questions","done","212"],["Compute coverage","done","18 topics"],["Freeze set","done",""]], log:[["11:58:10","Frozen as Midterm (v1)"]] },
+  { id:"job_8e52", kind:"Generation", title:"Generate 25 questions · Functions", status:"failed", done:11, total:25, unit:"questions", started:now-52*min, finished:now-47*min,
+    error:"LLM rate limit (429) after 3 retries — 11 of 25 kept",
+    steps:[["Plan topics","done","3 subtopics"],["Generate questions","failed","stopped at 11 / 25"],["Sandbox validation","done","11 passed"],["Send to review","done","11 sent"]],
+    log:[["11:15:30","Q11 passed sandbox"],["11:15:44","openai 429 Too Many Requests (retry 3/3)"],["11:15:44","job aborted, 11 questions saved to review"]] },
+  { id:"job_8e10", kind:"Ingestion", title:"Ingest “Automate the Boring Stuff.pdf”", status:"done", started:now-2.2*hr, finished:now-2*hr, result:"24 chapters · 311 sections",
+    steps:[["Upload PDF","done",""],["Read outline","done",""],["Extract sections","done","311"],["Chunk & embed","done",""],["Index for retrieval","done",""]], log:[] },
+  { id:"job_8d9b", kind:"Judge batch", title:"Judge 60 questions · rubric v1", status:"done", started:now-26*hr, finished:now-25.5*hr, result:"51 accepted · 9 flagged",
+    steps:[["Score with rubric v1","done","60"],["Summarize disagreements","done","9 flagged"]], log:[] },
+];
+
+const ICON = {
+  run:'<svg class="spin ico-run" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>',
+  ok:'<svg class="ico-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>',
+  fail:'<svg class="ico-fail" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5M12 16h.01"/></svg>',
+  q:'<svg class="ico-q" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  jobs:'<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/></svg>',
+  x:'<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  back:'<svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>',
+};
+const icon = j => ({running:ICON.run, queued:ICON.q, done:ICON.ok, failed:ICON.fail})[j.status];
+const badge = j => ({ running:'<span class="badge b-run">Running</span>', queued:'<span class="badge b-queue">Queued</span>',
+  done:'<span class="badge b-ok">Completed</span>', failed:'<span class="badge b-fail">Failed</span>' })[j.status];
+const ago = t => { const d=(Date.now()-t)/min; return d<1?"just now":d<60?`${Math.round(d)}m ago`:d<1440?`${Math.round(d/60)}h ago`:`${Math.round(d/1440)}d ago`; };
+const dur = (a,b) => { const s=Math.round((b-a)/1000); return s<60?`${s}s`:s<3600?`${Math.floor(s/60)}m ${s%60}s`:`${Math.floor(s/3600)}h ${Math.round(s%3600/60)}m`; };
+const pct = j => j.status==="done" ? 100 : j.pct ?? (j.total ? Math.round(100*j.done/j.total) : 0);
+const bar = j => `<div class="bar"><span style="width:${pct(j)}%"></span></div>`;
+const prog = j => j.total ? `${j.done} / ${j.total} ${j.unit}` : `${pct(j)}%`;
+const by = (...s) => JOBS.filter(j => s.includes(j.status));
+const sub = j => j.status==="running" ? `${prog(j)} · ${ago(j.started).replace(" ago","")}`
+  : j.status==="queued" ? "Waiting for job_8f21" : j.status==="failed" ? `<span class="err">${j.error}</span>` : `${j.result} · ${ago(j.finished)}`;
+
+// popOpen: header popover. modalOpen: run detail. selJob: job shown on the right (null = list only on phones).
+let popOpen = true, modalOpen = false, selJob = null, tab = "all";
+
+function renderButton() {
+  const n = by("running").length;
+  return `<button class="btn" id="jobs-btn" aria-expanded="${popOpen}">${n?ICON.run:ICON.jobs} Jobs${n?` <span class="count">${n}</span>`:""}</button>`;
+}
+
+function renderPopover() {
+  if (!popOpen) return "";
+  const rows = list => list.map(j => `
+    <div class="pop-row" data-open="${j.id}">${icon(j)}
+      <div><div class="t">${j.title}</div><div class="s">${sub(j)}</div>${j.status==="running"?bar(j):""}</div>
+      ${j.status==="failed"?'<button class="link" data-open="'+j.id+'">Retry</button>':""}
+    </div>`).join("");
+  const active = by("running","queued"), finished = by("done","failed");
+  return `<div class="pop">
+    <div class="pop-head"><b>Jobs</b><span class="muted" style="font-size:12px">${by("running").length} running · ${by("queued").length} queued</span></div>
+    <div class="pop-list">
+      ${active.length ? `<div class="pop-group">In progress</div>${rows(active)}` : `<div class="pop-group">Nothing running</div>`}
+      <div class="pop-group">Recently finished</div>${rows(finished.slice(0,3))}
+    </div>
+    <div class="pop-foot"><span class="muted" style="font-size:12px">${JOBS.length} jobs in the last 7 days</span><button class="link" id="view-all">View all jobs →</button></div>
+  </div>`;
+}
+
+function renderModal() {
+  if (!modalOpen) return "";
+  const lists = { all:JOBS, active:by("running","queued"), done:by("done"), failed:by("failed") };
+  const list = lists[tab];
+  const j = JOBS.find(x => x.id===selJob);
+  const stepIcon = s => s==="done"?ICON.ok:s==="running"?ICON.run:s==="failed"?ICON.fail:'<span class="ring"></span>';
+  const stepNote = (st) => st[2] || (st[1]==="running" ? (j.total ? `${j.done} / ${j.total}` : `${pct(j)}%`) : "");
+  return `<div class="scrim" data-close></div><div class="modal ${selJob?"has-detail":""}" role="dialog" aria-label="Jobs">
+    <div class="runs">
+      <div class="runs-head">
+        <div class="title">Jobs <button class="btn ghost" data-close style="padding:0 6px;height:28px" title="Close">${ICON.x}</button></div>
+        <div class="tabs" role="tablist">${[["all","All"],["active","Active"],["done","Done"],["failed","Failed"]].map(([k,l]) =>
+          `<button data-tab="${k}" aria-selected="${tab===k}">${l}<span class="n">${lists[k].length}</span></button>`).join("")}</div>
+      </div>
+      ${list.map(x => `<div class="run ${x.id===selJob?"sel":""}" data-job="${x.id}">${icon(x)}<div><div class="t">${x.title}</div>
+        <div class="s">${x.kind} · ${x.status==="running"?prog(x):x.status==="queued"?"queued":ago(x.finished)}</div></div></div>`).join("")
+        || '<div class="run muted" style="grid-template-columns:1fr">Nothing here.</div>'}
+    </div>
+    <div class="detail">${j ? `
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+        <div><button class="link back" data-back style="margin-bottom:6px">${ICON.back} All jobs</button>
+          <div class="kind">${j.kind} · <span class="mono">${j.id}</span></div><h2>${j.title}</h2></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">${badge(j)}
+          ${j.status==="failed"?`<button class="btn primary">Retry remaining ${j.total-j.done}</button>`:j.status==="done"?'<button class="btn">Open result</button>':'<button class="btn err">Cancel</button>'}</div>
+      </div>
+      <div class="facts">
+        <div><span>Started</span>${j.started?ago(j.started):"not yet"}</div>
+        <div><span>Duration</span><span class="mono" style="display:inline;color:var(--ink)">${j.started?dur(j.started,j.finished??Date.now()):"—"}</span></div>
+        <div><span>Progress</span>${j.status==="done"?"100%":prog(j)}</div>
+        ${j.result?`<div><span>Result</span>${j.result}</div>`:""}
+      </div>
+      ${j.status==="running"?bar(j):""}
+      ${j.error?`<div class="badge b-fail" style="height:auto;padding:8px 12px;border-radius:8px;font-size:13px;white-space:normal">${j.error}</div>`:""}
+      <div class="steps">${j.steps.map(st => `<div class="step ${st[1]}">${stepIcon(st[1])}<div>${st[0]}</div><span class="s">${stepNote(st)}</span></div>`).join("")}</div>
+      ${j.log.length?`<div><div class="kind" style="margin-bottom:6px">Log</div><pre class="console mono">${j.log.map(([t,m])=>`<span class="ts">${t}</span>  ${m}`).join("\n")}</pre></div>`:""}
+    ` : ""}</div>
+  </div>`;
+}
+
+function render() {
+  document.getElementById("jobs-slot").innerHTML = renderButton() + renderPopover();
+  document.getElementById("overlay").innerHTML = renderModal();
+}
+
+function openModal(id) {
+  popOpen = false; modalOpen = true; tab = "all";
+  // "View all" lands on the first active job on desktop so the right pane isn't blank;
+  // on phones it lands on the list instead.
+  selJob = id ?? (matchMedia("(max-width:900px)").matches ? null : (by("running","queued")[0] ?? JOBS[0]).id);
+}
+
+document.addEventListener("click", e => {
+  const t = e.target.closest("button,[data-open],[data-job],[data-close]");
+  if (!t) { if (popOpen && !e.target.closest(".pop")) { popOpen = false; render(); } return; }
+  if (t.id==="theme") { const r=document.documentElement; const d = r.dataset.theme!=="dark"; r.dataset.theme = d?"dark":"light"; t.textContent = d?"◐ Light mode":"◐ Dark mode"; return; }
+  if (t.id==="jobs-btn") popOpen = !popOpen;
+  else if (t.id==="view-all") openModal();
+  else if (t.dataset.open) openModal(t.dataset.open);
+  else if (t.dataset.job) selJob = t.dataset.job;
+  else if (t.dataset.tab) tab = t.dataset.tab;
+  else if ("back" in t.dataset) selJob = null;
+  else if ("close" in t.dataset) modalOpen = false;
+  else return;
+  render();
+});
+document.addEventListener("keydown", e => {
+  if (e.key!=="Escape") return;
+  if (modalOpen) modalOpen = false; else popOpen = false;
+  render();
+});
+
+// Fake live progress so "running" actually moves; log clock continues from the seed log.
+let fakeClock = new Date(2026,9,6,12,4,22).getTime();
+const stamp = () => (fakeClock += 8000, new Date(fakeClock).toTimeString().slice(0,8));
+setInterval(() => {
+  const gen = JOBS[0], ing = JOBS[1], judge = JOBS[2];
+  if (gen.status==="running") {
+    gen.done++; gen.log.push([stamp(), `Q${gen.done} passed sandbox (3/3 tests)`]); gen.log = gen.log.slice(-6);
+    if (gen.done===gen.total) { gen.status="done"; gen.finished=Date.now(); gen.result="38 passed · 2 flagged";
+      gen.steps = gen.steps.map(s => [s[0],"done",s[2]]);
+      judge.status="running"; judge.started=Date.now(); judge.steps[0]=["Wait for job_8f21","done",""]; judge.steps[1][1]="running"; }
+  } else if (judge.status==="running") {
+    judge.done = Math.min(judge.total, judge.done+4);
+    if (judge.done===judge.total) { judge.status="done"; judge.finished=Date.now(); judge.result="104 accepted · 16 flagged"; judge.steps = judge.steps.map(s=>[s[0],"done",s[2]]); }
+  }
+  if (ing.status==="running") {
+    ing.pct = Math.min(100, ing.pct+3);
+    if (ing.pct>=80 && ing.steps[2][1]==="running") { ing.steps[2]=["Extract sections","done","268"]; ing.steps[3][1]="running"; ing.log.push([stamp(),"268 sections extracted; embedding…"]); }
+    if (ing.pct===100) { ing.status="done"; ing.finished=Date.now(); ing.result="21 chapters · 268 sections"; ing.steps = ing.steps.map(s=>[s[0],"done",s[2]]); }
+  }
+  render();
+}, 1500);
+
+// Deep links for review: #modal opens "View all", #job_xxxx opens that job.
+const h = location.hash.slice(1);
+if (h==="modal") openModal(); else if (JOBS.some(j=>j.id===h)) openModal(h);
+render();
+</script>
+</body>
+</html>

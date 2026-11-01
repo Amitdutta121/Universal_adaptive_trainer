@@ -13,6 +13,10 @@ would pool pairs from two different panels into one agreement figure, which is
 exactly the mistake ADR-035 exists to prevent. A fingerprint cannot do that:
 identical prompts always produce the same name, and any change always produces a
 different one.
+
+**Overrides are per subject.** A judge edited for one subject preset never
+judges another subject's questions; every function here takes ``subject``,
+defaulting to the legacy subject that every pre-existing override belongs to.
 """
 
 from __future__ import annotations
@@ -22,31 +26,52 @@ import hashlib
 from sqlalchemy.orm import Session
 
 from app.domain.enums import JudgeMetricId
-from app.evaluation.prompts import RUBRIC_VERSION, SYSTEM_PROMPT_FOR
+from app.evaluation.prompts import rubric_version_for, system_prompts_for
 from app.persistence.repositories import JudgePromptRepository
+from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 #: Hex characters of the digest kept in the version name. Short enough to read in
 #: a table, wide enough that two prompt sets will not collide in one bank.
 _FINGERPRINT_CHARS = 8
 
 
-def resolve_system_prompts(session: Session) -> dict[JudgeMetricId, str]:
-    """The system prompt each judge runs now: the override, else the shipped one."""
-    overrides = {row.metric: row.system_prompt for row in JudgePromptRepository(session).list_all()}
-    return {metric: overrides.get(metric, SYSTEM_PROMPT_FOR[metric]) for metric in JudgeMetricId}
+def resolve_system_prompts(
+    session: Session, *, profile: SubjectProfile = PYTHON_PROFILE
+) -> dict[JudgeMetricId, str]:
+    """The system prompt each judge runs for this subject: its override, else the shipped one."""
+    shipped = system_prompts_for(profile)
+    overrides = {
+        row.metric: row.system_prompt
+        for row in JudgePromptRepository(session).list_all(subject=profile.personal_key)
+    }
+    return {metric: overrides.get(metric, shipped[metric]) for metric in JudgeMetricId}
 
 
-def effective_rubric_version(session: Session) -> str:
+def effective_rubric_version(
+    session: Session,
+    *,
+    profile: SubjectProfile = PYTHON_PROFILE,
+    snapshot_id: int | None = None,
+) -> str:
     """Name the panel in force, so two panels can never share a name.
 
-    An untouched installation returns :data:`RUBRIC_VERSION` unchanged -- there is
-    no edit, so claiming a modified judge would be a lie about provenance. Any
-    override appends a fingerprint of all four prompts.
+    An untouched Intro Python installation returns :data:`RUBRIC_VERSION` unchanged -- there is
+    no edit, so claiming a modified judge would be a lie about provenance. Another subject's
+    shipped panel is named by :func:`rubric_version_for`; any override appends a fingerprint of
+    all four prompts. A judge-memory snapshot (m11) is part of the panel name so trust
+    continues only while that snapshot stays.
     """
-    prompts = resolve_system_prompts(session)
-    if all(prompts[metric] == SYSTEM_PROMPT_FOR[metric] for metric in JudgeMetricId):
-        return RUBRIC_VERSION
-    return f"{RUBRIC_VERSION}+{fingerprint(prompts)}"
+    from app.evaluation.judge_memory import latest_promoted, memory_rubric_suffix
+
+    prompts = resolve_system_prompts(session, profile=profile)
+    base = rubric_version_for(profile)
+    if snapshot_id is None:
+        current = latest_promoted(session, profile.personal_key)
+        snapshot_id = current.id if current is not None else None
+    suffix = memory_rubric_suffix(snapshot_id)
+    if prompts == system_prompts_for(profile):
+        return f"{base}{suffix}"
+    return f"{base}+{fingerprint(prompts)}{suffix}"
 
 
 def fingerprint(prompts: dict[JudgeMetricId, str]) -> str:
@@ -65,6 +90,8 @@ def fingerprint(prompts: dict[JudgeMetricId, str]) -> str:
     return digest.hexdigest()[:_FINGERPRINT_CHARS]
 
 
-def is_edited(session: Session, metric: JudgeMetricId) -> bool:
-    """Whether this judge is running professor-edited text."""
-    return JudgePromptRepository(session).get(metric) is not None
+def is_edited(
+    session: Session, metric: JudgeMetricId, *, profile: SubjectProfile = PYTHON_PROFILE
+) -> bool:
+    """Whether this judge is running professor-edited text for this subject."""
+    return JudgePromptRepository(session).get(metric, subject=profile.personal_key) is not None

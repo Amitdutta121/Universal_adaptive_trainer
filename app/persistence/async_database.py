@@ -4,9 +4,9 @@
 part of this application is synchronous (``app/persistence/database.py``), and
 stays that way. This module opens a second connection to the *same* SQLite
 file with the async ``aiosqlite`` driver purely so ``app/auth/`` can use that
-library. Schema creation is still the sync engine's job (``database.init_db``)
--- both drivers read and write the same file, so nothing here needs its own
-``create_all``.
+library. Schema creation is still the sync engine's job (``database.init_db``,
+which runs the Alembic migrations) -- both drivers read and write the same file,
+so nothing here builds tables.
 """
 
 from __future__ import annotations

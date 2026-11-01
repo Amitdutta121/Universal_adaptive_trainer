@@ -76,8 +76,8 @@ def test_seeded_dev_account_logs_in_and_reaches_a_protected_route(
     assert me.status_code == 200
     assert me.json()["email"] == dev_settings.dev_user_email
 
-    students = real_client.get("/api/students")
-    assert students.status_code == 200
+    courses = real_client.get("/api/courses")
+    assert courses.status_code == 200
 
 
 def test_logout_revokes_the_session_immediately(

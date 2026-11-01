@@ -34,16 +34,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
             "mc_no_duplicate_options",
         ),
         (
-            QuestionType.MULTIPLE_CHOICE,
-            {"options": ["one", "two"], "correct_option_index": 9, "explanation": "Why."},
-            "mc_correct_option_exists",
-        ),
-        (
-            QuestionType.TRUE_FALSE,
-            {"correct_answer": "yes", "explanation": "Why."},
-            "tf_boolean_answer",
-        ),
-        (
             QuestionType.TRUE_FALSE,
             {"correct_answer": True, "explanation": " "},
             "tf_explanation_present",
@@ -57,11 +47,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
             QuestionType.OUTPUT_PREDICTION,
             {"code": "print(4)", "expected_output": "3"},
             "expected_output_verified",
-        ),
-        (
-            QuestionType.CODE_COMPLETION,
-            {"reference_solution": "print(1)", "tests": [{}]},
-            "harness_valid",
         ),
         (
             QuestionType.CODE_COMPLETION,
@@ -81,15 +66,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
             "debug_broken_exhibits_issue",
         ),
         (
-            QuestionType.DEBUGGING,
-            {
-                "code": "print(1)",
-                "reference_solution": "print(1)",
-                "tests": [{"stdout": "2"}],
-            },
-            "reference_passes_tests",
-        ),
-        (
             QuestionType.PARSONS,
             {
                 "blocks": [
@@ -99,22 +75,6 @@ def _checks(question_type: QuestionType, content: dict[str, object]) -> dict[str
                 "correct_order": ["a"],
             },
             "parsons_order_consistent",
-        ),
-        (
-            QuestionType.PARSONS,
-            {
-                "blocks": [{"id": "a", "text": "print(3)", "indent": -1}],
-                "correct_order": ["a"],
-            },
-            "parsons_indent_valid",
-        ),
-        (
-            QuestionType.CODING,
-            {
-                "reference_solution": "print(1)",
-                "tests": [{"stdout": "2"}],
-            },
-            "reference_passes_tests",
         ),
     ],
 )
@@ -155,24 +115,14 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
         (
             QuestionType.MULTIPLE_CHOICE,
             {"options": ["one", "two"], "correct_option_index": 0, "explanation": "Why."},
-            [
-                "mc_options_valid",
-                "mc_no_duplicate_options",
-                "mc_correct_option_exists",
-                "mc_explanation_present",
-            ],
-            [
-                "Options are valid",
-                "No duplicate options",
-                "Correct-answer reference exists",
-                "Explanation exists",
-            ],
+            ["mc_no_duplicate_options", "mc_explanation_present"],
+            ["No duplicate options", "Explanation exists"],
         ),
         (
             QuestionType.TRUE_FALSE,
             {"correct_answer": True, "explanation": "Why."},
-            ["tf_boolean_answer", "tf_explanation_present"],
-            ["Valid boolean answer", "Explanation exists"],
+            ["tf_explanation_present"],
+            ["Explanation exists"],
         ),
         (
             QuestionType.OUTPUT_PREDICTION,
@@ -183,11 +133,12 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
         (
             QuestionType.CODE_COMPLETION,
             {
+                "code": "def add(a,b):\n    return ___",
                 "reference_solution": "def add(a,b):\n    return a+b",
                 "tests": [{"assert": "assert add(1,2)==3"}],
             },
-            ["completion_reference_parses", "harness_valid", "reference_passes_tests"],
-            ["Reference solution parses", "Test harness is valid", "1/1 tests pass"],
+            ["completion_reference_parses", "completion_stub_incomplete"],
+            ["Reference solution parses", "Starter code leaves something to complete"],
         ),
         (
             QuestionType.DEBUGGING,
@@ -196,18 +147,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "reference_solution": "print(2)",
                 "tests": [{"stdout": "2"}],
             },
-            [
-                "debug_broken_exhibits_issue",
-                "debug_reference_parses",
-                "harness_valid",
-                "reference_passes_tests",
-            ],
-            [
-                "Broken code exhibits the issue",
-                "Reference solution parses",
-                "Test harness is valid",
-                "1/1 tests pass",
-            ],
+            ["debug_broken_exhibits_issue", "debug_reference_parses"],
+            ["Broken code exhibits the issue", "Reference solution parses"],
         ),
         (
             QuestionType.PARSONS,
@@ -215,16 +156,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "blocks": [{"id": "only", "text": "print(3)", "indent": 0}],
                 "correct_order": ["only"],
             },
-            [
-                "parsons_order_consistent",
-                "parsons_indent_valid",
-                "parsons_reference_compiles",
-            ],
-            [
-                "Canonical order is consistent",
-                "Indentation representation is valid",
-                "Reconstructed reference compiles",
-            ],
+            ["parsons_order_consistent", "parsons_reference_compiles"],
+            ["Canonical order uses every block once", "Reconstructed reference compiles"],
         ),
         (
             QuestionType.CODING,
@@ -232,8 +165,8 @@ def test_output_prediction_mismatch_evidence_is_bounded() -> None:
                 "reference_solution": "def add(a,b):\n    return a+b",
                 "tests": [{"assert": "assert add(1,2)==3"}],
             },
-            ["coding_reference_parses", "harness_valid", "reference_passes_tests"],
-            ["Reference solution parses", "Test harness is valid", "1/1 tests pass"],
+            ["coding_reference_parses"],
+            ["Reference solution parses"],
         ),
     ],
 )
@@ -254,3 +187,78 @@ def test_null_question_type_has_no_type_checks() -> None:
     question = _question(None, {})
 
     assert check_type(question, {}, RUNNER) == []
+
+
+ADD = "def add(a, b):\n    return a + b"
+
+
+@pytest.mark.parametrize(
+    "stub",
+    [
+        ADD,  # the live case: the stub shown was the full solution
+        "def add(a, b):\n    # TODO: nothing left to do\n    return a + b",  # same code
+        "def add(a, b):\n    return a - b",  # no blank to complete
+        None,
+    ],
+)
+def test_a_completion_stub_that_is_the_solution_or_has_no_blank_fails(stub: str | None) -> None:
+    content: dict[str, object] = {
+        "reference_solution": ADD,
+        "tests": [{"assert": "assert add(1, 2) == 3"}],
+    }
+    if stub is not None:
+        content["code"] = stub
+    check = _checks(QuestionType.CODE_COMPLETION, content)["completion_stub_incomplete"]
+    assert check.passed is False
+    assert check.evidence
+
+
+@pytest.mark.parametrize(
+    "stub",
+    [
+        "def add(a, b):\n    return ___",
+        "def add(a, b):\n    ...",
+        "def add(a, b):\n    pass",
+        "def add(a, b):\n    # TODO: return the sum\n    return None",
+    ],
+)
+def test_a_completion_stub_with_a_blank_passes(stub: str) -> None:
+    content = {"code": stub, "reference_solution": ADD, "tests": [{"assert": "assert True"}]}
+    assert _checks(QuestionType.CODE_COMPLETION, content)["completion_stub_incomplete"].passed
+
+
+def test_an_unclosed_code_fence_in_the_prompt_fails_and_a_closed_one_passes() -> None:
+    from app.validation.shared import check_shared
+
+    def fence(prompt: str):
+        question = Question(prompt=prompt, question_type=QuestionType.MULTIPLE_CHOICE)
+        checks = {check.name: check for check in check_shared(question, None)}
+        return checks.get("prompt_code_fences_closed")
+
+    assert fence("What does this print?\n```python\nprint(1)\n").passed is False
+    assert fence("What does this print?\n```python\nprint(1)\n```").passed is True
+    assert fence("What does print(1) show?") is None
+
+
+def test_a_broken_stub_fails_the_attempt_and_is_retried() -> None:
+    """The validator runs inside the retry loop, so the failed check becomes a correction."""
+    from app.generation.attempts import _check_instructions
+    from app.validation.service import DeterministicQuestionValidator
+
+    question = Question(
+        prompt="Finish add.\n```python\ndef add(a, b):",
+        question_type=QuestionType.CODE_COMPLETION,
+        content={
+            "code": ADD,
+            "reference_solution": ADD,
+            "tests": [{"assert": "assert add(1, 2) == 3"}],
+        },
+    )
+    report = DeterministicQuestionValidator().validate(question)
+    failed = [check for check in report.checks if not check.passed]
+    names = {check.name for check in failed}
+    assert {"completion_stub_incomplete", "prompt_code_fences_closed"} <= names
+    assert not report.passed
+    corrections = " ".join(_check_instructions(failed))
+    assert "leave a visible blank" in corrections
+    assert "Close every ``` code block" in corrections

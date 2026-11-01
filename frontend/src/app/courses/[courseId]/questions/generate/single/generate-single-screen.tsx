@@ -1,0 +1,322 @@
+"use client";
+
+/**
+ * Generate one question from one chunk, then review it right here.
+ *
+ * The bulk sheet (`../generate-screen.tsx`) prices and runs a whole spec sheet
+ * at once; this screen is its opposite — pick exactly one chunk, one type, one
+ * difficulty, generate, and give feedback before ever touching another chunk.
+ * It reuses the bulk sheet's chunk data (`useSheetRows`) and the Review
+ * Queue's question/judges/feedback components verbatim — the only new pieces
+ * are the outline tree, the PDF pane and the type/difficulty picker.
+ */
+
+import { parseAsInteger, parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useApprovedCurriculum, useGenerateQuestions } from "@/lib/api/queries";
+import { DIFFICULTIES, QUESTION_TYPES } from "../spec-sheet-types";
+import { useCourseQuestionTypes } from "../use-course-question-types";
+import { type SheetFilters, useSheetRows } from "../use-sheet-rows";
+import { GenerateControls } from "./components/generate-controls";
+import { OutlinePanel } from "./components/outline-panel";
+import { PageChunks } from "./components/page-chunks";
+import { PdfPageViewer } from "./components/pdf-page-viewer";
+import { QuestionReview } from "./components/question-review";
+import { QuestionsForChunk } from "./components/questions-for-chunk";
+
+export function GenerateSingleScreen() {
+  const [bookId, setBookId] = useQueryState("book", parseAsInteger);
+  const [chunkId, setChunkId] = useQueryState("chunk", parseAsString);
+  // The PDF page in view; `null` until the reader scrolls (or for a book with no PDF).
+  const [visiblePage, setVisiblePage] = useState<number | null>(null);
+  const [type, setType] = useQueryState(
+    "type",
+    parseAsStringLiteral(QUESTION_TYPES).withDefault("multiple_choice"),
+  );
+  // A link may name a type this course did not choose; fall back to one it did.
+  const offered = useCourseQuestionTypes();
+  useEffect(() => {
+    if (offered.length > 0 && !offered.includes(type)) void setType(offered[0] ?? null);
+  }, [offered, type, setType]);
+  const [difficulty, setDifficulty] = useQueryState(
+    "difficulty",
+    parseAsStringLiteral(DIFFICULTIES).withDefault("medium"),
+  );
+  const [search, setSearch] = useState("");
+  const [produced, setProduced] = useState<SheetFilters["produced"]>("any");
+  const [questionId, setQuestionId] = useState<number | null>(null);
+
+  // The PDF pane's height is drag-resizable via the handle below it. `null`
+  // means "fill the column" (the default flex behaviour); a number pins it and
+  // lets the source-text / questions panels below claim the rest.
+  const [pdfHeight, setPdfHeight] = useState<number | null>(null);
+  const pdfPaneRef = useRef<HTMLDivElement>(null);
+
+  const startPdfResize = (clientY: number) => {
+    const startY = clientY;
+    const startHeight = pdfPaneRef.current?.getBoundingClientRect().height ?? 480;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ns-resize";
+    const onMove = (event: PointerEvent) => {
+      const next = startHeight + (event.clientY - startY);
+      setPdfHeight(Math.max(320, Math.min(next, window.innerHeight - 140)));
+    };
+    const onUp = () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const pdfResizeBounds = () => ({
+    min: 320,
+    max: typeof window === "undefined" ? 1200 : window.innerHeight - 140,
+  });
+
+  const nudgePdfHeight = (delta: number) => {
+    const current = pdfHeight ?? pdfPaneRef.current?.getBoundingClientRect().height ?? 480;
+    const { min, max } = pdfResizeBounds();
+    setPdfHeight(Math.max(min, Math.min(current + delta, max)));
+  };
+
+  const filters: SheetFilters = useMemo(
+    () => ({ bookId, chapterId: null, produced, search }),
+    [bookId, produced, search],
+  );
+  const sheet = useSheetRows(filters);
+  const approvedCurriculum = useApprovedCurriculum();
+  const generate = useGenerateQuestions();
+
+  // A single book to work in is the point of this screen — pick the only one
+  // automatically rather than making that an extra click every time.
+  useEffect(() => {
+    if (bookId === null && sheet.books.length === 1) {
+      void setBookId(sheet.books[0].id);
+    }
+  }, [bookId, sheet.books, setBookId]);
+
+  const selectedRow = useMemo(
+    () => sheet.allRows.find((row) => row.chunkId === chunkId) ?? null,
+    [sheet.allRows, chunkId],
+  );
+
+  // A stale chunk id (wrong book, an older version, filtered out) points at nothing — drop it.
+  useEffect(() => {
+    if (!sheet.isPending && chunkId !== null && !selectedRow) {
+      void setChunkId(null);
+    }
+  }, [sheet.isPending, chunkId, selectedRow, setChunkId]);
+
+  // The one path that changes which chunk is "current", whether it was a click
+  // on the outline or the PDF pane scrolling a new chunk into view — either way
+  // a question open from the previous chunk no longer applies.
+  const selectChunk = (id: string) => {
+    setQuestionId(null);
+    void setChunkId(id);
+  };
+
+  const runGenerate = () => {
+    if (!selectedRow) return;
+    setQuestionId(null);
+    generate.mutate(
+      {
+        curriculum_version_id: approvedCurriculum.data?.version.id ?? null,
+        question_type: type,
+        difficulty,
+        chunk_ids: [selectedRow.chunkId],
+      },
+      {
+        onSuccess: (response) => {
+          const [id] = response.question_ids;
+          if (id !== undefined) setQuestionId(id);
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <PageHeader
+        title="Generate questions"
+        summary="One chunk, one question at a time — scroll to a page or pick a chunk, choose a type and difficulty, review, and give feedback right here."
+        actions={
+          <Select
+            value={bookId === null ? "" : String(bookId)}
+            onValueChange={(value) => {
+              void setBookId(value ? Number(value) : null);
+              void setChunkId(null);
+              setVisiblePage(null);
+              setQuestionId(null);
+            }}
+          >
+            <SelectTrigger className="h-9 w-64" size="sm">
+              <SelectValue placeholder="Choose a book" />
+            </SelectTrigger>
+            <SelectContent>
+              {sheet.books.map((book) => (
+                <SelectItem key={book.id} value={String(book.id)}>
+                  {book.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+
+      {sheet.isError ? <QueryError error={sheet.error} /> : null}
+      {sheet.isPending ? <TableSkeleton /> : null}
+
+      {!sheet.isPending && bookId === null ? (
+        <EmptyState title="Pick a book" hint="Choose a book above to see its chunks." />
+      ) : null}
+
+      {!sheet.isPending && bookId !== null ? (
+        <div className="grid min-h-0 min-w-0 gap-4 overflow-hidden xl:flex-1 xl:grid-cols-[19rem_minmax(0,1fr)_22rem]">
+          <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
+            <OutlinePanel
+              chapters={sheet.chapters}
+              rows={sheet.rows}
+              selectedChunkId={chunkId}
+              onSelect={selectChunk}
+              search={search}
+              onSearchChange={setSearch}
+              produced={produced}
+              onProducedChange={setProduced}
+            />
+          </div>
+
+          <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden">
+            <div
+              ref={pdfPaneRef}
+              className={pdfHeight === null ? "min-h-[560px] flex-1 xl:min-h-0" : "shrink-0"}
+              style={pdfHeight === null ? undefined : { height: pdfHeight }}
+            >
+              <PdfPageViewer
+                bookId={bookId}
+                rows={sheet.allRows}
+                selectedChunkId={chunkId}
+                onVisibleChunkChange={selectChunk}
+                onVisiblePageChange={setVisiblePage}
+              />
+            </div>
+            {/* biome-ignore lint/a11y/useSemanticElements: an interactive splitter, not a static <hr> divider */}
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize the PDF pane"
+              aria-valuenow={Math.round(
+                pdfHeight ?? pdfPaneRef.current?.getBoundingClientRect().height ?? 480,
+              )}
+              aria-valuemin={pdfResizeBounds().min}
+              aria-valuemax={pdfResizeBounds().max}
+              tabIndex={0}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                startPdfResize(event.clientY);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  nudgePdfHeight(-24);
+                } else if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  nudgePdfHeight(24);
+                } else if (event.key === "Home") {
+                  event.preventDefault();
+                  setPdfHeight(null);
+                }
+              }}
+              onDoubleClick={() => setPdfHeight(null)}
+              className="group -my-1.5 flex shrink-0 cursor-ns-resize items-center justify-center py-1.5"
+              title="Drag to resize · arrow keys to adjust · double-click to reset"
+            >
+              <div className="h-1 w-12 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
+            </div>
+            <PageChunks
+              bookId={bookId}
+              page={visiblePage}
+              selectedChunkId={chunkId}
+              onSelect={selectChunk}
+            />
+            <div className="h-64 shrink-0">
+              <QuestionsForChunk
+                chunkId={chunkId}
+                openQuestionId={questionId}
+                onOpen={setQuestionId}
+              />
+            </div>
+          </div>
+
+          <div className="min-w-0 space-y-4 xl:min-h-0 xl:overflow-y-auto">
+            {selectedRow ? (
+              <GenerateControls
+                type={type}
+                onTypeChange={(value) => {
+                  setQuestionId(null);
+                  void setType(value);
+                }}
+                difficulty={difficulty}
+                onDifficultyChange={(value) => {
+                  setQuestionId(null);
+                  void setDifficulty(value);
+                }}
+                onGenerate={runGenerate}
+                isGenerating={generate.isPending}
+              />
+            ) : (
+              <EmptyState
+                title="Pick a chunk"
+                hint="Scroll the PDF or pick a chunk from the outline to generate from."
+              />
+            )}
+
+            {generate.isError ? <QueryError error={generate.error} /> : null}
+          </div>
+        </div>
+      ) : null}
+
+      <Dialog
+        open={questionId !== null}
+        onOpenChange={(open) => {
+          if (!open) setQuestionId(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Question</DialogTitle>
+            <DialogDescription>
+              {selectedRow ? `From "${selectedRow.title}".` : "Review, edit, or reject it below."}
+            </DialogDescription>
+          </DialogHeader>
+          {questionId !== null ? (
+            <QuestionReview
+              key={questionId}
+              questionId={questionId}
+              onGenerateAnother={runGenerate}
+              onRegenerated={(id) => setQuestionId(id)}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

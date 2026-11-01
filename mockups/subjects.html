@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checking health · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .wrap-table td, .wrap-table th { white-space: normal; vertical-align: top; }
+  </style>
+</head>
+<!-- Checking health (internal): the checking tools across all courses. Catalogue, versions and
+     self-tests come from MOCK.TOOL_CATALOG, per-course state from MOCK.course_tools, question counts
+     from MOCK.checkedBy over MOCK.questions, readiness bars from assets/data-gen.js (all TODO(real)). -->
+<body data-scope="workspace" data-nav="" data-title="Checking health (internal)">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div>
+      <h1 class="text-2xl font-semibold">Checking health <span class="text-sm font-normal text-muted-foreground">(internal · not shown to professors)</span></h1>
+      <p class="text-sm text-muted-foreground">For the team running the checking tools: each tool's version and self-test, the courses using it, the questions that depend on it, and how far it has been measured. Professors see only the tool name, its version and its label (Computed, Quoted, AI-reviewed only, Rubric-graded).</p>
+    </div>
+
+    <template x-for="t in tools.filter((t) => t.st === 'failed')" :key="t.id">
+      <div class="alert" data-variant="destructive">
+        <i data-lucide="octagon-x"></i>
+        <h2 x-text="`${t.name} ${t.version} failed its self-test`"></h2>
+        <section>
+          <p class="font-mono text-xs" x-text="t.selftest.error"></p>
+          <p x-text="(t.courses.length ? `Used by ${t.courses.map((c) => c.code).join(', ')}; no new questions use it until it passes. ` : 'No course uses it, and none can add it until it passes. ') + `${t.qTotal} questions depend on it.`"></p>
+        </section>
+      </div>
+    </template>
+
+    <!-- Tools -->
+    <section class="card py-0 gap-0">
+      <header class="px-6 pt-5 pb-3 flex flex-wrap items-start gap-3">
+        <div class="grid gap-1">
+          <h2>Checking tools</h2>
+          <p class="text-sm text-muted-foreground" x-text="`${tools.length} in the catalogue · ${tools.filter((t) => t.st === 'ok').length} passing self-test · ${questionsTotal} questions checked across ${courses.length} courses · self-tests run ${checkedTools}`"></p>
+        </div>
+        <button type="button" class="btn ml-auto" data-variant="outline" data-size="sm" @click="run('tools')" :disabled="!!running">
+          <span x-show="running === 'tools'" class="inline-flex"><i data-lucide="loader-circle" class="animate-spin"></i></span>
+          <span x-text="running === 'tools' ? `Running ${done} of ${tools.length}…` : 'Re-run self-tests'"></span>
+        </button>
+      </header>
+      <div class="table-container border-t">
+        <table class="table wrap-table text-sm">
+          <thead>
+            <tr>
+              <th class="pl-6 w-40">Tool</th>
+              <th class="w-20">Version</th>
+              <th>Self-test (known answer)</th>
+              <th class="w-52">Courses using it</th>
+              <th class="w-40">Questions depending on it</th>
+              <th class="pr-6 w-72">Readiness</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="t in tools" :key="t.id">
+              <tr>
+                <td class="pl-6">
+                  <div class="font-medium" x-text="t.name"></div>
+                  <div class="mt-1"><span class="pill" :class="toneOf(t.level)" x-text="t.level"></span></div>
+                </td>
+                <td class="font-mono text-xs" x-text="t.version"></td>
+                <td>
+                  <div class="font-mono text-xs"><span x-text="t.probe[0]"></span> <span class="text-muted-foreground">→</span> <span x-text="t.probe[1]"></span></div>
+                  <div class="mt-1">
+                    <span x-show="t.st === 'pending'" class="pill tone-muted">Running</span>
+                    <span x-show="t.st === 'ok'" class="pill tone-ok">Passed</span>
+                    <span x-show="t.st === 'failed'" class="pill tone-critical">Failed</span>
+                  </div>
+                  <div x-show="t.st === 'failed'" class="mt-1 font-mono text-xs" style="color:var(--critical-solid)" x-text="t.selftest.error"></div>
+                </td>
+                <td>
+                  <div class="flex flex-wrap gap-1" x-show="t.courses.length">
+                    <template x-for="c in t.courses" :key="c.id">
+                      <span class="pill" :class="{ on: 'tone-ok', paused: 'tone-warn', retired: 'tone-muted' }[c.state]" :title="`Added ${c.added} by ${c.by}${c.note ? '. ' + c.note : ''}`" x-text="`${c.code} · ${c.state}`"></span>
+                    </template>
+                  </div>
+                  <span class="text-xs text-muted-foreground" x-show="!t.courses.length">None</span>
+                </td>
+                <td>
+                  <div class="tabular-nums font-medium" x-text="t.qTotal"></div>
+                  <div class="text-xs text-muted-foreground" x-show="t.qTotal" x-text="t.qBy.map(([c, n]) => `${c} ${n}`).join(' · ')"></div>
+                </td>
+                <td class="pr-6">
+                  <template x-if="t.ready.kind === 'bars'">
+                    <ul class="grid gap-0.5 text-xs">
+                      <template x-for="m in t.ready.metrics" :key="m.k">
+                        <li class="flex gap-1.5">
+                          <span class="text-muted-foreground" x-text="m.label"></span>
+                          <span class="ml-auto tabular-nums font-medium" :style="{ color: tone(m.v, m.bar) }" x-text="pct(m.v)"></span>
+                          <span class="tabular-nums text-muted-foreground" x-text="`bar ${pct(m.bar)}`"></span>
+                        </li>
+                      </template>
+                      <li class="text-muted-foreground" x-text="t.ready.note"></li>
+                    </ul>
+                  </template>
+                  <template x-if="t.ready.kind === 'calibration'">
+                    <ul class="grid gap-0.5 text-xs">
+                      <template x-for="c in t.ready.rows" :key="c.code">
+                        <li class="flex gap-1.5">
+                          <span class="text-muted-foreground" x-text="c.code"></span>
+                          <span class="ml-auto tabular-nums" :style="{ color: c.counts ? 'var(--ok-solid)' : '' }" x-text="c.text"></span>
+                        </li>
+                      </template>
+                      <li class="text-muted-foreground" x-text="`Calibrated per course: ${pct(t.ready.bar)} agreement on 20 graded answers`"></li>
+                    </ul>
+                  </template>
+                  <span x-show="t.ready.kind === 'none'" class="text-xs text-muted-foreground">Not measured yet</span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <footer class="px-6 py-3 border-t text-xs text-muted-foreground">
+        Readiness is the lowest value across the published exercise sets the tool has been run on (30 end-of-chapter exercises each) and the mutation tests on approved questions. Red: under the bar by more than 3 points; amber: within 3. Tools are never deleted; a retired tool's questions are flagged for review.
+      </footer>
+    </section>
+
+    <!-- Checking environment -->
+    <section class="card py-0 gap-0">
+      <header class="px-6 pt-5 pb-3 flex flex-wrap items-start gap-3">
+        <div class="grid gap-1">
+          <h2>Checking environment</h2>
+          <p class="text-sm text-muted-foreground">The sandbox the runners execute in. At start-up each library runs a program whose answer is known; if one fails, every tool that needs it stops taking new questions.</p>
+          <p class="text-xs text-muted-foreground"><span class="font-mono" x-text="cap.sandbox"></span> · last checked <span x-text="checked"></span></p>
+        </div>
+        <button type="button" class="btn ml-auto" data-variant="outline" data-size="sm" @click="run('probes')" :disabled="!!running">
+          <span x-show="running === 'probes'" class="inline-flex"><i data-lucide="loader-circle" class="animate-spin"></i></span>
+          <span x-text="running === 'probes' ? `Running ${done} of ${probes.length}…` : 'Re-run self-test'"></span>
+        </button>
+      </header>
+      <div class="table-container">
+        <table class="table wrap-table text-sm">
+          <thead><tr><th class="pl-6">Library</th><th>Known-answer program</th><th>Expected</th><th>Used by</th><th class="pr-6 w-72">Result</th></tr></thead>
+          <tbody>
+            <template x-for="p in probes" :key="p.id">
+              <tr>
+                <td class="pl-6 font-medium whitespace-nowrap" x-text="p.label"></td>
+                <td class="font-mono text-xs" x-text="p.probe"></td>
+                <td class="font-mono text-xs" x-text="p.expect"></td>
+                <td class="text-xs" :class="!usedBy(p.id).length && !shared(p.id) && 'text-muted-foreground'" x-text="usedBy(p.id).join(', ') || (shared(p.id) ? 'All runners' : 'No tool yet')"></td>
+                <td class="pr-6">
+                  <span x-show="p.state === 'pending'" class="pill tone-muted">Running</span>
+                  <span x-show="p.state === 'ok'" class="pill tone-ok">Passed</span>
+                  <div x-show="p.state === 'failed'" class="grid gap-1">
+                    <span><span class="pill tone-critical">Failed</span></span>
+                    <span class="font-mono text-xs" style="color:var(--critical-solid)" x-text="p.error"></span>
+                    <span class="text-xs text-muted-foreground" x-text="usedBy(p.id).length ? `Stops ${usedBy(p.id).join(', ')}.` : 'No checking tool depends on it, so nothing stops.'"></span>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- How a tool is cleared -->
+    <section class="card">
+      <header><h2>How a tool is cleared</h2><p>A tool, or a new version of one, is offered to courses only after these pass. Questions stay pinned to the version that checked them.</p></header>
+      <section class="grid lg:grid-cols-2 gap-x-8 gap-y-4 text-sm items-start">
+        <ol class="grid gap-2 list-decimal pl-5">
+          <li><span class="font-medium">Self-test.</span> <span class="text-muted-foreground">A known-answer probe on every start-up and for each new version. A failure stops new questions using the tool; questions it already checked keep their result.</span></li>
+          <li><span class="font-medium">Published exercises.</span> <span class="text-muted-foreground">Sets of 30 end-of-chapter exercises with answer keys from open textbooks (OpenStax, OpenIntro). The tool works them out without seeing the keys, then we compare.</span></li>
+          <li><span class="font-medium">Mutation tests.</span> <span class="text-muted-foreground">Approved questions are broken on purpose: wrong key, two correct options, a quote that isn't in the book, the answer leaked into the prompt. The tool must catch them.</span></li>
+        </ol>
+        <div class="table-container rounded-lg border">
+          <table class="table wrap-table text-sm">
+            <thead><tr><th>Label</th><th>Tools</th><th>Needs</th></tr></thead>
+            <tbody>
+              <template x-for="g in gates" :key="g.label">
+                <tr>
+                  <td><span class="pill whitespace-nowrap" :class="toneOf(g.label)" x-text="g.label"></span></td>
+                  <td class="text-xs" x-text="g.tools"></td>
+                  <td class="text-xs" :class="g.muted && 'text-muted-foreground'" x-text="g.needs"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c9-c13.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const B = MOCK.BARS;
+      const pct = (x) => `${Math.round(x * 100)}%`;
+      const courses = MOCK.courses;
+      // TODO(real): each tool's known-answer probe is stored with the tool version in the backend.
+      const PROBE = {
+        lookup: ['find("Keys must be hashable.", §11.1)', "found"],
+        match: ['match("B", key="B")', "correct"],
+        python: ["print(7 // 2)", "3"],
+        numeric: ["np.mean([4, 8, 6, 2])", "5.0 ± 0.01"],
+        maths: ['equiv("2*x - x - x", "0")', "True"],
+        rubric: ["grade(calibration_answer_07)", "2 / 3"],
+        sql: ["select 2 + 2", "4"],
+        web: ["click #add ×3; read #total", "6"],
+        java: ["System.out.println(7 / 2)", "3"],
+        logic: ["prove(Not(And(p, Not(p))))", "valid"],
+      };
+      // Sandbox libraries each runner needs (TODO(real)).
+      const NEEDS = { python: ["python"], numeric: ["numpy", "scipy", "pint"], maths: ["sympy"], sql: ["sqlite"] };
+
+      // Questions per tool and course, from the tool recorded on each question.
+      const byTool = {};
+      MOCK.questions.forEach((q) => {
+        const cb = MOCK.checkedBy(q);
+        const code = MOCK.course(q.course).code;
+        const t = (byTool[cb.tool] ||= {});
+        t[code] = (t[code] || 0) + 1;
+      });
+
+      // Readiness: the lowest value across the published exercise sets the tool has been run on.
+      const METRIC = { programs: "Exercises reproduced", quotes: "Quotes found exactly", mutation_proven: "Mutations caught", mutation_supported: "Mutations caught" };
+      const sets = (pred) => MOCK.profiles.filter((p) => p.gate.exercises && pred(p));
+      const bars = (ps, keys) => {
+        const metrics = keys.map((k) => {
+          const vals = ps.filter((p) => p.gate[k] != null).map((p) => [p.gate[k], p.label]).sort((a, b) => a[0] - b[0]);
+          return { k, label: METRIC[k], v: vals[0][0], bar: B[k], low: vals[0][1] };
+        });
+        const under = metrics.find((m) => m.v < m.bar);
+        return { kind: "bars", metrics, note: `${ps.length} exercise set${ps.length > 1 ? "s" : ""}${under ? ` · lowest: ${under.low}` : ""}` };
+      };
+      const hasFormat = (f) => (p) => p.formats.some(([x]) => x === f);
+      const RUBRIC_BAR = 0.85;
+      const READY = {
+        python: bars(sets(hasFormat("code_output")), ["programs", "mutation_proven"]),
+        numeric: bars(sets(hasFormat("numeric")), ["programs", "mutation_proven"]),
+        lookup: bars(sets((p) => p.gate.quotes != null), ["quotes", "mutation_supported"]),
+        rubric: {
+          kind: "calibration", bar: RUBRIC_BAR,
+          rows: courses.map((c) => ({ c, ct: (MOCK.course_tools[c.id] || []).find((t) => t.id === "rubric") }))
+            .filter((x) => x.ct && x.ct.calibration).map(({ c, ct }) => {
+              const k = ct.calibration;
+              return { code: c.code, counts: k.counts, text: k.counts ? `${pct(k.agreement)} · counts` : `${k.graded} / ${k.needed} graded${k.agreement != null ? ` · ${pct(k.agreement)}` : ""} · practice` };
+            }),
+        },
+      };
+
+      const tools = Object.values(MOCK.TOOL_CATALOG).map((t) => {
+        const q = byTool[t.id] || {};
+        return {
+          ...t, probe: PROBE[t.id], st: t.selftest.ok ? "ok" : "failed",
+          courses: courses.map((c) => {
+            const ct = (MOCK.course_tools[c.id] || []).find((x) => x.id === t.id);
+            return ct ? { id: c.id, code: c.code, state: ct.state, added: ct.added, by: ct.by, note: ct.note } : null;
+          }).filter(Boolean),
+          qBy: Object.entries(q).sort((a, b) => b[1] - a[1]),
+          qTotal: Object.values(q).reduce((a, b) => a + b, 0),
+          ready: READY[t.id] || { kind: "none" },
+        };
+      });
+
+      const names = (lvl) => tools.filter((t) => t.level === lvl).map((t) => t.name).join(", ");
+      const probes = MOCK.capabilities.probes.map((p) => ({ ...p, state: p.ok ? "ok" : "failed" }));
+      return {
+        pct, tools, courses, probes,
+        questionsTotal: MOCK.questions.length,
+        cap: MOCK.capabilities, checked: MOCK.capabilities.checked,
+        checkedTools: MOCK.TOOL_CATALOG.python.selftest.at,
+        running: null, done: 0,
+        gates: ["Computed", "Quoted", "AI-reviewed only", "Rubric-graded"].map((label) => ({
+          label, tools: names(label),
+          needs: label === "Computed" ? `Self-test, then ≥ ${pct(B.programs)} of published exercises reproduced and ≥ ${pct(B.mutation_proven)} of mutations caught`
+            : label === "Quoted" ? `Self-test, then ≥ ${pct(B.quotes)} of quotes found exactly in the section and ≥ ${pct(B.mutation_supported)} of mutations caught`
+            : label === "Rubric-graded" ? `Self-test; counts toward grades in a course only after 20 answers agree ≥ ${pct(RUBRIC_BAR)} with the professor's grading`
+            : "Self-test only. The key is reviewed by AI and labelled that way",
+          muted: label === "AI-reviewed only",
+        })),
+        toneOf: (label) => (Object.values(MOCK.LEVELS).find((l) => l.label === label) || { tone: "tone-muted" }).tone,
+        tone(v, bar) {
+          if (v == null || v >= bar) return "";
+          return bar - v > 0.03 ? "var(--critical-solid)" : "var(--warn-solid)";
+        },
+        usedBy: (cap) => Object.entries(NEEDS).filter(([, ns]) => ns.includes(cap)).map(([id]) => MOCK.TOOL_CATALOG[id].name),
+        shared: (cap) => ["no_network", "memory"].includes(cap),
+        // Re-run either list: rows go to Running, then settle one by one to their stored result.
+        run(which) {
+          const list = which === "tools" ? this.tools : this.probes;
+          const key = which === "tools" ? "st" : "state";
+          const final = (x) => ((which === "tools" ? x.selftest.ok : x.ok) ? "ok" : "failed");
+          this.running = which; this.done = 0;
+          list.forEach((x) => { x[key] = "pending"; });
+          const tick = () => {
+            list[this.done][key] = final(list[this.done]);
+            this.done++;
+            if (this.done < list.length) return setTimeout(tick, 160);
+            this.running = null;
+            const at = "2026-09-30 " + new Date().toTimeString().slice(0, 5);
+            if (which === "tools") this.checkedTools = at; else this.checked = at;
+            const bad = list.filter((x) => x[key] === "failed");
+            Mock.toast(bad.length ? `Self-test done: ${list.length - bad.length} of ${list.length} passed. ${bad.map((b) => b.name || b.label).join(", ")} still failing.` : "Self-test done: all passed");
+          };
+          setTimeout(tick, 250);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

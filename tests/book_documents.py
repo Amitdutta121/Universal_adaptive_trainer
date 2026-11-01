@@ -151,3 +151,71 @@ def without(document: dict[str, Any], *keys: str) -> dict[str, Any]:
     for key in keys:
         copy.pop(key, None)
     return copy
+
+
+def chunked_book(session: Any, document: dict[str, Any], *, course_id: int | None = None) -> Any:
+    """Store ``document`` as a chunked book: one chunk per section, in reading order.
+
+    The heading path is the chapter and section headings as printed (``"1 The Way of the
+    Program"``), and the pages are the section's. Returns the flushed ``BookRow``.
+    """
+    from app.persistence.models import BookRow, ChunkRow
+    from app.persistence.repositories import BookRepository, ChunkRepository
+
+    def label(unit: dict[str, Any]) -> str | None:
+        parts = [unit.get("number"), unit.get("title")]
+        return " ".join(part for part in parts if part) or None
+
+    book = BookRepository(session).add(
+        BookRow(
+            course_id=course_id,
+            title=document["title"],
+            author=document.get("author"),
+            original_filename=document.get("source_filename") or "book.pdf",
+            page_count=document.get("page_count"),
+        )
+    )
+    chunks = [
+        ChunkRow(
+            text=section["text"],
+            page_start=section.get("start_page"),
+            page_end=section.get("end_page"),
+            heading_path=[part for part in (label(chapter), label(section)) if part],
+        )
+        for chapter in document["chapters"]
+        for section in chapter["sections"]
+    ]
+    ChunkRepository(session).add_version(book, chunks)
+    return book
+
+
+def to_pdf(document: dict[str, Any]) -> bytes:
+    """Render ``document`` as a PDF: one page per section, the headings as its outline.
+
+    The page-text parser (``BOOK_PARSER=pages`` in the suite) turns it into one chunk per
+    section whose heading path is the chapter and section headings, in reading order.
+    """
+    import pymupdf
+
+    def label(unit: dict[str, Any]) -> str | None:
+        parts = [unit.get("number"), unit.get("title")]
+        return " ".join(part for part in parts if part) or None
+
+    pdf = pymupdf.open()
+    toc: list[list[Any]] = []
+    for chapter in document["chapters"]:
+        chapter_label = label(chapter)
+        for index, section in enumerate(chapter["sections"]):
+            page = pdf.new_page()
+            if chapter_label and index == 0:
+                toc.append([1, chapter_label, pdf.page_count])
+            section_label = label(section)
+            if section_label:
+                toc.append([2 if chapter_label else 1, section_label, pdf.page_count])
+            page.insert_textbox(pymupdf.Rect(40, 40, 560, 800), section["text"], fontsize=9)
+    if toc:
+        pdf.set_toc(toc)
+    pdf.set_metadata({"title": document.get("title") or "", "author": document.get("author") or ""})
+    data = pdf.tobytes()
+    pdf.close()
+    return data

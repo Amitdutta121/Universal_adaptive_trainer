@@ -1,0 +1,43 @@
+# Piston code-execution sandbox for graders.executors.piston.PistonExecutor.
+# See README.md in this folder: start, install the python runtime, health check, security notes.
+#
+#   docker compose -f docker/piston/docker-compose.yml up -d
+name: piston
+
+services:
+  api:
+    # Piston API 3.1.1 (Isolate + cgroup v2). Pinned by digest so a re-pull cannot change the
+    # sandbox under us; bump deliberately.
+    image: ghcr.io/engineer-man/piston@sha256:2f66b7456189c4d713aa986d98eccd0b6ee16d26c7ec5f21b30e942756fd127a
+    container_name: piston_api
+    restart: unless-stopped
+    # Required: the entrypoint creates a cgroup v2 subtree and Isolate builds per-job namespaces
+    # and cgroups. Without it the container exits at start ("Cannot find /sys/fs/cgroup ...").
+    privileged: true
+    ports:
+      # Localhost only: the API runs arbitrary code on request and has no authentication.
+      - "127.0.0.1:2000:2000"
+    volumes:
+      - piston_packages:/piston/packages
+    tmpfs:
+      - /tmp:exec
+    environment:
+      # Server-side caps. A request may ask for less, never more (the API rejects it).
+      PISTON_RUN_TIMEOUT: "30000"          # wall clock, ms
+      PISTON_RUN_CPU_TIME: "30000"         # CPU time, ms (PistonExecutor sends = run_timeout)
+      PISTON_COMPILE_TIMEOUT: "10000"
+      PISTON_RUN_MEMORY_LIMIT: "536870912" # 512 MiB; PistonExecutor asks for 256 MiB by default
+      PISTON_MAX_PROCESS_COUNT: "64"       # per job; contains fork bombs
+      PISTON_MAX_OPEN_FILES: "256"
+      PISTON_MAX_FILE_SIZE: "10000000"     # bytes per file written by the program
+      PISTON_OUTPUT_MAX_SIZE: "65536"      # bytes per stdout/stderr (default 1024 is too small)
+      PISTON_MAX_CONCURRENT_JOBS: "16"
+      PISTON_DISABLE_NETWORKING: "true"    # jobs get no network namespace access
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+
+volumes:
+  piston_packages:

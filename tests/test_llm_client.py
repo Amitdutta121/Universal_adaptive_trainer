@@ -87,6 +87,30 @@ class TestInstructorStructuredClient:
             }
         ]
 
+    def test_history_goes_between_the_system_and_the_new_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        create_calls: list[dict[str, Any]] = []
+
+        def create(**kwargs: Any) -> Answer:
+            create_calls.append(kwargs)
+            return Answer(value="42")
+
+        client, _, _ = client_with_create(monkeypatch, create)
+        client.complete_structured(
+            system="You are a test.",
+            prompt="Fix it.",
+            response_model=Answer,
+            history=[("user", "Answer the question."), ("assistant", '{"value": "41"}')],
+        )
+
+        assert create_calls[0]["messages"] == [
+            {"role": "system", "content": "You are a test."},
+            {"role": "user", "content": "Answer the question."},
+            {"role": "assistant", "content": '{"value": "41"}'},
+            {"role": "user", "content": "Fix it."},
+        ]
+
     def test_maps_validation_failure_to_malformed_output(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -251,3 +275,41 @@ class TestClientSelection:
 
         with pytest.raises(ConfigurationError):
             get_structured_client(settings)
+
+
+AZURE_BASE = "https://example.services.ai.azure.com/openai/v1/"
+
+
+def _create_kwargs(monkeypatch: pytest.MonkeyPatch, temperature: float | None, **overrides: Any):
+    calls: list[dict[str, Any]] = []
+
+    def create(**kwargs: Any) -> Answer:
+        calls.append(kwargs)
+        return Answer(value="ok")
+
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(client_module.openai, "OpenAI", lambda **_: object())
+    monkeypatch.setattr(client_module.instructor, "from_openai", lambda raw, *, mode: fake)
+    client = InstructorStructuredClient(openrouter_settings(**overrides), temperature=temperature)
+    complete(client)
+    return calls[0], client
+
+
+def test_an_azure_route_sends_no_openrouter_provider_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent, client = _create_kwargs(
+        monkeypatch, 0.0, llm_base_url=AZURE_BASE, llm_model="gpt-4.1-mini"
+    )
+    assert "extra_body" not in sent
+    assert (sent["max_tokens"], sent["temperature"]) == (256, 0.0)
+    assert client.description == "azure/gpt-4.1-mini"
+
+
+def test_a_reasoning_model_gets_a_completion_budget_and_no_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent, _ = _create_kwargs(monkeypatch, 0.0, llm_base_url=AZURE_BASE, llm_model="gpt-5-mini")
+    assert "temperature" not in sent and "max_tokens" not in sent
+    assert sent["max_completion_tokens"] == client_module.REASONING_OUTPUT_TOKENS
+    assert sent["reasoning_effort"] == "low"

@@ -1,0 +1,4 @@
+# pydantic-ai needs openai 3; instructor (jiter<0.15) and llama-index-llms-openai (openai<3) pin
+# older versions but the full suite passes on openai 3 (see the comment in pyproject.toml).
+openai>=3.26
+jiter>=0.16

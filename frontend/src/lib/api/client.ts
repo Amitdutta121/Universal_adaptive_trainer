@@ -11,6 +11,7 @@
  */
 
 import createClient, { type Middleware } from "openapi-fetch";
+import { loadLearnerIdentity } from "@/app/students/join/learner-identity";
 import { API_BASE_URL } from "@/lib/env";
 import type { paths } from "./schema";
 
@@ -52,6 +53,52 @@ const acceptJson: Middleware = {
   },
 };
 
+/** The header naming the course a request works inside (`app/web/routes/api/deps.py`). */
+export const COURSE_HEADER = "X-Course-Id";
+
+/** Matches `courseIdFromPath` in `lib/course.ts`, which is a client module and not imported here. */
+const COURSE_SEGMENT = /^\/courses\/(\d+)(?:\/|$)/;
+
+/**
+ * A browser request made from inside a course names that course.
+ *
+ * Read from the page's own URL rather than passed by each caller, so no screen
+ * can forget it. A Server Component has no `window` and sets the header itself
+ * (see `app/courses/[courseId]/questions/[question_id]/page.tsx`).
+ */
+const courseHeader: Middleware = {
+  async onRequest({ request }) {
+    if (typeof window === "undefined" || request.headers.has(COURSE_HEADER)) return request;
+    const match = COURSE_SEGMENT.exec(window.location.pathname);
+    if (match) request.headers.set(COURSE_HEADER, match[1]);
+    return request;
+  },
+};
+
+/** The header carrying the learner's `resume_token` (`app/web/routes/api/students.py`). */
+export const STUDENT_HEADER = "X-Student-Token";
+
+/** Starting a run, and every call about one run or attempt, which the backend ties to the learner. */
+const STUDENT_FLOW = /\/api\/(training-sessions|attempts)(\/|$)/;
+
+/**
+ * A student-flow request carries the learner's token (ADR-060).
+ *
+ * Run and attempt ids are sequential, so the backend answers 404 unless the run belongs to
+ * the learner holding the token. Read from the browser's stored identity rather than passed
+ * by each caller, like the course header above.
+ */
+const studentToken: Middleware = {
+  async onRequest({ request }) {
+    if (request.headers.has(STUDENT_HEADER) || !STUDENT_FLOW.test(new URL(request.url).pathname)) {
+      return request;
+    }
+    const identity = loadLearnerIdentity();
+    if (identity) request.headers.set(STUDENT_HEADER, identity.resumeToken);
+    return request;
+  },
+};
+
 /**
  * Build a client against an explicit origin.
  *
@@ -61,7 +108,7 @@ const acceptJson: Middleware = {
  */
 export function createApiClient(baseUrl: string) {
   const client = createClient<paths>({ baseUrl });
-  client.use(acceptJson);
+  client.use(acceptJson, courseHeader, studentToken);
   return client;
 }
 

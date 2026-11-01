@@ -1,0 +1,6 @@
+# Every recipe id ever shipped, one <subject>/<id> per line. Tutorial blocks store these ids,
+# so a line is never removed or changed; a new recipe adds one.
+intro_python/py.code_trace_stepper
+intro_python/py.misconception_line
+intro_python/py.topic_flow
+intro_python/py.video_clip

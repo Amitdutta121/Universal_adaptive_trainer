@@ -36,8 +36,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 
-from app.domain.books import SectionSource
-
 #: Separates components inside a fingerprint's canonical string. A unit separator
 #: cannot occur in a label, so two different component lists cannot collide by
 #: joining to the same string.
@@ -80,25 +78,6 @@ def fingerprint(parts: Iterable[str]) -> str:
     """Hash an ordered list of components into a short hex digest."""
     canonical = _SEPARATOR.join(parts)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:_DIGEST_LENGTH]
-
-
-def source_key(source: SectionSource) -> str:
-    """Identify a section by where it sits in its book, not by its database id.
-
-    Row ids change when a book is re-imported from a corrected document; the
-    book title plus the printed chapter/section numbers do not. Position within
-    the book is included as the fallback for a section the source never numbered,
-    so an unnumbered section is still distinguishable from its neighbours.
-    """
-    return _SEPARATOR.join(
-        (
-            normalize_label(source.book_title),
-            normalize_label(source.chapter_number or ""),
-            normalize_label(source.section_number or ""),
-            normalize_label(source.section_title or ""),
-            str(source.start_page or ""),
-        )
-    )
 
 
 def topic_stable_id(candidate_topic_labels: Iterable[str]) -> str:

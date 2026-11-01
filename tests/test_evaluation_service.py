@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import book_documents as docs
+import pytest
 from llm_fakes import FlakyJudgeClient, MetricJudgeClient, RaisingJudgeClient
 from sqlalchemy.orm import Session
 
@@ -21,7 +22,6 @@ from app.errors import LLMRequestError, MalformedModelOutputError
 from app.evaluation.prompts import build_user_prompt
 from app.evaluation.schema import MetricStatus, PedagogicalEvalStatus
 from app.evaluation.service import JUDGE_MAX_ATTEMPTS, PedagogicalJudge, build_judge_context
-from app.ingestion import BookImportService
 
 TAXONOMY = (
     b'{"schema_version":"1","label":"Python","topics":['
@@ -33,14 +33,12 @@ TAXONOMY = (
 
 
 def _seed_question(session: Session, settings: Any) -> Question:
-    book = BookImportService(session, settings).import_upload(
-        filename="book.json", data=docs.to_bytes(docs.minimal())
-    )
+    book = docs.chunked_book(session, docs.minimal())
     version = TaxonomyImportService(session, settings).import_upload(
         filename="taxonomy.json", data=TAXONOMY
     )
     session.commit()
-    section = book.chapters[0].sections[0]
+    chunk = book.chunks[0]
     topic = version.topics[0]
     return Question(
         id=1,
@@ -55,13 +53,13 @@ def _seed_question(session: Session, settings: Any) -> Question:
             "prompt": "What is printed?",
             "code": "print(3)",
             "expected_output": "3",
-            "sources": [{"section_id": section.id, "citation": "x"}],
+            "sources": [{"chunk_id": chunk.id, "citation": "x"}],
         },
         spec={
             "curriculum_version_id": version.id,
             "question_type": "output_prediction",
             "difficulty": "easy",
-            "source_section_ids": [section.id],
+            "source_chunk_ids": [chunk.id],
         },
     )
 
@@ -211,3 +209,32 @@ def test_subtopic_judge_sees_the_whole_taxonomy(session: Session, settings: Any)
 
     assert "For loops" in payload
     assert "claimed_taxonomy" in payload
+
+
+@pytest.fixture(autouse=True)
+def four_metric_panel(monkeypatch, settings):
+    from app.config import get_settings
+
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "issues,subtopic,difficulty,generatability")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("failing", [False, True])
+def test_two_enabled_metrics_determine_gate(session, settings, monkeypatch, failing):
+    from app.config import get_settings
+
+    monkeypatch.setenv("JUDGE_METRICS_ENABLED", "difficulty,subtopic")
+    get_settings.cache_clear()
+    question = _seed_question(session, settings)
+    client = _agreeing_client(question)
+    client.issue_codes = [RejectionReason.POOR_WORDING]
+    client.should_have_generated = False
+    if failing:
+        client.difficulty = Difficulty.HARD
+    result = PedagogicalJudge(session, client=client).evaluate(question)
+    assert client.calls == 2
+    assert {m.metric for m in result.metrics} == {JudgeMetricId.DIFFICULTY, JudgeMetricId.SUBTOPIC}
+    assert result.status is PedagogicalEvalStatus.COMPLETED
+    assert result.gate is (JudgeGate.NEEDS_REVIEW if failing else JudgeGate.APPROVED)

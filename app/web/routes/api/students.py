@@ -19,21 +19,47 @@ that powers the join lobby (``/students/join?set=...``), so those stay public.
 Only the professor-facing reads -- listing students, one student's detail and
 progress, and listing a student's sessions -- carry
 ``Depends(current_active_user)``.
+
+Public is not open, though (ADR-060): every call about one run or attempt, and starting a
+run, must carry the learner's ``resume_token`` in ``X-Student-Token``. Run and attempt ids
+are sequential, so without it an edited URL would reach another learner's run -- and
+through it another professor's course. A run that is not the token holder's is the same
+404 as one that does not exist.
 """
 
 from __future__ import annotations
 
 import logging
 import secrets
+from collections import Counter
 from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from app.adaptive import AdaptiveTrainingEngine
 from app.auth.backend import current_active_user
-from app.coverage import get_prod_question_set
+from app.coverage import get_prod_question_set, get_taxonomy_question_set
+from app.domain.enums import RoundStatus
 from app.domain.mastery import difficulty_for_mastery, mastery_band
-from app.errors import ActiveSessionExistsError, DomainRuleError, NotFoundError
+from app.errors import (
+    ActiveSessionExistsError,
+    AdaptiveTrainerError,
+    DomainRuleError,
+    NoQuestionAvailableError,
+    NotFoundError,
+    QuestionGeneratingError,
+)
+from app.generation.live import next_for_session, run_live_job
+from app.generation.refill import plan_refill, schedule_refill
+from app.jobs.queue import JobQueue, JobQueueDep
+from app.persistence.models import (
+    LiveQuestionJobRow,
+    StudentAttemptRow,
+    StudentRow,
+    TrainingSessionRow,
+)
 from app.persistence.repositories import (
     CurriculumRepository,
     QuestionSetRepository,
@@ -42,7 +68,9 @@ from app.persistence.repositories import (
     StudentStateRepository,
     TrainingSessionRepository,
 )
-from app.web.routes.api.deps import DbSession
+from app.tutorials.live import LiveQueue
+from app.tutorials.serving import blocks_after_answer, preteach_blocks
+from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     AnsweredOut,
     AnswerRequest,
@@ -52,6 +80,7 @@ from app.web.routes.api.schemas import (
     ClassWeaknessCellOut,
     ClassWeaknessStudentOut,
     CreateStudentRequest,
+    QuestionDetail,
     QuestionSetOut,
     ResumeStudentRequest,
     ServedQuestionOut,
@@ -62,6 +91,7 @@ from app.web.routes.api.schemas import (
     StudentProgressOut,
     StudentResumeOut,
     StudentRosterRowOut,
+    StudentTutorialBlockOut,
     SubtopicWeaknessOut,
     TopicMasteryOut,
     TrainingSessionListResponse,
@@ -81,10 +111,105 @@ ROSTER_PAGE_SIZE = 20
 #: Cap on cohort weakness cells returned, matching the client heatmap.
 WEAKNESS_CELLS = 48
 
+#: The header a student's browser sends its ``resume_token`` in (ADR-060).
+STUDENT_HEADER = "X-Student-Token"
+
+
+def _learner(
+    session: DbSession,
+    x_student_token: Annotated[str | None, Header(alias=STUDENT_HEADER)] = None,
+) -> StudentRow | None:
+    """The learner whose token the request carries, or ``None`` for a missing/unknown one."""
+    return StudentRepository(session).get_by_resume_token(x_student_token or "")
+
+
+#: The learner making a public student-flow request; ``None`` when the token is no one's.
+Learner = Annotated[StudentRow | None, Depends(_learner)]
+
+
+def _own_run(session: DbSession, learner: StudentRow | None, run_id: int) -> TrainingSessionRow:
+    """The run, or the same 404 as a missing one unless it is the token holder's."""
+    run = TrainingSessionRepository(session).get(run_id)
+    if learner is None or run.student_id != learner.id:
+        raise NotFoundError(f"Training session {run_id} was not found.")
+    return run
+
+
+def _own_attempt(
+    session: DbSession, learner: StudentRow | None, attempt_id: int
+) -> StudentAttemptRow:
+    """The attempt, or the same 404 as a missing one unless it is the token holder's."""
+    attempt = StudentAttemptRepository(session).get(attempt_id)
+    if learner is None or attempt.student_id != learner.id:
+        raise NotFoundError(f"Attempt {attempt_id} was not found.")
+    return attempt
+
+
+def _student_ids_in(
+    session: DbSession, course: int | None, curriculum_version_id: int | None
+) -> set[int] | None:
+    """The students the roster may show: the course's, narrowed to one taxonomy's when given.
+
+    ``None`` means no restriction, which only an unscoped (test-suite) request gets.
+    """
+    sessions = TrainingSessionRepository(session)
+    allowed: set[int] | None = None
+    if course is not None:
+        allowed = sessions.student_ids_for_course(course)
+    if curriculum_version_id is not None:
+        version = CurriculumRepository(session).get_version(curriculum_version_id)
+        ensure_in_course(version.course_id, course, f"Curriculum version {curriculum_version_id}")
+        in_version = sessions.student_ids_for_curriculum_version(curriculum_version_id)
+        allowed = in_version if allowed is None else allowed & in_version
+    return allowed
+
+
+def _student_in_course(session: DbSession, student_id: int, course: int | None) -> StudentRow:
+    """The student, or a 404 when they have never run a session in the request's course."""
+    row = StudentRepository(session).get(student_id)
+    if course is not None and student_id not in TrainingSessionRepository(
+        session
+    ).student_ids_for_course(course):
+        raise NotFoundError(f"Student {student_id} does not exist.")
+    return row
+
 
 def _aware(value: datetime) -> datetime:
     """SQLite hands back naive datetimes; compare them in UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+#: Roster columns a client may sort by. Absent sort keeps the repository's name order.
+RosterSort = Literal["name", "email", "answered", "average", "last_active", "enrolled"]
+
+
+def _sort_roster(
+    rows: list[StudentRow],
+    stats: dict[int, Any],
+    sort: RosterSort,
+    order: Literal["asc", "desc"],
+) -> list[StudentRow]:
+    """Order matched learners by one column. Learners with no value for it
+    (never answered, so no average or last activity) sit last either way."""
+
+    def value(row: StudentRow) -> Any:
+        stat = stats.get(row.id)
+        if sort == "name":
+            return row.display_name.casefold()
+        if sort == "email":
+            return row.email.casefold()
+        if sort == "answered":
+            return stat.answered_count if stat else 0
+        if sort == "average":
+            return stat.average_score if stat else None
+        if sort == "last_active":
+            return _aware(stat.last_activity_at) if stat and stat.last_activity_at else None
+        return _aware(row.created_at)
+
+    present = [row for row in rows if value(row) is not None]
+    missing = [row for row in rows if value(row) is None]
+    present.sort(key=value, reverse=order == "desc")
+    return present + missing
 
 
 def _passes_score(average: float | None, band: str) -> bool:
@@ -140,6 +265,15 @@ def get_prod_classroom(session: DbSession) -> QuestionSetOut:
     return QuestionSetOut.from_row(get_prod_question_set(session), is_prod=True)
 
 
+@router.get("/question-sets/taxonomy/{curriculum_version_id}", response_model=QuestionSetOut)
+def get_taxonomy_classroom(session: DbSession, curriculum_version_id: int) -> QuestionSetOut:
+    """The snapshot behind a taxonomy's classroom link; public, like the join page.
+
+    404 until the professor has created the link for this taxonomy.
+    """
+    return QuestionSetOut.from_row(get_taxonomy_question_set(session, curriculum_version_id))
+
+
 @router.get("/question-sets/{set_version_id}", response_model=QuestionSetOut)
 def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
     """One frozen set, public so an anonymous join link can describe itself."""
@@ -153,6 +287,7 @@ def get_question_set(session: DbSession, set_version_id: int) -> QuestionSetOut:
 )
 def list_students(
     session: DbSession,
+    course: CourseScope,
     search: str = "",
     score: str = "all",
     answered: str = "all",
@@ -160,6 +295,8 @@ def list_students(
     curriculum_version_id: int | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(ROSTER_PAGE_SIZE, ge=1, le=100),
+    sort: RosterSort | None = None,
+    order: Literal["asc", "desc"] = "asc",
 ) -> StudentListResponse:
     """One page of the roster, filtered server-side (ADR-041 keeps it read-only).
 
@@ -173,18 +310,15 @@ def list_students(
     set built from that taxonomy (see
     :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
     student is never tagged with a taxonomy directly, only a frozen set is.
+
+    ``sort``/``order`` order the whole matched set before it is paged, so a
+    sorted column is sorted across pages, not just within one.
     """
     students = StudentRepository(session)
     attempts = StudentAttemptRepository(session)
     stats = attempts.stats_by_student()
     now = datetime.now(UTC)
-    allowed_ids = (
-        TrainingSessionRepository(session).student_ids_for_curriculum_version(
-            curriculum_version_id
-        )
-        if curriculum_version_id is not None
-        else None
-    )
+    allowed_ids = _student_ids_in(session, course, curriculum_version_id)
 
     matched = []
     for row in students.search(search):
@@ -200,6 +334,9 @@ def list_students(
             and _passes_activity(last_activity, activity, now=now)
         ):
             matched.append(row)
+
+    if sort is not None:
+        matched = _sort_roster(matched, stats, sort, order)
 
     start = (page - 1) * page_size
     page_rows = matched[start : start + page_size]
@@ -230,7 +367,9 @@ def list_students(
     response_model=ClassSummaryOut,
     dependencies=[Depends(current_active_user)],
 )
-def class_summary(session: DbSession, curriculum_version_id: int | None = None) -> ClassSummaryOut:
+def class_summary(
+    session: DbSession, course: CourseScope, curriculum_version_id: int | None = None
+) -> ClassSummaryOut:
     """Cohort-wide figures for the roster's aggregate cards.
 
     Independent of which roster page is open: the class trend graph and the
@@ -246,13 +385,15 @@ def class_summary(session: DbSession, curriculum_version_id: int | None = None) 
     state = StudentStateRepository(session)
     curriculum = CurriculumRepository(session)
 
-    roster = students.search("")
-    stats = attempts.stats_by_student()
-    scored = attempts.scored_attempts_all(curriculum_version_id)
-    weakness_rows = state.list_weakness_all(curriculum_version_id)
+    allowed_ids = _student_ids_in(session, course, curriculum_version_id)
+    roster = [row for row in students.search("") if allowed_ids is None or row.id in allowed_ids]
+    scored = attempts.scored_attempts_all(curriculum_version_id, course_id=course)
+    weakness_rows = state.list_weakness_all(curriculum_version_id, course_id=course)
 
     names = {row.id: row.display_name for row in roster}
-    answered_by_student = {student_id: stat.answered_count for student_id, stat in stats.items()}
+    # Scored answers in this scope only, like the trend: a student's answers in another course
+    # are not "answered" here.
+    answered_by_student = Counter(attempt.student_id for attempt in scored)
     labels = curriculum.subtopic_labels_for([row.subtopic_id for row in weakness_rows])
 
     buckets: dict[int, list[tuple[int, float]]] = {}
@@ -289,6 +430,8 @@ def class_summary(session: DbSession, curriculum_version_id: int | None = None) 
 
     measured = {student_id for student_id, count in answered_by_student.items() if count}
     measured.update(row.student_id for row in weakness_rows)
+    # The answer counts span every course; only this roster's students are measured here.
+    measured &= {row.id for row in roster}
     all_scores = [attempt.score for attempt in scored]
 
     return ClassSummaryOut(
@@ -364,8 +507,8 @@ def resume_student(session: DbSession, payload: ResumeStudentRequest) -> Student
     response_model=StudentOut,
     dependencies=[Depends(current_active_user)],
 )
-def get_student(session: DbSession, student_id: int) -> StudentOut:
-    row = StudentRepository(session).get(student_id)
+def get_student(session: DbSession, course: CourseScope, student_id: int) -> StudentOut:
+    row = _student_in_course(session, student_id, course)
     return StudentOut.from_row(
         row, answered_count=StudentAttemptRepository(session).count_answered(student_id)
     )
@@ -376,7 +519,29 @@ def get_student(session: DbSession, student_id: int) -> StudentOut:
     response_model=StudentProgressOut,
     dependencies=[Depends(current_active_user)],
 )
-def student_progress(session: DbSession, student_id: int) -> StudentProgressOut:
+def student_progress(
+    session: DbSession, course: CourseScope, student_id: int
+) -> StudentProgressOut:
+    """Measured mastery, weakness and history for one learner (instructor view)."""
+    _student_in_course(session, student_id, course)
+    return _progress(session, student_id)
+
+
+@router.get("/training-sessions/{training_session_id}/progress", response_model=StudentProgressOut)
+def training_session_progress(
+    session: DbSession, learner: Learner, training_session_id: int
+) -> StudentProgressOut:
+    """The learner's own progress, for the student page.
+
+    Keyed by the run, like every other student-page call (``/next``, ``/answer``): the student
+    has no instructor login, so ``/students/{id}/progress`` answered 401 and the page's progress
+    sidebar never loaded.
+    """
+    run = _own_run(session, learner, training_session_id)
+    return _progress(session, run.student_id)
+
+
+def _progress(session: DbSession, student_id: int) -> StudentProgressOut:
     """Measured mastery, weakness and history for one learner.
 
     Only what has been scored appears. State rows are created on first touch
@@ -436,7 +601,7 @@ def student_progress(session: DbSession, student_id: int) -> StudentProgressOut:
     "/training-sessions", response_model=TrainingSessionOut, status_code=status.HTTP_201_CREATED
 )
 def start_training_session(
-    session: DbSession, payload: StartTrainingSessionRequest
+    session: DbSession, learner: Learner, payload: StartTrainingSessionRequest
 ) -> TrainingSessionOut:
     """Begin a run for one student against one frozen question set (ADR-036).
 
@@ -449,8 +614,12 @@ def start_training_session(
     corrupt the mastery estimate (ADR-041) -- and an accidental double-join (a
     second tab, a re-followed link) is a routine event, not an edge case. The
     client recovers by resuming the session the error names.
+
+    Only the learner holding the token may start a run, and only for themselves (ADR-060).
     """
-    student = StudentRepository(session).get(payload.student_id)
+    if learner is None or learner.id != payload.student_id:
+        raise NotFoundError(f"Student {payload.student_id} was not found.")
+    student = learner
     frozen = QuestionSetRepository(session).get(payload.set_version_id)
     open_run = TrainingSessionRepository(session).open_session_for(student.id)
     if open_run is not None:
@@ -483,8 +652,10 @@ def start_training_session(
     response_model=TrainingSessionListResponse,
     dependencies=[Depends(current_active_user)],
 )
-def list_training_sessions(session: DbSession, student_id: int) -> TrainingSessionListResponse:
-    student = StudentRepository(session).get(student_id)
+def list_training_sessions(
+    session: DbSession, course: CourseScope, student_id: int
+) -> TrainingSessionListResponse:
+    student = _student_in_course(session, student_id, course)
     rows = TrainingSessionRepository(session).list_for_student(student_id)
     return TrainingSessionListResponse(
         sessions=[
@@ -495,12 +666,22 @@ def list_training_sessions(session: DbSession, student_id: int) -> TrainingSessi
 
 
 @router.get("/training-sessions/{training_session_id}", response_model=TrainingSessionOut)
-def get_training_session(session: DbSession, training_session_id: int) -> TrainingSessionOut:
+def get_training_session(
+    session: DbSession, learner: Learner, training_session_id: int
+) -> TrainingSessionOut:
+    _own_run(session, learner, training_session_id)
     return _session_out(session, training_session_id)
 
 
 @router.get("/training-sessions/{training_session_id}/next", response_model=ServedQuestionOut)
-def next_question(session: DbSession, training_session_id: int) -> ServedQuestionOut:
+def next_question(
+    session: DbSession,
+    learner: Learner,
+    training_session_id: int,
+    background_tasks: BackgroundTasks,
+    request: Request = None,  # type: ignore[assignment]  # None only when called directly
+    queue: JobQueueDep = None,  # type: ignore[assignment]
+) -> ServedQuestionOut | JSONResponse:
     """Serve the next question.
 
     Not idempotent in the HTTP sense -- it writes an attempt row and lowers the
@@ -508,37 +689,166 @@ def next_question(session: DbSession, training_session_id: int) -> ServedQuestio
     outstanding: asking again returns the same one rather than drawing another.
     A GET is still the honest verb, because what a client wants here is the
     session's current question.
+
+    When the bank has nothing new for this student, a question is generated live
+    (:mod:`app.generation.live`) and this answers ``question_generating`` until it is ready;
+    the client keeps polling.
     """
-    served = AdaptiveTrainingEngine(session).serve_next(training_session_id)
+    _own_run(session, learner, training_session_id)
+    return _next_or_generate(
+        session, training_session_id, background_tasks, _live(request, queue), force=False
+    )
+
+
+@router.post(
+    "/training-sessions/{training_session_id}/live-question", response_model=ServedQuestionOut
+)
+def request_live_question(
+    session: DbSession,
+    learner: Learner,
+    training_session_id: int,
+    background_tasks: BackgroundTasks,
+    request: Request = None,  # type: ignore[assignment]  # None only when called directly
+    queue: JobQueueDep = None,  # type: ignore[assignment]
+) -> ServedQuestionOut | JSONResponse:
+    """``/next``, but generate even right after a failed attempt: the student asked to retry."""
+    _own_run(session, learner, training_session_id)
+    return _next_or_generate(
+        session, training_session_id, background_tasks, _live(request, queue), force=True
+    )
+
+
+def _error_response(exc: AdaptiveTrainerError, background_tasks: BackgroundTasks) -> JSONResponse:
+    # Raising would discard the injected BackgroundTasks. Return the same
+    # error contract explicitly so depletion still schedules replenishment.
+    error = {"code": exc.code, "message": exc.message}
+    if exc.detail is not None:
+        error["detail"] = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": error},
+        background=background_tasks,
+    )
+
+
+def _live(request: Request | None, queue: JobQueue | None) -> LiveQueue | None:
+    """Where a missing tutorial block's job goes (``app/tutorials/live.py``); ``None`` (write
+    nothing) when the route is called directly, as some tests do."""
+    if request is None or queue is None:
+        return None
+    from app.web.routes.api.retrieval import get_query_embedder
+    from app.web.routes.api.tutorials import get_tutorial_client
+
+    overrides = request.app.dependency_overrides
+    return LiveQueue(
+        queue,
+        # Test overrides only; in production the job builds both when it runs.
+        client=overrides[get_tutorial_client]() if get_tutorial_client in overrides else None,
+        embedder=overrides[get_query_embedder]() if get_query_embedder in overrides else None,
+    )
+
+
+def _next_or_generate(
+    session: DbSession,
+    training_session_id: int,
+    background_tasks: BackgroundTasks,
+    live: LiveQueue | None,
+    *,
+    force: bool,
+) -> ServedQuestionOut | JSONResponse:
+    try:
+        result = next_for_session(session, training_session_id, force=force)
+    except NoQuestionAvailableError as exc:
+        if plan_refill(session, training_session_id) is not None:
+            background_tasks.add_task(schedule_refill, training_session_id)
+        session.commit()
+        return _error_response(exc, background_tasks)
+    if isinstance(result, LiveQuestionJobRow):
+        if RoundStatus(result.status) is RoundStatus.QUEUED:
+            background_tasks.add_task(run_live_job, result.id)
+        session.commit()
+        return _error_response(
+            QuestionGeneratingError(
+                "Generating a new question for you.",
+                detail=(
+                    "You have answered everything available at this point, so a question is "
+                    "being written for you now. This usually takes under a minute."
+                ),
+            ),
+            background_tasks,
+        )
+    served = result
+    if plan_refill(session, training_session_id) is not None:
+        background_tasks.add_task(schedule_refill, training_session_id)
+    # Composed before the commit: showing them is logged for per-recipe stats (Task 28).
+    preteach = preteach_blocks(session, served.attempt, live=live)
     session.commit()
     subtopic_name = None
     if served.attempt.subtopic_id is not None:
         labels = CurriculumRepository(session).subtopic_labels_for([served.attempt.subtopic_id])
         subtopic_name = labels.get(served.attempt.subtopic_id, (None, None))[0]
-    return ServedQuestionOut.from_served(served, subtopic_name=subtopic_name)
+    out = ServedQuestionOut.from_served(served, subtopic_name=subtopic_name)
+    out.preteach_blocks = [StudentTutorialBlockOut.model_validate(block) for block in preteach]
+    return out
 
 
 @router.post("/attempts/{attempt_id}/answer", response_model=AnsweredOut)
-def answer_attempt(session: DbSession, attempt_id: int, payload: AnswerRequest) -> AnsweredOut:
+def answer_attempt(
+    session: DbSession,
+    learner: Learner,
+    attempt_id: int,
+    payload: AnswerRequest,
+    request: Request = None,  # type: ignore[assignment]  # None only when called directly
+    queue: JobQueueDep = None,  # type: ignore[assignment]
+) -> AnsweredOut:
     """Score a submitted answer and fold it into the student's state."""
+    _own_attempt(session, learner, attempt_id)
     try:
         result = AdaptiveTrainingEngine(session).submit_answer(attempt_id, payload.answer)
     except Exception:
         session.rollback()
         raise
+    blocks = blocks_after_answer(
+        session, result.attempt, mastery=result.mastery_after, live=_live(request, queue)
+    )
     session.commit()
-    return AnsweredOut.from_result(result)
+    out = AnsweredOut.from_result(result)
+    out.tutorial_blocks = [StudentTutorialBlockOut.model_validate(block) for block in blocks]
+    return out
 
 
 @router.get("/attempts/{attempt_id}", response_model=AttemptOut)
-def get_attempt(session: DbSession, attempt_id: int) -> AttemptOut:
-    return AttemptOut.from_row(StudentAttemptRepository(session).get(attempt_id))
+def get_attempt(session: DbSession, learner: Learner, attempt_id: int) -> AttemptOut:
+    return AttemptOut.from_row(_own_attempt(session, learner, attempt_id))
+
+
+@router.get("/attempts/{attempt_id}/review", response_model=QuestionDetail)
+def review_attempt(session: DbSession, learner: Learner, attempt_id: int) -> QuestionDetail:
+    """The answered question with its answer key, for the student's result card.
+
+    Only once *this* attempt has been answered: before that the key would answer the question
+    being asked. The student page used the instructor-only ``/questions/{id}`` and never got past
+    "Loading the correct answer".
+    """
+    attempt = _own_attempt(session, learner, attempt_id)
+    if attempt.score is None:
+        raise DomainRuleError(
+            "Answer the question first.",
+            detail=f"Attempt {attempt_id} has not been answered, so its answer key is not shown.",
+        )
+    from app.web.routes.api.questions import get_question
+
+    # Attempt ownership pins the reviewed question; the student page carries no
+    # instructor course filter. Use the explicit scope added by the course API.
+    return get_question(session, course=None, question_id=attempt.question_id)
 
 
 @router.post("/training-sessions/{training_session_id}/end", response_model=TrainingSessionOut)
-def end_training_session(session: DbSession, training_session_id: int) -> TrainingSessionOut:
+def end_training_session(
+    session: DbSession, learner: Learner, training_session_id: int
+) -> TrainingSessionOut:
     repository = TrainingSessionRepository(session)
-    repository.end(repository.get(training_session_id))
+    repository.end(_own_run(session, learner, training_session_id))
     session.commit()
     return _session_out(session, training_session_id)
 

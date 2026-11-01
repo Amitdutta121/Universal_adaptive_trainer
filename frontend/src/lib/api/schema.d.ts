@@ -48,7 +48,10 @@ export interface paths {
         };
         /**
          * Counts
-         * @description One count per section.
+         * @description One count per section, every one of them the course's own (ADR-060).
+         *
+         *     Learned instructions are the professor's (ADR-059), and a student counts once they have
+         *     run a session in the course.
          */
         get: operations["counts_api_counts_get"];
         put?: never;
@@ -93,6 +96,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register:Register */
+        post: operations["register_register_api_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/request-verify-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify:Request-Token */
+        post: operations["verify_request_token_api_auth_request_verify_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify:Verify */
+        post: operations["verify_verify_api_auth_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/forgot-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset:Forgot Password */
+        post: operations["reset_forgot_password_api_auth_forgot_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset:Reset Password */
+        post: operations["reset_reset_password_api_auth_reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -102,7 +190,9 @@ export interface paths {
         };
         /**
          * Read Current User
-         * @description The frontend's session check: 401 with no cookie, the professor's identity otherwise.
+         * @description The frontend's session check: 401 with no cookie, the professor's account otherwise.
+         *
+         *     ``is_verified`` drives the Studio's "verify your email" banner.
          */
         get: operations["read_current_user_api_auth_me_get"];
         put?: never;
@@ -111,6 +201,94 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/courses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Courses
+         * @description The professor's own courses, newest first, with what has been built in each.
+         */
+        get: operations["list_courses_api_courses_get"];
+        put?: never;
+        /**
+         * Create Course
+         * @description Create an empty course owned by the professor creating it.
+         *
+         *     The professor picks a subject and question types; the capabilities are worked out from the
+         *     types and stored with them (ADR-054).
+         */
+        post: operations["create_course_api_courses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Courses Overview
+         * @description The course list's dashboard: each of the professor's courses, and recent activity.
+         */
+        get: operations["courses_overview_api_courses_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Assessment Catalog
+         * @description Subjects, question types and capabilities, for choosing what a new course assesses.
+         */
+        get: operations["assessment_catalog_api_courses_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Course */
+        get: operations["get_course_api_courses__course_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Course
+         * @description Rename a course, change its description, or change the question types it allows.
+         */
+        patch: operations["update_course_api_courses__course_id__patch"];
         trace?: never;
     };
     "/api/books": {
@@ -122,7 +300,7 @@ export interface paths {
         };
         /**
          * List Books
-         * @description Every imported book, newest first.
+         * @description Every imported book in the course, newest first.
          *
          *     ``usable_only`` restricts the list to books that have sections to generate
          *     from, which is what a generation form needs.
@@ -131,7 +309,11 @@ export interface paths {
         put?: never;
         /**
          * Import Book
-         * @description Validate and import an uploaded book JSON document.
+         * @description Check an uploaded book document, store it, and import it as a background job.
+         *
+         *     The type, the size, a JSON document's structure and whether a PDF opens are
+         *     checked here, so the professor still sees those refusals in the import dialog.
+         *     Extracting a PDF's text is :func:`run_book_import`'s, after the ``202``.
          *
          *     Reading the spooled file synchronously is safe here: the route runs in a
          *     worker thread, so it does not block the event loop.
@@ -143,24 +325,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/books/document-guide": {
+    "/api/books/youtube": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Document Guide
-         * @description What a valid book document is, and the prompt that produces one.
-         *
-         *     Rendered from the ingestion contract rather than written out here, so a
-         *     client cannot describe a document this application would refuse. The prompt
-         *     is advisory: it grants nothing, and every upload is still validated in full.
-         */
-        get: operations["document_guide_api_books_document_guide_get"];
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Import Youtube
+         * @description Import a YouTube video's transcript as timestamped chunks; the video is never downloaded.
+         *
+         *     A ``422`` with code ``transcript_unavailable`` means the fetch failed and nothing was
+         *     stored: send the same request again with ``transcript`` pasted. The same video again
+         *     returns the source already imported; a different pasted transcript becomes its next version.
+         */
+        post: operations["import_youtube_api_books_youtube_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Book Version
+         * @description Re-import a book's file as its next chunk version, as a background job.
+         *
+         *     The same file again changes nothing. A changed one adds a version and makes it
+         *     current; the earlier version's chunks stay, so questions citing them still resolve.
+         */
+        post: operations["import_book_version_api_books__book_id__versions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -176,14 +381,14 @@ export interface paths {
         };
         /**
          * Get Book
-         * @description One book: import status, warnings and its chapter/section hierarchy.
+         * @description One book: import status, warnings, and how many chunks its current version has.
          */
         get: operations["get_book_api_books__book_id__get"];
         put?: never;
         post?: never;
         /**
          * Delete Book
-         * @description Delete a book, its structure and its retained document.
+         * @description Delete a book, its chunks and its retained document.
          *
          *     Refuses with 409 while questions cite the book, naming how many. ``force``
          *     proceeds anyway; the questions are kept and their citations are stranded.
@@ -210,54 +415,14 @@ export interface paths {
          * @description The original PDF as uploaded, for in-browser rendering.
          *
          *     Only a book imported from a PDF (``SourceFormat.BOOK_PDF``) has a source
-         *     file worth serving back -- a book declared directly as structured JSON has
-         *     no PDF to render, even though it also retains its uploaded file.
+         *     file worth serving back -- a DOCX or PPTX (or an old JSON book) has no PDF
+         *     to render, even though it also retains its uploaded file.
          *
          *     Not a download: no ``filename`` is passed to ``FileResponse``, so no
          *     ``Content-Disposition: attachment`` header is sent, and a PDF-rendering
          *     client can fetch it inline.
          */
         get: operations["get_book_source_api_books__book_id__source_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/books/{book_id}/sections": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Sections
-         * @description Every section of one book in reading order, without section text.
-         */
-        get: operations["list_sections_api_books__book_id__sections_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/books/{book_id}/sections/{section_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Section
-         * @description One section's verbatim text plus the citation that makes it traceable.
-         */
-        get: operations["get_section_api_books__book_id__sections__section_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -275,7 +440,7 @@ export interface paths {
         };
         /**
          * List Versions
-         * @description Every curriculum version, newest first, plus which one is approved.
+         * @description Every curriculum version in the course, newest first, plus which one is approved.
          */
         get: operations["list_versions_api_curriculum_versions_get"];
         put?: never;
@@ -284,6 +449,29 @@ export interface paths {
          * @description Validate and import a fixed Topic -> Subtopic taxonomy document.
          */
         post: operations["import_taxonomy_api_curriculum_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/curriculum/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft With Ai
+         * @description Ask the LLM to propose a taxonomy from what the professor wrote. Nothing is saved.
+         *
+         *     The draft opens in the builder; it becomes a curriculum version only when the
+         *     professor saves it there (ADR-052).
+         */
+        post: operations["draft_with_ai_api_curriculum_drafts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -323,7 +511,7 @@ export interface paths {
         };
         /**
          * Get Approved
-         * @description The curriculum version question generation is allowed to use.
+         * @description The curriculum version question generation is allowed to use, in this course.
          */
         get: operations["get_approved_api_curriculum_approved_get"];
         put?: never;
@@ -402,7 +590,7 @@ export interface paths {
         put?: never;
         /**
          * Activate Version
-         * @description Make an already-approved curriculum version the live one again.
+         * @description Make an already-approved curriculum version the live one in its course again.
          */
         post: operations["activate_version_api_curriculum_versions__version_id__activate_post"];
         delete?: never;
@@ -469,8 +657,9 @@ export interface paths {
          * List Questions
          * @description The question bank, newest first, with counts by lifecycle status.
          *
-         *     ``status``, ``curriculum_version_id``, ``section_id`` and ``run_id`` narrow
-         *     the listing; without them nothing is hidden. The API does not filter by
+         *     ``status`` and ``topic_id`` (each repeatable: ``?status=a&status=b`` keeps
+         *     either), ``curriculum_version_id``, ``chunk_id`` and ``run_id`` narrow the
+         *     listing; without them nothing is hidden. The API does not filter by
          *     default even though the page does, because a caller reading the bank over
          *     JSON has no way to discover rows an unrequested default removed.
          *     ``status_counts``, ``curriculum_version_counts`` and ``total`` always
@@ -478,131 +667,6 @@ export interface paths {
          *     showing of what.
          */
         get: operations["list_questions_api_questions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Questions
-         * @description Generate and persist one question per selected source section.
-         *
-         *     Every spec is validated before the first model call, so an invalid id later
-         *     in the list cannot leave a partially generated batch behind.
-         */
-        post: operations["generate_questions_api_questions_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/{question_id}/regenerate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Regenerate Question
-         * @description Generate a new question from an existing one, with instructor feedback.
-         *
-         *     The source question is never modified: this returns a fresh row, grounded in
-         *     the same section, type and difficulty, with the feedback threaded into the
-         *     generation prompt. It writes no review and triggers no instruction relearn --
-         *     that is the review endpoint's job, not this one.
-         */
-        post: operations["regenerate_question_api_questions__question_id__regenerate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/batch-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Batch Plan
-         * @description Compile a per-chunk spec sheet into the questions it would generate (ADR-044).
-         *
-         *     Read-only and free: it makes no model call and touches no row, so a professor
-         *     can price a spec sheet and revise it as often as they like. The compilation
-         *     lives here rather than in either UI because the rule that decides which format
-         *     each question gets must not be restated by a client (ADR-027).
-         */
-        post: operations["batch_plan_api_questions_batch_plan_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/generate-batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Batch
-         * @description Generate the questions a per-chunk spec sheet asks for (ADR-044).
-         *
-         *     One chunk may produce several questions, at several difficulties, in several
-         *     formats — which is what separates this from ``/generate``, where a run carries
-         *     one difficulty and one format for every section in it.
-         *
-         *     The run is synchronous: each question costs one generation call plus one judge
-         *     call per metric, made in sequence. A large sheet is therefore a long request,
-         *     and the console warns before submitting one.
-         */
-        post: operations["generate_batch_api_questions_generate_batch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/questions/generation-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Generation Plan
-         * @description What generating from this selection would produce, before it runs.
-         *
-         *     Read-only and free: it makes no model call, so a professor can price a run
-         *     and revise it as often as they like. The arithmetic lives here rather than in
-         *     the template because the page is only one client of it (ADR-027).
-         */
-        get: operations["generation_plan_api_questions_generation_plan_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -659,6 +723,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/generation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Generation Run
+         * @description Queue a run of one target kind, or with ``dry_run`` plan it for free.
+         *
+         *     Everything that can be refused is checked before the ``202``, as on the old routes.
+         */
+        post: operations["start_generation_run_api_generation_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/questions/{question_id}/review": {
         parameters: {
             query?: never;
@@ -670,7 +756,7 @@ export interface paths {
         put?: never;
         /**
          * Create Review
-         * @description Record a professor verdict, then act on the cell it lands in (ADR-037).
+         * @description Record a professor verdict and the cell it lands in (ADR-037). No model call.
          */
         post: operations["create_review_api_questions__question_id__review_post"];
         delete?: never;
@@ -728,11 +814,7 @@ export interface paths {
         };
         /**
          * List Instructions
-         * @description Every question type, with whatever has been learned for it.
-         *
-         *     Types with nothing learned are listed too, carrying the shipped instruction
-         *     and a review count -- that is how a professor sees which types have enough
-         *     feedback to be worth refreshing.
+         * @description Every built question type, with the instruction its generator receives now.
          */
         get: operations["list_instructions_api_instructions_get"];
         put?: never;
@@ -743,61 +825,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/instructions/{question_type}": {
+    "/api/guidelines": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Guidelines
+         * @description The course subject's pending and active guidelines, oldest first.
+         */
+        get: operations["list_guidelines_api_guidelines_get"];
         put?: never;
         post?: never;
-        /**
-         * Delete Instruction
-         * @description Delete one learned row so this type falls back to its shipped instruction.
-         */
-        delete: operations["delete_instruction_api_instructions__question_type__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/instructions/{question_type}/rules/{rule_index}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Rule
-         * @description Delete one learned rule and re-render the instruction from what remains.
-         */
-        delete: operations["delete_rule_api_instructions__question_type__rules__rule_index__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/instructions/{question_type}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh
-         * @description Re-learn one type's instruction from its reviews. Requires a configured LLM.
-         */
-        post: operations["refresh_api_instructions__question_type__refresh_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{guideline_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm
+         * @description The professor vouches for a guideline: it is sent from the next generation.
+         *
+         *     An output-contract guideline stays refused even when confirmed.
+         */
+        post: operations["confirm_api_guidelines__guideline_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{guideline_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete
+         * @description Retire a guideline: never sent again, and the distiller no longer sees it.
+         */
+        delete: operations["delete_api_guidelines__guideline_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -812,9 +896,32 @@ export interface paths {
         };
         /**
          * List Judge Prompts
-         * @description All four judges, each with the text it runs and the text it shipped with.
+         * @description All four judges of this course's subject: the text each runs and the text it shipped with.
          */
         get: operations["list_judge_prompts_api_judge_prompts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/judge-prompts/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Judge Stats
+         * @description Agreement per judge and trust per style under the panel in force now.
+         *
+         *     Styles are this course's; the learning pause is the subject's, because a rewrite renames
+         *     the panel for every course that shares these judges.
+         */
+        get: operations["judge_stats_api_judge_prompts_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -864,11 +971,31 @@ export interface paths {
          * Refresh
          * @description Re-learn one judge's prompt from the questions it got wrong (ADR-039).
          *
-         *     The mirror of ``POST /api/instructions/{question_type}/refresh``. Reads only
+         *     Manual, as the generator's retired refresh was (m5 moved it to guidelines). Reads only
          *     the disagreements this judge is named in, minus the held-out third, so the
          *     reserved questions stay available to score the result.
          */
         post: operations["refresh_api_judge_prompts__metric__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/judges/scorecard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Judge Scorecard
+         * @description Agreement, κ, Wilson 95% range, misses, false alarms, flag rate, retries and drops.
+         */
+        get: operations["judge_scorecard_api_judges_scorecard_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -884,7 +1011,7 @@ export interface paths {
         };
         /**
          * Calibration Results
-         * @description Judge/professor agreement over every reviewed, judged question.
+         * @description Judge/professor agreement over the course's reviewed, judged questions.
          */
         get: operations["calibration_results_api_calibration_results_get"];
         put?: never;
@@ -987,33 +1114,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/coverage/generation-runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Generation Run
-         * @description Generate one grounded question for each selected coverage gap.
-         *
-         *     For every target: retrieve the top book section that teaches its subtopic,
-         *     generate one multiple-choice question from that section at the requested
-         *     difficulty, and report what the generator claimed it wrote for. A target
-         *     with no confident section is skipped and the run continues; a provider
-         *     failure on one target is reported beside the questions the run did produce
-         *     (ADR-032). The new questions land in the review queue with no extra step.
-         */
-        post: operations["start_generation_run_api_coverage_generation_runs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/question-sets": {
         parameters: {
             query?: never;
@@ -1026,7 +1126,7 @@ export interface paths {
         put?: never;
         /**
          * Create Set
-         * @description Freeze every approved question of the approved curriculum under a name.
+         * @description Freeze every approved question of the course's approved curriculum under a name.
          */
         post: operations["create_set_api_question_sets_post"];
         delete?: never;
@@ -1035,7 +1135,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/question-sets/prod/sync": {
+    "/api/question-sets/taxonomy-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Taxonomy Links
+         * @description Every taxonomy in the course with its classroom link's current snapshot, if any.
+         *
+         *     One call for the whole list, so the Classrooms page does not ask once per taxonomy.
+         */
+        get: operations["list_taxonomy_links_api_question_sets_taxonomy_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets/taxonomy/{curriculum_version_id}/sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -1045,17 +1167,20 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Sync Prod Set
-         * @description Freeze the approved bank now and repoint the stable prod classroom link.
+         * Sync Taxonomy Set
+         * @description Freeze this taxonomy's approved questions and point its classroom link at them.
+         *
+         *     Each taxonomy has its own stable link (``/students/join?taxonomy={id}``), so
+         *     any taxonomy can be taught, not only the selected one.
          */
-        post: operations["sync_prod_set_api_question_sets_prod_sync_post"];
+        post: operations["sync_taxonomy_set_api_question_sets_taxonomy__curriculum_version_id__sync_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/retrieval/sections": {
+    "/api/chunks": {
         parameters: {
             query?: never;
             header?: never;
@@ -1063,12 +1188,630 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Retrieve Sections
-         * @description Rank sections for a query or a subtopic. Exactly one of the two is required.
+         * List Chunks
+         * @description A book's current chunks in reading order, or just those covering one page.
          */
-        get: operations["retrieve_sections_api_retrieval_sections_get"];
+        get: operations["list_chunks_api_chunks_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunks/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Chunks
+         * @description Rank the course's current chunks for a query or a subtopic. Exactly one is required.
+         *
+         *     Embeds any chunk still missing a vector in the configured model first.
+         */
+        get: operations["search_chunks_api_chunks_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunks/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Chunk Outline
+         * @description A book's current chunks without their text, each with the questions it has produced.
+         *
+         *     What a chunk picker lists; grouping by heading is the client's (ADR-066).
+         */
+        get: operations["chunk_outline_api_chunks_outline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunks/{chunk_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Chunk
+         * @description One chunk of any version: its text plus the citation that makes it traceable.
+         */
+        get: operations["get_chunk_api_chunks__chunk_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/styles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Styles
+         * @description The styles of the course's subject and the course's own; another ``subject``'s library.
+         */
+        get: operations["list_styles_api_styles_get"];
+        put?: never;
+        /**
+         * Create Course Style
+         * @description Add a style to this course only. It must pass the library's CI checks.
+         */
+        post: operations["create_course_style_api_styles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/styles/{style_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Style
+         * @description One style as a library file, ready for ``styles/<subject>/<id>.yaml`` in a PR.
+         */
+        get: operations["export_style_api_styles__style_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest
+         * @description AI-suggested styles per subtopic and a target per cell. Persists nothing.
+         */
+        post: operations["suggest_api_setup_suggest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current Setup
+         * @description The newest saved setup of a taxonomy, with its newest round; ``setup`` is null if none.
+         */
+        get: operations["current_setup_api_setup_get"];
+        put?: never;
+        /**
+         * Save Setup
+         * @description Save the approved setup and start round 1 in the background.
+         */
+        post: operations["save_setup_api_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds/{round_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Round
+         * @description One round's status and progress counters.
+         */
+        get: operations["get_round_api_rounds__round_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/custom-judges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Custom Judges
+         * @description Every custom judge of a taxonomy, enabled or not, oldest first.
+         */
+        get: operations["list_custom_judges_api_custom_judges_get"];
+        put?: never;
+        /**
+         * Create Custom Judge
+         * @description Add a rule. A ``pattern`` rule must carry a compilable ``pattern``.
+         */
+        post: operations["create_custom_judge_api_custom_judges_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/custom-judges/{judge_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Custom Judge
+         * @description Change a rule's text, kind, pattern, or enabled flag.
+         */
+        patch: operations["update_custom_judge_api_custom_judges__judge_id__patch"];
+        trace?: never;
+    };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description Recent and running jobs of the request's course, newest first.
+         */
+        get: operations["list_jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Job
+         * @description Stop a queued or running job. A queued one ends now; a running one after its question.
+         *
+         *     Judge runs cannot be stopped: the provider runs a submitted batch to the end.
+         */
+        post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Job
+         * @description Start a new job for what this one did not finish (see ``retry_label``).
+         *
+         *     Takes no embedder: building one makes a provider client, which a bulk or judge retry
+         *     never needs. A coverage retry's job builds the default one when it runs.
+         */
+        post: operations["retry_job_api_jobs__job_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Settings */
+        get: operations["read_settings_api_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Route
+         * @description Make a provider the default every role follows unless it names its own.
+         *
+         *     No Test is asked for, unlike a role save: the provider was tested when it was set up, and
+         *     switching back is one click. A provider without a URL and key is refused, OpenRouter aside.
+         */
+        put: operations["set_route_api_settings_route_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Provider Settings
+         * @description Save a provider's URL, key and default model, after one test call proves they work.
+         *
+         *     Nothing is saved when the call fails; the provider's own message comes back instead.
+         */
+        put: operations["save_provider_settings_api_settings_providers__provider__put"];
+        post?: never;
+        /**
+         * Reset Provider Settings
+         * @description Forget a provider's saved values; whatever ``.env`` has for it applies again.
+         */
+        delete: operations["reset_provider_settings_api_settings_providers__provider__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Provider Models
+         * @description The provider's model ids for the picker; any other id can still be typed.
+         *
+         *     Azure lists deployments only through its management API, so it has no list here.
+         */
+        get: operations["provider_models_api_settings_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/{role}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Settings
+         * @description One minimal call with the candidate configuration. Saves nothing.
+         */
+        post: operations["test_settings_api_settings__role__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Settings */
+        put: operations["save_settings_api_settings__role__put"];
+        post?: never;
+        /**
+         * Reset Settings
+         * @description Use ``.env`` for every value again. For embeddings on another model, via a switch.
+         */
+        delete: operations["reset_settings_api_settings__role__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recipes
+         * @description The course subject's library recipes, then the course's own (recipe builder, ids
+         *     ``exp.``), with the taxonomy's decisions when ``curriculum_version_id`` is given.
+         */
+        get: operations["list_recipes_api_tutorial_recipes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-recipes/{recipe_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Decide
+         * @description Approve or reject a recipe for a taxonomy: its bank blocks there follow, and so do the
+         *     blocks it makes later. Rejected blocks are hidden; only approved ones are frozen.
+         */
+        put: operations["decide_api_tutorial_recipes__recipe_id__decision_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Blocks
+         * @description A subtopic's or a taxonomy's bank blocks, newest first, optionally of one recipe.
+         *
+         *     Rejected blocks are hidden, and so are the copies frozen with a question set.
+         */
+        get: operations["list_blocks_api_tutorial_blocks_get"];
+        put?: never;
+        /**
+         * Create Block
+         * @description Generate one block. A block that stayed invalid comes back ``failed`` with ``error``.
+         */
+        post: operations["create_block_api_tutorial_blocks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-pregeneration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pregenerate
+         * @description Queue every block the taxonomy's bank is missing, or with ``dry_run`` price it for free.
+         *
+         *     Progress and the outcome are in ``GET /api/jobs``, like a generation run.
+         */
+        post: operations["pregenerate_api_tutorial_pregeneration_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tutorial-blocks/{block_id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Retire Block
+         * @description Stop showing one bank block: it is rejected and hidden, and its recipe is not written
+         *     again for that subtopic and level by live generation. Copies frozen with a set and failed
+         *     blocks cannot be retired.
+         */
+        put: operations["retire_block_api_tutorial_blocks__block_id__retire_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recipes */
+        get: operations["list_recipes_api_experimental_recipes_get"];
+        put?: never;
+        /** Create */
+        post: operations["create_api_experimental_recipes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft
+         * @description Draft a recipe from the professor's words, or revise ``current_yaml``. Saves nothing.
+         */
+        post: operations["draft_api_experimental_recipes_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes/try": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try Recipe
+         * @description Write one block of the recipe for a subtopic, without saving the block or the recipe.
+         */
+        post: operations["try_recipe_api_experimental_recipes_try_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experimental/recipes/{row_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update */
+        put: operations["update_api_experimental_recipes__row_id__put"];
+        post?: never;
+        /** Delete */
+        delete: operations["delete_api_experimental_recipes__row_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Agent
+         * @description Run the agent on an AG-UI ``RunAgentInput`` and stream its events back.
+         */
+        post: operations["run_agent_api_agent_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1087,6 +1830,28 @@ export interface paths {
          * @description The current production classroom snapshot behind the stable join link.
          */
         get: operations["get_prod_classroom_api_question_sets_prod_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/question-sets/taxonomy/{curriculum_version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Taxonomy Classroom
+         * @description The snapshot behind a taxonomy's classroom link; public, like the join page.
+         *
+         *     404 until the professor has created the link for this taxonomy.
+         */
+        get: operations["get_taxonomy_classroom_api_question_sets_taxonomy__curriculum_version_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1136,6 +1901,9 @@ export interface paths {
          *     set built from that taxonomy (see
          *     :meth:`TrainingSessionRepository.student_ids_for_curriculum_version`) -- a
          *     student is never tagged with a taxonomy directly, only a frozen set is.
+         *
+         *     ``sort``/``order`` order the whole matched set before it is paged, so a
+         *     sorted column is sorted across pages, not just within one.
          */
         get: operations["list_students_api_students_get"];
         put?: never;
@@ -1240,13 +2008,33 @@ export interface paths {
         };
         /**
          * Student Progress
-         * @description Measured mastery, weakness and history for one learner.
-         *
-         *     Only what has been scored appears. State rows are created on first touch
-         *     (ADR-041), so a subtopic nobody has been asked about is absent rather than
-         *     shown at a starting value it was never actually assigned.
+         * @description Measured mastery, weakness and history for one learner (instructor view).
          */
         get: operations["student_progress_api_students__student_id__progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Training Session Progress
+         * @description The learner's own progress, for the student page.
+         *
+         *     Keyed by the run, like every other student-page call (``/next``, ``/answer``): the student
+         *     has no instructor login, so ``/students/{id}/progress`` answered 401 and the page's progress
+         *     sidebar never loaded.
+         */
+        get: operations["training_session_progress_api_training_sessions__training_session_id__progress_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1278,6 +2066,8 @@ export interface paths {
          *     corrupt the mastery estimate (ADR-041) -- and an accidental double-join (a
          *     second tab, a re-followed link) is a routine event, not an edge case. The
          *     client recovers by resuming the session the error names.
+         *
+         *     Only the learner holding the token may start a run, and only for themselves (ADR-060).
          */
         post: operations["start_training_session_api_training_sessions_post"];
         delete?: never;
@@ -1319,10 +2109,34 @@ export interface paths {
          *     outstanding: asking again returns the same one rather than drawing another.
          *     A GET is still the honest verb, because what a client wants here is the
          *     session's current question.
+         *
+         *     When the bank has nothing new for this student, a question is generated live
+         *     (:mod:`app.generation.live`) and this answers ``question_generating`` until it is ready;
+         *     the client keeps polling.
          */
         get: operations["next_question_api_training_sessions__training_session_id__next_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training-sessions/{training_session_id}/live-question": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Live Question
+         * @description ``/next``, but generate even right after a failed attempt: the student asked to retry.
+         */
+        post: operations["request_live_question_api_training_sessions__training_session_id__live_question_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1366,6 +2180,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/attempts/{attempt_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Attempt
+         * @description The answered question with its answer key, for the student's result card.
+         *
+         *     Only once *this* attempt has been answered: before that the key would answer the question
+         *     being asked. The student page used the instructor-only ``/questions/{id}`` and never got past
+         *     "Loading the correct answer".
+         */
+        get: operations["review_attempt_api_attempts__attempt_id__review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/training-sessions/{training_session_id}/end": {
         parameters: {
             query?: never;
@@ -1383,6 +2221,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/evaluation/rerun-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rerun Preview
+         * @description What "Run judges" would do now: how many questions, or why it can't run.
+         */
+        get: operations["rerun_preview_api_evaluation_rerun_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evaluation/batch-runs": {
         parameters: {
             query?: never;
@@ -1392,7 +2250,7 @@ export interface paths {
         };
         /**
          * List Batch Runs
-         * @description Recent re-runs, newest first.
+         * @description The course's recent re-runs, newest first.
          */
         get: operations["list_batch_runs_api_evaluation_batch_runs_get"];
         put?: never;
@@ -1481,6 +2339,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivityEventOut */
+        ActivityEventOut: {
+            /** Kind */
+            kind: string;
+            /** Text */
+            text: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Course Id */
+            course_id: number | null;
+            /** Course Name */
+            course_name: string | null;
+        };
         /**
          * AgreementTrendResponse
          * @description Agreement panel by panel, oldest first (ADR-041).
@@ -1526,6 +2400,22 @@ export interface components {
             mastery_before: number | null;
             /** Mastery After */
             mastery_after: number | null;
+            /** Tutorial Blocks */
+            tutorial_blocks?: components["schemas"]["StudentTutorialBlockOut"][];
+        };
+        /**
+         * AssessmentCatalogResponse
+         * @description What a course can assess: the registry option D's course creation reads.
+         */
+        AssessmentCatalogResponse: {
+            /** Capabilities */
+            capabilities: components["schemas"]["CapabilityOut"][];
+            /** Question Types */
+            question_types: components["schemas"]["QuestionTypeOut"][];
+            /** Groups */
+            groups: components["schemas"]["QuestionTypeGroupOut"][];
+            /** Subjects */
+            subjects: components["schemas"]["SubjectPresetOut"][];
         };
         /**
          * AttemptOut
@@ -1560,37 +2450,6 @@ export interface components {
             created_at: string;
             /** Answered At */
             answered_at: string | null;
-        };
-        /**
-         * BatchPlanResponse
-         * @description The compiled plan for a spec sheet. Read-only: no question is generated.
-         */
-        BatchPlanResponse: {
-            /** Planned */
-            planned: components["schemas"]["PlannedQuestionOut"][];
-            totals: components["schemas"]["BatchPlanTotals"];
-        };
-        /**
-         * BatchPlanTotals
-         * @description What a compiled spec sheet costs, before any model call is made.
-         */
-        BatchPlanTotals: {
-            /** Chunks Specified */
-            chunks_specified: number;
-            /** Questions To Create */
-            questions_to_create: number;
-            /** Generation Calls */
-            generation_calls: number;
-            /** Judge Calls */
-            judge_calls: number;
-            /** Easy */
-            easy: number;
-            /** Medium */
-            medium: number;
-            /** Hard */
-            hard: number;
-            /** Identical Repeats */
-            identical_repeats: number;
         };
         /** BatchRunListResponse */
         BatchRunListResponse: {
@@ -1633,10 +2492,43 @@ export interface components {
              */
             title: string;
         };
+        /** Body_import_book_version_api_books__book_id__versions_post */
+        Body_import_book_version_api_books__book_id__versions_post: {
+            /** File */
+            file: string;
+        };
         /** Body_import_taxonomy_api_curriculum_versions_post */
         Body_import_taxonomy_api_curriculum_versions_post: {
             /** File */
             file: string;
+        };
+        /** Body_reset_forgot_password_api_auth_forgot_password_post */
+        Body_reset_forgot_password_api_auth_forgot_password_post: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** Body_reset_reset_password_api_auth_reset_password_post */
+        Body_reset_reset_password_api_auth_reset_password_post: {
+            /** Token */
+            token: string;
+            /** Password */
+            password: string;
+        };
+        /** Body_verify_request_token_api_auth_request_verify_token_post */
+        Body_verify_request_token_api_auth_request_verify_token_post: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** Body_verify_verify_api_auth_verify_post */
+        Body_verify_verify_api_auth_verify_post: {
+            /** Token */
+            token: string;
         };
         /**
          * BookDeletion
@@ -1650,14 +2542,17 @@ export interface components {
         };
         /**
          * BookDetail
-         * @description One book with its chapter/section hierarchy and import warnings.
+         * @description One book with its chunk count and import warnings.
          */
         BookDetail: {
             book: components["schemas"]["BookSummary"];
-            /** Section Count */
-            section_count: number;
-            /** Chapters */
-            chapters: components["schemas"]["ChapterOut"][];
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /** Current Version */
+            current_version?: number | null;
             /** Warnings */
             warnings: components["schemas"]["ExtractionWarning"][];
             /**
@@ -1667,30 +2562,11 @@ export interface components {
             grounded_question_count: number;
         };
         /**
-         * BookDocumentGuide
-         * @description Everything a professor needs to obtain a valid book document.
-         *
-         *     The prompt and the example are rendered from the ingestion contract itself,
-         *     so a client that shows them cannot describe a document the validator would
-         *     refuse.
+         * BookImportResult
+         * @description What a book import job produced: the book, as ``POST /books`` used to return it.
          */
-        BookDocumentGuide: {
-            /** Schema Version */
-            schema_version: string;
-            /** Supported Extensions */
-            supported_extensions: string[];
-            /** Max Upload Mb */
-            max_upload_mb: number;
-            /** Prompt */
-            prompt: string;
-            /** Example Json */
-            example_json: string;
-            /** Structure Sources */
-            structure_sources: components["schemas"]["VocabularyTermOut"][];
-            /** Warning Codes */
-            warning_codes: components["schemas"]["VocabularyTermOut"][];
-            /** Warning Severities */
-            warning_severities: components["schemas"]["VocabularyTermOut"][];
+        BookImportResult: {
+            book: components["schemas"]["BookSummary"];
         };
         /** BookListResponse */
         BookListResponse: {
@@ -1763,6 +2639,11 @@ export interface components {
             created_at: string;
             /** Imported At */
             imported_at: string | null;
+            /** Video Id */
+            video_id?: string | null;
+            video_availability?: components["schemas"]["VideoAvailability"] | null;
+            /** Availability Checked At */
+            availability_checked_at?: string | null;
         };
         /**
          * CalibrationLabel
@@ -1850,33 +2731,31 @@ export interface components {
             /** Difficulty Confusions */
             difficulty_confusions: components["schemas"]["DifficultyConfusion"][];
         };
-        /**
-         * ChapterOut
-         * @description One chapter and the sections beneath it.
-         */
-        ChapterOut: {
+        /** CapabilityOut */
+        CapabilityOut: {
             /** Id */
-            id: number;
-            /** Book Id */
-            book_id: number;
-            /** Number */
-            number: string | null;
-            /** Title */
-            title: string | null;
-            /** Position */
-            position: number;
-            /** Start Page */
-            start_page: number | null;
-            /** End Page */
-            end_page: number | null;
-            /** Location Label */
-            location_label: string | null;
-            /** Is Unlabelled */
-            is_unlabelled: boolean;
-            structure_source: components["schemas"]["StructureSource"];
-            structure_confidence: components["schemas"]["StructureConfidence"];
-            /** Sections */
-            sections: components["schemas"]["SectionSummary"][];
+            id: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Deterministic */
+            deterministic: boolean;
+            /** Built */
+            built: boolean;
+        };
+        /**
+         * CellTarget
+         * @description How many approved questions one subtopic x difficulty cell should reach.
+         *
+         *     Hard may be 0 when the lesson teaches one idea. Easy and medium stay at least one.
+         */
+        CellTarget: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            difficulty: components["schemas"]["Difficulty"];
+            /** Target */
+            target: number;
         };
         /**
          * ChunkGenerationSpec
@@ -1888,8 +2767,8 @@ export interface components {
          *     still two questions.
          */
         ChunkGenerationSpec: {
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             /**
              * Easy
              * @default 0
@@ -1907,6 +2786,97 @@ export interface components {
             hard: number;
             /** Question Types */
             question_types?: components["schemas"]["QuestionType"][];
+        };
+        /** ChunkListResponse */
+        ChunkListResponse: {
+            /** Chunks */
+            chunks: components["schemas"]["ChunkOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ChunkOut
+         * @description One chunk of a book version, with the citation that makes it traceable.
+         */
+        ChunkOut: {
+            /** Id */
+            id: string;
+            /** Book Id */
+            book_id: number;
+            /** Book Version */
+            book_version: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Page Start */
+            page_start: number | null;
+            /** Page End */
+            page_end: number | null;
+            /** Heading Path */
+            heading_path: string[];
+            /** Citation */
+            citation: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ChunkOutlineEntry
+         * @description One chunk without its text, and how many questions it has already produced.
+         */
+        ChunkOutlineEntry: {
+            chunk: components["schemas"]["ChunkSummary"];
+            /** Existing Question Count */
+            existing_question_count: number;
+        };
+        /**
+         * ChunkOutlineResponse
+         * @description ``GET /chunks/outline``: a book's current chunks in reading order, for a chunk picker.
+         */
+        ChunkOutlineResponse: {
+            book: components["schemas"]["BookSummary"];
+            /** Chunks */
+            chunks: components["schemas"]["ChunkOutlineEntry"][];
+        };
+        /**
+         * ChunkSummary
+         * @description One chunk's identity and location, without its text.
+         */
+        ChunkSummary: {
+            /** Id */
+            id: string;
+            /** Book Id */
+            book_id: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Page Start */
+            page_start: number | null;
+            /** Page End */
+            page_end: number | null;
+            /** Heading Path */
+            heading_path: string[];
+            /** Label */
+            label: string;
+            /** Location Label */
+            location_label: string | null;
+            /** Char Count */
+            char_count: number;
+        };
+        /**
+         * ChunksRunTarget
+         * @description Questions from chosen chunks: a spec sheet, or one instruction for a whole book.
+         */
+        ChunksRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "chunks";
+            /** Chunks */
+            chunks?: components["schemas"]["ChunkGenerationSpec"][];
+            whole_book?: components["schemas"]["WholeBookSpec"] | null;
+            /** Curriculum Version Id */
+            curriculum_version_id?: number | null;
+            /** Seed */
+            seed?: string | null;
         };
         /**
          * ClaimViolation
@@ -2011,8 +2981,6 @@ export interface components {
             llm_model: string;
             /** Embedding Model */
             embedding_model: string;
-            /** Book Schema Version */
-            book_schema_version: string;
             /** Taxonomy Schema Version */
             taxonomy_schema_version: string;
             /** Supported Book Extensions */
@@ -2033,6 +3001,12 @@ export interface components {
             judge_calls_per_question: number;
         };
         /**
+         * ContentKind
+         * @description What a subtopic's material is mostly about; the composer matches it to ``fits``.
+         * @enum {string}
+         */
+        ContentKind: "code" | "concept" | "process" | "misconception";
+        /**
          * CountsResponse
          * @description Dashboard counts, one per section.
          */
@@ -2049,6 +3023,107 @@ export interface components {
             learned_instructions: number;
             /** Students */
             students: number;
+        };
+        /** CourseCreate */
+        CourseCreate: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Subject */
+            subject?: string | null;
+            /** Question Types */
+            question_types?: string[] | null;
+        };
+        /** CourseListResponse */
+        CourseListResponse: {
+            /** Courses */
+            courses: components["schemas"]["CourseOut"][];
+        };
+        /**
+         * CourseOut
+         * @description One course, with how much has been built in it so far.
+         */
+        CourseOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Book Count
+             * @default 0
+             */
+            book_count: number;
+            /**
+             * Curriculum Version Count
+             * @default 0
+             */
+            curriculum_version_count: number;
+            /**
+             * Question Count
+             * @default 0
+             */
+            question_count: number;
+            /** Subject */
+            subject: string;
+            /** Question Types */
+            question_types: string[];
+            /** Capabilities */
+            capabilities: string[];
+        };
+        /**
+         * CourseProgressOut
+         * @description One course card on the course list: what is built, and what is next.
+         */
+        CourseProgressOut: {
+            course: components["schemas"]["CourseOut"];
+            /** Owner Email */
+            owner_email: string | null;
+            /** Owned By You */
+            owned_by_you: boolean;
+            /** Proposed Curriculum Count */
+            proposed_curriculum_count: number;
+            /** Approved Question Count */
+            approved_question_count: number;
+            /** Awaiting Review Count */
+            awaiting_review_count: number;
+            /** Question Set Count */
+            question_set_count: number;
+            /** Student Count */
+            student_count: number;
+            /** Coverage */
+            coverage: number | null;
+            /** Avg Mastery */
+            avg_mastery: number | null;
+            most_missed: components["schemas"]["MostMissedOut"] | null;
+            /** Setup */
+            setup: components["schemas"]["SetupStepOut"][];
+        };
+        /**
+         * CourseUpdate
+         * @description Omitted fields are left as they are.
+         */
+        CourseUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Question Types */
+            question_types?: string[] | null;
+        };
+        /** CoursesOverviewResponse */
+        CoursesOverviewResponse: {
+            /** Courses */
+            courses: components["schemas"]["CourseProgressOut"][];
+            /** Activity */
+            activity: components["schemas"]["ActivityEventOut"][];
         };
         /**
          * CoverageCell
@@ -2124,6 +3199,33 @@ export interface components {
             difficulty: components["schemas"]["Difficulty"];
         };
         /**
+         * CreateCourseStyleRequest
+         * @description ``POST /api/styles``: one style in the library's YAML format (CONTRIBUTING-styles.md).
+         */
+        CreateCourseStyleRequest: {
+            /** Yaml */
+            yaml: string;
+        };
+        /**
+         * CreateCustomJudgeRequest
+         * @description ``POST /api/custom-judges``. ``pattern`` is required for a ``pattern`` rule.
+         */
+        CreateCustomJudgeRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Rule Text */
+            rule_text: string;
+            /** @default llm */
+            kind: components["schemas"]["CustomJudgeKind"];
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
          * CreateQuestionSetRequest
          * @description Freeze the currently approved questions under a name.
          */
@@ -2142,6 +3244,34 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * CurrentSetupResponse
+         * @description ``GET /api/setup``: the current setup of a taxonomy, ``None`` when never set up.
+         */
+        CurrentSetupResponse: {
+            setup: components["schemas"]["QuestionSetupOut"] | null;
+        };
+        /**
+         * CurrentUserOut
+         * @description ``/me``. A plain ``str`` email, unlike :class:`UserRead`: the seeded developer account's
+         *     ``dev@local.test`` is not a deliverable address and must still be readable.
+         */
+        CurrentUserOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Is Verified */
+            is_verified: boolean;
+            /**
+             * Is Superuser
+             * @default false
+             */
+            is_superuser: boolean;
         };
         /**
          * CurriculumItemLabelUpdate
@@ -2280,6 +3410,59 @@ export interface components {
             is_approved: boolean;
         };
         /**
+         * CustomJudgeKind
+         * @description How a professor-written rule judge checks a question.
+         *
+         *     ``LLM`` asks the model one yes/no question per rule; ``PATTERN`` is a deterministic
+         *     regex/AST check over the question's code, with no model call.
+         * @enum {string}
+         */
+        CustomJudgeKind: "llm" | "pattern";
+        /** CustomJudgeListResponse */
+        CustomJudgeListResponse: {
+            /** Judges */
+            judges: components["schemas"]["CustomJudgeOut"][];
+        };
+        /**
+         * CustomJudgeOut
+         * @description One custom rule judge.
+         */
+        CustomJudgeOut: {
+            /** Id */
+            id: number;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Rule Text */
+            rule_text: string;
+            kind: components["schemas"]["CustomJudgeKind"];
+            /** Pattern */
+            pattern: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * CustomJudgeResult
+         * @description What one rule said about one question.
+         */
+        CustomJudgeResult: {
+            /** Judge Id */
+            judge_id: number;
+            /** Rule Text */
+            rule_text: string;
+            kind: components["schemas"]["CustomJudgeKind"];
+            /** Passed */
+            passed: boolean | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
          * Difficulty
          * @description Question difficulty. Selected from student topic mastery.
          * @enum {string}
@@ -2343,6 +3526,27 @@ export interface components {
             message: string;
             /** Location */
             location?: string | null;
+        };
+        /**
+         * EmbeddingSwitchOut
+         * @description The latest embedding model switch (Task 43); the old model serves until it is done.
+         */
+        EmbeddingSwitchOut: {
+            /** Job Id */
+            job_id: string;
+            /** Model */
+            model: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Error */
+            error?: string | null;
         };
         /**
          * EnumOption
@@ -2424,6 +3628,136 @@ export interface components {
          */
         EvaluationTrigger: "generation" | "batch_rerun";
         /**
+         * ExampleOption
+         * @description One choice of a choice-type example.
+         */
+        ExampleOption: {
+            /** Text */
+            text: string;
+            /**
+             * Correct
+             * @default false
+             */
+            correct: boolean;
+        };
+        /**
+         * ExampleQuestion
+         * @description One worked example shown on a style card, answer key included.
+         *
+         *     Mirrors ``ExampleQuestion`` in ``frontend/src/app/experiments/question-setup/mock-types.ts``.
+         */
+        ExampleQuestion: {
+            /** Prompt */
+            prompt: string;
+            /** Code */
+            code?: string | null;
+            /** Options */
+            options?: components["schemas"]["ExampleOption"][];
+            /** Lines */
+            lines?: string[];
+            /** Answer */
+            answer?: string | null;
+            /** Tests */
+            tests?: number | null;
+            /** Solution */
+            solution?: string | null;
+            /** Test Cases */
+            test_cases?: components["schemas"]["ExampleTestCase"][];
+            /**
+             * Grounding
+             * @default
+             */
+            grounding: string;
+        };
+        /**
+         * ExampleTestCase
+         * @description One hidden test of a code example. Same shape as a generated question's test case
+         *     (``app.generation.schemas.ExecutableTestCase``), which this pure module cannot import.
+         */
+        ExampleTestCase: {
+            /**
+             * Stdin
+             * @default
+             */
+            stdin: string;
+            /** Stdout */
+            stdout?: string | null;
+            /** Assert */
+            assert?: string | null;
+        };
+        /** ExperimentalRecipeDraftOut */
+        ExperimentalRecipeDraftOut: {
+            /** Yaml */
+            yaml: string;
+            /** Problems */
+            problems: string[];
+            recipe: components["schemas"]["TutorialRecipe"] | null;
+        };
+        /**
+         * ExperimentalRecipeDraftRequest
+         * @description What the professor asks for; with ``current_yaml``, a revision of that recipe.
+         */
+        ExperimentalRecipeDraftRequest: {
+            /** Description */
+            description: string;
+            /** Current Yaml */
+            current_yaml?: string | null;
+        };
+        /**
+         * ExperimentalRecipeOut
+         * @description A recipe from the experimental recipe builder: its YAML and the fields a list shows.
+         */
+        ExperimentalRecipeOut: {
+            /** Id */
+            id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Yaml */
+            yaml: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            recipe: components["schemas"]["TutorialRecipe"];
+        };
+        /**
+         * ExperimentalRecipeTryOut
+         * @description One block written from the recipe, never saved. ``error`` when it stayed invalid.
+         */
+        ExperimentalRecipeTryOut: {
+            renderer: components["schemas"]["TutorialRenderer"];
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Chunk Ids */
+            chunk_ids: string[];
+            /** Error */
+            error: string | null;
+            /** Model */
+            model: string;
+        };
+        /** ExperimentalRecipeTryRequest */
+        ExperimentalRecipeTryRequest: {
+            /** Yaml */
+            yaml: string;
+            /** Subtopic Id */
+            subtopic_id: number;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+        };
+        /** ExperimentalRecipeYaml */
+        ExperimentalRecipeYaml: {
+            /** Yaml */
+            yaml: string;
+        };
+        /**
          * ExtractionWarning
          * @description One thing that went wrong, or could not be determined, during extraction.
          *
@@ -2453,7 +3787,7 @@ export interface components {
          * FailedRunTarget
          * @description A gap target whose generation call reached the provider and failed.
          *
-         *     The section was retrieved and the request was well formed; the model call
+         *     The chunk was retrieved and the request was well formed; the model call
          *     itself did not return a usable question. What the run already produced is
          *     kept (ADR-032), so this is reported beside ``generated`` rather than raised.
          */
@@ -2461,8 +3795,8 @@ export interface components {
             /** Subtopic Id */
             subtopic_id: number;
             difficulty: components["schemas"]["Difficulty"];
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             /** Error */
             error: string;
         };
@@ -2488,28 +3822,17 @@ export interface components {
             meaning: string;
         };
         /**
-         * FillGapsRequest
-         * @description The gaps a professor selected on the coverage page.
-         *
-         *     Deliberately a list of *targets*, not a question count. The generator picks
-         *     its own topic and subtopics from the chunk it is given (ADR-031), so asking
-         *     for "seven questions" would promise an aim the generator does not accept.
+         * GapsRunTarget
+         * @description One multiple-choice question per coverage gap (``POST /coverage/generation-runs``).
          */
-        FillGapsRequest: {
+        GapsRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "gaps";
             /** Targets */
             targets: components["schemas"]["CoverageTargetRef"][];
-        };
-        /**
-         * GenerateBatchRequest
-         * @description A per-chunk generation run: many chunks, each with its own instruction.
-         */
-        GenerateBatchRequest: {
-            /** Curriculum Version Id */
-            curriculum_version_id?: number | null;
-            /** Chunks */
-            chunks: components["schemas"]["ChunkGenerationSpec"][];
-            /** Seed */
-            seed?: string | null;
         };
         /**
          * GenerateBatchResponse
@@ -2529,47 +3852,24 @@ export interface components {
             planned: components["schemas"]["PlannedQuestionOut"][];
         };
         /**
-         * GenerateQuestionsRequest
-         * @description A generation request.
-         *
-         *     Exactly one source selection is required: either ``section_ids`` or
-         *     ``all_sections_of_book``. One question is generated per resolved section.
-         *
-         *     No topic or subtopic: the generator reads the section and classifies its own
-         *     question against the approved taxonomy (ADR-031).
+         * GenerateTutorialBlockRequest
+         * @description ``POST /api/tutorial-blocks``: generate one block of a recipe for a subtopic.
          */
-        GenerateQuestionsRequest: {
-            /** Curriculum Version Id */
-            curriculum_version_id?: number | null;
-            question_type: components["schemas"]["QuestionType"];
-            difficulty: components["schemas"]["Difficulty"];
-            /** Book Id */
-            book_id?: number | null;
-            /** Section Ids */
-            section_ids?: number[] | null;
-            /**
-             * All Sections Of Book
-             * @default false
-             */
-            all_sections_of_book: boolean;
-            /** Seed */
-            seed?: string | null;
-        };
-        /** GenerateQuestionsResponse */
-        GenerateQuestionsResponse: {
-            /** Created */
-            created: number;
-            /** Question Ids */
-            question_ids: number[];
-            /** Questions */
-            questions: components["schemas"]["QuestionSummary"][];
+        GenerateTutorialBlockRequest: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            /** Code */
+            code?: string | null;
         };
         /**
          * GeneratedRunQuestion
          * @description One question a generation run produced, and how its aim landed.
          *
          *     ``requested_subtopic_id`` is the gap the professor picked; ``claimed_*`` is
-         *     what the generator classified the question as after reading the section
+         *     what the generator classified the question as after reading the chunk
          *     (ADR-031). ``aim_matched`` is the two agreeing at the topic level -- reported,
          *     never used to filter, so a drift is visible in the review queue instead.
          */
@@ -2583,8 +3883,8 @@ export interface components {
             claimed_topic_id: number | null;
             /** Claimed Subtopic Ids */
             claimed_subtopic_ids: number[];
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             status: components["schemas"]["QuestionStatus"];
             /** Aim Matched */
             aim_matched: boolean;
@@ -2627,61 +3927,78 @@ export interface components {
             model?: string | null;
         };
         /**
-         * GenerationPlanChapter
-         * @description One chapter, and the candidate sections beneath it.
+         * GenerationRoundOut
+         * @description ``GET /api/rounds/{id}``: one round's status and progress.
          */
-        GenerationPlanChapter: {
+        GenerationRoundOut: {
             /** Id */
             id: number;
-            /** Label */
-            label: string;
-            /** Location Label */
-            location_label: string | null;
-            /** Sections */
-            sections: components["schemas"]["GenerationPlanSection"][];
+            /** Setup Id */
+            setup_id: number;
+            /** Number */
+            number: number;
+            status: components["schemas"]["RoundStatus"];
+            /** Requested */
+            requested: number;
+            /** Produced */
+            produced: number;
+            /** Dropped */
+            dropped: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /** Skip Reason */
+            skip_reason?: string | null;
+            /**
+             * Lessons Applied
+             * @default 0
+             */
+            lessons_applied: number;
+            /** Lessons Error */
+            lessons_error?: string | null;
+            /** Drift Warning */
+            drift_warning?: string | null;
+            /** First Attempt Passed */
+            first_attempt_passed?: number | null;
+            /** Saturated */
+            saturated?: string | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
         };
         /**
-         * GenerationPlanResponse
-         * @description The chunk plan: every candidate section, and the cost of the selection.
+         * GenerationRunPlan
+         * @description ``200`` for ``dry_run``: the planned questions and their cost. Nothing was run.
          */
-        GenerationPlanResponse: {
-            book: components["schemas"]["BookSummary"];
-            /** Chapters */
-            chapters: components["schemas"]["GenerationPlanChapter"][];
-            totals: components["schemas"]["GenerationPlanTotals"];
-            /** Blockers */
-            blockers: string[];
+        GenerationRunPlan: {
+            /** Kind */
+            kind: string;
+            /** Planned */
+            planned: components["schemas"]["PlannedRunQuestion"][];
+            totals: components["schemas"]["GenerationRunTotals"];
         };
         /**
-         * GenerationPlanSection
-         * @description One candidate source section, and what generating from it would mean.
+         * GenerationRunRequest
+         * @description ``POST /api/generation-runs``: one target kind per run (ADR-066).
          */
-        GenerationPlanSection: {
-            section: components["schemas"]["SectionSummary"];
-            /** Existing Question Count */
-            existing_question_count: number;
-            /** Selected */
-            selected: boolean;
-            /** Selectable */
-            selectable: boolean;
-        };
-        /**
-         * GenerationPlanTotals
-         * @description What the selected run costs, before any model call is made.
-         */
-        GenerationPlanTotals: {
-            /** Sections Available */
-            sections_available: number;
-            /** Sections Selected */
-            sections_selected: number;
-            /** Questions To Create */
-            questions_to_create: number;
-            /** Generation Calls */
-            generation_calls: number;
-            /** Judge Calls */
-            judge_calls: number;
-            /** Source Chars */
-            source_chars: number;
+        GenerationRunRequest: {
+            /** Target */
+            target: components["schemas"]["ChunksRunTarget"] | components["schemas"]["GapsRunTarget"] | components["schemas"]["SetupCellsRunTarget"] | components["schemas"]["RegenerateRunTarget"];
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
         };
         /**
          * GenerationRunResponse
@@ -2704,6 +4021,41 @@ export interface components {
             possible_duplicates: number;
         };
         /**
+         * GenerationRunStarted
+         * @description ``202``: the run is queued. Follow ``job_id`` in ``GET /api/jobs``.
+         */
+        GenerationRunStarted: {
+            /** Kind */
+            kind: string;
+            /** Job Id */
+            job_id: string;
+            /** Round Id */
+            round_id?: number | null;
+        };
+        /**
+         * GenerationRunTotals
+         * @description What a run costs on the first attempt of every question.
+         *
+         *     A question that fails a check is retried, up to ``max_attempts_per_question`` times, so
+         *     the real count can be higher. ``judge_calls`` is ``None`` for a round: its judges are
+         *     the setup's enabled judges and rules, run inside the retry loop.
+         */
+        GenerationRunTotals: {
+            /** Questions To Create */
+            questions_to_create: number;
+            /** Generation Calls */
+            generation_calls: number;
+            /** Judge Calls */
+            judge_calls: number | null;
+            /** Max Attempts Per Question */
+            max_attempts_per_question: number;
+            /**
+             * Identical Repeats
+             * @default 0
+             */
+            identical_repeats: number;
+        };
+        /**
          * GeneratorKind
          * @description Which generator produced a question.
          *
@@ -2712,6 +4064,60 @@ export interface components {
          * @enum {string}
          */
         GeneratorKind: "base" | "personalized";
+        /**
+         * GuidanceLevel
+         * @description How much a tutorial block does for the student, from most to least (BKT-driven).
+         * @enum {string}
+         */
+        GuidanceLevel: "worked" | "faded" | "cue";
+        /**
+         * GuidelineListResponse
+         * @description ``GET /api/guidelines``: the course subject's pending and active guidelines.
+         */
+        GuidelineListResponse: {
+            /** Active Support */
+            active_support: number;
+            /** Guidelines */
+            guidelines: components["schemas"]["GuidelineOut"][];
+        };
+        /**
+         * GuidelineOut
+         * @description One learned guideline (ADR-063): pending until two reviews or a confirm, then sent.
+         */
+        GuidelineOut: {
+            /** Id */
+            id: number;
+            /** Target */
+            target: string;
+            question_type: components["schemas"]["QuestionType"] | null;
+            /** Text */
+            text: string;
+            status: components["schemas"]["GuidelineStatus"];
+            /** Support Count */
+            support_count: number;
+            /** Review Ids */
+            review_ids: number[];
+            /** Confirmed By Professor */
+            confirmed_by_professor: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * GuidelineStatus
+         * @description Where a learned guideline stands (ADR-063 point 4).
+         *
+         *     Only ``ACTIVE`` ones are sent: at least two distinct supporting reviews, or the
+         *     professor's confirmation. ``PENDING`` waits for that. ``RETIRED`` was dropped, merged,
+         *     or deleted by the professor; ``REFUSED`` was an output-contract rule the deterministic
+         *     filter would not store as a preference. Both are kept for the record, never sent.
+         * @enum {string}
+         */
+        GuidelineStatus: "pending" | "active" | "retired" | "refused";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2755,6 +4161,82 @@ export interface components {
             rule_count: number;
             /** Review Count */
             review_count: number;
+        };
+        /** JobListResponse */
+        JobListResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["JobOut"][];
+        };
+        /**
+         * JobOut
+         * @description One entry of the Jobs panel, whichever table the job lives in.
+         *
+         *     ``id`` is ``job-<n>`` (bulk generation, coverage fill), ``round-<n>`` (question round) or
+         *     ``judge-<run id>`` (judge re-run). ``link`` is a course-relative page holding the job's
+         *     output. ``counts`` names the numbers worth showing for this kind, e.g. ``dropped``.
+         *     ``result`` is what the old blocking response returned, for the kinds that had one:
+         *     :class:`GenerateBatchResponse` for bulk generation, :class:`GenerationRunResponse` for a
+         *     coverage fill, :class:`BookImportResult` for a book import,
+         *     :class:`RegenerateQuestionResponse` for a regeneration.
+         */
+        JobOut: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "regeneration" | "tutorial_pregeneration" | "question_round" | "judge_run";
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Counts */
+            counts?: {
+                [key: string]: number;
+            };
+            /** Error */
+            error?: string | null;
+            /** Link */
+            link?: string | null;
+            /** Result */
+            result?: components["schemas"]["GenerateBatchResponse"] | components["schemas"]["GenerationRunResponse"] | components["schemas"]["BookImportResult"] | components["schemas"]["RegenerateQuestionResponse"] | null;
+            /**
+             * Can Cancel
+             * @default false
+             */
+            can_cancel: boolean;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested: boolean;
+            /** Retry Label */
+            retry_label?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+        };
+        /**
+         * JobStartedResponse
+         * @description ``202`` from a route that queued a background job; follow it in ``GET /api/jobs``.
+         */
+        JobStartedResponse: {
+            /** Job Id */
+            job_id: string;
         };
         /**
          * JudgeBatchRunOut
@@ -2890,6 +4372,108 @@ export interface components {
             rubric_version_changed: boolean;
         };
         /**
+         * JudgeRerunPreviewOut
+         * @description What "Run judges" would do for the course right now.
+         */
+        JudgeRerunPreviewOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Disabled Reason */
+            disabled_reason?: string | null;
+            /** Eligible */
+            eligible: number;
+            /** Active Run Id */
+            active_run_id?: string | null;
+        };
+        /**
+         * JudgeScorecardOut
+         * @description One judge on ``GET /api/judges/scorecard`` (ADR-064, m8).
+         */
+        JudgeScorecardOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** N */
+            n: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement */
+            agreement: number | null;
+            /** Kappa */
+            kappa: number | null;
+            /** Agreement Low */
+            agreement_low: number | null;
+            /** Agreement High */
+            agreement_high: number | null;
+            /** Missed */
+            missed: number;
+            /** False Alarms */
+            false_alarms: number;
+            /** Flags */
+            flags: number;
+            /** Flag Rate */
+            flag_rate: number | null;
+            /** Retries */
+            retries: number;
+            /** Drops */
+            drops: number;
+        };
+        /**
+         * JudgeScorecardResponse
+         * @description Per-judge agreement, κ, Wilson 95% range, and round retries/drops.
+         */
+        JudgeScorecardResponse: {
+            /** Judges */
+            judges: components["schemas"]["JudgeScorecardOut"][];
+        };
+        /**
+         * JudgeStatsOut
+         * @description Step 13: how often the professor agreed with one judge, pooled over styles' windows.
+         */
+        JudgeStatsOut: {
+            metric: components["schemas"]["JudgeMetricId"];
+            /** Observations */
+            observations: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement Rate */
+            agreement_rate: number | null;
+        };
+        /** JudgeStatsResponse */
+        JudgeStatsResponse: {
+            /** Rubric Version */
+            rubric_version: string;
+            /** Judges */
+            judges: components["schemas"]["JudgeStatsOut"][];
+            /** Styles */
+            styles: components["schemas"]["StyleTrustOut"][];
+            /** Held Out Pairs */
+            held_out_pairs: number;
+            /** Held Out Needed */
+            held_out_needed: number;
+            /** Learning Enabled */
+            learning_enabled: boolean;
+            /** Learning Paused */
+            learning_paused: boolean;
+            /** Trusted Style Count */
+            trusted_style_count: number;
+            /** Min Observations */
+            min_observations: number;
+            /** Min Agreement */
+            min_agreement: number;
+            /** Min Acceptance */
+            min_acceptance: number;
+            /** Min Topic Local */
+            min_topic_local: number;
+        };
+        /**
+         * LLMProvider
+         * @description Supported LLM providers (ADR-068; their endpoints and defaults: ``app.llm_providers``).
+         *
+         *     ``NONE`` keeps the UI runnable without credentials (ADR-010). Every other provider is
+         *     called through the same OpenAI-compatible client; ``CUSTOM`` is any such endpoint.
+         * @enum {string}
+         */
+        LLMProvider: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom" | "none";
+        /**
          * MasteryBand
          * @description Coarse band derived from a BKT mastery probability.
          * @enum {string}
@@ -2962,6 +4546,75 @@ export interface components {
          * @enum {string}
          */
         MetricStatus: "completed" | "error";
+        /** MetricTrust */
+        MetricTrust: {
+            /** Observations */
+            observations: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement Rate */
+            agreement_rate: number;
+            /** Trusted */
+            trusted: boolean;
+            /**
+             * Audit Revoked
+             * @default false
+             */
+            audit_revoked: boolean;
+            /** Local Observations */
+            local_observations?: number | null;
+        };
+        /** MetricTrustOut */
+        MetricTrustOut: {
+            /** Observations */
+            observations: number;
+            /** Agreements */
+            agreements: number;
+            /** Agreement Rate */
+            agreement_rate: number;
+            /** Trusted */
+            trusted: boolean;
+            /** Audit Revoked */
+            audit_revoked: boolean;
+            /** Local Observations */
+            local_observations?: number | null;
+        };
+        /**
+         * ModelRole
+         * @description What a model is used for; each can be pointed at its own provider and model.
+         * @enum {string}
+         */
+        ModelRole: "generation" | "judges" | "agent" | "tutorials" | "ask_why" | "embeddings" | "transcription";
+        /** ModelSettingsResponse */
+        ModelSettingsResponse: {
+            /** Roles */
+            roles: components["schemas"]["RoleSettingsResponse"][];
+            /** Providers */
+            providers: components["schemas"]["ProviderOut"][];
+            /** Can Edit */
+            can_edit: boolean;
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom";
+            /**
+             * Route Source
+             * @enum {string}
+             */
+            route_source: "db" | "env";
+        };
+        /** MostMissedOut */
+        MostMissedOut: {
+            /** Subtopic */
+            subtopic: string;
+            /** Topic */
+            topic: string;
+            /** Miss Rate */
+            miss_rate: number;
+            /** Attempts */
+            attempts: number;
+        };
         /**
          * ParsonsBlockOut
          * @description One draggable block, including the indentation it should display with.
@@ -2997,7 +4650,7 @@ export interface components {
             judge_model?: string | null;
             /**
              * Rubric Version
-             * @default question-metrics@1
+             * @default question-metrics@2
              */
             rubric_version: string;
             /**
@@ -3023,10 +4676,34 @@ export interface components {
          * @description One question a compiled run will ask for, in the order it will be asked.
          */
         PlannedQuestionOut: {
-            /** Section Id */
-            section_id: number;
+            /** Chunk Id */
+            chunk_id: string;
             difficulty: components["schemas"]["Difficulty"];
             question_type: components["schemas"]["QuestionType"];
+        };
+        /**
+         * PlannedRunQuestion
+         * @description One question a run would ask for. Which fields are set depends on the kind.
+         */
+        PlannedRunQuestion: {
+            difficulty?: components["schemas"]["Difficulty"] | null;
+            question_type?: components["schemas"]["QuestionType"] | null;
+            /** Chunk Id */
+            chunk_id?: string | null;
+            /** Subtopic Id */
+            subtopic_id?: number | null;
+            /** Style Id */
+            style_id?: string | null;
+            /** Question Id */
+            question_id?: number | null;
+        };
+        /** PlannedTutorialBlock */
+        PlannedTutorialBlock: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
         };
         /**
          * PollBatchRunResponse
@@ -3057,6 +4734,62 @@ export interface components {
             prompt_excerpt: string;
             /** Score */
             score: number;
+        };
+        /** ProviderModel */
+        ProviderModel: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Context Length */
+            context_length?: number | null;
+            /** Prompt Price */
+            prompt_price?: number | null;
+            /** Completion Price */
+            completion_price?: number | null;
+        };
+        /**
+         * ProviderOut
+         * @description One provider as the app calls it (ADR-068). The key is only ever masked.
+         */
+        ProviderOut: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom";
+            /** Label */
+            label: string;
+            /** Base Url */
+            base_url: string | null;
+            /** Base Url Required */
+            base_url_required: boolean;
+            /** Api Key Masked */
+            api_key_masked: string | null;
+            /** Chat Model */
+            chat_model: string | null;
+            /** Embedding Model */
+            embedding_model: string | null;
+            /** Embeds */
+            embeds: boolean;
+            /** Lists Models */
+            lists_models: boolean;
+            /** Configured */
+            configured: boolean;
+            /** Saved */
+            saved: ("base_url" | "api_key" | "chat_model")[];
+        };
+        /**
+         * ProviderUpdate
+         * @description A provider's values to test and save. Empty or ``null`` keeps what is there.
+         */
+        ProviderUpdate: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Chat Model */
+            chat_model?: string | null;
         };
         /**
          * QuadrantCell
@@ -3158,6 +4891,9 @@ export interface components {
             pedagogical_eval: components["schemas"]["PedagogicalEvaluation"] | null;
             /** Pedagogical Error Message */
             pedagogical_error_message: string | null;
+            /** Custom Results */
+            custom_results?: components["schemas"]["CustomJudgeResult"][];
+            judge_trust?: components["schemas"]["TrustReport"] | null;
             personalization: components["schemas"]["PersonalizationEvidence"] | null;
             /** Original Prompt */
             original_prompt: string | null;
@@ -3167,6 +4903,8 @@ export interface components {
             original_tests: string | null;
             /** Reviews */
             reviews: components["schemas"]["ReviewOut"][];
+            /** Borderline Notes */
+            borderline_notes?: string[];
         };
         /**
          * QuestionKind
@@ -3191,9 +4929,12 @@ export interface components {
             };
             /** Total */
             total: number;
-            status?: components["schemas"]["QuestionStatus"] | null;
+            /** Status */
+            status?: components["schemas"]["QuestionStatus"][] | null;
             /** Curriculum Version Id */
             curriculum_version_id?: number | null;
+            /** Topic Id */
+            topic_id?: number[] | null;
             /** Run Id */
             run_id?: string | null;
         };
@@ -3240,11 +4981,61 @@ export interface components {
             is_prod: boolean;
         };
         /**
+         * QuestionSetupOut
+         * @description A saved setup, with its newest round.
+         */
+        QuestionSetupOut: {
+            /** Id */
+            id: number;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved Styles */
+            approved_styles: components["schemas"]["SubtopicStyles"][];
+            /** Cell Targets */
+            cell_targets: components["schemas"]["CellTarget"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            latest_round: components["schemas"]["GenerationRoundOut"] | null;
+        };
+        /**
          * QuestionStatus
          * @description Lifecycle of a generated question through validation and review.
          * @enum {string}
          */
         QuestionStatus: "generated" | "validation_passed" | "validation_failed" | "approved" | "rejected";
+        /**
+         * QuestionStyle
+         * @description One style in a subject's library.
+         *
+         *     ``id`` is stable and namespaced by subject (``py.trace_output``): it is stored on every
+         *     question generated in this style and on every approved setup, so renaming a style must not
+         *     change it.
+         */
+        QuestionStyle: {
+            /** Id */
+            id: string;
+            /** Subject */
+            subject: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            question_type: components["schemas"]["QuestionType"];
+            /** Difficulty Range */
+            difficulty_range: components["schemas"]["Difficulty"][];
+            /** Checked By */
+            checked_by: string;
+            /** Applies To */
+            applies_to?: string[];
+            /** Examples */
+            examples: [
+                components["schemas"]["ExampleQuestion"],
+                components["schemas"]["ExampleQuestion"]
+            ];
+        };
         /**
          * QuestionSummary
          * @description One generated question, without its solution, tests or reports.
@@ -3291,6 +5082,30 @@ export interface components {
             created_at: string;
             /** Updated At */
             updated_at: string | null;
+            /** Style Id */
+            style_id?: string | null;
+            /** Round Id */
+            round_id?: number | null;
+            /** Target Subtopic Id */
+            target_subtopic_id?: number | null;
+            /** Trust Provenance */
+            trust_provenance?: string | null;
+            /**
+             * Live Generated
+             * @default false
+             */
+            live_generated: boolean;
+            /**
+             * Audit
+             * @default false
+             */
+            audit: boolean;
+            /** Audit Metric */
+            audit_metric?: string | null;
+            /** Audit Reason */
+            audit_reason?: string | null;
+            /** Solve Flag */
+            solve_flag?: string | null;
         };
         /**
          * QuestionTaxonomy
@@ -3309,7 +5124,35 @@ export interface components {
          * @description Assessment format (independent of scoring mode).
          * @enum {string}
          */
-        QuestionType: "multiple_choice" | "true_false" | "output_prediction" | "code_completion" | "debugging" | "parsons" | "coding";
+        QuestionType: "multiple_choice" | "true_false" | "output_prediction" | "code_completion" | "debugging" | "parsons" | "coding" | "numeric_response" | "equation_response";
+        /** QuestionTypeGroupOut */
+        QuestionTypeGroupOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Hint */
+            hint: string;
+        };
+        /** QuestionTypeOut */
+        QuestionTypeOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Widget */
+            widget: string;
+            /** Group */
+            group: string;
+            /** Graded By */
+            graded_by: string[];
+            /** Also Needs */
+            also_needs: string[];
+            /** Offerable */
+            offerable: boolean;
+            /** Ai Graded */
+            ai_graded: boolean;
+        };
         /** ReasonCount */
         ReasonCount: {
             code: components["schemas"]["RejectionReason"];
@@ -3319,18 +5162,23 @@ export interface components {
             count: number;
         };
         /**
-         * RegenerateQuestionRequest
-         * @description Regenerate one existing question with instructor feedback.
-         *
-         *     The feedback is threaded into the generation prompt. The source question is
-         *     never modified -- a new question is produced (ADR-002).
+         * RecipeCheck
+         * @description A generation-time check a block of the recipe must pass (Task 23).
+         * @enum {string}
          */
-        RegenerateQuestionRequest: {
-            /** Feedback */
-            feedback: string;
-            /** Professor Id */
-            professor_id?: number | null;
-        };
+        RecipeCheck: "html_loads" | "trace_matches";
+        /**
+         * RecipeInput
+         * @description What the generator hands the model besides the recipe's prompt.
+         * @enum {string}
+         */
+        RecipeInput: "subtopic" | "chunks" | "code";
+        /**
+         * RecipeTool
+         * @description A tool whose output a block embeds as-is (Task 20).
+         * @enum {string}
+         */
+        RecipeTool: "python_trace" | "video_clip";
         /** RegenerateQuestionResponse */
         RegenerateQuestionResponse: {
             /** Question Id */
@@ -3338,6 +5186,23 @@ export interface components {
             /** Regenerated From Question Id */
             regenerated_from_question_id: number;
             question: components["schemas"]["QuestionSummary"];
+        };
+        /**
+         * RegenerateRunTarget
+         * @description A new question from an existing one, with instructor feedback (ADR-002).
+         */
+        RegenerateRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "regenerate";
+            /** Question Id */
+            question_id: number;
+            /** Feedback */
+            feedback: string;
+            /** Professor Id */
+            professor_id?: number | null;
         };
         /**
          * RejectionReason
@@ -3356,22 +5221,22 @@ export interface components {
             set_version_id: number;
         };
         /**
-         * RetrievedSectionOut
-         * @description One book section returned by semantic retrieval, with its citation.
+         * RetrievedChunkOut
+         * @description One chunk returned by semantic retrieval.
          */
-        RetrievedSectionOut: {
-            /** Section Id */
-            section_id: number;
+        RetrievedChunkOut: {
+            /** Chunk Id */
+            chunk_id: string;
             /** Book Id */
             book_id: number;
             /** Book Title */
             book_title: string;
-            /** Chapter Title */
-            chapter_title: string | null;
-            /** Section Number */
-            section_number: string | null;
-            /** Section Title */
-            section_title: string | null;
+            /** Heading Path */
+            heading_path: string[];
+            /** Page Start */
+            page_start: number | null;
+            /** Page End */
+            page_end: number | null;
             /** Score */
             score: number;
             /** Snippet */
@@ -3425,6 +5290,9 @@ export interface components {
              */
             created_at: string;
             outcome?: components["schemas"]["ReviewOutcomeOut"] | null;
+            corrected_difficulty?: components["schemas"]["Difficulty"] | null;
+            /** Corrected Subtopic Ids */
+            corrected_subtopic_ids?: number[] | null;
         };
         /**
          * ReviewOutcomeOut
@@ -3495,6 +5363,9 @@ export interface components {
             tests?: string | null;
             /** Professor Id */
             professor_id?: number | null;
+            corrected_difficulty?: components["schemas"]["Difficulty"] | null;
+            /** Corrected Subtopic Ids */
+            corrected_subtopic_ids?: number[] | null;
         };
         /** ReviewStatsResponse */
         ReviewStatsResponse: {
@@ -3510,98 +5381,112 @@ export interface components {
             reason_distribution: components["schemas"]["ReasonCount"][];
         };
         /**
-         * SectionDetail
-         * @description One section's full text plus the citation that makes it traceable.
+         * RoleSettingsResponse
+         * @description One role's effective model settings. The key is only ever masked.
          */
-        SectionDetail: {
-            section: components["schemas"]["SectionSummary"];
-            /** Text */
-            text: string;
-            /** Warnings */
-            warnings: components["schemas"]["ExtractionWarning"][];
-            source: components["schemas"]["SectionSource"];
-            /** Citation */
-            citation: string;
+        RoleSettingsResponse: {
+            role: components["schemas"]["ModelRole"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Base Url */
+            base_url: string | null;
+            /** Api Key Masked */
+            api_key_masked: string | null;
+            /** Sources */
+            sources: {
+                [key: string]: "db" | "env";
+            };
+            /** Configured */
+            configured: boolean;
+            /** Testable */
+            testable: boolean;
+            switch?: components["schemas"]["EmbeddingSwitchOut"] | null;
         };
-        /** SectionListResponse */
-        SectionListResponse: {
-            /** Sections */
-            sections: components["schemas"]["SectionSummary"][];
-            /** Total */
-            total: number;
-        };
-        /**
-         * SectionSource
-         * @description Everything needed to cite a section back to the book it came from.
-         *
-         *     This is the traceability contract that later question generation depends on:
-         *     given a section, a generated question can name the book, chapter, section and
-         *     pages it was grounded in.
-         */
-        SectionSource: {
-            /** Book Id */
-            book_id: number;
-            /** Book Title */
-            book_title: string;
-            /** Book Author */
-            book_author?: string | null;
-            /** Section Id */
-            section_id: number;
-            /** Chapter Id */
-            chapter_id?: number | null;
-            /** Chapter Number */
-            chapter_number?: string | null;
-            /** Chapter Title */
-            chapter_title?: string | null;
-            /** Section Number */
-            section_number?: string | null;
-            /** Section Title */
-            section_title?: string | null;
-            /** Start Page */
-            start_page?: number | null;
-            /** End Page */
-            end_page?: number | null;
-            structure_source: components["schemas"]["StructureSource"];
-            structure_confidence: components["schemas"]["StructureConfidence"];
+        /** RoleSettingsSave */
+        RoleSettingsSave: {
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
             /**
-             * Location Label
-             * @description Human-readable page location, or ``None`` if pages are unknown.
+             * Clear Api Key
+             * @default false
              */
-            readonly location_label: string | null;
+            clear_api_key: boolean;
+            /** Test Token */
+            test_token: string;
         };
         /**
-         * SectionSummary
-         * @description One section's identity and location, without its text.
+         * RoleSettingsUpdate
+         * @description A role's settings to test or save. ``null`` means "use .env" for that field.
          */
-        SectionSummary: {
-            /** Id */
-            id: number;
-            /** Book Id */
-            book_id: number;
-            /** Chapter Id */
-            chapter_id: number | null;
-            /** Number */
-            number: string | null;
-            /** Title */
-            title: string | null;
-            /** Display Title */
-            display_title: string;
-            /** Position */
-            position: number;
-            /** Char Count */
-            char_count: number;
-            /** Start Page */
-            start_page: number | null;
-            /** End Page */
-            end_page: number | null;
-            /** Location Label */
-            location_label: string | null;
-            /** Is Unlabelled */
-            is_unlabelled: boolean;
-            /** Is Empty */
-            is_empty: boolean;
-            structure_source: components["schemas"]["StructureSource"];
-            structure_confidence: components["schemas"]["StructureConfidence"];
+        RoleSettingsUpdate: {
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /**
+             * Clear Api Key
+             * @default false
+             */
+            clear_api_key: boolean;
+        };
+        /**
+         * RoundStatus
+         * @description Lifecycle of one generation round of a question setup.
+         *
+         *     A round runs in the background (the ``/api/*`` proxy would time out on a synchronous
+         *     one), so the client polls it until it reaches ``DONE`` or ``FAILED``.
+         * @enum {string}
+         */
+        RoundStatus: "queued" | "running" | "done" | "failed";
+        /** RouteUpdate */
+        RouteUpdate: {
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "openrouter" | "azure" | "openai" | "anthropic" | "xai" | "deepseek" | "custom";
+        };
+        /**
+         * SaveSetupRequest
+         * @description ``POST /api/setup``: the professor's approved setup.
+         *
+         *     ``cell_targets`` is the suggester's, passed back unchanged -- the professor does not edit
+         *     counts. A subtopic with no approved styles is simply absent from ``approved_styles``.
+         */
+        SaveSetupRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved Styles */
+            approved_styles: components["schemas"]["SubtopicStyles"][];
+            /** Cell Targets */
+            cell_targets: components["schemas"]["CellTarget"][];
+            /**
+             * Round Size
+             * @default 10
+             */
+            round_size: number;
+        };
+        /**
+         * SaveSetupResponse
+         * @description The saved setup and the first round it started.
+         */
+        SaveSetupResponse: {
+            /** Setup Id */
+            setup_id: number;
+            /** Round Id */
+            round_id: number;
         };
         /**
          * ServedQuestionOut
@@ -3624,6 +5509,11 @@ export interface components {
             resumed: boolean;
             /** Fallback Used */
             fallback_used: boolean;
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
             requested_difficulty: components["schemas"]["Difficulty"];
             served_difficulty: components["schemas"]["Difficulty"];
             /** Subtopic Id */
@@ -3641,6 +5531,60 @@ export interface components {
             code?: string | null;
             /** Blocks */
             blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
+            /** Answer Hint */
+            answer_hint?: string | null;
+            /** Preteach Blocks */
+            preteach_blocks?: components["schemas"]["StudentTutorialBlockOut"][];
+        };
+        /** SettingsTestResponse */
+        SettingsTestResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Error */
+            error?: string | null;
+            /** Dimension */
+            dimension?: number | null;
+            /** Test Token */
+            test_token?: string | null;
+        };
+        /**
+         * SetupCellsRunTarget
+         * @description The next round of a question setup, for cells still below target (``POST /rounds``).
+         */
+        SetupCellsRunTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "setup_cells";
+            /** Setup Id */
+            setup_id: number;
+            /**
+             * Size
+             * @default 10
+             */
+            size: number;
+        };
+        /** SetupStepOut */
+        SetupStepOut: {
+            /** Key */
+            key: string;
+            /** Done */
+            done: boolean;
+        };
+        /**
+         * SetupSuggestion
+         * @description What ``suggest_setup`` returns: styles per subtopic and a target per cell.
+         */
+        SetupSuggestion: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Subject */
+            subject: string;
+            /** Subtopics */
+            subtopics: components["schemas"]["SubtopicStyleSuggestion"][];
+            /** Cell Targets */
+            cell_targets: components["schemas"]["CellTarget"][];
         };
         /**
          * SkippedRunTarget
@@ -3655,14 +5599,14 @@ export interface components {
         };
         /**
          * SourceFormat
-         * @description Accepted upload formats.
+         * @description The format a book was imported from.
          *
-         *     Structured book JSON is declared directly. A PDF is turned into that same
-         *     declared shape by ``app.ingestion.pdf`` before validation -- its own
-         *     embedded outline stands in for a hand-authored declaration (ADR-048).
+         *     PDF, DOCX and PPTX are parsed into chunks (``app.ingestion.parsing``). ``BOOK_JSON``
+         *     is the retired book JSON document (Task 10): no longer accepted, kept so older
+         *     book rows still read.
          * @enum {string}
          */
-        SourceFormat: "book_json" | "book_pdf";
+        SourceFormat: "book_json" | "book_pdf" | "book_docx" | "book_pptx" | "youtube";
         /** StartTrainingSessionRequest */
         StartTrainingSessionRequest: {
             /** Student Id */
@@ -3670,25 +5614,6 @@ export interface components {
             /** Set Version Id */
             set_version_id: number;
         };
-        /**
-         * StructureConfidence
-         * @description How much to trust a boundary.
-         *
-         *     ``LOW`` means the producer guessed; such units must never be presented as
-         *     though the source document had declared them.
-         * @enum {string}
-         */
-        StructureConfidence: "high" | "medium" | "low";
-        /**
-         * StructureSource
-         * @description How a chapter or section boundary was determined.
-         *
-         *     Declared *by the book document*, never inferred by this application. It
-         *     records what the producer of the JSON actually relied on, so the professor
-         *     can tell a boundary the source document stated from one a producer guessed at.
-         * @enum {string}
-         */
-        StructureSource: "pdf_outline" | "markdown_heading" | "manual" | "structured_json" | "producer_inferred";
         /**
          * StudentIdentityOut
          * @description A learner plus the token their browser keeps to come back as them.
@@ -3819,6 +5744,76 @@ export interface components {
             score_series?: number[];
         };
         /**
+         * StudentTutorialBlockOut
+         * @description A tutorial block as a student sees it: what to draw, nothing about how it was made.
+         */
+        StudentTutorialBlockOut: {
+            /** Id */
+            id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * StyleListResponse
+         * @description ``GET /api/styles``: one subject's style library, then the course's own styles.
+         */
+        StyleListResponse: {
+            /** Subject */
+            subject: string;
+            /** Styles */
+            styles: components["schemas"]["QuestionStyle"][];
+            /** Course Style Ids */
+            course_style_ids?: string[];
+        };
+        /**
+         * StyleTrustOut
+         * @description One (taxonomy, style) scope: whether its questions skip review, and why not.
+         */
+        StyleTrustOut: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Style Id */
+            style_id: string;
+            /** Style Name */
+            style_name: string | null;
+            /** Trusted */
+            trusted: boolean;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["MetricTrustOut"];
+            };
+        };
+        /** SubjectPresetOut */
+        SubjectPresetOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Default Types */
+            default_types: string[];
+            /** Coming Soon Types */
+            coming_soon_types: string[];
+            /** Primary Groups */
+            primary_groups: string[];
+            /** Examples */
+            examples: {
+                [key: string]: string;
+            };
+            /**
+             * Ready
+             * @default true
+             */
+            ready: boolean;
+        };
+        /**
          * SubmitBatchRunRequest
          * @description Optional narrowing of a re-run to named questions.
          *
@@ -3900,8 +5895,10 @@ export interface components {
             id: number;
             /** Book Id */
             book_id: number;
+            /** Chunk Id */
+            chunk_id: string | null;
             /** Section Id */
-            section_id: number;
+            section_id: number | null;
             /** Candidate Label */
             candidate_label: string;
             /** Definition */
@@ -3924,6 +5921,28 @@ export interface components {
             description: string | null;
             /** Stable Id */
             stable_id: string | null;
+        };
+        /**
+         * SubtopicStyleSuggestion
+         * @description The styles suggested for one subtopic, and why.
+         */
+        SubtopicStyleSuggestion: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Style Ids */
+            style_ids: string[];
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * SubtopicStyles
+         * @description The styles approved for one subtopic.
+         */
+        SubtopicStyles: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Style Ids */
+            style_ids: string[];
         };
         /**
          * SubtopicSummary
@@ -3961,6 +5980,14 @@ export interface components {
             observations: number;
         };
         /**
+         * SuggestSetupRequest
+         * @description ``POST /api/setup/suggest``.
+         */
+        SuggestSetupRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+        };
+        /**
          * TaxonomyDocumentGuide
          * @description Everything a professor needs to obtain a valid taxonomy document.
          *
@@ -3986,6 +6013,73 @@ export interface components {
              * @default false
              */
             retains_upload: boolean;
+        };
+        /**
+         * TaxonomyDraftRequest
+         * @description What the professor tells the AI about the taxonomy they want (ADR-052).
+         */
+        TaxonomyDraftRequest: {
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Audience
+             * @default
+             */
+            audience: string;
+            /**
+             * Must Cover
+             * @default
+             */
+            must_cover: string;
+            /**
+             * Leave Out
+             * @default
+             */
+            leave_out: string;
+            /**
+             * Size
+             * @default standard
+             * @enum {string}
+             */
+            size: "compact" | "standard" | "detailed";
+            /** Topic Count */
+            topic_count?: number | null;
+            /** Subtopic Count */
+            subtopic_count?: number | null;
+        };
+        /**
+         * TaxonomyDraftResponse
+         * @description An AI-proposed taxonomy that has not been saved (ADR-052).
+         */
+        TaxonomyDraftResponse: {
+            /** Drafted By */
+            drafted_by: string;
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /** Analysis */
+            analysis: string;
+        };
+        /** TaxonomyLinkListResponse */
+        TaxonomyLinkListResponse: {
+            /** Links */
+            links: components["schemas"]["TaxonomyLinkOut"][];
+        };
+        /**
+         * TaxonomyLinkOut
+         * @description One taxonomy and the classroom link it has, if any (ADR-053).
+         */
+        TaxonomyLinkOut: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Label */
+            label: string;
+            /** Approved Question Count */
+            approved_question_count: number;
+            classroom: components["schemas"]["QuestionSetOut"] | null;
         };
         /**
          * TopicCoverage
@@ -4157,6 +6251,187 @@ export interface components {
             /** Metrics */
             metrics: components["schemas"]["MetricFaultsOut"][];
         };
+        /** TrustReport */
+        TrustReport: {
+            /** Trusted */
+            trusted: boolean;
+            /** Eligible */
+            eligible: boolean;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["MetricTrust"];
+            };
+            /** Scope Key */
+            scope_key: string;
+        };
+        /**
+         * TutorialBlockOut
+         * @description One generated tutorial block; ``payload`` follows ``renderer``'s contract.
+         */
+        TutorialBlockOut: {
+            /** Id */
+            id: number;
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Recipe Id */
+            recipe_id: string;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            renderer: components["schemas"]["TutorialRenderer"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Chunk Ids */
+            chunk_ids: string[];
+            status: components["schemas"]["TutorialBlockStatus"];
+            /** Error */
+            error: string | null;
+            /** Model */
+            model: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * TutorialBlockStatus
+         * @description A generated tutorial block: ``DRAFT`` until the professor decides its recipe (Phase 6);
+         *     ``FAILED`` when its payload stayed invalid after the one repair retry.
+         * @enum {string}
+         */
+        TutorialBlockStatus: "draft" | "failed" | "approved" | "rejected";
+        /**
+         * TutorialPregenerationPlan
+         * @description ``200`` for ``dry_run``. ``generation_calls`` counts first attempts; an invalid block
+         *     gets one repair retry, so at most ``generation_calls * max_attempts_per_block``.
+         */
+        TutorialPregenerationPlan: {
+            /** Planned */
+            planned: components["schemas"]["PlannedTutorialBlock"][];
+            /** Blocks To Create */
+            blocks_to_create: number;
+            /** Already Made */
+            already_made: number;
+            /** Generation Calls */
+            generation_calls: number;
+            /** Max Attempts Per Block */
+            max_attempts_per_block: number;
+        };
+        /**
+         * TutorialPregenerationRequest
+         * @description ``POST /api/tutorial-pregeneration``: every missing block of a taxonomy.
+         */
+        TutorialPregenerationRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Recipe Ids */
+            recipe_ids?: string[] | null;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+        };
+        /**
+         * TutorialRecipe
+         * @description One recipe in a subject's library.
+         *
+         *     ``id`` is stable and namespaced by subject (``py.code_trace_stepper``): blocks store it and
+         *     per-recipe stats key on it, so it is never renamed.
+         */
+        TutorialRecipe: {
+            /** Id */
+            id: string;
+            /** Subject */
+            subject: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            renderer: components["schemas"]["TutorialRenderer"];
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
+            /** Fits */
+            fits: components["schemas"]["ContentKind"][];
+            /** Guidance Levels */
+            guidance_levels: components["schemas"]["GuidanceLevel"][];
+            /** Inputs */
+            inputs?: components["schemas"]["RecipeInput"][];
+            tool?: components["schemas"]["RecipeTool"] | null;
+            /** Checks */
+            checks?: components["schemas"]["RecipeCheck"][];
+        };
+        /** TutorialRecipeDecisionOut */
+        TutorialRecipeDecisionOut: {
+            /** Recipe Id */
+            recipe_id: string;
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved */
+            approved: boolean;
+            /** Blocks Changed */
+            blocks_changed: number;
+        };
+        /**
+         * TutorialRecipeDecisionRequest
+         * @description ``PUT /api/tutorial-recipes/{recipe_id}/decision``: approve or reject a recipe.
+         */
+        TutorialRecipeDecisionRequest: {
+            /** Curriculum Version Id */
+            curriculum_version_id: number;
+            /** Approved */
+            approved: boolean;
+        };
+        /**
+         * TutorialRecipeListResponse
+         * @description ``GET /api/tutorial-recipes``: the recipes of the course's subject.
+         */
+        TutorialRecipeListResponse: {
+            /** Subject */
+            subject: string;
+            /** Recipes */
+            recipes: components["schemas"]["TutorialRecipe"][];
+            /** Decisions */
+            decisions?: {
+                [key: string]: boolean;
+            };
+            /** Stats */
+            stats?: {
+                [key: string]: components["schemas"]["TutorialRecipeStatsOut"];
+            };
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
+        };
+        /**
+         * TutorialRecipeStatsOut
+         * @description How a recipe has done: professors' decisions and students' next answers.
+         */
+        TutorialRecipeStatsOut: {
+            /** Decided */
+            decided: number;
+            /** Approval Rate */
+            approval_rate: number | null;
+            /** Outcomes */
+            outcomes: number;
+            /** Next Correct Rate */
+            next_correct_rate: number | null;
+            /** Weight */
+            weight: number;
+        };
+        /**
+         * TutorialRenderer
+         * @description How the frontend draws a tutorial block (Phase 5). Few and trusted: each has a payload
+         *     contract (``app/tutorials/renderers.py``) and one frontend component.
+         * @enum {string}
+         */
+        TutorialRenderer: "markdown" | "mermaid" | "chartjs" | "html" | "video_clip";
         /**
          * TypeCalibrationOut
          * @description One question type's four-cell report (ADR-034).
@@ -4179,12 +6454,11 @@ export interface components {
         };
         /**
          * TypeInstructionOut
-         * @description What the generator is told for one question type (ADR-033).
+         * @description What the generator is told for one question type (ADR-033, ADR-063).
          *
-         *     ``learned`` distinguishes an instruction built from reviews from the shipped
-         *     default, so a professor can see at a glance which types their feedback has
-         *     actually reached. ``available_reviews`` is how many reviews a refresh would
-         *     draw on now, which is what makes a stale instruction visible.
+         *     ``instruction`` is the shipped text plus the type's **active** guidelines, ``rules`` their
+         *     texts, and ``learned`` whether there is any. ``review_count`` is the distinct reviews
+         *     behind them; ``available_reviews`` how many reviews of the type exist.
          */
         TypeInstructionOut: {
             question_type: components["schemas"]["QuestionType"];
@@ -4201,17 +6475,66 @@ export interface components {
             /** Updated At */
             updated_at: string | null;
         };
-        /** TypeInstructionRefreshResponse */
-        TypeInstructionRefreshResponse: {
-            question_type: components["schemas"]["QuestionType"];
-            /** Learned */
-            learned: boolean;
-            /** Rule Count */
-            rule_count: number;
-            /** Review Count */
-            review_count: number;
-            /** Instruction */
-            instruction: string;
+        /**
+         * UpdateCustomJudgeRequest
+         * @description ``PATCH /api/custom-judges/{id}``: only the fields sent are changed.
+         */
+        UpdateCustomJudgeRequest: {
+            /** Rule Text */
+            rule_text?: string | null;
+            kind?: components["schemas"]["CustomJudgeKind"] | null;
+            /** Pattern */
+            pattern?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * UserCreate
+         * @description What a registration posts: an email and a password, nothing else.
+         *
+         *     Narrower than ``BaseUserCreate``, so the public schema does not even list
+         *     ``is_superuser``/``is_verified``/``is_active``. A body that sends them anyway has them
+         *     ignored here, and ``create(safe=True)`` would drop them regardless.
+         */
+        UserCreate: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * UserRead
+         * @description The account as the API shows it.
+         */
+        UserRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /**
+             * Is Superuser
+             * @default false
+             */
+            is_superuser: boolean;
+            /**
+             * Is Verified
+             * @default false
+             */
+            is_verified: boolean;
         };
         /** ValidationError */
         ValidationError: {
@@ -4227,15 +6550,14 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
-         * VocabularyTermOut
-         * @description One closed-vocabulary value, and what it means to a professor.
+         * VideoAvailability
+         * @description Whether a YouTube source can still be played in an embedded player (Task 30).
+         *
+         *     Set at import and by the periodic check (``app/jobs/video_availability.py``); a clip of a
+         *     video that is not ``AVAILABLE`` is not shown to students.
+         * @enum {string}
          */
-        VocabularyTermOut: {
-            /** Value */
-            value: string;
-            /** Meaning */
-            meaning: string;
-        };
+        VideoAvailability: "available" | "unavailable" | "not_embeddable" | "unknown";
         /**
          * WarningSeverity
          * @description Whether a warning describes a defect or merely states a fact.
@@ -4246,6 +6568,51 @@ export interface components {
          * @enum {string}
          */
         WarningSeverity: "defect" | "info";
+        /**
+         * WholeBookSpec
+         * @description One instruction for every chunk of a book's current version.
+         */
+        WholeBookSpec: {
+            /** Book Id */
+            book_id: number;
+            /**
+             * Easy
+             * @default 0
+             */
+            easy: number;
+            /**
+             * Medium
+             * @default 0
+             */
+            medium: number;
+            /**
+             * Hard
+             * @default 0
+             */
+            hard: number;
+            /** Question Types */
+            question_types?: components["schemas"]["QuestionType"][];
+        };
+        /**
+         * YouTubeImportRequest
+         * @description A YouTube video to import from its transcript (Task 30).
+         *
+         *     ``transcript`` is the professor's paste, used when fetching it failed; empty means fetch.
+         */
+        YouTubeImportRequest: {
+            /** Url */
+            url: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Transcript
+             * @default
+             */
+            transcript: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -4298,7 +6665,9 @@ export interface operations {
     counts_api_counts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4311,6 +6680,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CountsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4398,6 +6776,198 @@ export interface operations {
             };
         };
     };
+    register_register_api_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_request_token_api_auth_request_verify_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_verify_request_token_api_auth_request_verify_token_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_verify_api_auth_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_verify_verify_api_auth_verify_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_forgot_password_api_auth_forgot_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_reset_forgot_password_api_auth_forgot_password_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_reset_password_api_auth_reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_reset_reset_password_api_auth_reset_password_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     read_current_user_api_auth_me_get: {
         parameters: {
             query?: never;
@@ -4413,9 +6983,166 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["CurrentUserOut"];
+                };
+            };
+        };
+    };
+    list_courses_api_courses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseListResponse"];
+                };
+            };
+        };
+    };
+    create_course_api_courses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CourseCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    courses_overview_api_courses_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoursesOverviewResponse"];
+                };
+            };
+        };
+    };
+    assessment_catalog_api_courses_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentCatalogResponse"];
+                };
+            };
+        };
+    };
+    get_course_api_courses__course_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_course_api_courses__course_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CourseUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4426,7 +7153,9 @@ export interface operations {
                 limit?: number;
                 usable_only?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4455,7 +7184,9 @@ export interface operations {
     import_book_api_books_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4466,12 +7197,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookSummary"];
+                    "application/json": components["schemas"]["JobStartedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4485,22 +7216,74 @@ export interface operations {
             };
         };
     };
-    document_guide_api_books_document_guide_get: {
+    import_youtube_api_books_youtube_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["YouTubeImportRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookDocumentGuide"];
+                    "application/json": components["schemas"]["BookImportResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_book_version_api_books__book_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_book_version_api_books__book_id__versions_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStartedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4508,7 +7291,9 @@ export interface operations {
     get_book_api_books__book_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4541,7 +7326,9 @@ export interface operations {
             query?: {
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4572,7 +7359,9 @@ export interface operations {
     update_book_api_books__book_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4607,7 +7396,9 @@ export interface operations {
     get_book_source_api_books__book_id__source_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 book_id: number;
             };
@@ -4635,75 +7426,14 @@ export interface operations {
             };
         };
     };
-    list_sections_api_books__book_id__sections_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                book_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SectionListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_section_api_books__book_id__sections__section_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                book_id: number;
-                section_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SectionDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_versions_api_curriculum_versions_get: {
         parameters: {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4732,7 +7462,9 @@ export interface operations {
     import_taxonomy_api_curriculum_versions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4749,6 +7481,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurriculumVersionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_with_ai_api_curriculum_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxonomyDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyDraftResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4785,7 +7550,9 @@ export interface operations {
     get_approved_api_curriculum_approved_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4800,12 +7567,23 @@ export interface operations {
                     "application/json": components["schemas"]["CurriculumVersionDetail"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_version_api_curriculum_versions__version_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4838,7 +7616,9 @@ export interface operations {
             query?: {
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4869,7 +7649,9 @@ export interface operations {
     update_version_api_curriculum_versions__version_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4904,7 +7686,9 @@ export interface operations {
     update_tree_api_curriculum_versions__version_id__tree_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4939,7 +7723,9 @@ export interface operations {
     activate_version_api_curriculum_versions__version_id__activate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4970,7 +7756,9 @@ export interface operations {
     update_topic_api_curriculum_topics__topic_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 topic_id: number;
             };
@@ -5005,7 +7793,9 @@ export interface operations {
     get_subtopic_api_curriculum_subtopics__subtopic_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 subtopic_id: number;
             };
@@ -5036,7 +7826,9 @@ export interface operations {
     update_subtopic_api_curriculum_subtopics__subtopic_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 subtopic_id: number;
             };
@@ -5072,12 +7864,15 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                status?: components["schemas"]["QuestionStatus"] | null;
+                status?: components["schemas"]["QuestionStatus"][] | null;
                 curriculum_version_id?: number | null;
-                section_id?: number | null;
+                topic_id?: number[] | null;
+                chunk_id?: string | null;
                 run_id?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5103,180 +7898,16 @@ export interface operations {
             };
         };
     };
-    generate_questions_api_questions_generate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateQuestionsRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerateQuestionsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    regenerate_question_api_questions__question_id__regenerate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                question_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegenerateQuestionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegenerateQuestionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    batch_plan_api_questions_batch_plan_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BatchPlanResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_batch_api_questions_generate_batch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerateBatchResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generation_plan_api_questions_generation_plan_get: {
-        parameters: {
-            query: {
-                book_id: number;
-                section_ids?: number[] | null;
-                all_sections?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerationPlanResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     review_queue_api_questions_review_queue_get: {
         parameters: {
             query?: {
                 after?: number | null;
                 mode?: "all" | "scoreable";
+                curriculum_version_id?: number | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5305,7 +7936,9 @@ export interface operations {
     get_question_api_questions__question_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };
@@ -5333,10 +7966,47 @@ export interface operations {
             };
         };
     };
+    start_generation_run_api_generation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerationRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRunStarted"] | components["schemas"]["GenerationRunPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_review_api_questions__question_id__review_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };
@@ -5373,7 +8043,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5402,7 +8074,9 @@ export interface operations {
     review_stats_api_reviews_stats_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5417,12 +8091,23 @@ export interface operations {
                     "application/json": components["schemas"]["ReviewStatsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     list_instructions_api_instructions_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5437,15 +8122,24 @@ export interface operations {
                     "application/json": components["schemas"]["TypeInstructionListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    delete_instruction_api_instructions__question_type__delete: {
+    list_guidelines_api_guidelines_get: {
         parameters: {
             query?: never;
-            header?: never;
-            path: {
-                question_type: components["schemas"]["QuestionType"];
+            header?: {
+                "X-Course-Id"?: number | null;
             };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5456,7 +8150,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TypeInstructionOut"];
+                    "application/json": components["schemas"]["GuidelineListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5470,13 +8164,14 @@ export interface operations {
             };
         };
     };
-    delete_rule_api_instructions__question_type__rules__rule_index__delete: {
+    confirm_api_guidelines__guideline_id__confirm_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
-                question_type: components["schemas"]["QuestionType"];
-                rule_index: number;
+                guideline_id: number;
             };
             cookie?: never;
         };
@@ -5488,7 +8183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TypeInstructionOut"];
+                    "application/json": components["schemas"]["GuidelineOut"];
                 };
             };
             /** @description Validation Error */
@@ -5502,12 +8197,14 @@ export interface operations {
             };
         };
     };
-    refresh_api_instructions__question_type__refresh_post: {
+    delete_api_guidelines__guideline_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
-                question_type: components["schemas"]["QuestionType"];
+                guideline_id: number;
             };
             cookie?: never;
         };
@@ -5519,7 +8216,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TypeInstructionRefreshResponse"];
+                    "application/json": components["schemas"]["GuidelineOut"];
                 };
             };
             /** @description Validation Error */
@@ -5536,7 +8233,9 @@ export interface operations {
     list_judge_prompts_api_judge_prompts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5551,12 +8250,54 @@ export interface operations {
                     "application/json": components["schemas"]["JudgePromptListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judge_stats_api_judge_prompts_stats_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     save_judge_prompt_api_judge_prompts__metric__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 metric: components["schemas"]["JudgeMetricId"];
             };
@@ -5591,7 +8332,9 @@ export interface operations {
     revert_judge_prompt_api_judge_prompts__metric__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 metric: components["schemas"]["JudgeMetricId"];
             };
@@ -5622,7 +8365,9 @@ export interface operations {
     refresh_api_judge_prompts__metric__refresh_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 metric: components["schemas"]["JudgeMetricId"];
             };
@@ -5650,10 +8395,43 @@ export interface operations {
             };
         };
     };
+    judge_scorecard_api_judges_scorecard_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeScorecardResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     calibration_results_api_calibration_results_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5668,12 +8446,23 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationResultsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     calibration_pairs_api_calibration_pairs_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5688,6 +8477,15 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationPairsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     calibration_quadrant_api_calibration_quadrant_get: {
@@ -5695,7 +8493,9 @@ export interface operations {
             query?: {
                 rubric_version?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5724,7 +8524,9 @@ export interface operations {
     agreement_trend_api_calibration_trend_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5739,6 +8541,15 @@ export interface operations {
                     "application/json": components["schemas"]["AgreementTrendResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     coverage_api_coverage_get: {
@@ -5746,7 +8557,9 @@ export interface operations {
             query?: {
                 set_version_id?: number | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5772,43 +8585,12 @@ export interface operations {
             };
         };
     };
-    start_generation_run_api_coverage_generation_runs_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FillGapsRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GenerationRunResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_question_sets_api_question_sets_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5823,12 +8605,23 @@ export interface operations {
                     "application/json": components["schemas"]["QuestionSetListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     create_set_api_question_sets_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5858,11 +8651,46 @@ export interface operations {
             };
         };
     };
-    sync_prod_set_api_question_sets_prod_sync_post: {
+    list_taxonomy_links_api_question_sets_taxonomy_links_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxonomyLinkListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_taxonomy_set_api_question_sets_taxonomy__curriculum_version_id__sync_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                curriculum_version_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -5876,16 +8704,719 @@ export interface operations {
                     "application/json": components["schemas"]["QuestionSetOut"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    retrieve_sections_api_retrieval_sections_get: {
+    list_chunks_api_chunks_get: {
+        parameters: {
+            query: {
+                book_id: number;
+                /** @description Only chunks covering this page. */
+                page?: number | null;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_chunks_api_chunks_search_get: {
         parameters: {
             query?: {
                 /** @description Free-text query. */
-                query?: string | null;
+                q?: string | null;
                 /** @description Curriculum subtopic; its topic + name + description becomes the query. */
                 subtopic_id?: number | null;
+                /** @description Search this book only. */
+                book_id?: number | null;
                 top_k?: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievedChunkOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chunk_outline_api_chunks_outline_get: {
+        parameters: {
+            query: {
+                book_id: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkOutlineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_chunk_api_chunks__chunk_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                chunk_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_styles_api_styles_get: {
+        parameters: {
+            query?: {
+                subject?: string | null;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_course_style_api_styles_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCourseStyleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionStyle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_style_api_styles__style_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                style_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_api_setup_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupSuggestion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    current_setup_api_setup_get: {
+        parameters: {
+            query: {
+                curriculum_version_id: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentSetupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_setup_api_setup_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveSetupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_round_api_rounds__round_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                round_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRoundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_custom_judges_api_custom_judges_get: {
+        parameters: {
+            query: {
+                curriculum_version_id: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomJudgeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_custom_judge_api_custom_judges_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCustomJudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomJudgeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_custom_judge_api_custom_judges__judge_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                judge_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCustomJudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomJudgeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_job_api_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_job_api_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStartedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+        };
+    };
+    set_route_api_settings_route_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_provider_settings_api_settings_providers__provider__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["LLMProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_provider_settings_api_settings_providers__provider__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["schemas"]["LLMProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    provider_models_api_settings_models_get: {
+        parameters: {
+            query?: {
+                provider?: components["schemas"]["LLMProvider"];
             };
             header?: never;
             path?: never;
@@ -5899,8 +9430,551 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RetrievedSectionOut"][];
+                    "application/json": components["schemas"]["ProviderModel"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_settings_api_settings__role__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["ModelRole"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_settings_api_settings__role__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["ModelRole"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleSettingsSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_settings_api_settings__role__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["ModelRole"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recipes_api_tutorial_recipes_get: {
+        parameters: {
+            query?: {
+                curriculum_version_id?: number | null;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialRecipeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_api_tutorial_recipes__recipe_id__decision_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TutorialRecipeDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialRecipeDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_blocks_api_tutorial_blocks_get: {
+        parameters: {
+            query?: {
+                subtopic_id?: number | null;
+                curriculum_version_id?: number | null;
+                recipe_id?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialBlockOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_block_api_tutorial_blocks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateTutorialBlockRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialBlockOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pregenerate_api_tutorial_pregeneration_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TutorialPregenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStartedResponse"] | components["schemas"]["TutorialPregenerationPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_block_api_tutorial_blocks__block_id__retire_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                block_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TutorialBlockOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recipes_api_experimental_recipes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_experimental_recipes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeYaml"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_api_experimental_recipes_draft_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeDraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    try_recipe_api_experimental_recipes_try_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeTryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeTryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_api_experimental_recipes__row_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentalRecipeYaml"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentalRecipeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_api_experimental_recipes__row_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_agent_api_agent_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -5929,6 +10003,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+        };
+    };
+    get_taxonomy_classroom_api_question_sets_taxonomy__curriculum_version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curriculum_version_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionSetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5974,8 +10079,12 @@ export interface operations {
                 curriculum_version_id?: number | null;
                 page?: number;
                 page_size?: number;
+                sort?: ("name" | "email" | "answered" | "average" | "last_active" | "enrolled") | null;
+                order?: "asc" | "desc";
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6039,7 +10148,9 @@ export interface operations {
             query?: {
                 curriculum_version_id?: number | null;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6101,7 +10212,9 @@ export interface operations {
     get_student_api_students__student_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 student_id: number;
             };
@@ -6132,9 +10245,44 @@ export interface operations {
     student_progress_api_students__student_id__progress_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 student_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentProgressOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    training_session_progress_api_training_sessions__training_session_id__progress_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
+            path: {
+                training_session_id: number;
             };
             cookie?: never;
         };
@@ -6165,7 +10313,9 @@ export interface operations {
             query: {
                 student_id: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6194,7 +10344,9 @@ export interface operations {
     start_training_session_api_training_sessions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6227,7 +10379,9 @@ export interface operations {
     get_training_session_api_training_sessions__training_session_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -6258,7 +10412,42 @@ export interface operations {
     next_question_api_training_sessions__training_session_id__next_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
+            path: {
+                training_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServedQuestionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_live_question_api_training_sessions__training_session_id__live_question_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -6289,7 +10478,9 @@ export interface operations {
     answer_attempt_api_attempts__attempt_id__answer_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 attempt_id: number;
             };
@@ -6324,7 +10515,9 @@ export interface operations {
     get_attempt_api_attempts__attempt_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 attempt_id: number;
             };
@@ -6352,10 +10545,45 @@ export interface operations {
             };
         };
     };
+    review_attempt_api_attempts__attempt_id__review_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     end_training_session_api_training_sessions__training_session_id__end_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Student-Token"?: string | null;
+            };
             path: {
                 training_session_id: number;
             };
@@ -6383,12 +10611,45 @@ export interface operations {
             };
         };
     };
+    rerun_preview_api_evaluation_rerun_preview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JudgeRerunPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_batch_runs_api_evaluation_batch_runs_get: {
         parameters: {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6417,7 +10678,9 @@ export interface operations {
     submit_batch_run_api_evaluation_batch_runs_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -6450,7 +10713,9 @@ export interface operations {
     get_batch_run_api_evaluation_batch_runs__run_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 run_id: string;
             };
@@ -6481,7 +10746,9 @@ export interface operations {
     poll_batch_run_api_evaluation_batch_runs__run_id__poll_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 run_id: string;
             };
@@ -6512,7 +10779,9 @@ export interface operations {
     question_evaluations_api_questions__question_id__evaluations_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
             path: {
                 question_id: number;
             };

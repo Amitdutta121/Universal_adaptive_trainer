@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rubrics · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .qrow { display: grid; gap: .25rem; width: 100%; text-align: left; padding: .7rem 1rem; border-top: 1px solid var(--border); }
+    .qrow:hover { background: var(--muted); }
+    .qrow[data-on] { background: var(--accent); box-shadow: inset 3px 0 0 var(--primary); }
+    .ev { background: var(--accent); border-bottom: 2px solid var(--primary); border-radius: 2px; padding: 0 1px; }
+    .ev sup { font-family: var(--font-mono); font-size: .65rem; color: var(--accent-foreground); margin-left: 1px; }
+    .inj { background: var(--critical-wash); color: var(--critical-solid); border-radius: 2px; padding: 0 1px; }
+    .meter { position: relative; height: .5rem; border-radius: 999px; background: var(--muted); }
+    .meter > span { position: absolute; inset: 0 auto 0 0; border-radius: 999px; transition: width .5s ease; }
+    .meter > i { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--foreground); }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: .5rem; overflow: hidden; }
+    .seg button { padding: .2rem .6rem; font-size: .75rem; }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button[data-on] { background: var(--primary); color: var(--primary-foreground); }
+    .crit-in { font-size: .8125rem; }
+  </style>
+</head>
+<!-- Rubrics: written-explanation questions checked by the Rubric grader (MOCK.TOOL_CATALOG.rubric).
+     AI drafts each rubric from the objective + book section; the professor edits and approves it; no
+     unapproved rubric grades anything. Calibration: the professor grades answers herself (blind); per-
+     criterion agreement below 85% (or fewer than 20 answers) = practice only. Data: assets/data-rubrics.js. -->
+<body data-scope="course" data-nav="questions" data-title="Rubrics">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <nav class="text-sm text-muted-foreground flex items-center gap-1">
+      <a class="hover:underline" :href="Mock.link('questions.html')">Question bank</a>
+      <i data-lucide="chevron-right" class="size-3.5"></i><span>Rubrics</span>
+    </nav>
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="max-w-3xl">
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Rubrics</h1>
+        <p class="text-sm text-muted-foreground" x-text="`Written-explanation questions are graded by the ${tool.name} ${tool.version}, criterion by criterion, against a rubric you approve. Each grade quotes the part of the answer that earned it.`"></p>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link('alignment.html')"><i data-lucide="scale"></i>Alignment</a>
+      </div>
+    </div>
+
+    <!-- Calibration (course level) -->
+    <section class="card gap-0 py-0">
+      <header class="flex flex-wrap items-center gap-3 px-6 pt-5 pb-4">
+        <h2 class="font-semibold">Calibration</h2>
+        <span class="pill" :class="cal.counts ? 'tone-ok' : 'tone-warn'" x-text="cal.counts ? 'Counts toward grades' : `Practice only until ${Mock.pct(cal.bar)}`"></span>
+        <span class="text-sm text-muted-foreground" x-text="`How often the grader makes the same call as you, per criterion, on answers you graded yourself.`"></span>
+      </header>
+      <div class="grid gap-6 border-t px-6 py-5 lg:grid-cols-[12rem_minmax(0,1fr)_minmax(0,1fr)]">
+        <div>
+          <div class="text-3xl font-display font-semibold" x-text="Mock.pct(cal.agreement)"></div>
+          <div class="text-xs text-muted-foreground" x-text="cal.criteria ? `agree with you · ${cal.agreed} of ${cal.criteria} criteria` : 'no answers graded by you yet'"></div>
+          <div class="mt-1 text-xs font-mono" x-show="lastDelta" :style="{ color: lastDelta < 0 ? 'var(--critical-solid)' : 'var(--ok-solid)' }" x-text="lastDelta ? `${lastDelta > 0 ? '+' : ''}${lastDelta.toFixed(1)} pts from your last grade` : ''"></div>
+        </div>
+        <div class="grid gap-4 content-start">
+          <div class="grid gap-1.5">
+            <div class="flex text-xs"><span class="font-medium">Agreement</span><span class="ml-auto text-muted-foreground" x-text="`bar ${Mock.pct(cal.bar)}`"></span></div>
+            <div class="meter" :title="`Agreement ${Mock.pct(cal.agreement)}; bar ${Mock.pct(cal.bar)}`">
+              <span :style="{ width: `${(cal.agreement || 0) * 100}%`, background: cal.agreement >= cal.bar ? 'var(--ok-solid)' : 'var(--warn-solid)' }"></span>
+              <i :style="{ left: `${cal.bar * 100}%` }"></i>
+            </div>
+          </div>
+          <div class="grid gap-1.5">
+            <div class="flex text-xs"><span class="font-medium">Answers graded by you</span><span class="ml-auto font-mono" x-text="gradedText"></span></div>
+            <div class="meter"><span :style="{ width: `${Math.min(1, cal.graded / cal.needed) * 100}%`, background: 'var(--primary)' }"></span></div>
+          </div>
+        </div>
+        <div class="grid gap-3 content-start text-sm">
+          <p x-show="!cal.counts && cal.graded < cal.needed" x-text="`Results go to students as feedback and don't change any grade. Grades start counting once you've graded ${cal.needed} answers and agreement is ${Mock.pct(cal.bar)} or higher.`"></p>
+          <p x-show="!cal.counts && cal.graded >= cal.needed" x-text="`Agreement is below ${Mock.pct(cal.bar)}, so results are practice only again: feedback for students, no effect on grades. Grade more answers or tighten the criteria you disagree on.`"></p>
+          <p x-show="cal.counts" x-text="`Rubric-graded answers count toward assignment grades. Keep spot-checking: if agreement drops below ${Mock.pct(cal.bar)}, the grader goes back to practice only.`"></p>
+          <p class="text-xs text-muted-foreground" x-show="projection" x-text="projection"></p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn" data-size="sm" :disabled="!nextAnswer" @click="startGrade(nextAnswer)"><i data-lucide="pencil-line"></i>Grade the next answer</button>
+            <span class="text-xs text-muted-foreground" x-text="nextAnswer ? `${ungradedCount} not graded by you` : (questions.length ? 'Nothing left to grade' : 'No answers yet')"></span>
+          </div>
+        </div>
+      </div>
+      <footer class="border-t px-6 py-3 text-xs text-muted-foreground">Every grade you change becomes a calibration example for the grader. Each answer is graded twice; when the two gradings differ on a criterion, the answer is flagged and its score waits for you.</footer>
+    </section>
+
+    <!-- Statistics: no written questions -->
+    <template x-if="!questions.length">
+      <div class="card">
+        <section class="grid place-items-center gap-3 py-10 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="file-pen-line"></i></span>
+          <div class="font-medium">No written-answer questions yet</div>
+          <p class="text-sm text-muted-foreground max-w-lg" x-text="course.numbers.questions ? 'Generate written-explanation questions and the AI drafts a rubric for each one from its learning objective and book section. They appear here for you to edit and approve.' : `${course.name} has no questions yet: generation is blocked until the taxonomy is approved. Once written-explanation questions are generated, each gets an AI-drafted rubric to approve here.`"></p>
+          <a class="btn" data-variant="outline" data-size="sm" :href="Mock.link(course.numbers.questions ? 'generate.html' : 'taxonomy.html')" x-text="course.numbers.questions ? 'Generate questions' : 'Review the taxonomy'"></a>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="questions.length">
+      <div class="grid gap-6 xl:grid-cols-[20rem_minmax(0,1fr)]">
+        <!-- Question list -->
+        <div class="card gap-0 py-0 self-start overflow-hidden">
+          <header class="px-4 pt-4 pb-3">
+            <h2 class="font-semibold">Written-answer questions</h2>
+            <p class="text-xs text-muted-foreground" x-text="`${questions.length} questions · ${needApproval} rubric${needApproval === 1 ? ' needs' : 's need'} approval`"></p>
+          </header>
+          <template x-for="x in questions" :key="x.id">
+            <button type="button" class="qrow" :data-on="x.id === sel ? '' : null" @click="select(x.id)">
+              <span class="text-sm leading-5" x-text="x.prompt"></span>
+              <span class="text-xs text-muted-foreground" x-text="x.subtopic"></span>
+              <span class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                <span class="pill" :class="statusOf(x).tone" x-text="statusOf(x).label"></span>
+                <span class="pill tone-accent" x-show="x.criteria.some((c) => c.origin === 'edited')">Edited by you</span>
+                <span class="text-xs text-muted-foreground" x-text="x.answers.length ? `${x.answers.length} answers · ${x.answers.filter((a) => a.prof).length} graded by you` : 'No answers'"></span>
+                <span class="pill tone-critical" x-show="flagCount(x)" x-text="`${flagCount(x)} flagged`"></span>
+              </span>
+            </button>
+          </template>
+        </div>
+
+        <!-- Selected question -->
+        <div class="grid gap-6 content-start min-w-0">
+          <!-- Rubric editor -->
+          <section class="card gap-0 py-0">
+            <header class="grid gap-1 px-6 pt-5 pb-4">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="pill" :class="statusOf(q).tone" x-text="statusOf(q).label"></span>
+                <span class="font-mono text-xs text-muted-foreground" x-text="`Rubric v${q.version}${q.dirty ? ' → v' + (q.version + 1) + ' (unsaved)' : ''}`"></span>
+                <span class="text-xs text-muted-foreground ml-auto" x-text="q.approved ? `Approved by ${q.approved.by} · ${fmtDate(q.approved.at)}` : `Drafted by AI · ${fmtDate(q.drafted)}`"></span>
+              </div>
+              <h2 class="text-lg font-semibold leading-snug" x-text="q.prompt"></h2>
+              <p class="text-sm text-muted-foreground"><span x-text="`${q.topic} · ${q.subtopic} · `"></span><span x-text="q.section"></span></p>
+              <p class="text-sm"><span class="text-muted-foreground">Learning objective: </span><span x-text="q.objective"></span></p>
+            </header>
+            <div class="table-container border-t">
+              <table class="table text-sm table-fixed">
+                <thead><tr><th class="pl-6 w-12">#</th><th>Criterion</th><th class="w-20">Points</th><th>What earns it</th><th class="w-32">Source</th><th class="pr-6 w-14"></th></tr></thead>
+                <tbody>
+                  <template x-for="(c, k) in q.criteria" :key="c.id">
+                    <tr class="align-top">
+                      <td class="pl-6 pt-4 font-mono text-xs text-muted-foreground" x-text="k + 1"></td>
+                      <td class="whitespace-normal w-[30%]"><textarea class="textarea crit-in leading-5 font-medium" rows="2" x-model="c.text" @input="edited(c)" :aria-label="`Criterion ${k + 1}`"></textarea></td>
+                      <td><input type="number" min="1" max="5" class="input crit-in w-16 font-mono" x-model.number="c.points" @input="edited(c)" :aria-label="`Points for criterion ${k + 1}`"></td>
+                      <td class="whitespace-normal"><textarea class="textarea crit-in leading-5" rows="2" x-model="c.earns" @input="edited(c)" :aria-label="`What earns criterion ${k + 1}`"></textarea></td>
+                      <td class="pt-3.5">
+                        <span class="pill" :class="c.origin === 'edited' ? 'tone-accent' : 'tone-muted'" x-text="c.origin === 'edited' ? 'Edited by you' : 'AI-drafted'"></span>
+                        <div class="mt-1 text-xs text-muted-foreground whitespace-normal" x-show="c.was" :title="`AI's original: ${c.was}`" x-text="c.was ? `was: “${c.was}”` : ''"></div>
+                      </td>
+                      <td class="pr-6 pt-2.5"><button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :disabled="q.criteria.length <= 3" @click="removeCrit(k)" :aria-label="`Remove criterion ${k + 1}`" title="Remove (a rubric needs 3–5 criteria)"><i data-lucide="x"></i></button></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <footer class="flex flex-wrap items-center gap-2 border-t px-6 py-3">
+              <span class="text-sm font-medium" x-text="`${total(q)} points`"></span>
+              <button type="button" class="btn" data-variant="ghost" data-size="sm" :disabled="q.criteria.length >= 5" @click="addCrit()"><i data-lucide="plus"></i>Add criterion</button>
+              <button type="button" class="btn" data-variant="outline" data-size="sm" :disabled="q.redrafting" @click="redraft()">
+                <span class="inline-flex" :class="q.redrafting ? 'animate-spin' : ''"><i data-lucide="refresh-cw"></i></span><span x-text="q.redrafting ? 'Redrafting…' : 'Redraft with AI'"></span>
+              </button>
+              <span class="text-xs text-muted-foreground" x-show="q.status === 'draft'" x-text="`Not used until you approve it: ${q.answers.length} answers are waiting.`"></span>
+              <span class="text-xs text-muted-foreground" x-show="q.status === 'approved' && q.dirty" x-text="`v${q.version} keeps grading until you approve the changes.`"></span>
+              <button type="button" class="btn ml-auto" data-size="sm" x-show="q.status === 'draft' || q.dirty" :disabled="q.grading || !valid(q)" @click="approve()">
+                <i data-lucide="check"></i><span x-text="q.grading ? 'Grading answers…' : q.status === 'draft' ? 'Approve rubric' : 'Approve changes'"></span>
+              </button>
+              <span class="ml-auto text-xs text-muted-foreground" x-show="q.status === 'approved' && !q.dirty">Edit any field to make a new version.</span>
+            </footer>
+          </section>
+
+          <!-- Answers -->
+          <section class="card gap-0 py-0">
+            <header class="flex flex-wrap items-center gap-3 px-6 pt-5 pb-4">
+              <h2 class="font-semibold">Answers</h2>
+              <span class="text-sm text-muted-foreground" x-show="q.status === 'approved'" x-text="`${q.answers.length} graded by the AI · ${q.answers.filter((a) => a.prof).length} also by you`"></span>
+              <div class="seg ml-auto" x-show="q.status === 'approved' && q.answers.length">
+                <template x-for="f in filters" :key="f[0]">
+                  <button type="button" :data-on="filter === f[0] ? '' : null" @click="filter = f[0]" x-text="`${f[1]} ${countBy(f[0])}`"></button>
+                </template>
+              </div>
+            </header>
+            <template x-if="q.status === 'draft'">
+              <div class="border-t px-6 py-8 text-center text-sm text-muted-foreground" x-text="q.grading ? `Grading ${q.answers.length} answers with v${q.version}…` : `${q.answers.length} answers waiting. Nothing is graded with a rubric you haven't approved; approve it above and these are graded straight away.`"></div>
+            </template>
+            <template x-if="q.status === 'approved' && !q.answers.length">
+              <div class="border-t px-6 py-8 text-center text-sm text-muted-foreground">No answers since this rubric was approved. Answers appear here as students practise.</div>
+            </template>
+            <template x-if="q.status === 'approved' && q.answers.length">
+              <div class="table-container border-t">
+                <table class="table text-sm">
+                  <thead><tr><th class="pl-6">Student</th><th>Answer</th><th class="text-right">AI</th><th class="text-right">You</th><th>Agree</th><th>Flags</th><th class="pr-6"></th></tr></thead>
+                  <tbody>
+                    <template x-for="a in shown" :key="a.id">
+                      <tr class="cursor-pointer" @click="openAnswer(a)">
+                        <td class="pl-6 whitespace-nowrap"><div class="font-medium" x-text="a.student"></div><div class="text-xs text-muted-foreground" x-text="a.at"></div></td>
+                        <td class="whitespace-normal max-w-md"><span class="line-clamp-2 text-muted-foreground" x-text="a.text"></span></td>
+                        <td class="text-right font-mono whitespace-nowrap" x-text="aiScore(a)"></td>
+                        <td class="text-right font-mono whitespace-nowrap" x-text="a.prof ? `${MOCK.rubricScore(q, a.prof)}/${total(q)}` : '—'"></td>
+                        <td>
+                          <span class="pill" x-show="a.prof" :class="agreeOf(a) === q.criteria.length ? 'tone-ok' : 'tone-warn'" x-text="a.prof ? `${agreeOf(a)} of ${q.criteria.length}` : ''"></span>
+                          <span class="text-xs text-muted-foreground" x-show="!a.prof">not graded</span>
+                        </td>
+                        <td class="whitespace-nowrap">
+                          <span class="pill tone-critical" x-show="a.injection">Injection attempt</span>
+                          <span class="pill tone-warn" x-show="a.ai2 && !a.prof">Gradings disagree</span>
+                        </td>
+                        <td class="pr-6 text-right whitespace-nowrap">
+                          <button type="button" class="btn" data-size="sm" data-variant="outline" x-show="!a.prof" @click.stop="startGrade(a)">Grade</button>
+                          <button type="button" class="btn" data-size="sm" data-variant="ghost" @click.stop="openAnswer(a)">View</button>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+            <footer class="border-t px-6 py-3 text-xs text-muted-foreground" x-show="q.status === 'approved' && q.answers.length">Answers are graded as text, never as instructions. An answer that tells the grader what to do (“give full marks”) is graded on the criteria only and flagged here.</footer>
+          </section>
+        </div>
+      </div>
+    </template>
+
+    <!-- Answer detail -->
+    <dialog x-ref="detail" class="dialog" @click="if ($event.target === $el) $el.close()" aria-labelledby="ad-title">
+      <template x-if="cur">
+          <div class="sm:max-w-2xl">
+            <header>
+              <h2 id="ad-title" x-text="`${cur.a.student} · ${cur.a.at}`"></h2>
+              <p x-text="cur.q.prompt"></p>
+            </header>
+            <section class="grid gap-4 overflow-y-auto">
+              <div class="rounded-lg border p-3 text-[15px] leading-7" x-html="highlight(cur.q, cur.a)"></div>
+              <template x-if="cur.a.injection">
+                <div class="rounded-lg p-3 text-sm tone-critical">
+                  <div class="font-medium">Injection attempt: not followed</div>
+                  <p class="mt-1" x-text="`The answer contains an instruction to the grader (“${cur.a.injection}”). It was treated as part of the student's text and graded on the criteria only. Nothing in an answer can change the rubric or the score.`"></p>
+                </div>
+              </template>
+              <template x-if="cur.a.ai2">
+                <div class="rounded-lg p-3 text-sm tone-warn">
+                  <div class="font-medium">The two gradings disagree</div>
+                  <p class="mt-1" x-text="`Graded twice: ${diffText(cur.q, cur.a)}. The score is shown as a range until you grade it.`"></p>
+                </div>
+              </template>
+              <div class="table-container rounded-lg border">
+                <table class="table text-sm">
+                  <thead><tr><th>Criterion</th><th>AI</th><th>Evidence quoted from the answer</th><th>You</th></tr></thead>
+                  <tbody>
+                    <template x-for="(c, k) in cur.q.criteria" :key="c.id">
+                      <tr class="align-top">
+                        <td class="whitespace-normal min-w-44"><span class="font-mono text-xs text-muted-foreground mr-1" x-text="k + 1"></span><span x-text="c.text"></span> <span class="text-xs text-muted-foreground" x-text="`(${c.points})`"></span></td>
+                        <td class="whitespace-nowrap">
+                          <span class="pill" :class="cur.a.ai[k] ? 'tone-ok' : 'tone-muted'" x-text="cur.a.ai[k] ? `Met +${c.points}` : 'Missing'"></span>
+                          <div class="mt-1 text-xs" style="color:var(--warn-solid)" x-show="cur.a.ai2 && cur.a.ai2[k] !== cur.a.ai[k]" x-text="cur.a.ai2 ? `2nd grading: ${cur.a.ai2[k] ? 'met' : 'missing'}` : ''"></div>
+                        </td>
+                        <td class="whitespace-normal min-w-56 text-sm" x-text="cur.a.ev[k] ? `“${cur.a.ev[k]}”` : 'missing'" :class="cur.a.ev[k] ? '' : 'text-muted-foreground'"></td>
+                        <td class="whitespace-nowrap">
+                          <span class="pill" x-show="cur.a.prof" :class="cur.a.prof && cur.a.prof[k] === (cur.a.ai[k] || 0) ? 'tone-ok' : 'tone-critical'" x-text="cur.a.prof ? (cur.a.prof[k] ? 'Met' : 'Not met') : ''"></span>
+                          <span class="text-xs text-muted-foreground" x-show="!cur.a.prof">—</span>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <p class="text-xs text-muted-foreground" x-text="cur.a.prof ? `You: ${MOCK.rubricScore(cur.q, cur.a.prof)}/${total(cur.q)} · AI: ${aiScore(cur.a, cur.q)} · agreed on ${agreeOf(cur.a, cur.q)} of ${cur.q.criteria.length} criteria. Your grade is what the student sees.` : `AI: ${aiScore(cur.a, cur.q)}. ${cal.counts ? 'Counts toward the grade.' : 'Practice only: sent to the student as feedback, no effect on the grade.'}`"></p>
+            </section>
+            <footer>
+              <button type="button" class="btn" data-variant="outline" @click="$refs.detail.close()">Close</button>
+              <button type="button" class="btn" x-show="!cur.a.prof" @click="$refs.detail.close(); startGrade(cur.a)">Grade this answer</button>
+            </footer>
+          </div>
+      </template>
+    </dialog>
+
+    <!-- Grade an answer (blind) -->
+    <dialog x-ref="grade" class="dialog" aria-labelledby="gr-title">
+      <template x-if="g">
+          <div class="sm:max-w-2xl">
+            <header>
+              <h2 id="gr-title" x-text="g.saved ? 'Your grade vs the grader' : `Grade ${g.a.student}'s answer`"></h2>
+              <p x-text="g.saved ? g.summary : 'Mark each criterion yourself. The AI\'s grades stay hidden until you save, so they don\'t steer you.'"></p>
+            </header>
+            <section class="grid gap-4 overflow-y-auto">
+              <div class="text-xs text-muted-foreground" x-text="g.q.prompt"></div>
+              <div class="rounded-lg border p-3 text-[15px] leading-7" x-html="g.saved ? highlight(g.q, g.a) : Mock.esc(g.a.text)"></div>
+              <p class="text-xs" style="color:var(--critical-solid)" x-show="g.a.injection">This answer contains an instruction to the grader. Grade the content only.</p>
+              <div class="grid gap-2">
+                <template x-for="(c, k) in g.q.criteria" :key="c.id">
+                  <div class="grid gap-2 rounded-lg border px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div class="text-sm">
+                      <div><span class="font-mono text-xs text-muted-foreground mr-1" x-text="k + 1"></span><span class="font-medium" x-text="c.text"></span> <span class="text-xs text-muted-foreground" x-text="`(${c.points} pt${c.points > 1 ? 's' : ''})`"></span></div>
+                      <div class="text-xs text-muted-foreground" x-text="c.earns"></div>
+                      <div class="mt-1 text-xs" x-show="g.saved" x-text="g.saved ? `AI: ${g.a.ai[k] ? 'met' : 'missing'}${g.a.ev[k] ? ` · “${g.a.ev[k]}”` : ''}` : ''"></div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <div class="seg" x-show="!g.saved">
+                        <button type="button" :data-on="g.marks[k] === 1 ? '' : null" @click="g.marks[k] = 1" :aria-label="`Criterion ${k + 1} met`">Met</button>
+                        <button type="button" :data-on="g.marks[k] === 0 ? '' : null" @click="g.marks[k] = 0" :aria-label="`Criterion ${k + 1} not met`">Not met</button>
+                      </div>
+                      <span class="pill" x-show="g.saved" :class="g.marks[k] === (g.a.ai[k] || 0) ? 'tone-ok' : 'tone-critical'" x-text="g.marks[k] === (g.a.ai[k] || 0) ? 'Same call' : (g.marks[k] ? 'You: met' : 'You: not met')"></span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </section>
+            <footer>
+              <template x-if="!g.saved">
+                <div class="flex w-full items-center gap-2">
+                  <span class="text-xs text-muted-foreground" x-text="`${g.marks.filter((m) => m !== null).length} of ${g.q.criteria.length} marked`"></span>
+                  <button type="button" class="btn ml-auto" data-variant="outline" @click="$refs.grade.close()">Cancel</button>
+                  <button type="button" class="btn" :disabled="g.marks.some((m) => m === null)" @click="saveGrade()">Save grade</button>
+                </div>
+              </template>
+              <template x-if="g.saved">
+                <div class="flex w-full items-center gap-2">
+                  <span class="text-xs text-muted-foreground" x-text="`Agreement ${Mock.pct(g.before)} → ${Mock.pct(cal.agreement)} · ${gradedText}`"></span>
+                  <button type="button" class="btn ml-auto" data-variant="outline" @click="$refs.grade.close()">Done</button>
+                  <button type="button" class="btn" x-show="nextAnswer" @click="startGrade(nextAnswer)">Grade the next answer</button>
+                </div>
+              </template>
+            </footer>
+          </div>
+      </template>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/data-rubrics.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const cid = Mock.courseId;
+      const tool = { ...MOCK.TOOL_CATALOG.rubric, ...(MOCK.course_tools[cid] || []).find((t) => t.id === "rubric") };
+      // Deep copy so edits stay on this page (reload resets).
+      const questions = JSON.parse(JSON.stringify((MOCK.rubrics[cid] || { questions: [] }).questions))
+        .map((x) => ({ ...x, dirty: false, grading: false, redrafting: false, drafted: x.drafted || null }));
+      const start = questions.find((x) => x.id === Mock.param("q")) || questions[0] || null;
+      const sum = (arr) => arr.reduce((s, v) => s + v, 0);
+      return {
+        course: Mock.course, tool, questions, sel: start ? start.id : null, filter: "all",
+        filters: [["all", "All"], ["todo", "Not graded by you"], ["flagged", "Flagged"]],
+        cur: null, g: null, lastDelta: 0,
+        get gradedText() { const c = this.cal; return c.graded > c.needed ? `${c.graded} graded (${c.needed} needed)` : `${c.graded} of ${c.needed}`; },
+        get needApproval() { return this.questions.filter((x) => x.status !== 'approved' || x.dirty).length; },
+        get q() { return this.questions.find((x) => x.id === this.sel) || this.questions[0]; },
+        get cal() { return MOCK.rubricCalibration(cid, this.questions); },
+        get gradable() { return this.questions.filter((x) => x.status === "approved").flatMap((x) => x.answers.filter((a) => !a.prof).map((a) => ({ a, x }))); },
+        get ungradedCount() { return this.gradable.length; },
+        // Next ungraded answer: the selected question first, then the others.
+        get nextAnswer() { const all = this.gradable; return (all.find((r) => r.x.id === this.sel) || all[0] || {}).a || null; },
+        get projection() {
+          const c = this.cal, left = c.needed - c.graded;
+          if (left <= 0 || c.agreement === null) return "";
+          const per = c.criteria / c.graded, best = (c.agreed + left * per) / (c.criteria + left * per);
+          if (best < c.bar) return `${left} more to grade. Even if the grader matches you on every criterion of those, agreement tops out at ${Mock.pct(best)}: the rubric needs tightening first.`;
+          return `${left} more to grade. If the grader matches you on every criterion of those, agreement ends at ${Mock.pct(best)}${Math.round(best * 100) === Math.round(c.bar * 100) ? ": exactly the bar, so one more disagreement keeps it practice only" : ""}.`;
+        },
+        fmtDate: (iso) => iso ? new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "",
+        statusOf(x) {
+          if (x.status === "draft") return { label: "Draft · needs approval", tone: "tone-warn" };
+          if (x.dirty) return { label: "Changes not approved", tone: "tone-warn" };
+          return { label: "Approved", tone: "tone-ok" };
+        },
+        total(x) { return sum(x.criteria.map((c) => Number(c.points) || 0)); },
+        valid(x) { return x.criteria.length >= 3 && x.criteria.every((c) => c.text.trim() && c.earns.trim() && c.points >= 1); },
+        flagCount(x) { return x.status === "approved" ? x.answers.filter((a) => a.injection || (a.ai2 && !a.prof)).length : 0; },
+        questionOf(a) { return this.questions.find((x) => x.answers.includes(a)); },
+        aiScore(a, x) {
+          x = x || this.questionOf(a);
+          const s1 = MOCK.rubricScore(x, a.ai), s2 = a.ai2 ? MOCK.rubricScore(x, a.ai2) : s1;
+          return s1 === s2 ? `${s1}/${this.total(x)}` : `${Math.min(s1, s2)}–${Math.max(s1, s2)}/${this.total(x)}`;
+        },
+        agreeOf(a, x) { x = x || this.questionOf(a); return x.criteria.filter((_, k) => a.prof && a.prof[k] === (a.ai[k] || 0)).length; },
+        diffText(x, a) { return x.criteria.map((c, k) => (a.ai2[k] !== a.ai[k] ? `criterion ${k + 1} (${c.text.toLowerCase()}) was met in one grading and missing in the other` : null)).filter(Boolean).join("; "); },
+        countBy(f) { return this.q.answers.filter((a) => this.match(a, f)).length; },
+        match(a, f) { return f === "all" || (f === "todo" && !a.prof) || (f === "flagged" && (a.injection || (a.ai2 && !a.prof))); },
+        get shown() { return this.q.answers.filter((a) => this.match(a, this.filter)); },
+        select(id) { this.sel = id; this.filter = "all"; },
+        edited(c) { c.origin = "edited"; this.q.dirty = this.q.status === "approved"; },
+        addCrit() { this.q.criteria.push({ id: `c${Date.now()}`, text: "", points: 1, earns: "", origin: "edited" }); this.q.dirty = this.q.status === "approved"; },
+        removeCrit(k) {
+          this.q.criteria.splice(k, 1);
+          this.q.answers.forEach((a) => { a.ai.splice(k, 1); a.ev.splice(k, 1); a.ai2 && a.ai2.splice(k, 1); a.prof && a.prof.splice(k, 1); });
+          this.q.dirty = this.q.status === "approved";
+        },
+        redraft() {
+          const x = this.q; x.redrafting = true;
+          setTimeout(() => { x.redrafting = false; Mock.toast(`Redraft started from “${x.objective.slice(0, 40)}…” and ${x.section.split(" · ")[1]}. It opens here as a new draft; the job is in Jobs.`); }, 1100);
+        },
+        approve() {
+          const x = this.q;
+          if (x.status === "draft") {
+            x.grading = true;
+            setTimeout(() => {
+              x.grading = false; x.status = "approved"; x.approved = { by: MOCK.me.name, at: MOCK.today };
+              x.answers.forEach((a) => { a.pending = false; while (a.ai.length < x.criteria.length) { a.ai.push(0); a.ev.push(null); } });
+              Mock.toast(`Rubric v${x.version} approved. Graded ${x.answers.length} waiting answers: ${this.cal.counts ? "counts toward grades" : "practice only"}. The job is in Jobs.`);
+            }, 1200);
+          } else {
+            x.version++; x.dirty = false; x.approved = { by: MOCK.me.name, at: MOCK.today };
+            Mock.toast(`Rubric v${x.version} approved. New answers are graded with it; the ${x.answers.length} already graded keep their v${x.version - 1} grades.`);
+          }
+        },
+        openAnswer(a) { this.cur = { a, q: this.questionOf(a) }; this.$refs.detail.showModal(); },
+        startGrade(a) {
+          if (!a) return;
+          const x = this.questionOf(a);
+          if (x.id !== this.sel) this.select(x.id);
+          this.g = { a, q: x, marks: x.criteria.map(() => null), saved: false, before: this.cal.agreement, summary: "" };
+          if (!this.$refs.grade.open) this.$refs.grade.showModal();
+        },
+        saveGrade() {
+          const g = this.g, wasCounting = this.cal.counts, before = this.cal.agreement;
+          g.a.prof = [...g.marks];
+          const same = this.agreeOf(g.a, g.q), n = g.q.criteria.length, after = this.cal.agreement;
+          this.lastDelta = before === null ? 0 : (after - before) * 100;
+          g.saved = true;
+          g.summary = same === n ? `Same call on all ${n} criteria.` : `Different call on ${n - same} of ${n} criteria. ${n - same === 1 ? "That call is now a calibration example" : "Those calls are now calibration examples"} for the grader.`;
+          if (wasCounting && !this.cal.counts) Mock.toast(`Agreement fell to ${Mock.pct(after)}, below ${Mock.pct(this.cal.bar)}. The grader is practice only again; students' grades are no longer changed by it.`);
+          else if (!wasCounting && this.cal.counts) Mock.toast(`Calibrated: ${Mock.pct(after)} over ${this.cal.graded} answers. Rubric grades now count toward grades.`);
+          else Mock.toast(`Saved. Agreement ${Mock.pct(before)} → ${Mock.pct(after)}.`);
+        },
+        // The answer with each criterion's quoted evidence marked, and any injected instruction.
+        highlight(x, a) {
+          const spans = [];
+          a.ev.forEach((e, k) => { if (e && a.ai[k]) { const s = a.text.indexOf(e); if (s >= 0) spans.push({ s, e: s + e.length, k }); } });
+          if (a.injection) { const s = a.text.indexOf(a.injection); if (s >= 0) spans.push({ s, e: s + a.injection.length, inj: true }); }
+          spans.sort((p, r) => p.s - r.s);
+          let out = "", at = 0;
+          spans.forEach((p) => {
+            if (p.s < at) return; // overlapping quote: shown in the table only
+            out += Mock.esc(a.text.slice(at, p.s));
+            const t = Mock.esc(a.text.slice(p.s, p.e));
+            out += p.inj ? `<span class="inj" title="Instruction to the grader: ignored">${t}</span>` : `<mark class="ev" title="Criterion ${p.k + 1}: ${Mock.esc(x.criteria[p.k].text)}">${t}<sup>${p.k + 1}</sup></mark>`;
+            at = p.e;
+          });
+          return out + Mock.esc(a.text.slice(at));
+        },
+      };
+    }
+  </script>
+</body>
+</html>

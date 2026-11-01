@@ -2148,3 +2148,671 @@ cover the readers, and touching sixty call sites for the sake of a flag is how o
 *Reusing `rejected`:* legacy rows already carry it, with a different meaning, and hiding them would
 change what old versions show.
 
+
+
+---
+
+## ADR-051 — Alembic migrations, and courses as the workspace books and taxonomies belong to
+
+**Status:** accepted. Supersedes ADR-008's "no migration tool".
+
+**Migrations.** `init_db` now owns the schema through Alembic, run in-process (no `alembic.ini`,
+no offline mode; scripts under `app/persistence/migrations/`). An empty database is built with
+`create_all` and stamped at head, which keeps the test suite fast. A database from before
+migrations existed is stamped at `0001_baseline` (an empty revision standing for ADR-008's schema)
+and upgraded. A brand-new *table* still needs no migration; a change to an existing table does,
+and `verify_schema` names a column added without one.
+
+**Courses.** A `courses` table (`name`, `description`, `owner_id` for roadmap F2). Only `books` and
+`curriculum_versions` carry `course_id`; everything else reaches its course through them, and a
+question through its curriculum version, which generation always requires. Migration `0002`
+moves every existing book and taxonomy into one "Default course".
+
+**Scoping.** The Studio's URLs are `/courses/{id}/...`, and the API client sends that id as
+`X-Course-Id`. Routes keep their paths; lists, counts, imports, the approved taxonomy and the
+generation default narrow to the course, and a book or taxonomy fetched by id from another course
+is a 404. Each course has its own approved taxonomy. Without the header nothing is narrowed, so
+scripts and the existing tests see the whole installation.
+
+**Not yet course-scoped, on purpose:** learned type instructions, judge prompts, students and the
+single `prod` classroom alias (it follows whichever course last synced it). Courses are not access
+control either; F2 owns that.
+
+**Alternatives rejected.** *Path-prefixed API routes:* rewrites every router and the generated
+client for no behavioural gain over a header. *A cookie for the current course:* hidden state, and
+two tabs would fight over it. *`course_id` on questions:* duplicates what the curriculum version
+already says, and touches every place a question is built.
+
+---
+
+## ADR-052 — The model may propose a taxonomy from the professor's brief; only the professor saves one
+
+**Status:** accepted. Narrows ADR-021; implements roadmap F6.
+
+`POST /api/curriculum/drafts` takes what the professor writes -- title and description
+(required), audience and level, a "must cover" list (one topic or outcome per line; a pasted
+syllabus works), a "leave out" list, and a size (compact ~15, standard ~30, detailed ~45
+subtopics) -- and returns an LLM-proposed Topic -> Subtopic taxonomy **unsaved**. The Curriculum
+page opens it in the existing builder (ADR-049/050) with a banner naming the model and its
+planning notes; closing asks before discarding, and the draft is kept in the browser like any
+unsaved work. It becomes a curriculum version only when the professor saves it, through the same
+validated upload as a hand-built taxonomy.
+
+**No book is read.** An earlier version drafted from a book's outline; it was dropped because it
+copied the book's chapter structure into the taxonomy and tied the course to one textbook. The
+professor's intent decides the shape; the books still ground the *questions* later, so a subtopic
+no book covers shows up as a coverage gap, not as an error here.
+
+**The instruction** (`app/curriculum/drafting.py`) is subject-neutral and says what the product
+does with the result: topics are walked in order, each subtopic costs ~9 reviewed questions, and
+a subtopic's description is the query that finds its reading passage. The response schema puts an
+`analysis` field first, so the model plans (level, skill areas, dependencies) before it writes
+any topic. Duplicate names, over-long fields and empty topics are repaired rather than rejected;
+the result is then judged by the normal validator.
+
+**ADR-021 still holds where it matters:** a human decides the curriculum, and there is one
+definition of it. What changes is that the app may now *suggest* one.
+
+---
+
+## ADR-053 — No "active" taxonomy: the header selector chooses, and every taxonomy has its own classroom link
+
+**Status:** accepted. Replaces the single installation-wide `prod` classroom link.
+
+The taxonomy selector at the top right is the one place a professor chooses which taxonomy
+they are working in; every course page follows it (Questions, Review queue, Generate, Coverage,
+Classrooms, Roster). The choice is still stored per course (`approved_at`, ADR-051), so it
+survives a reload and is the same in every tab, but the UI no longer calls it "active": there is
+no "Make active" action, and a saved taxonomy that is not selected is simply "saved".
+
+What students get no longer depends on that choice. **Each taxonomy has its own stable classroom
+link**, `/students/join?taxonomy={id}`, backed by a question-set alias `taxonomy-{id}`.
+"Create classroom link" / "Update" freezes that taxonomy's approved questions as a new immutable
+snapshot (ADR-036) and points the alias at it; learners already in a run keep their snapshot.
+So several taxonomies can be taught at once. `POST /api/question-sets/taxonomy/{id}/sync`
+(professor, course-scoped) and `GET /api/question-sets/taxonomy/{id}` (public) implement it.
+
+Old `?set={id}` and `?set=prod` links keep working; the UI no longer creates prod links.
+
+---
+
+## ADR-054 — A course chooses its question types; capabilities follow from them
+
+**Status:** accepted. First step of the grader plan (G0/G3); the graders themselves are not moved yet.
+
+`app/assessment/catalog.py` is the one registry of what the product can assess:
+
+- **Capabilities** (checking abilities, each implemented by a grader) and **question types** (what
+  the student answers with) are defined **once, for every subject**. A question type is gradable
+  by any one of its `graded_by` capabilities and always needs its `also_needs` ones (the code
+  types need Run Python to prove their answer at creation).
+- **Subject presets** are the only per-subject data: default ticked types, which groups show
+  first, and example questions in that subject's terms.
+
+Creating a course is two steps (design "option D"): subject, then question types. The professor
+never picks graders; `capabilities_for(types)` works them out on the server and both lists are
+stored on the course (`subject`, `question_types_json`, `capabilities_json`; migration 0003
+gives every existing course the Intro Python subject and all seven types).
+
+A type is **offerable** only if it is built end to end -- generated, validated and scored by
+this app. Today that is the seven Python types. Short answer, numeric, equation and short
+explanation are listed as "Coming soon" and refused by the API.
+
+Generation is held to the choice: `POST /api/questions/generate`, `/generate-batch` and coverage
+gap filling refuse a type the course did not choose (422), and the generate screens only offer
+the course's types. Calls without a course header are unchecked, as before courses existed.
+
+**Not yet:** changing a course's question types after creation; the taxonomy drafter and the
+generator prompts do not read the course's capabilities yet; the graders still live in
+`app.validation` and `app.adaptive.scoring` (extraction is G1).
+
+## ADR-055 — Graders are an isolated package; code runs through a switchable executor
+
+**Status:** accepted. Track C of `docs/GENERIC_ASSESSMENT_MILESTONES.md` (C0–C7).
+
+**Context.** Marking lived inside the app (`app.adaptive.scoring`, `app.validation.runner`) and
+was Python-only. A subject other than Python needs other kinds of checking (numbers with units,
+formulas), and student code must eventually run somewhere safer than a local subprocess.
+
+**Decision.**
+- `graders/` is a standalone package: one grader per capability id (`structured.choice`,
+  `structured.ordering`, `text.normalized_match`, `code.python.execute`, `code.python.tests`,
+  `quantity.units`, `symbolic.expression_equivalence`), each with `check_spec` and `grade`, scoring
+  0–1. It may not import `app` (enforced by `tests/graders/test_isolation.py`).
+- The app owns question types. `app/assessment/specs.py` is the one translation from a stored
+  question to `(capability, spec, answer rewrite)`; `app.adaptive.scoring` reports the result on
+  the 0–100 scale. Whether a capability is "built" is read from the registry, never hand-set.
+- Code runs through an `Executor`: `LocalExecutor` (a subprocess, not a sandbox) or
+  `PistonExecutor` (Piston over HTTP; `docker/piston/`). `EXECUTOR=local|piston` picks one at
+  startup (`app/assessment/executor.py`); one shared instance (`graders.get_executor`) serves
+  scoring and the authoring checks, and `app/validation/runner.py` is a thin shim over
+  `graders.python`.
+- A run the executor could not perform at all (sandbox unreachable or refusing) is flagged
+  `RunResult.infra_error`; graders raise `ExecutorError` and the app answers 503
+  (`CodeExecutionUnavailableError`). It is never scored as a wrong answer or recorded, and its
+  internals are logged, not shown to the student.
+
+**Evidence the move changed nothing.** Every stored attempt (345) scores identically through a
+frozen copy of the old scorer and the new path (`scripts/replay_grading.py`); 37 synthetic cases
+across all seven types agree (`tests/test_grader_replay.py`), also with code run in Piston; all
+342 stored questions re-validate with identical reports (`scripts/revalidate_questions.py`).
+The oracle runs code with its own frozen copy of the old runner (`tests/frozen_runner.py`).
+
+**Not yet.** The default stays `local` in development; production should set `piston`. Numeric
+and formula graders exist but no question type uses them yet (the app cannot generate or map
+them), so they stay "Coming soon". AI rubric grading (`semantic.source_grounded`) is not built.
+
+
+## ADR-056 — The course's subject decides prompts, judge panels and what is learned
+
+**Status:** accepted. Phase 2, S1–S3 of `docs/GENERIC_ASSESSMENT_MILESTONES.md`.
+
+**Context.** Every prompt said "introductory-Python", and judge edits and learned instructions
+were global. A Physics or custom course would be generated and judged as Python, and a lesson
+from one course's professor would rewrite another subject's generator.
+
+**Decision.**
+- A `SubjectProfile` (`app/subjects/`) is built from the course: its subject preset, its question
+  types, whether any of them runs code. Generator, judge and judge-learning prompts are functions
+  of it; code-only wording and issue codes appear only for code types. The Python profile
+  reproduces the shipped prompts byte for byte (`tests/golden/python_prompts.json`).
+- Professor judge edits and learned type instructions are stored per **storage key**: the preset
+  id (`intro_python`, `physics`, ...), shared by every course on that preset, or
+  `custom:<course id>` for a custom subject, which is one course's own. Learning reads only
+  reviews and judge outcomes of questions under the same key.
+- Each subject's shipped judge panel has its own rubric version (`rubric_version_for`), so
+  calibration never pools two subjects' judges; an edit appends a fingerprint as before.
+- The subject is found from the question's curriculum version → course, or from the request's
+  `X-Course-Id`. No course means Intro Python, which is what every row was before courses.
+- A bank re-judge records one rubric version, so it covers one course's questions (all of them
+  when no course is named, as before).
+
+**Consequences.** Physics questions are generated and judged with Physics prompts; Python courses
+are unchanged. Existing edits and learned instructions belong to `intro_python` (migration 0004).
+
+## ADR-057 — Alembic migrations are the only schema source
+
+**Status:** accepted. Amends ADR-051's "an empty database is built with `create_all`" and "a new
+table needs no migration".
+
+**Context.** `init_db` built an empty database with `create_all` and ran `create_all` again after
+every upgrade, so a table could exist that no migration creates, and `0001_baseline` was empty. A
+move to Postgres would replay only the migrations and silently miss those tables.
+
+**Decision.** `init_db` only runs `alembic upgrade head` (after stamping a pre-Alembic database at
+`0001_baseline`). `0001_baseline` now creates the schema as of the last pre-migration commit
+(`d5c0fa4`, rendered by autogenerate with the app's TypeDecorators written as plain column types),
+so base → head builds the whole schema. Every model change, a new table included, ships as a
+migration; `tests/test_persistence.py` runs `alembic check` on a freshly migrated database, and
+`verify_schema` now also names a missing table. A repo-root `alembic.ini` lets
+`alembic check` / `alembic revision --autogenerate` run against `DATABASE_URL`.
+
+**Consequences.** Tests build each database through the full migration chain instead of one
+`create_all`. Databases first built by `create_all` keep their small differences (unused legacy
+tables, unnamed foreign keys); they upgrade fine but `alembic check` against them is not clean.
+
+## ADR-058 — A professor reaches only the courses they own
+
+**Status:** accepted. Supersedes the "unscoped means every course" rule in
+`app/web/routes/api/deps.py` and the "courses are not access control yet" note on
+`ensure_in_course`.
+
+**Context.** Any logged-in professor could open any course, and a request without
+`X-Course-Id` read every course's rows. Several by-id routes (topic and subtopic edits,
+question evaluations and regenerate, batch runs, calibration, retrieval, and the professor's
+student routes) checked no course at all.
+
+**Decision.** `CourseScope` requires the header and loads the course through
+`CourseRepository.get_owned`: a course someone else owns is the same 404 as an unknown one,
+so a guessed id reveals nothing. A missing header is a 422. Every route that fetches a row by
+id checks that row against the scope (`ensure_in_course`, `question_in_course`), and the
+cohort-wide reads (calibration, agreement trend, batch-run list, retrieval, roster, class
+summary) filter to the course. A student belongs to a course through a session on a set built
+from one of its taxonomies. `/courses`, `/courses/overview` and `/courses/{id}` list and open
+only the professor's own courses. Ownership is `courses.owner_id`; membership for
+co-instructors and TAs comes with task-104. Migration `0009_course_access` gives every
+ownerless course to the first user by email (the `0002_courses` rule) and adds
+`judge_batch_runs.course_id`.
+
+**Consequences.** The Studio already sends the header from every `/courses/{id}/…` page; a
+`CourseGate` in the professor chrome shows "Course not found" when the course 404s. The test
+suite overrides `_course_scope` so its older header-less calls stay unscoped, while a request
+naming a course still gets the real ownership check; `tests/test_course_access.py` runs without
+the override. Judge prompts and learned instructions stay keyed by subject (ADR-056), so two
+professors teaching the same subject still share them; that is a separate follow-up.
+
+## ADR-059 — Judge edits and learned rules belong to the professor
+
+**Status:** accepted. Amends ADR-056's "a preset is shared by every course using it".
+
+**Context.** With per-course access (ADR-058), two professors teaching the same preset subject
+still shared one row per judge metric and per question type: one professor's judge edit or
+learned rule rewrote the other's judges and generator.
+
+**Decision.** `SubjectProfile.personal_key` (`<preset>@<owner hex>`; `custom:<course id>` for a
+custom subject) keys judge-prompt overrides, learned type instructions, judge panels, trust
+scope and judge learning. `storage_key` still names the subject for the shared style library.
+A preset pools across one professor's own courses only. Migration `0010_personal_judges` copies
+each shared row to every professor owning a course of that subject.
+
+**Consequences.** The Judges page of one professor never shows or changes another's. A request
+without a course (tests only) still reads the bare preset key.
+
+Also under ADR-058: ids carried in query strings and bodies (coverage `set_version_id` and gap
+targets, generation version/book/section ids, review subtopic corrections) are checked against
+the request's course, and every cross-course 404 reads exactly like a missing row.
+
+## ADR-060 — An account is the isolation boundary for public signup
+
+**Status:** accepted. Extends ADR-058 (per-course access) and ADR-059 (per-professor judges)
+to the public signup coming in M3; amends ADR-041's "the student flow needs no credential".
+
+**Context.** Once anyone can register, every account must be treated as untrusted. ADR-058
+already scoped professor routes to owned courses, but an audit for M2 found four remaining
+hops: `GET /api/counts` counted reviews, learned instructions and students across every
+course; `POST /api/question-sets/prod/sync` let any course repoint the one installation-wide
+`prod` alias, taking over another professor's prod join link; `?curriculum_version_id=` on the
+question list and review queue, and `question_ids` on a judge re-run, were filtered out
+silently instead of refused; and every public run/attempt route (`/training-sessions/{id}/…`,
+`/attempts/{id}/…`, starting a run) took a bare sequential id, so an edited URL reached another
+learner's run, answer keys and email -- and through it another professor's course.
+
+**Decision.** The account is the boundary: what a new account can see or change is exactly
+what it created. A course is reached only by its owner (`courses.owner_id`, stamped from the
+session on create; a posted owner is ignored); every row is reached through its course; an
+id of another account's row -- in a path, query, body or `X-Course-Id` -- is the same 404 as a
+missing one, never a 403. A superuser gets nothing extra: no route reads `is_superuser`.
+Ownerless rows (`courses.owner_id` NULL, books/taxonomies with `course_id` NULL) are reached
+by no account. They are left as they are rather than tightened to `NOT NULL`: owner deletion
+is `ON DELETE SET NULL`, unit tests and scripts build course-less rows, and handing orphans to
+some account would be a guess on a public instance; every check compares with `=`, which
+NULL never satisfies, and the isolation test seeds such rows to keep it that way. The public
+student flow stays login-free but not open: run and attempt routes, and starting a run,
+require the learner's `resume_token` in `X-Student-Token` and answer 404 unless the run is
+that learner's. The prod alias may only be repointed while unset or already serving the
+requesting course.
+
+**Consequences.** `tests/test_account_isolation.py` enumerates `app.routes`: every route is
+either probed (A's ids everywhere -> 404, empty lists for a new account, A's data unchanged
+after the sweep, for a plain account and a superuser) or named in an allowlist with a reason,
+so a new route fails the test until it is classified. The Studio's client sends
+`X-Student-Token` from the stored learner identity, which the join screen now saves before
+starting a run. Still open: classroom links are sequential ids
+(`/students/join?set=` / `?taxonomy=`), so a guessed link joins that class; closing it needs
+an unguessable join code, which changes every shared link.
+
+## ADR-061 — Public professor registration, with a verified email before LLM spend
+
+**Status:** accepted. Completes the public signup that ADR-060 prepared (M3); supersedes the
+"no registration route; the developer account is seeded" notes in `app/auth/` and
+`app/web/routes/api/auth.py`.
+
+**Context.** Accounts came only from the development seed and `python -m app.auth.create_user`.
+A stranger needs to create an account, prove they own the address, and recover a forgotten
+password, and the repo could not send email at all. Once anyone can sign up, the expensive
+thing an account can do is spend the installation's LLM and embedder credit.
+
+**Decision.** fastapi-users' own routers are mounted under `/api/auth`: `register`,
+`request-verify-token`, `verify`, `forgot-password` and `reset-password`; nothing is
+hand-rolled. Register runs `create(safe=True)` and its schema is only email and password, so a
+posted `is_superuser`, `is_verified` or `is_active` has no effect. The 12-character rule stays
+in `UserManager.validate_password`. Registering emails a verification link at once
+(`on_after_register` → `request_verify`); accounts made by the CLI or the seed are created
+verified and get none. Links are `PUBLIC_APP_URL/verify?token=` and
+`/reset-password?token=`, signed with `AUTH_SECRET_KEY` and valid for one hour.
+
+An unverified account can log in and use the whole Studio except the 14 routes that call the
+LLM or the embedder (generation, regeneration, batch generation, coverage gap runs, section
+retrieval, AI taxonomy drafts, setup suggestion, saving a setup and starting a round, judge
+batch re-runs and polls, instruction and judge relearning, and the review that triggers
+relearning). They take `current_verified_user`, which is `current_user(active=True,
+verified=True)` with a readable 403 (`email_not_verified`) instead of fastapi-users' bare one.
+`tests/test_registration.py` lists them and fails if the app's set drifts. Live questions and
+refills in the student flow have no logged-in user; they only run for a classroom with a
+question setup, and a setup can only be saved by a verified account.
+
+Email goes through an `EmailSender` (`app/auth/email.py`): `console` logs the message and link
+(default in development and test), `smtp` uses `smtplib` with STARTTLS off the request thread
+(default in production). Production refuses to start without `PUBLIC_APP_URL`, and with the
+`smtp` backend without `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM`. A failed send
+is logged, never raised. fastapi-users' error codes are turned into sentences by the shared
+HTTP error handler, so the forms show the server's own reason inline.
+
+**Consequences.** Forgot-password and request-verify-token answer 202 whether or not the
+address has an account. Register does not: an existing email is a 400
+(`register_user_already_exists`), which tells a caller that the address has an account. This
+is accepted, as most signup forms do the same; closing it would mean answering every register
+with "check your email". Forgot-password still takes measurably longer for a real account (one
+password hash), which fastapi-users does too. A password reset deletes every session of the
+account. Not here (M4): rate limits, a CAPTCHA, and a per-account LLM quota, so a
+verified account can still spend without limit.
+
+## ADR-062 — Long professor actions run as recorded background jobs, behind one queue interface
+
+**Status:** accepted. Amends ADR-030 (judge re-runs are now collected automatically).
+
+Bulk generation and coverage gap fills were one blocking request each, minutes long; question
+rounds already ran in the background (`generation_rounds` + `BackgroundTasks`) but nothing
+listed them, and a round left `running` by a restart blocked every later round of its
+taxonomy. Judge re-runs had an API and no button, and their results waited for someone to call
+the poll route.
+
+Now every long action is a job the Studio's header **Jobs** button lists
+(`GET /api/jobs`, `docs/JOBS_PLAN.md`):
+
+- Bulk generation and coverage fills answer `202 {job_id}`. Everything that can be refused is
+  checked before the 202; the work then runs from a `background_jobs` row (migration `0011`)
+  through the same claim-run-record lifecycle `run_round` uses, committing per question. The
+  row stores what the old blocking response returned, so the pages show the same results.
+  Coverage's process-local "topics in flight" set is replaced by that table.
+- Rounds and judge re-runs keep their own tables; `GET /api/jobs` maps all three onto one shape.
+- Every route that schedules work goes through `app.jobs.queue.JobQueue`. Today's only
+  implementation wraps FastAPI `BackgroundTasks` (in-process, not durable). Submitted functions
+  take ids, not live objects, so a durable queue (Huey's SQLite backend was the candidate) is a
+  new `JobQueue` plus one dependency override, not a rewrite.
+- On startup, jobs and rounds left queued or running are marked failed ("interrupted by a
+  server restart"); questions already made stay. This assumes one backend process.
+- A `JudgeCollector` thread (started when `JUDGE_BATCH_ENABLED`) polls every unfinished judge
+  run each minute, after submission and after a restart alike. One active run per course; the
+  Judges page's **Run judges** button confirms the question count first
+  (`GET /api/evaluation/rerun-preview`).
+
+- Cancelling records `cancel_requested_at` (migration `0012`); the job's loop checks it after
+  each committed question and stops, so nothing paid for is thrown away. A queued job ends at
+  once. Judge runs cannot be cancelled: OpenRouter's batch API offers no cancel, only deleting a
+  finished batch. Retrying starts a new job for what the old one left undone (bulk generation
+  resumes its fixed plan at `start_at`; a coverage fill takes the gaps it did not reach or that
+  failed; a round starts the next round; a judge run is submitted again); a background job is
+  retried once.
+- Book import is a `background_jobs` row too (`book_import`). `POST /books` keeps the quick
+  checks (type, size, a JSON document's structure, whether a PDF opens), stores the file and
+  answers `202`; extracting a textbook PDF's text, which can take minutes, runs in the job. A
+  document refused there leaves neither rows nor its file. A running import cannot be
+  cancelled (it is one step) and is not retried (a refused document is refused again); the
+  import dialog closes and opens the job's run window instead of waiting on "Validating…".
+
+**Consequences.** A restart loses in-flight generation (marked failed, made questions kept)
+rather than resuming it; that is the trade for no extra process. The UI polls (2 s while
+anything is active, 30 s otherwise) instead of a push channel. Cancelling takes effect after the
+question in flight, which can take a minute with judge calls.
+
+## ADR-063 — The generator learns from memory, once per round, behind safeguards
+
+**Status:** proposed; decisions 1–2 accepted and implemented (m1: a review makes no model
+call; `app/feedback/lessons.py` runs at the start of each round) and the duplicate check of
+decision 6 (m2: `app/retrieval/duplicates.py`, thresholds calibrated there; facets are m7), and the example retrieval of decision 3 (m3: `app/retrieval/examples.py`; same type required, "style only" and "already in the bank" in the target block), and the episodes of decision 3 (m4: `app/memory/`, table `memory_episodes`, one per review, written on save with every judge's verdict and back-filled by migration 0015; round examples and at most one "rejected because" are read from them, scoped by subject key), and the guidelines and safeguards of decisions 3-4 (m5: `app/memory/guidelines.py`, table `memory_guidelines`; the lesson run asks for add/merge/support/retire operations citing review ids and applies them in code; active only with two distinct reviews or the professor's confirm; comments passed as quoted evidence; output-contract guidelines refused by a deterministic filter; existing rules migrated by 0016, two-review ones active, the rest pending; `refresh_type_instruction` retired; per-round drift check in `app/generation/drift.py` shown on the round strip; guidelines listed with Confirm / Delete on the Judges page, since the instructions page no longer exists), and the retry lessons of decision 5 (m6: the lesson run turns each failed attempt of an approved round question into an episode with `source = "retry"`, shown as "Avoid N: ..." to targets of the same type and subtopic while the question stays approved, deleted with the approval; first-attempt passes counted per round, column added by 0017, on the round strip), and the facets of decision 6 (m7: `app/generation/facets.py`, table `subtopic_facets` by 0018; facets listed by one call per subtopic from the round's background job, never from a request; each target gets a facet its cell's approved or pending questions do not cover, two targets of a cell never share one, and the facet is frozen in the question's spec; a cell with every facet covered gets no target and is named on the round strip as saturated). Amends ADR-033 and ADR-037
+(lessons reach the generator before the next round, not the next question). Judge learning is ADR-064. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md` m1–m7. After the 3-round walkthrough: multiple-choice options are shuffled (seeded by the prompt's hash, option-letter references in the explanation relabelled) before any check sees the draft, so answer position is fixed at the source and the drift check of decision 4 is only a safety net (`app/generation/schemas.py::shuffle_options`). Two deterministic checks now fail an attempt inside the retry loop: a code-completion stub with no blank marker or equal (by AST) to the reference solution (`completion_stub_incomplete`), and a prompt with an unclosed ``` fence (`prompt_code_fences_closed`, only on prompts that contain a fence). Decision 6 gains a concept check: for the nearest stored question in the 0.75–0.90 band, one structured call asks whether both assess the same concept the same way; "yes" fails the attempt with "assesses the same idea as: ...", and on the last attempt the question is kept with its soft flag and held for review (`app/generation/review.py::ConceptChecker`, injected from `rounds.py`; skipped without a model).
+
+What we measured on copies of the dev database (2026-10-07/08):
+
+- A reject blocked the review screen: `create_review` ran the generator and judge relearn
+  (1 to ~35 LLM calls) before it responded.
+- One adversarial comment ("the correct answer must always be option A") became a rule from a
+  single review, and every later question obeyed it (16/16). Two other bogus comments were not
+  adopted, so the rewriter resists taste but not instructions.
+- A clear preference was learned after one round (code in the stem: 2/6 → 5/6 → 6/6).
+- `accepted_examples` found an example for 10% of targets and did not filter by question type
+  (73% of the examples it returned were another type).
+- The duplicate check ignored `content["code"]`, did not run on rounds, and at 0.85 caught 2 of
+  14 professor "too similar" rejects. With code included, 0.75 catches 9/14 and flags 17% of
+  approvals; ≥ 0.90 is near-verbatim (3% of approvals).
+- Better examples alone did not reduce retries in 24 generations; retries came from the judges.
+
+Decision — the generator's learning loop:
+
+1. **A review only records.** Saving a review writes the review, its outcome and an episode.
+   It makes no LLM call; the screen moves on at once.
+2. **Lessons run once per round,** in the round's background job, before it generates, over the
+   reviews since the last run.
+3. **Two memories, scoped by subject key and question type.**
+   - *Guidelines* (semantic): short rules, all active ones sent with every generation. The
+     lesson run asks for edit operations (add, merge, support, retire) citing review ids — never
+     a rewritten list.
+   - *Episodes* (episodic): reviewed questions with the professor's verdict, reasons and
+     comment, plus retry lessons. Retrieved per target: same question type required, then exact
+     subtopic × difficulty, then same topic, then embedding similarity; no two near-identical
+     examples; the nearest existing questions shown as "already in the bank".
+4. **Safeguards.** A guideline is active only with ≥ 2 distinct supporting reviews or the
+   professor's confirmation. Comments are quoted evidence, never instructions; guidelines about
+   the output contract (answer position, option count, fields) are refused. Each round is
+   checked for drift (answer-position spread, option count, stem length). Deleting a review
+   deletes what was learned from it.
+5. **Retry lessons.** A failed attempt and the reason it failed become an episode only when the
+   professor approves the final question.
+6. **Duplicates.** Embeddings include the code; an exact match or cosine ≥ 0.90 fails the
+   attempt with the similar question quoted; 0.75–0.90 keeps it with the soft flag; on the last
+   attempt a duplicate is kept with the flag, not dropped. Each target gets a facet of its
+   subtopic the cell has not covered; a cell with every facet covered is reported as saturated.
+
+**Consequences.** Generation outside rounds (single question, live) uses the memory as of the
+last lesson run. A rule now needs two reviews, so a genuine one-off preference waits for a
+second example or a click. Existing learned rules are migrated as pending unless two reviews
+support them. Acceptance is `scripts/simulate_review_loop.py` with adversarial reviews: the
+option-A rate stays near chance, compliance with the scripted standard is at least today's,
+and first-attempt pass rate rises across rounds.
+
+## ADR-064 — Judges learn from memory on both sides of their decisions, frozen per round
+
+**Status:** accepted. Decisions 1–5 implemented (m8: `app/calibration/scorecard.py`,
+`GET /api/judges/scorecard`; agreement, Cohen's κ and a Wilson 95% range per judge; difficulty
+and subtopic scored against the professor's confirmed values on every review; retries and drops
+attributed from `generation_attempts`; the table is on the Judges page. m9: each round keeps up
+to 2 judge-failed drafts as audit items; agree = confirmed objection, disagree = false alarm;
+episodes use `source=audit`. m10: only a clear judge failure retries — difficulty two bands
+off, no subtopic overlap, or a blocking issue code; a one-band / overlapping / advisory miss
+is kept with a note. m11: `app/evaluation/judge_memory.py`; each judge's prompt is the shipped
+text plus `judge:<metric>` guidelines plus the nearest episodes; the lesson run distils judges
+first and freezes a snapshot on the round; a snapshot is promoted only when held-out agreement
+does not drop and the known-bad pass rate does not rise; panel versioning keys on the snapshot
+id; `refresh_judge_prompt`'s rewrite is no longer part of the lesson run). Supersedes ADR-039's
+rewrite-and-gate learning; keeps its held-out check. Milestones: `docs/LEARNING_MEMORY_MILESTONES.md`
+m8–m11. Routing fix after the 3-round walkthrough: a review is evidence for the difficulty or
+subtopic judge only when the professor's confirmed value differs from the judge's or that
+judge's reason is cited; issue reasons and unattributed reject/edit comments go to the issues
+judge; agreements are retrievable past cases, never distilled (`episode_teaches` /
+`episode_confirms`). Each judge's distillation prompt names its scope, and a difficulty or
+subtopic guideline that is not about difficulty or topic is refused like an output-contract rule.
+
+Of 222 routed reviews, judges raised 67 false alarms and 27 misses. In rounds, a draft a judge
+fails is retried or dropped and never reviewed, so the most common judge mistake is invisible
+and shows up only as retries. Learning started after 5 disagreements per judge and a ~16-call
+held-out gate; an 18-review simulation taught no judge anything.
+
+Decision:
+
+1. **Measure first.** A per-judge scorecard: agreement with a 95% range, kappa, misses, false
+   alarms, flag rate, and the retries and drops each judge causes. Difficulty and subtopic are
+   scored on every review against the professor's confirmed values.
+2. **Feedback on both sides.** Each round puts up to 2 judge-rejected drafts in the review queue
+   as an audit; the professor's agree / disagree is a feedback record for that judge.
+3. **Soft-fail when borderline.** Only a clear failure causes a retry (difficulty two bands
+   off, no subtopic overlap, a blocking issue code); a borderline one goes to the queue with
+   the judge's note.
+4. **MemAlign memory per judge.** Prompt = shipped prompt + active guidelines + the nearest
+   past cases for that judge. Guidelines are edited, need two supporting reviews, and come
+   from one distillation call per judge per round.
+5. **Order and freezing.** The lesson run updates judges before the generator; a round uses one
+   judge memory snapshot throughout; a snapshot is promoted only if held-out agreement does not
+   drop and the known-bad pass rate does not rise. Trust and calibration key on the snapshot.
+
+**Consequences.** The professor reviews up to 2 extra audit items per round. Some borderline
+questions reach the queue that a stricter gate would have dropped. Judge prompts vary per
+question within a fixed snapshot, so the panel identity is the snapshot, not the prompt text.
+
+## ADR-065 — Round questions are solved blind, and a retry sees the draft it corrects
+
+**Status:** accepted. Implemented: `app/generation/solve.py` (`BlindSolver`), the `blind_solve`
+check in `RoundReview`, `questions.solve_flag` (migration `0021_solve_flag`), the review-card
+banner; `complete_structured(..., history=...)` in `app/llm/client.py` and the multi-turn loop
+in `app/generation/attempts.py`; judge rubric `question-metrics@2`.
+
+Professor reviews of round questions found wrong keys, two correct options and missing
+information that no check caught: the answer check executes code only, and the issues judge
+does not run in rounds. On 49 labelled questions (19 flawed, 30 good), two small models solving
+each multiple-choice question without its key -- Claude Haiku 4.5 and DeepSeek, zero-shot --
+flagged about 14 of the 19 flawed and 1 of the 30 good; few-shot examples made it worse, and
+Chain-of-Verification caught no more at 6.5 calls a question. A repair that saw the flawed
+question and the solver's finding fixed 3 of 3 wrong keys and missing information, and no
+ambiguity. Retries, however, sent only the original prompt plus the correction: the generator
+never saw the question the correction was about.
+
+Decision:
+
+1. **Blind solve in the round loop.** Each multiple-choice and true/false round question is
+   answered by `BLIND_SOLVE_MODELS` (default the two above) at temperature 0, without its key
+   or explanation. A solver that picks another answer, or finds zero or several correct
+   options, fails the `blind_solve` check: the finding is the correction. On the last attempt
+   the question is kept with `solve_flag`, held for the professor and never auto-approved,
+   because about one good key in thirty draws a disagreement. An unavailable solver is skipped.
+2. **Retries are a conversation.** A retry sends the original request, the rejected draft as
+   the model's own turn (as the checks saw it: shuffled options, key, explanation), then the
+   correction. A reply that was not a question is asked again with a note.
+3. **Prompts say what they mean.** The audit of every round prompt fixed: the issues judge was
+   told code in a multiple-choice question had run; "plausible alternatives" without "the
+   others definitely wrong"; overlapping difficulty bands and "a full level away";
+   `ambiguous` overlapping `poor_distractors` (now one code, blocking); internal check names
+   in corrections; learned guidelines about what their component cannot see or control
+   (difficulty labels, citations, the bank), now refused. The judge rubric is
+   `question-metrics@2` so calibration never pools old and new verdicts.
+
+**Consequences.** Two more cheap calls per multiple-choice attempt, and roughly 1.5-2x more
+input tokens per retry. Code that does not compile inside a question (Q246, Q257) and exact
+output (Q357) are still not caught: solvers read code charitably; a compile-and-run check of
+code in stems and options is the next step. Live student generation does not blind-solve yet:
+it serves before review, so holding would change that flow. Ambiguity is flagged but rarely
+repaired; it is left to the professor.
+
+## ADR-066 — One `POST /generation-runs` over two generation pipelines
+
+**Status:** accepted 2026-10-14 (Task 12). Implemented in Task 13: `app/web/routes/api/generation_runs.py` (the job bodies already live in the route modules, and `app.generation` must not import `app.web`, so there is no `app/generation/runs.py`).
+
+The plan assumed the seven generation endpoints share one pipeline. Traced to the generator,
+they share the bottom layer only: every path builds a `QuestionSpec`
+(`build_question_spec`), calls `BaseQuestionGenerator.generate_one`, stores a `QuestionRow`,
+records the evaluation under a run id and commits per question. Above that there are **two
+orchestrators**, not one:
+
+- **Plain** -- `GenerationService._generate_specs` (`app/generation/service.py`): generate with
+  validator retries, then the four `JudgeMetricId` judges once, after the fact. Used by
+  `/questions/generate`, `/questions/{id}/regenerate`, `/questions/generate-batch` and
+  `/coverage/generation-runs` (one `generate_batch` call per gap target).
+- **Round** -- `GenerationService.generate_round_question` driven by `rounds._generate_round`:
+  judges, custom rules, duplicate and concept checks and blind solve run *inside* the retry
+  loop; a question that still fails is dropped, not stored; hard cells are two-step; style
+  facets, memory lessons and trust routing apply; progress lives on `GenerationRoundRow`, not
+  `BackgroundJobRow`. Used by `POST /rounds` (and round 1 from `POST /question-setups`).
+
+`/questions/batch-plan` and `/questions/generation-plan` generate nothing; they are free
+planners.
+
+### Old endpoint → target kind
+
+| Old endpoint | Kind | Pipeline | Runs as | Cost per question (calls) | Response today |
+|---|---|---|---|---|---|
+| `POST /questions/generate` | `chunks` (each chunk `{difficulty: 1}`, one type) | plain | **inline, 201** | ≤3 gen + 4 judge | `GenerateQuestionsResponse` |
+| `POST /questions/generate-batch` | `chunks` | plain | job `bulk_generation`, 202 | ≤3 gen + 4 judge | job result `GenerateBatchResponse` |
+| `POST /questions/{id}/regenerate` | `regenerate{question_id, feedback}` | plain + feedback | **inline, 201** | ≤3 gen + 4 judge | `RegenerateQuestionResponse` |
+| `POST /coverage/generation-runs` | `gaps` (MCQ only) | plain, per target, + retrieval + dedup flag | job `coverage_fill`, 202 | 1 query embed + ≤3 gen + 4 judge + dedup embed | job result `GenerationRunResponse` |
+| `POST /rounds` | `setup_cells{setup_id, size}` | round | `GenerationRoundRow`, 202, polled at `GET /rounds/{id}` | per attempt: gen (×2 hard) + enabled judges + custom rules + 2 blind solve + 1 concept, ≤3 attempts; + facets and lessons once per round | `StartRoundResponse` |
+| `POST /questions/batch-plan` | `dry_run` of `chunks` | -- | inline, free | 0 | `BatchPlanResponse` |
+| `GET /questions/generation-plan` | totals → `dry_run` of `chunks`; chunk listing → `GET /chunks` | -- | inline, free | 0 | `GenerationPlanResponse` |
+
+Other differences the new endpoint must keep:
+
+- **Guards.** `chunks`: question types allowed, chunks and curriculum in course. `gaps`:
+  subtopics in course, MCQ allowed, refuses a topic with a run in flight. `setup_cells`: setup in
+  course, one active round per taxonomy, a round with no targets is a 422, never committed.
+  `regenerate`: question in course, a single recoverable source chunk.
+- **Retry.** The Jobs panel retries `bulk_generation` from `start_at` and `coverage_fill` from
+  its failed targets (`app/web/routes/api/jobs.py`). Rounds have no retry; the next round is it.
+- **Retrieval.** `gaps` skips a target with no chunk above `MIN_CHUNK_SCORE`; rounds fall back to
+  the subtopic's evidence chunk. Kept as is.
+
+### Decision
+
+1. **One endpoint, two pipelines.** `POST /api/generation-runs` dispatches by kind; the plain and
+   round orchestrators are not merged. Merging would either add in-loop judging and blind solve
+   to every plain run (≈2-3x the calls) or drop them from rounds (the checks ADR-063/065 added
+   for measured failures).
+2. **Request.** One kind per run, a discriminated union; no caller mixes kinds.
+   ```
+   { dry_run: bool = false,
+     target: {kind: "chunks", chunks: [ChunkRequest] | whole_book: {book_id, easy, medium, hard, question_types},
+              curriculum_version_id?, seed?}
+           | {kind: "gaps", targets: [{subtopic_id, difficulty}]}
+           | {kind: "setup_cells", setup_id: int, size?: int}
+           | {kind: "regenerate", question_id: int, feedback: str} }
+   ```
+   `whole_book` keeps the whole-book shorthand so a client never sends 800 ids.
+3. **Every run is queued (202).** `chunks` → `bulk_generation`, `gaps` → `coverage_fill`,
+   `regenerate` → a new `regeneration` job kind, `setup_cells` → a round. This moves
+   `/generate` and `/regenerate` off the request: today they hold the request open for
+   ≈10 s per question (only `proxyTimeout: 600_000` in `frontend/next.config.ts` keeps a
+   long `/generate` alive), are lost if the professor leaves the page, and never show in
+   Jobs. Response:
+   `{kind, job_id, round_id?}`; `job_id` is `job-N` or `round-N`, as `GET /jobs` lists them,
+   and rounds keep `GET /rounds/{id}` for progress. A regeneration has no retry in Jobs.
+4. **`dry_run`** returns `200 {planned[], totals}` with no model call and no row:
+   `chunks` = today's `compile_chunk_requests` totals; `gaps` = one question per target, no
+   retrieval; `setup_cells` = `plan_targets`, which only reads (style draws are random, so the
+   run may pick other styles for the same cells); `regenerate` = one question. Totals are call
+   counts for the first attempt of each question, as `batch-plan` reports today -- no prices;
+   `max_attempts_per_question` bounds the retries, and a round's `judge_calls` is `null` (its
+   judges are the setup's, run inside the loop). The route needs a verified email even for
+   `dry_run` (`SPENDS_LLM_CREDIT`).
+5. **The chunk picker** loses `GET /questions/generation-plan` for `GET /chunks/outline?book_id=`:
+   each chunk's summary and `existing_question_count`, without its text (`GET /chunks` carries
+   the full text, too heavy for a picker over every book). The heading grouping moves to the
+   client, with the same rule and chapter ids. The single and regenerate screens wait on their
+   job (`waitForJob`) and read its stored result, so their flow is unchanged.
+6. **Out of scope.** `POST /question-setups` keeps starting round 1 itself; live student
+   generation (`app/generation/live.py`) and refill are not professor runs and are untouched.
+   `POST /question-sets/prod/sync` is removed in Task 15 with its unused frontend hook
+   (`useSyncProdQuestionSet`, no consumer).
+
+**Consequences.** The single and regenerate screens must poll a job instead of reading a 201 body
+(Task 14). Test scenarios of the five old generation routes are rerun through the new one
+(Task 13). The two pipelines remain, so a fix to judging still has to land in the right one.
+
+## ADR-067 — Every signed-in account can change model settings, unless the instance says otherwise
+
+**Status:** accepted 2026-10-30. Supersedes Task 42's admin-only rule for test, save and reset.
+
+**Context.** Task 42 let any professor read the model settings but kept Test, Save, Reset and the
+route toggle for superusers, because they change what the whole instance spends money on. Locally
+there is one professor, the seeded `dev@local.test` account is not a superuser, and so the
+Settings link was hidden from the only person using the app.
+
+**Decision.** `MODEL_SETTINGS_ADMIN_ONLY` (default `false`) decides it. Off, any signed-in account
+can test, save and reset every role and switch the route, and the sidebar shows the Settings link
+to everyone. On, Task 42's rule returns: `require_admin` answers 403 `admin_required` and
+`GET /api/settings` reports `can_edit: false`, which the page already shows as a read-only notice.
+The test-before-save token is unchanged either way.
+
+**Consequences.** With open registration (ADR-058's untrusted accounts) and the flag off, a
+stranger's account could repoint a role's base URL and key, sending course content to their
+endpoint and spending on the instance. Production must set `MODEL_SETTINGS_ADMIN_ONLY=true`.
+
+## ADR-068 — Seven providers behind one OpenAI-compatible client, with a default and per-role overrides
+
+**Status:** accepted 2026-10-30. Supersedes the OpenRouter/Azure route toggle (Task 44 follow-up).
+
+**Context.** The route toggle offered two endpoints, both configured only in `.env`. Professors
+want to use the key they already have (OpenAI, Anthropic, xAI, DeepSeek) or a local endpoint,
+and to set it up on the Settings screen rather than by editing `.env`.
+
+**Decision.** `app/llm_providers.py` lists OpenRouter, Azure OpenAI, OpenAI, Anthropic, xAI,
+DeepSeek and `custom` (any OpenAI-compatible URL). All speak the OpenAI chat API, so the existing
+client serves them; Claude goes through Anthropic's OpenAI-compatible endpoint and asks for fenced
+JSON because that endpoint ignores `response_format`. Each provider's URL, key and default chat
+model come from `.env` and can be saved on the Providers pane (row `provider.<id>`, key encrypted
+like a role's), after one test call. `LLM_ROUTE` / the saved route names the default provider:
+every role without its own provider uses it and its default model. A role that picks a provider
+uses that provider's URL and key; it chooses only the provider and model. Embeddings fall back to
+OpenRouter when the default provider has no embedding model.
+
+**Consequences.** Providers without a native OpenAI-compatible API (Gemini, Bedrock) need `custom`
+or a gateway. Azure's model list is not read (deployments are only listed by its management API),
+so its model is typed. Per-role URL and key fields left the UI; a role that stored them before
+keeps using them until it is saved again (which clears both) or reset.
+

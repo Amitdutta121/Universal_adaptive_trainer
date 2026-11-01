@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Question bank · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .bank-row { cursor: pointer; }
+    .bank-row:hover td { background: var(--muted); }
+    .bank-prompt { max-width: 15.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<!-- C10 · Question bank: every question in the course with filters, states and duplicate flags. -->
+<body data-scope="course" data-nav="questions" data-title="Question bank">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Question bank</h1>
+        <p class="text-sm text-muted-foreground">Every generated question in this course, with its checks, judge verdicts and your review.</p>
+      </div>
+      <div class="ml-auto flex gap-2" x-show="all.length">
+        <a class="btn" data-variant="outline" :href="Mock.link('coverage.html')">Show coverage</a>
+        <a class="btn" data-variant="outline" :href="Mock.link('review.html')" x-text="`Review ${course.numbers.awaiting_review} awaiting`"></a>
+        <a class="btn" :href="Mock.link('generate.html')"><i data-lucide="wand-sparkles"></i>Generate</a>
+      </div>
+    </div>
+
+    <!-- Empty course (statistics) -->
+    <template x-if="!all.length">
+      <div class="card">
+        <section class="grid place-items-center gap-3 py-12 text-center">
+          <span class="grid size-10 place-items-center rounded-full tone-muted"><i data-lucide="list-checks"></i></span>
+          <div>
+            <div class="font-medium">No questions yet</div>
+            <p class="text-sm text-muted-foreground max-w-md">Questions appear here once they are generated. Generation for this course is blocked until its taxonomy is approved: the AI draft from OpenIntro Statistics is waiting for your review.</p>
+          </div>
+          <div class="flex gap-2">
+            <a class="btn" :href="Mock.link('taxonomy-draft.html')">Review the taxonomy draft</a>
+            <a class="btn" data-variant="outline" :href="Mock.link('generate.html')">Open Generate</a>
+          </div>
+        </section>
+      </div>
+    </template>
+
+    <template x-if="all.length">
+      <div class="grid gap-6">
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <template x-for="n in numbers" :key="n.label">
+            <div class="card p-4 gap-1">
+              <div class="text-xs text-muted-foreground" x-text="n.label"></div>
+              <div class="text-2xl font-display font-semibold" x-text="n.value"></div>
+              <div class="text-xs text-muted-foreground" x-text="n.hint"></div>
+            </div>
+          </template>
+        </section>
+
+        <section class="card gap-0 py-0">
+          <!-- Filters -->
+          <div class="grid gap-3 p-4 border-b md:grid-cols-[minmax(0,2fr)_repeat(5,minmax(0,1fr))]">
+            <div role="group" class="field">
+              <label for="f-q" class="text-xs text-muted-foreground">Search</label>
+              <input id="f-q" class="input" type="search" placeholder="Search prompt, id, subtopic, generator run…" x-model.debounce.150ms="f.q">
+            </div>
+            <div role="group" class="field">
+              <label for="f-status" class="text-xs text-muted-foreground">Status</label>
+              <select id="f-status" class="select w-full" x-model="f.status">
+                <option value="">All statuses</option>
+                <template x-for="s in statuses" :key="s"><option :value="s" x-text="Mock.label(s)" :selected="f.status === s"></option></template>
+                <option value="held" :selected="f.status === 'held'">Held for an exam</option>
+              </select>
+            </div>
+            <div role="group" class="field">
+              <label for="f-type" class="text-xs text-muted-foreground">Question type</label>
+              <select id="f-type" class="select w-full" x-model="f.type">
+                <option value="">All types</option>
+                <template x-for="t in course.question_types" :key="t"><option :value="t" x-text="MOCK.question_types[t].label" :selected="f.type === t"></option></template>
+              </select>
+            </div>
+            <div role="group" class="field">
+              <label for="f-diff" class="text-xs text-muted-foreground">Difficulty</label>
+              <select id="f-diff" class="select w-full" x-model="f.difficulty">
+                <option value="">All difficulties</option>
+                <template x-for="d in ['easy','medium','hard']" :key="d"><option :value="d" x-text="d" :selected="f.difficulty === d"></option></template>
+              </select>
+            </div>
+            <div role="group" class="field">
+              <label for="f-topic" class="text-xs text-muted-foreground">Topic</label>
+              <select id="f-topic" class="select w-full" x-model="f.topic">
+                <option value="">All topics</option>
+                <template x-for="t in course.taxonomy" :key="t.id"><option :value="t.id" x-text="t.name" :selected="f.topic === t.id"></option></template>
+              </select>
+            </div>
+            <div role="group" class="field">
+              <label for="f-tool" class="text-xs text-muted-foreground">Checked by</label>
+              <select id="f-tool" class="select w-full" x-model="f.tool">
+                <option value="">Any tool</option>
+                <template x-for="t in tools" :key="t.id"><option :value="t.id" x-text="t.name" :selected="f.tool === t.id"></option></template>
+              </select>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 px-4 py-2 border-b text-sm">
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" class="input" x-model="f.dupOnly"> Possible duplicates only
+            </label>
+            <span class="text-muted-foreground" x-text="`${rows.length} of ${all.length} shown`"></span>
+            <template x-for="c in chips" :key="c.key">
+              <button type="button" class="pill tone-accent" @click="f[c.key] = c.key === 'dupOnly' ? false : ''">
+                <span x-text="c.text"></span><span aria-hidden="true">×</span>
+              </button>
+            </template>
+            <button type="button" class="btn ml-auto" data-variant="ghost" data-size="sm" x-show="chips.length" @click="clear()">Clear filters</button>
+          </div>
+
+          <div class="table-container" x-show="rows.length">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="w-16"><button type="button" class="inline-flex items-center gap-1" @click="sortDesc = !sortDesc">ID <i data-lucide="arrow-up-down" class="size-3"></i></button></th>
+                  <th>Prompt</th>
+                  <th>Type</th>
+                  <th>Difficulty</th>
+                  <th>Status</th>
+                  <th>Validation</th>
+                  <th>Judges</th>
+                  <th>Topic / subtopic</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="q in rows" :key="q.id">
+                  <tr class="bank-row" @click="location.href = Mock.link('question.html', { id: q.id })">
+                    <td class="font-mono text-xs"><a class="hover:underline" :href="Mock.link('question.html', { id: q.id })" x-text="q.id" @click.stop></a></td>
+                    <td>
+                      <div class="flex items-center gap-1.5">
+                        <span x-show="held(q)" class="shrink-0" style="color:var(--warn-solid)" :title="heldTitle(q)" :aria-label="heldTitle(q)"><i data-lucide="lock" class="size-3.5"></i></span>
+                        <span x-show="dupes(q).length" class="shrink-0" style="color:var(--warn-solid)" :title="`Possible duplicate of #${dupes(q)[0]?.question_id} (similarity ${dupes(q)[0]?.score})`"><i data-lucide="copy" class="size-3.5"></i></span>
+                        <span class="bank-prompt" x-text="q.prompt.split('\n').filter(Boolean).slice(0, 2).join(' — ').replaceAll('`', '')" :title="q.prompt"></span>
+                      </div>
+                    </td>
+                    <td class="text-xs whitespace-nowrap" x-text="MOCK.question_types[q.type].label"></td>
+                    <td class="text-xs" x-text="q.difficulty"></td>
+                    <td><span class="pill" :class="Mock.tone(q.status)" x-text="Mock.label(q.status)"></span></td>
+                    <td>
+                      <div class="flex flex-col items-start gap-1">
+                        <span class="pill" :class="q.status === 'validation_failed' ? 'tone-critical' : 'tone-muted'" x-text="q.status === 'validation_failed' ? 'failed' : 'passed'"></span>
+                        <span class="pill whitespace-nowrap" :class="toneOf(cb(q).level)" :title="`Answer key checked by ${cb(q).name} ${cb(q).version} · ${cb(q).level}`" x-text="cb(q).name"></span>
+                      </div>
+                    </td>
+                    <td class="text-xs whitespace-nowrap" :title="flagTitle(q)">
+                      <span class="pill" :class="flags(q) ? 'tone-warn' : 'tone-muted'" x-text="flags(q) ? `${flags(q)} of 4 flagged` : 'none flagged'"></span>
+                    </td>
+                    <td class="text-xs whitespace-nowrap"><div x-text="q.subtopic"></div><div class="text-muted-foreground" x-text="q.topic"></div></td>
+                    <td class="font-mono text-xs whitespace-nowrap"><div x-text="q.created"></div><div class="text-muted-foreground" x-text="q.generator"></div></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="grid place-items-center gap-2 py-10 text-center" x-show="!rows.length">
+            <div class="font-medium">No questions match this filter</div>
+            <p class="text-sm text-muted-foreground">Broaden the search or clear filters.</p>
+            <button type="button" class="btn" data-variant="outline" data-size="sm" @click="clear()">Clear filters</button>
+          </div>
+        </section>
+      </div>
+    </template>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c9-c13.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      const all = MOCK.questions.filter((q) => q.course === c.id);
+      const f = {
+        q: Mock.param("q") || "", status: Mock.param("status") || "", type: Mock.param("type") || "",
+        difficulty: Mock.param("difficulty") || "", topic: Mock.param("topic") || "", dupOnly: Mock.param("dup") === "1",
+        tool: Mock.param("tool") || "",
+      };
+      // Which tool (and version) checked each answer key (MOCK.checkedBy); its trust label comes from the tool.
+      const cbOf = Object.fromEntries(all.map((q) => [q.id, MOCK.checkedBy(q)]));
+      const toolIds = [...new Set(all.map((q) => cbOf[q.id].tool))];
+      const toolCount = (r, id) => r.filter((q) => cbOf[q.id].tool === id).length;
+      return {
+        course: c, all, f, sortDesc: false,
+        // Every tool present in this course's questions, most-used first.
+        tools: toolIds.map((id) => MOCK.TOOL_CATALOG[id]).sort((a, b) => toolCount(all, b.id) - toolCount(all, a.id)),
+        cb: (q) => cbOf[q.id],
+        toneOf: (label) => (Object.values(MOCK.LEVELS).find((l) => l.label === label) || { tone: "tone-muted" }).tone,
+        statuses: ["generated", "validation_passed", "validation_failed", "approved", "rejected"],
+        dupes: (q) => MOCK.duplicates(q),
+        held: (q) => MOCK.heldFor(q.id),
+        heldTitle(q) {
+          const e = MOCK.heldFor(q.id);
+          const d = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return e ? `Held for ${e.name} until ${d(e.held_until)}` : "";
+        },
+        flags: (q) => Object.values(q.judges).filter((v) => v === "flag").length,
+        flagTitle: (q) => MOCK.judges.map((j) => `${j.label}: ${q.judges[j.id]}`).join(" · "),
+        get rows() {
+          const s = this.f.q.trim().toLowerCase();
+          const out = all.filter((q) =>
+            (!this.f.status || (this.f.status === "held" ? !!MOCK.heldFor(q.id) : q.status === this.f.status)) &&
+            (!this.f.type || q.type === this.f.type) &&
+            (!this.f.difficulty || q.difficulty === this.f.difficulty) &&
+            (!this.f.topic || q.topic_id === this.f.topic) &&
+            (!this.f.dupOnly || MOCK.duplicates(q).length) &&
+            (!this.f.tool || cbOf[q.id].tool === this.f.tool) &&
+            (!s || `${q.id} ${q.prompt} ${q.subtopic} ${q.generator}`.toLowerCase().includes(s)));
+          return this.sortDesc ? out.slice().reverse() : out;
+        },
+        get chips() {
+          const out = [];
+          if (this.f.q) out.push({ key: "q", text: `search: ${this.f.q}` });
+          if (this.f.status) out.push({ key: "status", text: this.f.status === "held" ? "held for an exam" : `status: ${Mock.label(this.f.status)}` });
+          if (this.f.type) out.push({ key: "type", text: `type: ${MOCK.question_types[this.f.type].label}` });
+          if (this.f.difficulty) out.push({ key: "difficulty", text: `difficulty: ${this.f.difficulty}` });
+          if (this.f.topic) out.push({ key: "topic", text: `topic: ${c.taxonomy.find((t) => t.id === this.f.topic)?.name}` });
+          if (this.f.dupOnly) out.push({ key: "dupOnly", text: "possible duplicates" });
+          if (this.f.tool) out.push({ key: "tool", text: `checked by: ${MOCK.TOOL_CATALOG[this.f.tool].name}` });
+          return out;
+        },
+        clear() { Object.assign(this.f, { q: "", status: "", type: "", difficulty: "", topic: "", dupOnly: false, tool: "" }); },
+        get numbers() {
+          const r = this.rows;
+          return [
+            { label: "In bank", value: all.length, hint: `${all.filter((q) => q.status === "validation_failed").length} failed checks` },
+            // Replaces the old "Shown" tile; the row count is already next to the filters.
+            // Replaces "Computed answer keys": how many rows each checking tool checked.
+            ...(() => {
+              const by = this.tools.map((t) => [t.name, toolCount(r, t.id)]).filter(([, n]) => n);
+              return [{ label: "Checked by", value: by.length === 1 ? by[0][0] : `${by.length} tools`, hint: by.length === 1 ? `All ${by[0][1]} rows shown` : by.map(([n, k]) => `${n} ${k}`).join(" · ") || "No rows shown" }];
+            })(),
+            { label: "Approved", value: r.filter((q) => q.status === "approved").length, hint: "In the rows shown" },
+            { label: "Possible duplicates", value: r.filter((q) => MOCK.duplicates(q).length).length, hint: "Similarity ≥ 0.88 to another question" },
+          ];
+        },
+      };
+    }
+  </script>
+</body>
+</html>

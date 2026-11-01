@@ -39,9 +39,9 @@ def _question(session: Session, **kwargs: object) -> QuestionRow:
 
 class TestJsonObjectAndList:
     def test_object_round_trips_as_a_dict(self, session: Session) -> None:
-        row = _question(session, spec={"topic_id": 1, "source_section_ids": [4, 5]})
+        row = _question(session, spec={"topic_id": 1, "source_chunk_ids": ["c4", "c5"]})
 
-        assert row.spec == {"topic_id": 1, "source_section_ids": [4, 5]}
+        assert row.spec == {"topic_id": 1, "source_chunk_ids": ["c4", "c5"]}
 
     def test_absent_object_reads_as_none(self, session: Session) -> None:
         assert _question(session).spec is None
@@ -239,8 +239,8 @@ def test_rows_written_before_these_column_types_still_read(
                 "personalization_context_json = :ctx WHERE id = :id"
             ),
             {
-                "spec": '{"source_section_ids":[7]}',
-                "content": '{"sources":[{"section_id":7,"citation":"Book, ch.1"}]}',
+                "spec": '{"source_chunk_ids":["c7"]}',
+                "content": '{"sources":[{"chunk_id":"c7","citation":"Book, ch.1"}]}',
                 "ctx": '{"preference_ids":[3],"retrieved_review_ids":[9]}',
                 "id": row.id,
             },
@@ -248,6 +248,6 @@ def test_rows_written_before_these_column_types_still_read(
     session.expire_all()
 
     loaded = session.get(QuestionRow, row.id)
-    assert loaded.spec == {"source_section_ids": [7]}
+    assert loaded.spec == {"source_chunk_ids": ["c7"]}
     assert loaded.content["sources"][0]["citation"] == "Book, ch.1"
     assert loaded.personalization_context == {"preference_ids": [3], "retrieved_review_ids": [9]}

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Materials · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+  <style>
+    .drop { border: 1.5px dashed var(--hairline-2); border-radius: var(--radius); background: var(--muted); }
+    .drop.over { border-color: var(--primary); background: var(--accent); }
+  </style>
+</head>
+<!-- C2 · Materials: the books a course generates questions from; upload PDF or book JSON (F4, F5). -->
+<body data-scope="course" data-nav="materials" data-title="Materials">
+  <main x-data="page()" x-cloak class="grid gap-6">
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <p class="text-sm text-muted-foreground" x-text="`${course.code} · ${course.name}`"></p>
+        <h1 class="text-2xl font-semibold">Materials</h1>
+        <p class="text-sm text-muted-foreground mt-1">The textbooks questions are generated from. Each section is the unit a question cites.</p>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <button type="button" class="btn" @click="openUpload()"><i data-lucide="upload"></i>Upload book</button>
+      </div>
+    </div>
+
+    <!-- Embedding in progress: generation can only cite embedded sections -->
+    <template x-for="b in books.filter((b) => b.embedded < b.sections)" :key="'emb-' + b.id">
+      <div class="alert">
+        <i data-lucide="loader"></i>
+        <h2 x-text="`Embedding ${b.title}: ${b.embedded} of ${b.sections} sections done`"></h2>
+        <section>
+          <p><span x-text="`The book is imported. Questions can be generated from embedded sections now; the other ${b.sections - b.embedded} are ready in a few minutes. The job keeps running if you close this tab.`"></span>
+          <a class="underline" href="jobs.html">View in Jobs</a></p>
+        </section>
+      </div>
+    </template>
+
+    <section class="card">
+      <section class="grid gap-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <input class="input max-w-xs" type="search" placeholder="Search title or author" x-model="q" aria-label="Search books">
+          <select class="select w-44" x-model="status" aria-label="Filter by status">
+            <option value="all">All statuses</option>
+            <option value="imported">Imported</option>
+            <option value="partial">Partial</option>
+          </select>
+          <p class="ml-auto text-sm text-muted-foreground" x-text="visible.length === books.length ? `${books.length} book${books.length === 1 ? '' : 's'}` : `${visible.length} of ${books.length} books`"></p>
+        </div>
+
+        <div class="table-container" x-show="visible.length">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Format</th>
+                <th>Structure</th>
+                <th class="w-40">Embedding</th>
+                <th>Warnings</th>
+                <th>Uploaded</th>
+                <th class="w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="b in visible" :key="b.id">
+                <tr>
+                  <td>
+                    <a class="font-medium hover:underline" :href="Mock.link('book.html', { book: b.id })" x-text="b.title"></a>
+                    <div class="text-xs text-muted-foreground" x-text="b.authors"></div>
+                  </td>
+                  <td><span class="pill" :class="Mock.tone(b.status)" :title="STATUS_MEANING[b.status]" x-text="b.status"></span></td>
+                  <td class="font-mono text-xs text-muted-foreground" x-text="b.format === 'book_pdf' ? 'PDF' : 'Book JSON'"></td>
+                  <td class="text-sm">
+                    <div class="tabular-nums" x-text="`${b.chapters} chapters · ${b.sections} sections`"></div>
+                    <div class="text-xs text-muted-foreground" x-text="`${SOURCE[b.structure_source] || '—'} · ${b.confidence} confidence`"></div>
+                  </td>
+                  <td>
+                    <template x-if="b.embedded >= b.sections">
+                      <span class="text-sm text-muted-foreground inline-flex items-center gap-1"><span class="pill tone-ok">Done</span><span x-text="`${b.sections}/${b.sections}`"></span></span>
+                    </template>
+                    <template x-if="b.embedded < b.sections">
+                      <div class="grid gap-1">
+                        <div class="flex text-xs"><span class="pill tone-accent">Embedding</span><span class="ml-auto tabular-nums text-muted-foreground" x-text="`${b.embedded}/${b.sections}`"></span></div>
+                        <div class="progress" role="progressbar" :aria-valuenow="Math.round(b.embedded / b.sections * 100)" aria-valuemin="0" aria-valuemax="100"><span :style="`width:${b.embedded / b.sections * 100}%`"></span></div>
+                      </div>
+                    </template>
+                  </td>
+                  <td class="text-sm">
+                    <span class="text-muted-foreground" x-show="!b.warnings.length">—</span>
+                    <template x-for="w in b.warnings" :key="w.code">
+                      <span class="pill" :class="w.severity === 'defect' ? 'tone-critical' : 'tone-muted'" :title="w.text" x-text="w.code.replace(/_/g, ' ')"></span>
+                    </template>
+                  </td>
+                  <td class="text-sm text-muted-foreground" x-text="b.uploaded"></td>
+                  <td>
+                    <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" :aria-label="`Delete ${b.title}`" @click="remove(b)"><i data-lucide="trash-2"></i></button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="py-10 text-center" x-show="!books.length">
+          <p class="font-medium">No books uploaded yet</p>
+          <p class="text-sm text-muted-foreground mt-1">Upload the course textbook as a PDF or a book JSON document. Questions are generated from its sections.</p>
+          <button type="button" class="btn mt-3" @click="openUpload()">Upload book</button>
+        </div>
+        <div class="py-8 text-center text-sm text-muted-foreground" x-show="books.length && !visible.length">No book matches this filter. Clear the search or choose a different status.</div>
+      </section>
+    </section>
+
+    <p class="text-xs text-muted-foreground">
+      <b>imported</b>: the document validated with no caveats. <b>partial</b>: it validated but declares caveats, or a boundary was guessed; read its warnings before generating from it.
+    </p>
+
+    <!-- Upload dialog -->
+    <dialog x-ref="upload" class="dialog" aria-labelledby="upload-title" @click="if ($event.target === $el && !busy) $el.close()">
+      <div class="sm:max-w-lg">
+        <header>
+          <h2 id="upload-title">Upload a book</h2>
+          <p>A PDF or a structured book JSON document. A PDF's chapters and sections are read from its table of contents where one exists. An invalid document is refused in full; nothing is stored.</p>
+        </header>
+        <section class="grid gap-4">
+          <template x-if="phase === 'pick'">
+            <div class="grid gap-4">
+              <label class="drop grid place-items-center gap-1 px-4 py-8 text-center cursor-pointer" :class="over && 'over'"
+                     @dragover.prevent="over = true" @dragleave="over = false" @drop.prevent="over = false; pick($event.dataTransfer.files[0])">
+                <i data-lucide="file-up" class="size-6 text-muted-foreground"></i>
+                <span class="text-sm font-medium" x-text="file ? file.name : 'Drop a file here, or click to choose'"></span>
+                <span class="text-xs text-muted-foreground" x-text="file ? file.size : 'PDF or .json, up to 50 MB'"></span>
+                <input type="file" class="sr-only" accept=".pdf,.json" @change="pick($event.target.files[0])">
+              </label>
+              <button type="button" class="btn justify-self-start" data-variant="link" data-size="sm" x-show="!file" @click="pick(null)">Use a sample file</button>
+              <div role="group" class="field">
+                <label for="book-title">Title <span class="text-muted-foreground">(optional)</span></label>
+                <input id="book-title" type="text" x-model="title" placeholder="Leave blank to use the title inside the document">
+              </div>
+              <p class="text-xs text-muted-foreground">EPUB, Markdown, plain text and HTML can't be imported. Convert one of those to a book JSON document first.</p>
+            </div>
+          </template>
+          <template x-if="phase === 'running'">
+            <div class="grid gap-3">
+              <p class="text-sm"><span class="font-medium" x-text="file.name"></span> <span class="text-muted-foreground">· Import book job</span></p>
+              <ol class="grid gap-2 text-sm">
+                <template x-for="(s, i) in STEPS" :key="s">
+                  <li class="flex items-center gap-2">
+                    <span class="grid size-5 place-items-center rounded-full text-[10px] font-semibold" :class="i < step ? 'tone-ok' : i === step ? 'tone-accent' : 'tone-muted'" x-text="i < step ? '✓' : i + 1"></span>
+                    <span :class="i > step && 'text-muted-foreground'" x-text="s"></span>
+                  </li>
+                </template>
+              </ol>
+              <div class="progress" role="progressbar" :aria-valuenow="step * 25" aria-valuemin="0" aria-valuemax="100"><span :style="`width:${Math.min(100, step / STEPS.length * 100)}%`"></span></div>
+              <p class="text-xs text-muted-foreground">You can close this dialog; the import continues in the background and appears in Jobs.</p>
+            </div>
+          </template>
+        </section>
+        <footer>
+          <button type="button" class="btn" data-variant="outline" @click="$refs.upload.close()" x-text="phase === 'running' ? 'Close' : 'Cancel'"></button>
+          <button type="button" class="btn" x-show="phase === 'pick'" :disabled="!file" @click="start()">Import book</button>
+        </footer>
+        <button type="button" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Close dialog" @click="$refs.upload.close()">✕</button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-c.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const c = Mock.course;
+      // TODO(real): sample upload per course.
+      const SAMPLE = c.id === "statistics"
+        ? { name: "introductory-statistics-openstax.pdf", size: "22.6 MB", title: "Introductory Statistics (OpenStax)", authors: "Illowsky, Dean", chapters: 13, sections: 71 }
+        : { name: "automate-the-boring-stuff-2e.pdf", size: "9.3 MB", title: "Automate the Boring Stuff with Python, 2nd ed.", authors: "Al Sweigart", chapters: 20, sections: 156 };
+      return {
+        course: c,
+        books: MOCK.books.filter((b) => b.course === c.id).map((b) => ({ ...b, warnings: [...b.warnings] })),
+        q: "", status: "all",
+        phase: "pick", file: null, title: "", over: false, step: 0, busy: false,
+        STEPS: ["Upload document", "Validate and read the outline", "Split into sections", "Start embedding sections"],
+        SOURCE: { pdf_outline: "PDF table of contents", structured_json: "Declared in JSON", heading_guess: "Guessed from headings" },
+        STATUS_MEANING: {
+          imported: "The document validated and declared no caveats.",
+          partial: "The document validated but declares caveats, or a boundary was guessed.",
+        },
+        get visible() {
+          const n = this.q.trim().toLowerCase();
+          return this.books.filter((b) => (this.status === "all" || b.status === this.status)
+            && (!n || `${b.title} ${b.authors}`.toLowerCase().includes(n)));
+        },
+        openUpload() {
+          this.phase = "pick"; this.file = null; this.title = ""; this.step = 0;
+          this.$refs.upload.showModal();
+        },
+        pick(f) {
+          this.file = f ? { name: f.name, size: `${(f.size / 1048576).toFixed(1)} MB` } : { name: SAMPLE.name, size: SAMPLE.size };
+        },
+        start() {
+          this.phase = "running"; this.step = 0; this.busy = true;
+          const tick = () => {
+            this.step++;
+            if (this.step < this.STEPS.length) return setTimeout(tick, 700);
+            this.busy = false;
+            const isPdf = !this.file.name.endsWith(".json");
+            this.books.unshift({
+              id: "new" + Date.now(), course: c.id, title: this.title.trim() || SAMPLE.title, authors: SAMPLE.authors,
+              format: isPdf ? "book_pdf" : "book_json", status: "imported", chapters: SAMPLE.chapters, sections: SAMPLE.sections,
+              embedded: 0, structure_source: isPdf ? "pdf_outline" : "structured_json", confidence: "high",
+              uploaded: MOCK.today, warnings: [],
+            });
+            this.$refs.upload.close();
+            Mock.toast(`Imported “${this.title.trim() || SAMPLE.title}”. Embedding ${SAMPLE.sections} sections; the Import book job is in Jobs.`);
+          };
+          setTimeout(tick, 700);
+        },
+        remove(b) {
+          this.books = this.books.filter((x) => x.id !== b.id);
+          Mock.toast(`Deleted “${b.title}”. Questions generated from it keep their citation.`);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

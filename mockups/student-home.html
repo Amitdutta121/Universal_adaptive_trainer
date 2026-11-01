@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My courses · Adaptive Trainer (mockup)</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/basecoat.cdn.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="https://cdn.jsdelivr.net/npm/basecoat-css@1.0.2/dist/js/all.min.js" defer></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<!-- F2s · Student home: the student's courses and mastery per topic. Phone-first. -->
+<body data-scope="student" data-title="My courses">
+  <main x-data="page()" x-cloak class="mx-auto grid w-full max-w-2xl gap-4 px-4 py-6">
+    <div>
+      <h1 class="text-xl font-semibold" x-text="`Hi, ${student.name.split(' ')[0]}`"></h1>
+      <p class="text-sm text-muted-foreground" x-text="`${enrolments.length} course · last practised ${fmt(enrolments[0].last_session)}`"></p>
+    </div>
+
+    <template x-for="e in enrolments" :key="e.class_id">
+      <section class="card gap-4 py-5">
+        <!-- Assignment due next (G2/G3) and the schedule-driven practice scope (G1). -->
+        <template x-if="due">
+          <div class="mx-6 grid gap-2 rounded-lg border p-3" :style="{ borderColor: 'var(--primary)' }">
+            <div class="text-sm">
+              <span class="font-medium" x-text="`Due ${fmt(due.due, true)}: `"></span><span x-text="`${due.a.name} — ${due.goalText}.`"></span>
+              <span class="font-medium" x-text="due.nowText"></span>
+            </div>
+            <div class="relative h-1.5 rounded-full" style="background:var(--muted)" :aria-label="`Progress toward the goal: ${Mock.pct(due.progress)}`">
+              <div class="h-1.5 rounded-full" :style="{ background: 'var(--primary)', width: `${due.progress * 100}%` }"></div>
+            </div>
+            <div class="flex text-xs text-muted-foreground">
+              <span x-text="`${due.goalShort} · ${due.a.points} points`"></span>
+              <span class="ml-auto" x-text="due.extension ? `Extended to ${fmt(due.extension)}` : `${due.daysLeft} day${due.daysLeft === 1 ? '' : 's'} left`"></span>
+            </div>
+          </div>
+        </template>
+        <header>
+          <p class="text-xs text-muted-foreground" x-text="`${e.cls.name} · ${MOCK.student_extra.instructor}`"></p>
+          <h2 x-text="`${e.course.name} (${e.course.code})`"></h2>
+          <p x-text="`Practising “${e.set.name}” · ${e.set.questions} questions · ${student.sessions} sessions, ${student.attempts} answers`"></p>
+        </header>
+        <section class="grid gap-4">
+          <div class="flex items-end gap-4">
+            <div>
+              <div class="text-xs text-muted-foreground">Overall mastery</div>
+              <div class="font-display text-3xl font-semibold" x-text="Mock.pct(student.avg_mastery)"></div>
+            </div>
+            <div class="flex h-10 flex-1 items-end gap-1" aria-label="Mastery over the last 8 weeks">
+              <template x-for="(v, i) in student.trend" :key="i">
+                <div class="flex-1 rounded-sm" :style="`height:${Math.round(v * 100)}%;background:${i === student.trend.length - 1 ? 'var(--primary)' : 'var(--hairline-2)'}`"></div>
+              </template>
+            </div>
+          </div>
+          <a class="btn w-full" data-size="lg" href="student-practice.html">Continue practising<i data-lucide="arrow-right"></i></a>
+          <p class="-mt-2 text-xs text-muted-foreground" x-show="released.weeks" x-text="`Practising topics from weeks 1–${released.weeks} of the syllabus (${released.count} of ${course.taxonomy.length} topics), with some review of earlier weeks.`"></p>
+
+          <!-- The weakest subtopics (practice serves these next), each with its 3-minute lesson (student-lesson.html). -->
+          <div class="grid gap-2">
+            <div class="flex items-baseline text-sm"><span class="font-medium">Lessons for your weakest subtopics</span></div>
+            <ul class="grid gap-1.5">
+              <template x-for="w in lessonsFor" :key="w.id">
+                <li><a class="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm hover:bg-[var(--muted)]" :href="`student-lesson.html?sub=${w.id}&from=home`">
+                  <span class="grid min-w-0"><span class="font-medium" x-text="w.name"></span><span class="text-xs text-muted-foreground" x-text="w.blurb"></span></span>
+                  <span class="ml-auto shrink-0 font-mono text-xs" x-text="Mock.pct(w.m)"></span>
+                  <span class="shrink-0 text-muted-foreground"><i data-lucide="chevron-right" class="size-4"></i></span>
+                </a></li>
+              </template>
+            </ul>
+          </div>
+
+          <div>
+            <div class="mb-2 flex items-baseline text-sm">
+              <span class="font-medium">Mastery by topic</span>
+              <button class="ml-auto text-xs underline underline-offset-4" @click="sortWeak = !sortWeak" x-text="sortWeak ? 'Course order' : 'Weakest first'"></button>
+            </div>
+            <ul class="grid gap-2.5">
+              <template x-for="t in topics" :key="t.id">
+                <li class="grid gap-1">
+                  <div class="flex text-sm">
+                    <span x-text="t.name"></span>
+                    <span class="ml-auto font-mono text-xs" :class="t.m ? '' : 'text-muted-foreground'" x-text="t.m ? Mock.pct(t.m) : t.opens ? `Opens ${fmt(t.opens)}` : 'Not started'"></span>
+                  </div>
+                  <div class="h-1.5 rounded-full" style="background:var(--muted)">
+                    <div class="h-1.5 rounded-full" :style="`width:${t.m * 100}%;background:${t.m < 0.5 ? 'var(--warn-solid)' : 'var(--primary)'}`"></div>
+                  </div>
+                </li>
+              </template>
+            </ul>
+            <p class="mt-3 text-xs text-muted-foreground">Mastery is an estimate of how likely you are to answer a new question on the topic correctly. It updates after every answer.</p>
+          </div>
+        </section>
+      </section>
+    </template>
+
+    <a class="btn" data-variant="outline" href="student-join.html">Join another class</a>
+  </main>
+
+  <script src="assets/mock-data.js"></script>
+  <script src="assets/data-g.js"></script>
+  <script src="assets/data-gen.js"></script>
+  <script src="assets/data-f.js"></script>
+  <script src="assets/data-lessons-content.js"></script>
+  <script src="assets/data-lessons.js"></script>
+  <script src="assets/lesson-schema.js"></script>
+  <script src="assets/data-lesson-player.js"></script>
+  <script src="assets/data-multi.js"></script>
+  <script src="assets/data-tools.js"></script>
+  <script src="assets/layout.js"></script>
+  <script>
+    function page() {
+      const student = MOCK.student_session.student;
+      const course = MOCK.course("python");
+      const X = MOCK.student_extra;
+      const topicOf = (sub) => course.taxonomy.find((t) => t.subtopics.some((s) => s.name === sub))?.name;
+      // Schedule: which topics are open this week, and when the others open.
+      const sched = MOCK.schedule.python;
+      const releasedIds = MOCK.releasedTopics("python");
+      const opensOn = (tid) => {
+        if (releasedIds.includes(tid)) return null;
+        const w = sched.weeks.find((x) => x.topics.includes(tid));
+        return w ? w.starts : null;
+      };
+      // The assignment due soonest that this student hasn't finished.
+      const results = MOCK.assignment_results[student.id] || {};
+      const next = MOCK.assignments
+        .filter((a) => a.course === "python" && a.status === "open" && a.sections.includes(student.class_id))
+        .filter((a) => !["done", "late", "excused"].includes(results[a.id]?.state))
+        .sort((x, y) => x.due.localeCompare(y.due))[0];
+      let due = null;
+      if (next) {
+        const r = results[next.id];
+        const until = r.extension || next.due;
+        due = {
+          a: next, due: until, extension: r.extension, progress: r.progress,
+          daysLeft: Math.max(0, Math.round((new Date(until + "T12:00") - new Date(MOCK.today + "T12:00")) / 86400000)),
+          goalText: next.goal.type === "mastery" ? `reach ${Math.round(next.goal.target * 100)}%` : `answer ${next.goal.n} questions`,
+          // For a mastery goal, progress = mastery ÷ target, so mastery = progress × target.
+          goalShort: next.goal.type === "mastery" ? `${Mock.pct(r.progress * next.goal.target)} of ${Mock.pct(next.goal.target)} on ${next.topics.map((t) => course.taxonomy.find((x) => x.id === t).name).join(", ")}` : `${Math.round(r.progress * next.goal.n)} of ${next.goal.n} questions`,
+          nowText: next.goal.type === "mastery" ? `You're at ${Mock.pct(r.progress * next.goal.target)}.` : `You've answered ${Math.round(r.progress * next.goal.n)}.`,
+        };
+      }
+      return {
+        student,
+        course,
+        due,
+        released: { weeks: sched.current_week, count: releasedIds.length },
+        sortWeak: false,
+        enrolments: X.enrolments.map((e) => {
+          const cls = MOCK.classes.find((c) => c.id === e.class_id);
+          return { ...e, cls, course: MOCK.course(e.course), set: MOCK.question_sets.find((s) => s.id === cls.question_set) };
+        }),
+        // Weakest subtopics that have a lesson. TODO(real): only lessons the professor has published.
+        lessonsFor: Object.entries(X.subtopic_mastery).sort((a, b) => a[1] - b[1]).slice(0, 3).map(([name, m]) => {
+          const sub = course.taxonomy.flatMap((t) => t.subtopics).find((s) => s.name === name);
+          const blocks = sub ? MOCK.studentLesson(sub.id).blocks : [];
+          const kinds = blocks.filter((b) => ["predict", "trace", "explore", "branch", "fill", "parsons", "check"].includes(b.type)).length;
+          return sub && { id: sub.id, name, m, blurb: `${topicOf(name)} · 3-minute lesson · ${kinds} activit${kinds === 1 ? 'y' : 'ies'}` };
+        }).filter(Boolean),
+        weakest: Object.entries(X.subtopic_mastery).map(([name, m]) => ({ name, m, topic: topicOf(name) }))
+          .sort((a, b) => a.m - b.m).slice(0, 3),
+        get topics() {
+          const list = course.taxonomy.map((t) => ({ id: t.id, name: t.name, m: student.mastery[t.id] || 0, opens: opensOn(t.id) }));
+          return this.sortWeak ? list.filter((t) => t.m).sort((a, b) => a.m - b.m).concat(list.filter((t) => !t.m)) : list;
+        },
+        fmt(d, weekday) { return new Date(d + "T12:00").toLocaleDateString("en-US", weekday ? { weekday: "short", month: "short", day: "numeric" } : { month: "short", day: "numeric" }); },
+      };
+    }
+  </script>
+</body>
+</html>

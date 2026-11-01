@@ -22,6 +22,7 @@ from app.persistence.models import (
     TopicRow,
 )
 from app.persistence.repositories import QuestionSetRepository
+from app.web.routes.api.students import STUDENT_HEADER
 
 
 def _bank(session: Session, *, question_type: QuestionType = QuestionType.TRUE_FALSE) -> int:
@@ -83,15 +84,15 @@ def _enrol_payload(name: str) -> dict[str, str]:
 
 
 def _enrol(client: TestClient, name: str = "Ada") -> int:
-    response = client.post("/api/students", json=_enrol_payload(name))
-    assert response.status_code == 201, response.text
-    return response.json()["id"]
+    return _enrol_with_token(client, name)[0]
 
 
 def _enrol_with_token(client: TestClient, name: str = "Ada") -> tuple[int, str]:
+    """Enrol, and from now on send this learner's token like their browser does (ADR-060)."""
     response = client.post("/api/students", json=_enrol_payload(name))
     assert response.status_code == 201, response.text
     body = response.json()
+    client.headers[STUDENT_HEADER] = body["resume_token"]
     return body["id"], body["resume_token"]
 
 
@@ -190,6 +191,30 @@ class TestRosterPagination:
         assert [row["display_name"] for row in second["students"]] == ["Cy"]
         assert second["total"] == 3
 
+    def test_sort_orders_the_whole_set_before_paging(self, client: TestClient) -> None:
+        for name in ("Ada", "Bea", "Cy"):
+            _enrol(client, name)
+
+        params = {"sort": "name", "order": "desc", "page_size": 2}
+        first = client.get("/api/students", params={**params, "page": 1}).json()
+        second = client.get("/api/students", params={**params, "page": 2}).json()
+        assert [row["display_name"] for row in first["students"]] == ["Cy", "Bea"]
+        assert [row["display_name"] for row in second["students"]] == ["Ada"]
+
+    def test_learners_without_a_value_sort_last_either_way(
+        self, client: TestClient, session: Session
+    ) -> None:
+        set_id = _bank(session)
+        _enrol(client, "Ada")
+        _answer_one(client, set_id, "Bea")
+
+        for order in ("asc", "desc"):
+            rows = client.get("/api/students", params={"sort": "average", "order": order}).json()
+            assert [row["display_name"] for row in rows["students"]] == ["Bea", "Ada"]
+
+    def test_an_unknown_sort_is_refused(self, client: TestClient) -> None:
+        assert client.get("/api/students", params={"sort": "resume_token"}).status_code == 422
+
     def test_search_matches_name_or_email(self, client: TestClient) -> None:
         _enrol(client, "Ada")
         _enrol(client, "Grace")
@@ -248,6 +273,10 @@ class TestRosterPagination:
             "/api/students/class-summary", params={"curriculum_version_id": version_a}
         ).json()
         assert [attempt["student_id"] for attempt in scoped["scored_attempts"]] == [student_a]
+        # Bea answered in the other taxonomy only: not this roster's, so not measured here.
+        assert (scoped["student_count"], scoped["measured_students"]) == (1, 1)
+        # Ada's answer count is this taxonomy's alone.
+        assert scoped["weakness_cells"][0]["affected"][0]["answered"] == 1
         assert len(scoped["weakness_cells"]) == 1
         assert [row["name"] for row in scoped["weakness_cells"][0]["affected"]] == ["Ada"]
 
@@ -508,3 +537,36 @@ class TestTheAnswerIsNeverPublished:
             {"id": "head", "text": "for value in items:", "indent": 0},
         ]
         assert "correct_order" not in body
+
+
+class TestStudentPageWithoutInstructorLogin:
+    """The student page has no instructor session; its calls must not need one."""
+
+    def test_the_student_sees_their_progress_and_answered_key_without_logging_in(
+        self, settings, session: Session, client: TestClient
+    ) -> None:
+        set_id = _bank(session, question_type=QuestionType.MULTIPLE_CHOICE)
+        student_id = _enrol(client)
+        run_id = _start(client, student_id, set_id)
+
+        from app.main import create_app
+
+        with TestClient(create_app(settings)) as public:
+            public.headers[STUDENT_HEADER] = client.headers[STUDENT_HEADER]
+            served = public.get(f"/api/training-sessions/{run_id}/next").json()
+            attempt_id = served["attempt_id"]
+            # Before answering, the key stays hidden.
+            assert public.get(f"/api/attempts/{attempt_id}/review").status_code == 422
+
+            answered = public.post(f"/api/attempts/{attempt_id}/answer", json={"answer": "1"})
+            assert answered.status_code == 200, answered.text
+
+            review = public.get(f"/api/attempts/{attempt_id}/review")
+            assert review.status_code == 200, review.text
+            assert review.json()["content"]["correct_option_index"] == 1
+
+            progress = public.get(f"/api/training-sessions/{run_id}/progress")
+            assert progress.status_code == 200, progress.text
+            assert progress.json()["answered"] == 1
+            # The instructor route stays instructor-only.
+            assert public.get(f"/api/students/{student_id}/progress").status_code == 401
