@@ -56,6 +56,18 @@ function extensionOf(name: string) {
   return dot === -1 ? "" : name.slice(dot).toLowerCase();
 }
 
+/** Why the backend would refuse `file` before it is sent, or `null` when it would take it. */
+export function uploadProblem(file: File, extensions: string[], maxUploadMb?: number) {
+  if (!extensions.includes(extensionOf(file.name))) {
+    const formats = extensions.map((ext) => FORMAT_NAMES[ext] ?? ext.slice(1).toUpperCase());
+    return `This file type cannot be read. Upload a ${formats.join(", ")} file.`;
+  }
+  if (maxUploadMb !== undefined && exceedsUploadLimit(file.size, maxUploadMb)) {
+    return `This file is larger than the ${maxUploadMb} MB limit.`;
+  }
+  return null;
+}
+
 /** True when the paste or drop landed in a box the professor is typing in. */
 function inTextField(target: EventTarget | null) {
   return (
@@ -64,16 +76,23 @@ function inTextField(target: EventTarget | null) {
   );
 }
 
-function UniversalUploader({ onImported }: { onImported: () => void }) {
+function UniversalUploader({
+  onImported,
+  initialLink = "",
+}: {
+  onImported: () => void;
+  initialLink?: string;
+}) {
   const config = useConfig();
   const importBook = useImportBook();
   const importVideo = useImportYoutube();
   const [, setJobParam] = useQueryState("job", parseAsString);
   const [file, setFile] = useState<File | null>(null);
-  const [link, setLink] = useState("");
+  const [link, setLink] = useState(initialLink);
   const [title, setTitle] = useState("");
   const [transcript, setTranscript] = useState("");
-  const [needsPaste, setNeedsPaste] = useState(false);
+  // A link handed over from a page drop has already failed to fetch its transcript.
+  const [needsPaste, setNeedsPaste] = useState(Boolean(initialLink));
   const [dragging, setDragging] = useState(false);
   const [localProblem, setLocalProblem] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -140,12 +159,9 @@ function UniversalUploader({ onImported }: { onImported: () => void }) {
     importBook.reset();
 
     if (file) {
-      if (!extensions.includes(extensionOf(file.name))) {
-        setLocalProblem(`This file type cannot be read. Upload a ${formats.join(", ")} file.`);
-        return;
-      }
-      if (maxUploadMb !== undefined && exceedsUploadLimit(file.size, maxUploadMb)) {
-        setLocalProblem(`This file is larger than the ${maxUploadMb} MB limit.`);
+      const problem = uploadProblem(file, extensions, maxUploadMb);
+      if (problem) {
+        setLocalProblem(problem);
         return;
       }
       try {
@@ -364,9 +380,12 @@ function UniversalUploader({ onImported }: { onImported: () => void }) {
 export function BookImportDialog({
   open,
   onOpenChange,
+  initialLink,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** A YouTube link whose transcript could not be fetched: opens on the paste box. */
+  initialLink?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -382,7 +401,7 @@ export function BookImportDialog({
             read is refused and nothing is stored.
           </DialogDescription>
         </DialogHeader>
-        <UniversalUploader onImported={() => onOpenChange(false)} />
+        <UniversalUploader initialLink={initialLink} onImported={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );

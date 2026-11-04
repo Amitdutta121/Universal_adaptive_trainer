@@ -37,6 +37,8 @@ export const qk = {
     blocks: (subtopicId: number) => ["tutorials", "blocks", subtopicId] as const,
     sample: (versionId: number, recipeId: string) =>
       ["tutorials", "sample", versionId, recipeId] as const,
+    gallery: (versionId: number, recipeId: string) =>
+      ["tutorials", "gallery", versionId, recipeId] as const,
   },
   system: {
     health: () => ["system", "health"] as const,
@@ -145,6 +147,8 @@ export const qk = {
     // One key per opening. A remount of that opening reads the same in-flight request.
     suggestion: (curriculumVersionId: number, session: number) =>
       ["setup", "suggestion", curriculumVersionId, session] as const,
+    visibility: (courseId: number, curriculumVersionId: number | null) =>
+      ["setup", "visibility", courseId, curriculumVersionId] as const,
   },
   rounds: {
     all: ["rounds"] as const,
@@ -783,6 +787,8 @@ export function useImportYoutube() {
       unwrap(api.POST("/api/books/youtube", { body })),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: qk.books.all });
+      // The import queues the video's embedding job.
+      client.invalidateQueries({ queryKey: qk.jobs.all });
     },
   });
 }
@@ -1691,6 +1697,44 @@ export function useSaveSetup() {
   });
 }
 
+/**
+ * Approved and hidden questions per style and type for the course, and per subtopic cell of one
+ * taxonomy (ADR-070). The course is passed explicitly: course Settings opens outside the course.
+ */
+export const useQuestionVisibility = (courseId: number, curriculumVersionId: number | null) =>
+  useQuery({
+    queryKey: qk.setup.visibility(courseId, curriculumVersionId),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/question-visibility", {
+          params: {
+            query: curriculumVersionId === null ? {} : { curriculum_version_id: curriculumVersionId },
+          },
+          headers: { [COURSE_HEADER]: String(courseId) },
+        }),
+      ),
+  });
+
+/** Hide approved questions from students, or show hidden ones again (ADR-070). */
+export function useSetQuestionVisibility(courseId: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["SetQuestionVisibilityRequest"]) =>
+      unwrap(
+        api.POST("/api/question-visibility", {
+          body,
+          headers: { [COURSE_HEADER]: String(courseId) },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["setup", "visibility", courseId] });
+      client.invalidateQueries({ queryKey: qk.questions.all });
+      client.invalidateQueries({ queryKey: qk.coverage.all });
+      client.invalidateQueries({ queryKey: qk.courses.all });
+    },
+  });
+}
+
 /** Queue the next round of a setup, for cells still below target. */
 export function useStartNextRound() {
   const client = useQueryClient();
@@ -1944,6 +1988,21 @@ export function useDecideTutorialRecipe() {
 }
 
 /** Stop showing one bank block to students (live tutorials' review after publishing). */
+/** Every bank block of one recipe across a taxonomy, newest first: the style's gallery. */
+export const useTutorialGallery = (versionId: number, recipeId: string | null) =>
+  useQuery({
+    queryKey: qk.tutorials.gallery(versionId, recipeId ?? ""),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/tutorial-blocks", {
+          params: {
+            query: { curriculum_version_id: versionId, recipe_id: recipeId ?? "", limit: 500 },
+          },
+        }),
+      ),
+    enabled: recipeId !== null,
+  });
+
 export function useRetireTutorialBlock() {
   const client = useQueryClient();
   return useMutation({
@@ -2062,19 +2121,36 @@ export function useTryExperimentalRecipe() {
 export function useSaveExperimentalRecipe() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ courseId, id, yaml }: { courseId: number; id: number | null; yaml: string }) =>
+    mutationFn: ({
+      courseId,
+      id,
+      yaml,
+      examples = [],
+    }: {
+      courseId: number;
+      id: number | null;
+      yaml: string;
+      /** Examples written from this exact YAML, kept as the style's first tutorials. */
+      examples?: Schemas["ExperimentalRecipeExample"][];
+    }) =>
       id === null
-        ? unwrap(api.POST("/api/experimental/recipes", { ...inCourse(courseId), body: { yaml } }))
+        ? unwrap(
+            api.POST("/api/experimental/recipes", {
+              ...inCourse(courseId),
+              body: { yaml, examples },
+            }),
+          )
         : unwrap(
             api.PUT("/api/experimental/recipes/{row_id}", {
               ...inCourse(courseId),
               params: { path: { row_id: id } },
-              body: { yaml },
+              body: { yaml, examples },
             }),
           ),
     // A saved recipe joins the course's tutorial recipes, and an edit hides its old blocks.
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: qk.experimentalRecipes.all });
+    // Only the list: the examples on screen are model calls and stay as they are.
+    onSuccess: (_saved, { courseId }) => {
+      client.invalidateQueries({ queryKey: qk.experimentalRecipes.list(courseId) });
       client.invalidateQueries({ queryKey: qk.tutorials.all });
     },
   });
@@ -2090,8 +2166,8 @@ export function useDeleteExperimentalRecipe() {
           params: { path: { row_id: id } },
         }),
       ),
-    onSuccess: () => {
-      client.invalidateQueries({ queryKey: qk.experimentalRecipes.all });
+    onSuccess: (_deleted, { courseId }) => {
+      client.invalidateQueries({ queryKey: qk.experimentalRecipes.list(courseId) });
       client.invalidateQueries({ queryKey: qk.tutorials.all });
     },
   });

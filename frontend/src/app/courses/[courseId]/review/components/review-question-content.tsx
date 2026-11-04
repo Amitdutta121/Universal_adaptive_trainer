@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { PromptText } from "@/components/prompt-text";
 import { type AuthoringReviewProps, questionTypeUI } from "@/lib/question-types/registry";
 import { CodeBlock, ReviewChip } from "./review-primitives";
 
@@ -38,9 +39,10 @@ export function ReviewQuestionSurface({
             className="review-textarea"
           />
         ) : (
-          <p className="whitespace-pre-wrap text-[15px] text-[var(--review-foreground)] leading-7">
-            {detail.question.prompt}
-          </p>
+          <PromptText
+            text={detail.question.prompt}
+            className="text-[15px] text-[var(--review-foreground)]"
+          />
         )}
       </CardContent>
     </Card>
@@ -59,7 +61,7 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
         <CardDescription>This question has no specialized renderer yet.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="whitespace-pre-wrap text-[14px] leading-7">{detail.question.prompt}</p>
+        <PromptText text={detail.question.prompt} className="text-[14px]" />
         {referenceEdit ? <CodeBlock>{referenceEdit}</CodeBlock> : null}
       </CardContent>
     </Card>

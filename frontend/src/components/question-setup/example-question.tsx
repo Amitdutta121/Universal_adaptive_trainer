@@ -6,6 +6,7 @@
 import { CheckIcon, GripVerticalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExampleQuestion } from "./types";
+import { PromptText } from "@/components/prompt-text";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -31,7 +32,7 @@ export function ExampleQuestionView({ example, label }: { example: ExampleQuesti
   return (
     <figure className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-3.5">
       <figcaption className="text-muted-foreground text-xs">{label}</figcaption>
-      <p className="text-sm leading-relaxed">{example.prompt}</p>
+      <PromptText text={example.prompt} className="text-sm leading-relaxed" />
 
       {example.code ? <CodeBlock code={example.code} /> : null}
 

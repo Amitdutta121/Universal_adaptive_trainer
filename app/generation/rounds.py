@@ -655,7 +655,7 @@ def _generate_round(
         memory_as_of=row.started_at,
     )
     # Without an embedder only exact duplicates are caught (ADR-063 point 6).
-    duplicates = DuplicateChecker(session, embedder)
+    duplicates = DuplicateChecker(session, embedder, persist_cache=False)
     # A resembling (not duplicate) question may be the same idea reworded: one cheap call.
     concepts = ConceptChecker(client)
     run_id = new_run_id()
@@ -719,19 +719,23 @@ def _generate_round(
                         style_id=style.id,
                         facet=facets[index],
                     )
+                    examples = accepted_examples(
+                        session,
+                        version_id,
+                        (subtopic_id, difficulty),
+                        style.question_type,
+                        chunk_id=chunk_id,
+                        embedder=embedder,
+                    )
+                    # End the read phase (it may have cached vectors) before the model calls:
+                    # an open write would hold SQLite's lock through them (TASK-140).
+                    session.commit()
                     question = service.generate_round_question(
                         spec,
                         version=version,
                         round_id=round_id,
                         rules=rules,
-                        examples=accepted_examples(
-                            session,
-                            version_id,
-                            (subtopic_id, difficulty),
-                            style.question_type,
-                            chunk_id=chunk_id,
-                            embedder=embedder,
-                        ),
+                        examples=examples,
                         run_id=run_id,
                         duplicates=duplicates,
                         concepts=concepts,

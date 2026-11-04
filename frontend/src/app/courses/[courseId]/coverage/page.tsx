@@ -1,10 +1,7 @@
 /**
  * The coverage route shell.
  *
- * `CoverageScreen` keeps which snapshot the grid is pointed at in the URL
- * (`?set=`), which means it reads search params, which Next requires to sit
- * inside a Suspense boundary — without one the whole route opts out of static
- * rendering at build time.
+ * The Suspense fallback shows the header and a skeleton while the screen loads.
  */
 
 import { Suspense } from "react";

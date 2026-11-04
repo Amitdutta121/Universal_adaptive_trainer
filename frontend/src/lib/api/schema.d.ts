@@ -1352,6 +1352,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/question-visibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Question Visibility
+         * @description Approved and hidden questions per style and type, and per subtopic of one taxonomy, so
+         *     turning a style or type off can say how many questions it would hide (ADR-070).
+         */
+        get: operations["question_visibility_api_question_visibility_get"];
+        put?: never;
+        /**
+         * Set Question Visibility
+         * @description Hide the course's approved questions in some styles or types from students, or show
+         *     hidden ones again; course-wide or in one subtopic. Never a reject (ADR-070).
+         */
+        post: operations["set_question_visibility_api_question_visibility_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rounds/{round_id}": {
         parameters: {
             query?: never;
@@ -2758,6 +2784,21 @@ export interface components {
             target: number;
         };
         /**
+         * CellVisibilityCount
+         * @description Questions tagged with one subtopic, at one difficulty, in one style (``None``: no style).
+         */
+        CellVisibilityCount: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            /** Style Id */
+            style_id: string | null;
+            difficulty: components["schemas"]["Difficulty"];
+            /** Approved */
+            approved: number;
+            /** Hidden */
+            hidden: number;
+        };
+        /**
          * ChunkGenerationSpec
          * @description One chunk's instruction on the spec sheet (ADR-044).
          *
@@ -3704,6 +3745,26 @@ export interface components {
             current_yaml?: string | null;
         };
         /**
+         * ExperimentalRecipeExample
+         * @description A block shown while making the recipe (``POST /try``), sent back to keep on save.
+         */
+        ExperimentalRecipeExample: {
+            /** Subtopic Id */
+            subtopic_id: number;
+            guidance_level: components["schemas"]["GuidanceLevel"];
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Chunk Ids */
+            chunk_ids: string[];
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+        };
+        /**
          * ExperimentalRecipeOut
          * @description A recipe from the experimental recipe builder: its YAML and the fields a list shows.
          */
@@ -3725,6 +3786,16 @@ export interface components {
              */
             updated_at: string;
             recipe: components["schemas"]["TutorialRecipe"];
+            /**
+             * Blocks Retired
+             * @default 0
+             */
+            blocks_retired: number;
+            /**
+             * Examples Kept
+             * @default 0
+             */
+            examples_kept: number;
         };
         /**
          * ExperimentalRecipeTryOut
@@ -3756,6 +3827,8 @@ export interface components {
         ExperimentalRecipeYaml: {
             /** Yaml */
             yaml: string;
+            /** Examples */
+            examples?: components["schemas"]["ExperimentalRecipeExample"][];
         };
         /**
          * ExtractionWarning
@@ -4186,7 +4259,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "regeneration" | "tutorial_pregeneration" | "question_round" | "judge_run";
+            kind: "bulk_generation" | "coverage_fill" | "book_import" | "embedding_switch" | "source_embedding" | "regeneration" | "tutorial_pregeneration" | "question_round" | "judge_run";
             /** Title */
             title: string;
             /**
@@ -5005,7 +5078,7 @@ export interface components {
          * @description Lifecycle of a generated question through validation and review.
          * @enum {string}
          */
-        QuestionStatus: "generated" | "validation_passed" | "validation_failed" | "approved" | "rejected";
+        QuestionStatus: "generated" | "validation_passed" | "validation_failed" | "approved" | "rejected" | "hidden";
         /**
          * QuestionStyle
          * @description One style in a subject's library.
@@ -5152,6 +5225,21 @@ export interface components {
             offerable: boolean;
             /** Ai Graded */
             ai_graded: boolean;
+        };
+        /**
+         * QuestionVisibilityResponse
+         * @description ``GET /api/question-visibility``: approved and hidden questions (ADR-070).
+         *
+         *     ``by_style`` and ``by_type`` cover the whole course; ``by_cell`` only the taxonomy named
+         *     by ``curriculum_version_id`` (empty when none is named).
+         */
+        QuestionVisibilityResponse: {
+            /** By Style */
+            by_style: components["schemas"]["StyleVisibilityCount"][];
+            /** By Type */
+            by_type: components["schemas"]["TypeVisibilityCount"][];
+            /** By Cell */
+            by_cell: components["schemas"]["CellVisibilityCount"][];
         };
         /** ReasonCount */
         ReasonCount: {
@@ -5536,6 +5624,28 @@ export interface components {
             /** Preteach Blocks */
             preteach_blocks?: components["schemas"]["StudentTutorialBlockOut"][];
         };
+        /**
+         * SetQuestionVisibilityRequest
+         * @description Hide approved questions from students, or show hidden ones again (ADR-070).
+         *
+         *     Name ``style_ids`` or ``question_types``, not both. ``subtopic_id`` narrows to questions
+         *     tagged with that subtopic; without it the whole course.
+         */
+        SetQuestionVisibilityRequest: {
+            /** Hidden */
+            hidden: boolean;
+            /** Style Ids */
+            style_ids?: string[];
+            /** Question Types */
+            question_types?: components["schemas"]["QuestionType"][];
+            /** Subtopic Id */
+            subtopic_id?: number | null;
+        };
+        /** SetQuestionVisibilityResponse */
+        SetQuestionVisibilityResponse: {
+            /** Changed */
+            changed: number;
+        };
         /** SettingsTestResponse */
         SettingsTestResponse: {
             /** Ok */
@@ -5788,6 +5898,15 @@ export interface components {
             metrics: {
                 [key: string]: components["schemas"]["MetricTrustOut"];
             };
+        };
+        /** StyleVisibilityCount */
+        StyleVisibilityCount: {
+            /** Style Id */
+            style_id: string;
+            /** Approved */
+            approved: number;
+            /** Hidden */
+            hidden: number;
         };
         /** SubjectPresetOut */
         SubjectPresetOut: {
@@ -6408,6 +6527,8 @@ export interface components {
              * @default false
              */
             live: boolean;
+            /** Needs Video */
+            needs_video?: string[];
         };
         /**
          * TutorialRecipeStatsOut
@@ -6474,6 +6595,14 @@ export interface components {
             available_reviews: number;
             /** Updated At */
             updated_at: string | null;
+        };
+        /** TypeVisibilityCount */
+        TypeVisibilityCount: {
+            question_type: components["schemas"]["QuestionType"];
+            /** Approved */
+            approved: number;
+            /** Hidden */
+            hidden: number;
         };
         /**
          * UpdateCustomJudgeRequest
@@ -9046,6 +9175,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveSetupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    question_visibility_api_question_visibility_get: {
+        parameters: {
+            query?: {
+                curriculum_version_id?: number | null;
+            };
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionVisibilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_question_visibility_api_question_visibility_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetQuestionVisibilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetQuestionVisibilityResponse"];
                 };
             };
             /** @description Validation Error */

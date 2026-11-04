@@ -8,14 +8,17 @@ real subtopic through the library's own generator (:func:`write_block`), shown a
 
 A saved recipe joins the course's recipes (``course_recipes`` in ``generator.py``): it is listed
 on the tutorials page beside the library's, can be approved per taxonomy, and reaches students
-only once approved (``servable_recipes`` in ``serving.py``). Editing or deleting one hides the
-blocks it already wrote. Ids start with ``exp.`` so they never collide with a library id.
+only once approved (``servable_recipes`` in ``serving.py``). Deleting one, or an edit that
+changes how it writes (not just its name or summary), hides the blocks it already wrote; the
+examples shown while making it can be kept as its first blocks (:func:`keep_examples`). Ids
+start with ``exp.`` so they never collide with a library id.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import yaml
@@ -33,10 +36,14 @@ from app.persistence.models import (
     TopicRow,
     TutorialBlockRow,
 )
+from app.persistence.repositories import ChunkRepository
 from app.retrieval.chunks import ChunkRetriever
 from app.styles.loader import _Dumper
 from app.subjects import SubjectProfile
+from app.tutorials.approval import initial_status
 from app.tutorials.generator import BlockRequest, get_recipes, write_block
+from app.tutorials.html_check import HtmlCheckUnavailable, check_html_block
+from app.tutorials.renderers import payload_problems
 from app.tutorials.schema import (
     ContentKind,
     RecipeCheck,
@@ -141,24 +148,116 @@ def _ensure_free(session: Session, course_id: int, recipe_id: str, keep: int | N
         )
 
 
-def save_recipe(
+@dataclass(frozen=True)
+class StoredRecipe:
+    row: ExperimentalRecipeRow
+    #: Bank blocks hidden because the edit changed how the recipe writes them.
+    blocks_retired: int = 0
+
+
+#: Fields that only label a recipe; changing them leaves its blocks as they were written.
+_LABELS = {"name", "summary"}
+
+
+def _writes_differently(old_text: str, new: TutorialRecipe, subject: str) -> bool:
+    try:
+        old = parse_recipe(old_text, subject)
+    except DomainRuleError:
+        return True
+    return old.model_dump(exclude=_LABELS) != new.model_dump(exclude=_LABELS)
+
+
+def store_recipe(
     session: Session, profile: SubjectProfile, text: str, row_id: int | None = None
-) -> ExperimentalRecipeRow:
-    """Create (``row_id`` ``None``) or replace a recipe; flushed, not committed."""
+) -> StoredRecipe:
+    """Create (``row_id`` ``None``) or replace a recipe; flushed, not committed.
+
+    An edit that changes how blocks are written (anything but the name and summary) hides the
+    blocks written before it, so students get freshly written ones.
+    """
     course_id = _course(profile)
     recipe = parse_recipe(text, profile.storage_key)
     row = get_row(session, profile, row_id) if row_id is not None else None
     _ensure_free(session, course_id, recipe.id, keep=row.id if row else None)
+    retired = 0
     if row is None:
         row = ExperimentalRecipeRow(course_id=course_id, recipe_id=recipe.id, yaml=text)
         session.add(row)
     else:
-        if row.yaml != text:
-            # Its blocks were written from the old wording; students get freshly written ones.
-            _retire_blocks(session, course_id, row.recipe_id)
+        if row.yaml != text and _writes_differently(row.yaml, recipe, profile.storage_key):
+            retired = _retire_blocks(session, course_id, row.recipe_id)
         row.recipe_id, row.yaml = recipe.id, text
     session.flush()
-    return row
+    return StoredRecipe(row=row, blocks_retired=retired)
+
+
+def save_recipe(
+    session: Session, profile: SubjectProfile, text: str, row_id: int | None = None
+) -> ExperimentalRecipeRow:
+    """:func:`store_recipe`, for callers that only need the row."""
+    return store_recipe(session, profile, text, row_id).row
+
+
+@dataclass(frozen=True)
+class Example:
+    """A block shown while the recipe was being made (:func:`try_recipe`), sent back to keep."""
+
+    subtopic_id: int
+    guidance_level: GuidanceLevel
+    payload: dict
+    chunk_ids: list[str]
+    model: str = ""
+
+
+def keep_examples(
+    session: Session,
+    profile: SubjectProfile,
+    recipe_text: str,
+    examples: list[Example],
+    *,
+    html_check: Callable[[dict, list[RecipeCheck]], list[str]] | None = None,
+) -> int:
+    """Add the examples to the bank as the saved recipe's first blocks; returns how many.
+
+    They come back from the browser, so each is checked again as a written block would be: a
+    subtopic of this course at a level the recipe writes, a payload its renderer draws (and, for
+    html, that loads), and chunks that exist. One that fails is dropped, not saved.
+    """
+    check = html_check or check_html_block
+    course_id = _course(profile)
+    recipe = parse_recipe(recipe_text, profile.storage_key)
+    kept = 0
+    for example in examples:
+        subtopic = session.get(SubtopicRow, example.subtopic_id)
+        if subtopic is None or subtopic.topic.curriculum_version.course_id != course_id:
+            continue
+        if example.guidance_level not in recipe.guidance_levels or not example.chunk_ids:
+            continue
+        if payload_problems(recipe.renderer, example.payload):
+            continue
+        if recipe.renderer is TutorialRenderer.HTML:
+            try:
+                if check(example.payload, list(recipe.checks)):
+                    continue
+            except HtmlCheckUnavailable:
+                continue
+        if len(ChunkRepository(session).get_many(example.chunk_ids)) != len(set(example.chunk_ids)):
+            continue
+        session.add(
+            TutorialBlockRow(
+                subtopic_id=subtopic.id,
+                recipe_id=recipe.id,
+                guidance_level=example.guidance_level,
+                renderer=recipe.renderer,
+                payload=example.payload,
+                chunk_ids=example.chunk_ids,
+                status=initial_status(session, subtopic.topic.curriculum_version_id, recipe.id),
+                model=example.model,
+            )
+        )
+        kept += 1
+    session.flush()
+    return kept
 
 
 def delete_recipe(session: Session, profile: SubjectProfile, row_id: int) -> None:

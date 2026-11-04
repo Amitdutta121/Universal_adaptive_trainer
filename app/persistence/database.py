@@ -56,6 +56,8 @@ def create_db_engine(settings: Settings | None = None) -> Engine:
         # FastAPI serves requests from a thread pool; SQLite's default
         # same-thread check would reject those connections.
         connect_args["check_same_thread"] = False
+        # The driver's 5 s default fails a request that queues behind a short write.
+        connect_args["timeout"] = settings.database_busy_timeout_seconds
 
     engine = create_engine(
         settings.database_url,

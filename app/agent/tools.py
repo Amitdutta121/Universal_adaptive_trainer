@@ -153,6 +153,7 @@ def import_material(
             YouTubeImportRequest(url=url, title=title, transcript=transcript),
             deps.youtube_fetch or books_routes.get_youtube_fetch(),
             deps.youtube_check or books_routes.get_youtube_check(),
+            queue=deps.queue,
         )
     return ImportedMaterial(
         book_id=result.book.id, title=result.book.title, status=result.book.status.value

@@ -1,11 +1,21 @@
-import { render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as baseRender, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecipeBuilder } from "./recipe-builder";
 
+function render(ui: React.ReactElement) {
+  return baseRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+}
+
 const draftMutate = vi.fn();
 const saveMutate = vi.fn();
 const deleteMutate = vi.fn();
+/** `mutate(vars, { onSuccess })` over a mocked async mutation, as React Query calls it. */
+const asMutate =
+  (fn: (vars: unknown) => unknown) =>
+  (vars: unknown, options?: { onSuccess?: (result: unknown) => void }) =>
+    void Promise.resolve(fn(vars)).then((result) => options?.onSuccess?.(result));
 const tryMutate = vi.fn();
 const exampleQuery = vi.fn();
 const state = vi.hoisted(() => ({ recipes: [] as unknown[], drafting: false }));
@@ -75,8 +85,18 @@ vi.mock("@/lib/api/queries", () => ({
     error: null,
     data: undefined,
   }),
-  useSaveExperimentalRecipe: () => ({ mutateAsync: saveMutate, isPending: false, error: null }),
-  useDeleteExperimentalRecipe: () => ({ mutateAsync: deleteMutate, isPending: false, error: null }),
+  useSaveExperimentalRecipe: () => ({
+    mutateAsync: saveMutate,
+    mutate: asMutate(saveMutate),
+    isPending: false,
+    error: null,
+  }),
+  useDeleteExperimentalRecipe: () => ({
+    mutateAsync: deleteMutate,
+    mutate: asMutate(deleteMutate),
+    isPending: false,
+    error: null,
+  }),
   useExperimentalExample: (courseId: number, run: number, body: unknown) => {
     exampleQuery(courseId, run, body);
     return {
@@ -116,7 +136,7 @@ describe("RecipeBuilder", () => {
     const user = userEvent.setup();
     render(<RecipeBuilder />);
 
-    await user.type(screen.getByLabelText("Describe the recipe"), "Teach with an analogy");
+    await user.type(screen.getByLabelText("Describe the style"), "Teach with an analogy");
     await user.click(screen.getByRole("button", { name: "Draft with AI" }));
 
     // The course with a curriculum is picked by default.
@@ -128,9 +148,9 @@ describe("RecipeBuilder", () => {
     expect(screen.getByText("Teach with an analogy")).toBeInTheDocument();
     expect(await screen.findByText("One analogy and its limit")).toBeInTheDocument();
     // The YAML is one click away, not the main view.
-    expect(screen.queryByLabelText("Recipe YAML")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Style YAML")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Edit YAML" }));
-    expect(screen.getByLabelText("Recipe YAML")).toHaveValue(YAML);
+    expect(screen.getByLabelText("Style YAML")).toHaveValue(YAML);
 
     // Two examples on subtopics of different topics, at the recipe's first level, shown.
     expect(await screen.findAllByText("Example block")).toHaveLength(2);
@@ -144,7 +164,7 @@ describe("RecipeBuilder", () => {
     render(<RecipeBuilder />);
 
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Generating the recipe on Azure · gpt-5-mini");
+    expect(status).toHaveTextContent("Generating the style on Azure · gpt-5-mini");
     expect(screen.getByRole("button", { name: /New/ })).toBeEnabled();
   });
 

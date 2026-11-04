@@ -3,7 +3,8 @@
 /**
  * Tell the professor when a job they started finishes, wherever they are in the course.
  *
- * Watches the Jobs list for a job that was queued or running and now is not. That
+ * Watches the Jobs list for a job that was queued or running and now is not, or that first
+ * appears already finished (a small import can start and end between two refetches). That
  * job's output just landed, so the lists it changes are refetched here: the screen
  * that started it may be long gone, and nothing else would notice.
  */
@@ -30,7 +31,7 @@ export function useJobFinishedToasts(jobs: readonly Job[], onView: (jobId: strin
 
     const finished = jobs.filter((job) => {
       const was = before.get(job.id);
-      return (was === "queued" || was === "running") && !isActive(job);
+      return (was === undefined || was === "queued" || was === "running") && !isActive(job);
     });
     if (finished.length === 0) return;
 

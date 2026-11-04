@@ -13,6 +13,7 @@ import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { PromptText } from "@/components/prompt-text";
 import {
   Table,
   TableBody,
@@ -100,7 +101,7 @@ export default async function QuestionDetailPage(props: PageProps<"/courses/[cou
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="whitespace-pre-wrap text-sm">{question.prompt}</p>
+          <PromptText text={question.prompt} className="text-sm" />
           {detail.reference_solution ? (
             <>
               <Separator />

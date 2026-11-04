@@ -44,6 +44,11 @@ from app.jobs.queue import JobQueue, JobQueueDep
 from app.jobs.runner import Progress, create_job, execute
 from app.persistence.models import BackgroundJobRow
 from app.persistence.repositories import BookRepository, ChunkRepository
+from app.retrieval.source_embedding import (
+    embed_after_import,
+    run_source_embedding,
+    start_source_embedding,
+)
 from app.web.routes.api.deps import CourseScope, DbSession, ensure_in_course
 from app.web.routes.api.schemas import (
     BookDeletion,
@@ -123,6 +128,7 @@ def import_youtube(
     request: YouTubeImportRequest,
     fetch: Annotated[TranscriptFetch, Depends(get_youtube_fetch)],
     check: Annotated[AvailabilityCheck, Depends(get_youtube_check)],
+    queue: JobQueueDep,
 ) -> BookImportResult:
     """Import a YouTube video's transcript as timestamped chunks; the video is never downloaded.
 
@@ -137,6 +143,10 @@ def import_youtube(
         course_id=course,
     )
     session.commit()
+    embedding = start_source_embedding(session, book.id)
+    if embedding is not None:
+        session.commit()
+        queue.submit(run_source_embedding, embedding.id)
     return BookImportResult(book=BookSummary.from_row(book))
 
 
@@ -197,8 +207,10 @@ def _start_import(
 
 
 def run_book_import(job_id: int, *, session_factory=None) -> None:
-    """Background body of ``POST /books``: import the stored upload, then record the book."""
+    """Background body of ``POST /books``: import the stored upload, record the book, then
+    embed its chunks so the first question round does not have to."""
     execute(job_id, _book_import, session_factory=session_factory)
+    embed_after_import(job_id, session_factory=session_factory)
 
 
 def _book_import(session: Session, job: BackgroundJobRow, _progress: Progress) -> dict:

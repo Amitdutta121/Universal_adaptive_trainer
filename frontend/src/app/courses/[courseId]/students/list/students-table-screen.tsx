@@ -7,6 +7,7 @@
  */
 
 import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, QueryError, TableSkeleton } from "@/components/query-state";
@@ -23,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useApprovedCurriculum, useCurriculumVersions, useStudents } from "@/lib/api/queries";
+import { useCoursePath } from "@/lib/use-course";
 
 const PAGE_SIZE = 25;
 
@@ -134,6 +136,17 @@ export function StudentsTableScreen() {
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<SortKey | null>(null);
   const [order, setOrder] = useState<SortOrder>("asc");
+  const coursePath = useCoursePath();
+
+  // Roster opens with this learner searched and selected, under the same taxonomy.
+  function rosterHref(student: { id: number; email?: string | null; display_name: string }) {
+    const params = new URLSearchParams({
+      search: student.email || student.display_name,
+      student: String(student.id),
+      taxonomy: curriculumFilter,
+    });
+    return coursePath(`/students/roster?${params}`);
+  }
 
   // A new column starts ascending; clicking the sorted column flips it.
   function toggleSort(column: SortKey) {
@@ -352,6 +365,7 @@ export function StudentsTableScreen() {
                         <SortableHead label="Avg score" column="average" numeric {...sortProps} />
                         <SortableHead label="Last active" column="last_active" {...sortProps} />
                         <SortableHead label="Enrolled" column="enrolled" {...sortProps} />
+                        <TableHead className={`${HEAD_CLASS} text-right`}>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -379,6 +393,11 @@ export function StudentsTableScreen() {
                           </TableCell>
                           <TableCell className="py-3">
                             <DateCell value={student.created_at} />
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            <Button asChild variant="outline" size="sm">
+                              <Link href={rosterHref(student)}>Details</Link>
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}

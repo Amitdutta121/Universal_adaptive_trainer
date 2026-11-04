@@ -175,6 +175,11 @@ BODIES: dict[tuple[str, str], Any] = {
         "approved_styles": [],
         "cell_targets": [],
     },
+    ("POST", "/api/question-visibility"): {
+        "hidden": True,
+        "style_ids": ["py.trace"],
+        "subtopic_id": "{subtopic}",
+    },
     ("POST", "/api/custom-judges"): {"curriculum_version_id": "{version}", "rule_text": "Taken"},
     ("POST", "/api/training-sessions"): {"student_id": "{student}", "set_version_id": "{qset}"},
     ("POST", "/api/evaluation/batch-runs"): {"question_ids": ["{question}"]},
@@ -252,7 +257,8 @@ SHIPPED_LISTS = {
     ("GET", "/api/judges/scorecard"): {"judges"},  # one zeroed row per shipped judge
     ("GET", "/api/instructions"): {"instructions"},
     ("GET", "/api/styles"): {"styles"},
-    ("GET", "/api/tutorial-recipes"): {"recipes"},
+    # needs_video: the shipped clip recipe, which a course without a video cannot use.
+    ("GET", "/api/tutorial-recipes"): {"recipes", "needs_video"},
     # One zeroed row per shipped judge metric.
     ("GET", "/api/calibration/results"): {"metrics"},
     ("GET", "/api/calibration/quadrant"): {"metrics", "unattributable_metrics"},

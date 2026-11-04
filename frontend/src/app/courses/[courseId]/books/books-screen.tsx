@@ -36,6 +36,7 @@ import { CONTENT_TYPES, contentTypeOf } from "./book-display";
 import { BookDeleteDialog } from "./components/book-delete-dialog";
 import { BookEditDialog } from "./components/book-edit-dialog";
 import { BookImportDialog } from "./components/book-import-dialog";
+import { ContentDropZone } from "./components/content-drop-zone";
 import { BooksTable } from "./components/books-table";
 
 const TYPE_FILTERS = ["all", ...CONTENT_TYPES] as const;
@@ -76,6 +77,8 @@ export function BooksScreen() {
   const [editing, setEditing] = useState<BookSummary | null>(null);
   const [deleting, setDeleting] = useState<BookSummary | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  // Set when a dropped YouTube link needs its transcript pasted in the uploader.
+  const [transcriptLink, setTranscriptLink] = useState<string | undefined>();
 
   const books = useBooks();
 
@@ -98,7 +101,13 @@ export function BooksScreen() {
         title={section.label}
         summary={section.summary}
         actions={
-          <Button size="sm" onClick={() => setImportOpen(true)}>
+          <Button
+            size="sm"
+            onClick={() => {
+              setTranscriptLink(undefined);
+              setImportOpen(true);
+            }}
+          >
             <Upload />
             Upload content
           </Button>
@@ -163,7 +172,7 @@ export function BooksScreen() {
             total === 0 ? (
               <EmptyState
                 title="Nothing has been uploaded yet"
-                hint="Use Upload content to add a PDF, a Word or PowerPoint file, or a YouTube video."
+                hint="Drop a PDF, Word or PowerPoint file or a YouTube link here, or use Upload content."
               />
             ) : (
               <EmptyState
@@ -179,7 +188,20 @@ export function BooksScreen() {
         </CardContent>
       </Card>
 
-      <BookImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      <ContentDropZone
+        disabled={importOpen}
+        onNeedsTranscript={(url) => {
+          setTranscriptLink(url);
+          setImportOpen(true);
+        }}
+      />
+      {/* Keyed so a link handed over by a page drop starts a fresh uploader. */}
+      <BookImportDialog
+        key={transcriptLink ?? "uploader"}
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        initialLink={transcriptLink}
+      />
       {/* Keyed so the form remounts with the values of whichever row was chosen. */}
       <BookEditDialog
         key={`edit-${editing?.id ?? "none"}`}

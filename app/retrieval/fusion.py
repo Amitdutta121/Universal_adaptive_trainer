@@ -12,10 +12,14 @@ so fusion makes no model call.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Sequence
 
 #: Results each side contributes before fusion; LlamaIndex's default, and what was measured.
 FUSE_TOP_K = 10
+#: Two requests importing LlamaIndex at once (two tutorial examples right after a restart) can
+#: see a half-imported package and fail with ImportError; the first import is done under this.
+_IMPORT_LOCK = threading.Lock()
 
 
 def fused_ranking(query: str, dense: Sequence[tuple[str, str, float]], *, top_k: int) -> list[str]:
@@ -27,12 +31,13 @@ def fused_ranking(query: str, dense: Sequence[tuple[str, str, float]], *, top_k:
     if not dense:
         return []
     # Imported here: LlamaIndex costs about a second to import and only fusion needs it.
-    from llama_index.core.base.base_retriever import BaseRetriever
-    from llama_index.core.llms import MockLLM
-    from llama_index.core.retrievers import QueryFusionRetriever
-    from llama_index.core.retrievers.fusion_retriever import FUSION_MODES
-    from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
-    from llama_index.retrievers.bm25 import BM25Retriever
+    with _IMPORT_LOCK:
+        from llama_index.core.base.base_retriever import BaseRetriever
+        from llama_index.core.llms import MockLLM
+        from llama_index.core.retrievers import QueryFusionRetriever
+        from llama_index.core.retrievers.fusion_retriever import FUSION_MODES
+        from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
+        from llama_index.retrievers.bm25 import BM25Retriever
 
     nodes = [TextNode(id_=chunk_id, text=text) for chunk_id, text, _ in dense]
     side_k = min(max(FUSE_TOP_K, top_k), len(nodes))

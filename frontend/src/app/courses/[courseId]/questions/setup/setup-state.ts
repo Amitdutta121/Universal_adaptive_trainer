@@ -1,10 +1,19 @@
 /**
- * Pure logic behind the question-setup modal: which styles the professor approved for each
- * subtopic, which subtopics still have none, the target totals, and the save payload.
+ * Pure logic behind the question-setup modal (ADR-069): which styles each subtopic gets, which
+ * subtopics still have none, the target totals, and the save payload.
  *
- * A new setup starts with every suggested style approved; the professor deselects what they
- * don't want (a skip) and selects other library styles (an add). Counts are the suggester's and
- * are passed back unchanged.
+ * Three layers decide a subtopic's styles:
+ * 1. course: the styles the professor keeps on for the whole course;
+ * 2. fit: of those, the ones the subtopic starts with. A new setup starts from the AI's
+ *    suggestion; editing a saved setup starts from what it saved and asks the AI nothing;
+ * 3. subtopic overrides: optional local adds and removals.
+ * Course changes reach every subtopic; a subtopic edit stays local. Only styles of a type the
+ * course allows (`course.question_types`) count; a blocked type's styles stay in `courseOn`, so
+ * allowing the type again brings them back.
+ *
+ * Storage is unchanged: the save sends each subtopic's resolved set as `approved_styles`, and an
+ * existing setup is turned back into layers by `initialLayers`. Counts are passed back unchanged:
+ * the suggester's for a new setup, the saved ones when editing.
  */
 
 import { DIFFICULTIES, type Difficulty } from "@/components/question-setup/types";
@@ -13,6 +22,7 @@ import type {
   CurriculumVersionDetail,
   QuestionSetup,
   SaveSetupRequest,
+  Schemas,
   SetupSuggestion,
   SubtopicStyleSuggestion,
 } from "@/lib/api/types";
@@ -20,20 +30,46 @@ import type {
 /** Round 1's size, sent as `SaveSetupRequest.round_size` (the backend's default). */
 export const FIRST_ROUND_SIZE = 10;
 
-export type Verdict = "approved" | "skipped";
+/** The whole-course scope; any other scope is a subtopic id. */
+export const COURSE = "course";
+export type Scope = typeof COURSE | number;
 
-export interface SetupChoices {
-  /** Use / skip per suggested style, keyed by subtopic id then style id. */
-  verdicts: Readonly<Record<number, Readonly<Record<string, Verdict>>>>;
-  /** Styles the professor added from the library, per subtopic. Always approved. */
-  added: Readonly<Record<number, readonly string[]>>;
+/** What the layer logic needs of a library style. */
+export interface LayerStyle {
+  id: string;
+  question_type: string;
+}
+
+/** The library and the question types the course allows. */
+export interface SetupContext {
+  library: readonly LayerStyle[];
+  allowed: ReadonlySet<string>;
+}
+
+/** A subtopic's local edits on top of the course and the AI fit. */
+export interface Override {
+  added: readonly string[];
+  removed: readonly string[];
+}
+
+export interface SetupLayers {
+  /** Styles on for the whole course, including remembered styles of a blocked type. */
+  courseOn: ReadonlySet<string>;
+  overrides: Readonly<Record<number, Override>>;
+  /**
+   * Editing only: the styles the saved fits already account for. A course style turned on that
+   * is not in it (no subtopic had it) reaches every subtopic.
+   */
+  baseline?: ReadonlySet<string>;
 }
 
 export interface SetupSubtopic {
   id: number;
   name: string;
-  /** What the AI suggested for it; `null` when the suggestion left it out. */
+  /** What the AI suggested for it; `null` when the suggestion left it out or when editing. */
   suggestion: SubtopicStyleSuggestion | null;
+  /** Editing only: the styles the saved setup gave it, its fit instead of a suggestion. */
+  saved?: readonly string[];
 }
 
 export interface SetupTopic {
@@ -45,12 +81,21 @@ export interface SetupTopic {
 /** Subtopics the professor removed from the taxonomy are not set up. */
 const LIVE_STATUSES = new Set(["proposed", "accepted", "edited"]);
 
-/** The approved taxonomy's topics and subtopics, each with the AI's suggestion for it. */
+/**
+ * The approved taxonomy's topics and subtopics, each with the AI's suggestion for it (a new
+ * setup) or the styles `current` saved for it (editing, where there is no suggestion).
+ */
 export function setupTopics(
   curriculum: CurriculumVersionDetail,
-  suggestion: SetupSuggestion,
+  suggestion: SetupSuggestion | null,
+  current: QuestionSetup | null = null,
 ): SetupTopic[] {
-  const bySubtopic = new Map(suggestion.subtopics.map((entry) => [entry.subtopic_id, entry]));
+  const bySubtopic = new Map(
+    (suggestion?.subtopics ?? []).map((entry) => [entry.subtopic_id, entry]),
+  );
+  const saved = new Map(
+    (current?.approved_styles ?? []).map((entry) => [entry.subtopic_id, entry.style_ids]),
+  );
   return [...curriculum.topics]
     .filter((topic) => LIVE_STATUSES.has(topic.review_status))
     .sort((a, b) => a.position - b.position)
@@ -64,6 +109,7 @@ export function setupTopics(
           id: subtopic.id,
           name: subtopic.name,
           suggestion: bySubtopic.get(subtopic.id) ?? null,
+          ...(current ? { saved: saved.get(subtopic.id) ?? [] } : {}),
         })),
     }))
     .filter((topic) => topic.subtopics.length > 0);
@@ -90,128 +136,157 @@ export function withKnownStyles(
   return { topics: known, dropped };
 }
 
-/**
- * The starting choices. A new setup starts with every suggested style approved. Editing an
- * existing setup starts from what was approved last time: a previously approved style the AI
- * suggests again is approved, one it no longer suggests is kept as an added style, and a new
- * suggestion starts unselected.
- */
-export function initialChoices(
-  topics: readonly SetupTopic[],
-  current: QuestionSetup | null,
-): SetupChoices {
-  const verdicts: Record<number, Record<string, Verdict>> = {};
-  const added: Record<number, string[]> = {};
-  if (!current) return approveAllUndecided({ verdicts, added }, topics);
-  const previous = new Map(
-    current.approved_styles.map((entry) => [entry.subtopic_id, entry.style_ids]),
+/** Styles on for the whole course whose type the course allows, in library order. */
+export function liveCourseOn(layers: SetupLayers, context: SetupContext): Set<string> {
+  return new Set(
+    context.library
+      .filter((style) => layers.courseOn.has(style.id) && context.allowed.has(style.question_type))
+      .map((style) => style.id),
   );
-  for (const topic of topics) {
-    for (const subtopic of topic.subtopics) {
-      const styleIds = previous.get(subtopic.id) ?? [];
-      const suggested = new Set(subtopic.suggestion?.style_ids ?? []);
-      for (const styleId of styleIds) {
-        if (suggested.has(styleId)) {
-          verdicts[subtopic.id] = { ...verdicts[subtopic.id], [styleId]: "approved" };
-        } else {
-          added[subtopic.id] = [...(added[subtopic.id] ?? []), styleId];
-        }
-      }
-    }
-  }
-  return { verdicts, added };
-}
-
-export function decide(
-  choices: SetupChoices,
-  subtopicId: number,
-  styleId: string,
-  verdict: Verdict,
-): SetupChoices {
-  return {
-    ...choices,
-    verdicts: {
-      ...choices.verdicts,
-      [subtopicId]: { ...choices.verdicts[subtopicId], [styleId]: verdict },
-    },
-  };
-}
-
-export function addStyle(choices: SetupChoices, subtopicId: number, styleId: string): SetupChoices {
-  const current = choices.added[subtopicId] ?? [];
-  if (current.includes(styleId)) return choices;
-  return { ...choices, added: { ...choices.added, [subtopicId]: [...current, styleId] } };
-}
-
-export function removeStyle(
-  choices: SetupChoices,
-  subtopicId: number,
-  styleId: string,
-): SetupChoices {
-  const current = choices.added[subtopicId] ?? [];
-  return {
-    ...choices,
-    added: { ...choices.added, [subtopicId]: current.filter((id) => id !== styleId) },
-  };
 }
 
 /**
- * Select or deselect one library style for a subtopic: a suggested style flips between approved
- * and skipped, any other style is added or removed.
+ * A subtopic's fit that the course has on, then (editing) any course style no saved fit
+ * accounts for.
  */
-export function toggleStyle(
-  choices: SetupChoices,
+function baseStyleIds(
+  layers: SetupLayers,
+  live: ReadonlySet<string>,
   subtopic: SetupSubtopic,
-  styleId: string,
-): SetupChoices {
-  if (subtopic.suggestion?.style_ids.includes(styleId)) {
-    const approved = choices.verdicts[subtopic.id]?.[styleId] === "approved";
-    return decide(choices, subtopic.id, styleId, approved ? "skipped" : "approved");
-  }
-  return (choices.added[subtopic.id] ?? []).includes(styleId)
-    ? removeStyle(choices, subtopic.id, styleId)
-    : addStyle(choices, subtopic.id, styleId);
-}
-
-/** Approve every suggested style the professor has not decided yet; skips are kept. */
-export function approveAllUndecided(
-  choices: SetupChoices,
-  topics: readonly SetupTopic[],
-): SetupChoices {
-  const verdicts: Record<number, Record<string, Verdict>> = { ...choices.verdicts };
-  for (const topic of topics) {
-    for (const subtopic of topic.subtopics) {
-      for (const styleId of subtopic.suggestion?.style_ids ?? []) {
-        if (verdicts[subtopic.id]?.[styleId]) continue;
-        verdicts[subtopic.id] = { ...verdicts[subtopic.id], [styleId]: "approved" };
-      }
+): string[] {
+  const fit = subtopic.saved ?? subtopic.suggestion?.style_ids ?? [];
+  const result = fit.filter((id) => live.has(id));
+  if (layers.baseline) {
+    for (const id of live) {
+      if (!layers.baseline.has(id) && !result.includes(id)) result.push(id);
     }
   }
-  return { ...choices, verdicts };
+  return result;
 }
 
-/** The approved styles of one subtopic: used suggestions first, then added ones. */
-export function approvedStyleIds(choices: SetupChoices, subtopic: SetupSubtopic): string[] {
-  const used = (subtopic.suggestion?.style_ids ?? []).filter(
-    (styleId) => choices.verdicts[subtopic.id]?.[styleId] === "approved",
-  );
-  const added = (choices.added[subtopic.id] ?? []).filter((styleId) => !used.includes(styleId));
-  return [...used, ...added];
+/**
+ * The styles a subtopic gets: its fit within the course's styles, plus its local adds, minus
+ * its local removals. Fit styles first, then added ones.
+ */
+export function effectiveStyleIds(
+  layers: SetupLayers,
+  context: SetupContext,
+  subtopic: SetupSubtopic,
+): string[] {
+  const live = liveCourseOn(layers, context);
+  const override = layers.overrides[subtopic.id];
+  const removed = new Set(override?.removed ?? []);
+  const result = baseStyleIds(layers, live, subtopic);
+  for (const id of override?.added ?? []) {
+    if (live.has(id) && !result.includes(id)) result.push(id);
+  }
+  return result.filter((id) => !removed.has(id));
 }
 
-/** Subtopics with no approved style. Approve is blocked while any remain. */
+/** Styles on in a scope: the course's live set, or a subtopic's effective set. */
+export function styleIdsIn(
+  layers: SetupLayers,
+  context: SetupContext,
+  subtopic: SetupSubtopic | null,
+): Set<string> {
+  return subtopic
+    ? new Set(effectiveStyleIds(layers, context, subtopic))
+    : liveCourseOn(layers, context);
+}
+
+export function isCustom(layers: SetupLayers, subtopicId: number): boolean {
+  const override = layers.overrides[subtopicId];
+  return Boolean(override && (override.added.length > 0 || override.removed.length > 0));
+}
+
+/**
+ * The starting layers. A new setup has every library style of an allowed type on and no local
+ * edits. An existing setup is what it saved: the course has on every style any subtopic uses,
+ * each subtopic's saved styles are its fit (`setupTopics` with `current`), so nothing starts
+ * local, and `baseline` lets a course style no subtopic had reach them all.
+ */
+export function initialLayers(
+  context: SetupContext,
+  current: QuestionSetup | null,
+): SetupLayers {
+  if (!current) {
+    return {
+      courseOn: new Set(
+        context.library
+          .filter((style) => context.allowed.has(style.question_type))
+          .map((style) => style.id),
+      ),
+      overrides: {},
+    };
+  }
+  const courseOn = new Set(current.approved_styles.flatMap((entry) => entry.style_ids));
+  return { courseOn, overrides: {}, baseline: new Set(courseOn) };
+}
+
+/**
+ * Turn styles on or off in a scope. For the course this changes `courseOn` and so every
+ * subtopic. For a subtopic it records a local add or removal; a subtopic can only turn on a style
+ * the course has on.
+ */
+export function setStyles(
+  layers: SetupLayers,
+  context: SetupContext,
+  scope: SetupSubtopic | typeof COURSE,
+  styleIds: readonly string[],
+  on: boolean,
+): SetupLayers {
+  if (scope === COURSE) {
+    const courseOn = new Set(layers.courseOn);
+    for (const id of styleIds) {
+      if (on) courseOn.add(id);
+      else courseOn.delete(id);
+    }
+    return { ...layers, courseOn };
+  }
+  const live = liveCourseOn(layers, context);
+  const base = new Set(baseStyleIds(layers, live, scope));
+  const current = layers.overrides[scope.id];
+  const added = new Set(current?.added ?? []);
+  const removed = new Set(current?.removed ?? []);
+  for (const id of styleIds) {
+    if (on) {
+      if (!live.has(id)) continue;
+      removed.delete(id);
+      if (!base.has(id)) added.add(id);
+    } else {
+      added.delete(id);
+      if (base.has(id)) removed.add(id);
+    }
+  }
+  const { [scope.id]: _dropped, ...rest } = layers.overrides;
+  const overrides =
+    added.size > 0 || removed.size > 0
+      ? { ...rest, [scope.id]: { added: [...added], removed: [...removed] } }
+      : rest;
+  return { ...layers, overrides };
+}
+
+/** Drop a subtopic's local edits, so it follows the course again. */
+export function resetSubtopic(layers: SetupLayers, subtopicId: number): SetupLayers {
+  const { [subtopicId]: _dropped, ...rest } = layers.overrides;
+  return { ...layers, overrides: rest };
+}
+
+/** Subtopics with no style. Approve is blocked while any remain. */
 export function subtopicsWithoutStyle(
-  choices: SetupChoices,
+  layers: SetupLayers,
+  context: SetupContext,
   topics: readonly SetupTopic[],
 ): SetupSubtopic[] {
   return topics.flatMap((topic) =>
-    topic.subtopics.filter((subtopic) => approvedStyleIds(choices, subtopic).length === 0),
+    topic.subtopics.filter((subtopic) => effectiveStyleIds(layers, context, subtopic).length === 0),
   );
 }
 
 export function saveRequest(
   curriculumVersionId: number,
-  choices: SetupChoices,
+  layers: SetupLayers,
+  context: SetupContext,
   topics: readonly SetupTopic[],
   cellTargets: readonly CellTarget[],
 ): SaveSetupRequest {
@@ -220,7 +295,7 @@ export function saveRequest(
     approved_styles: topics.flatMap((topic) =>
       topic.subtopics.map((subtopic) => ({
         subtopic_id: subtopic.id,
-        style_ids: approvedStyleIds(choices, subtopic),
+        style_ids: effectiveStyleIds(layers, context, subtopic),
       })),
     ),
     cell_targets: [...cellTargets],
@@ -258,4 +333,56 @@ export function uncoveredDifficulties(
 export function rowTotal(row: Record<Difficulty, number | null> | undefined): number {
   if (!row) return 0;
   return DIFFICULTIES.reduce((sum, difficulty) => sum + (row[difficulty] ?? 0), 0);
+}
+
+// ------------------------------------------------ existing questions (ADR-070)
+
+export type QuestionVisibility = Schemas["QuestionVisibilityResponse"];
+
+/**
+ * Approved and hidden questions written in these styles, in a scope: the whole course, or the
+ * questions tagged with one subtopic.
+ */
+export function questionsIn(
+  visibility: QuestionVisibility,
+  scope: Scope,
+  styleIds: readonly string[],
+): { approved: number; hidden: number } {
+  const ids = new Set(styleIds);
+  const rows =
+    scope === COURSE
+      ? visibility.by_style.filter((row) => ids.has(row.style_id))
+      : visibility.by_cell.filter(
+          (row) => row.subtopic_id === scope && row.style_id !== null && ids.has(row.style_id),
+        );
+  return {
+    approved: rows.reduce((sum, row) => sum + row.approved, 0),
+    hidden: rows.reduce((sum, row) => sum + row.hidden, 0),
+  };
+}
+
+/**
+ * Subtopic x difficulty cells in the scope that meet their target now and would fall below it
+ * if the approved questions in these styles were hidden.
+ */
+export function slotsBelowTarget(
+  visibility: QuestionVisibility,
+  cellTargets: readonly CellTarget[],
+  scope: Scope,
+  styleIds: readonly string[],
+): number {
+  const ids = new Set(styleIds);
+  let slots = 0;
+  for (const cell of cellTargets) {
+    if (cell.target <= 0 || (scope !== COURSE && cell.subtopic_id !== scope)) continue;
+    const rows = visibility.by_cell.filter(
+      (row) => row.subtopic_id === cell.subtopic_id && row.difficulty === cell.difficulty,
+    );
+    const now = rows.reduce((sum, row) => sum + row.approved, 0);
+    const hiding = rows
+      .filter((row) => row.style_id !== null && ids.has(row.style_id))
+      .reduce((sum, row) => sum + row.approved, 0);
+    if (now >= cell.target && now - hiding < cell.target) slots++;
+  }
+  return slots;
 }

@@ -103,6 +103,18 @@ describe("student session screen", () => {
     expect(screen.queryByRole("region", { name: "Before you start" })).not.toBeInTheDocument();
   });
 
+  it("does not offer the answered question again while the next one loads", async () => {
+    render(<StudentSessionScreen trainingSessionId={5} />);
+    await userEvent.type(screen.getByRole("textbox"), "6");
+    await userEvent.click(screen.getByRole("button", { name: /Submit answer/ }));
+
+    // /next still holds attempt 11 until it returns.
+    await userEvent.click(await screen.findByRole("button", { name: /Next question/ }));
+
+    expect(screen.queryByText("Question 1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Submit answer/ })).not.toBeInTheDocument();
+  });
+
   it("drops the answered question while the next one is being written", () => {
     // A failed fetch keeps the last good `data`: the question just answered.
     next = {
@@ -116,6 +128,32 @@ describe("student session screen", () => {
     expect(screen.queryByText("Question 1")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Submit answer/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Pre-teaching text")).not.toBeInTheDocument();
+  });
+
+  it("keeps the result up with a progress bar while the next question is written", async () => {
+    const view = render(<StudentSessionScreen trainingSessionId={5} />);
+    await userEvent.type(screen.getByRole("textbox"), "6");
+    await userEvent.click(screen.getByRole("button", { name: /Submit answer/ }));
+
+    next = {
+      data: served,
+      error: new ApiError(409, "question_generating", "A new question is being written"),
+      isError: true,
+    };
+    await userEvent.click(await screen.findByRole("button", { name: /Next question/ }));
+    view.rerender(<StudentSessionScreen trainingSessionId={5} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("A new question is being written");
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.getByText("Worked tutorial text")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Preparing next question/ })).toBeDisabled();
+
+    next = { data: { ...served, attempt_id: 12, ordinal: 2 }, error: null, isError: false };
+    view.rerender(<StudentSessionScreen trainingSessionId={5} />);
+
+    expect(await screen.findByText("Question 2")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Worked tutorial text")).not.toBeInTheDocument();
   });
 
   it("offers neither question nor tutorial once the run has ended", () => {

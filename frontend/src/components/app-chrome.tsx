@@ -1,13 +1,11 @@
 "use client";
 
-import type { Route } from "next";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AgentPanel } from "@/components/agent/agent-panel";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
-import { LogoGlyph } from "@/components/brand-logo";
 import { CourseGate } from "@/components/course-gate";
+import { StudentBrand } from "@/components/student-brand";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
 import { courseIdFromPath } from "@/lib/course";
@@ -57,17 +55,8 @@ function StudentChrome({ children, wide }: { children: React.ReactNode; wide: bo
           wide ? "student-shell__frame student-shell__frame--wide" : "student-shell__frame"
         }
       >
-        <header className="student-shell__header">
-          <Link href={"/students/join" as Route} className="student-shell__brand">
-            <span className="student-shell__brand-mark">
-              <LogoGlyph className="size-5" />
-            </span>
-            <span>
-              <span className="student-shell__eyebrow">Adaptive Trainer</span>
-              <span className="student-shell__title">Student Classroom</span>
-            </span>
-          </Link>
-        </header>
+        {/* The session screen puts the brand beside its progress card itself. */}
+        {wide ? null : <StudentBrand />}
         <div className="student-shell__content">{children}</div>
       </div>
     </main>

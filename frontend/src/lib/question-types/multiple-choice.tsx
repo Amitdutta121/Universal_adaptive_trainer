@@ -161,8 +161,8 @@ function MultipleChoiceAuthoringReview({ detail }: AuthoringReviewProps) {
               <div className="pt-1 font-mono text-[var(--review-muted)] text-xs">
                 {String.fromCharCode(65 + index)}
               </div>
-              <div className="grow">
-                <CodeBlock>{option}</CodeBlock>
+              <div className="min-w-0 grow">
+                <CodeBlock className="whitespace-pre-wrap break-words">{option}</CodeBlock>
               </div>
               {index === correctIndex ? <ReviewChip tone="accent">correct</ReviewChip> : null}
             </div>

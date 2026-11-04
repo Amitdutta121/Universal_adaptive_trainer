@@ -109,11 +109,15 @@ class QuestionEmbeddingStore:
         self._session = session
         self._embedder = embedder
 
-    def embed_with(self, text: str, rows: Sequence[QuestionRow]) -> tuple[np.ndarray, np.ndarray]:
+    def embed_with(
+        self, text: str, rows: Sequence[QuestionRow], *, persist: bool = True
+    ) -> tuple[np.ndarray, np.ndarray]:
         """``text``'s vector and ``rows``' vectors, all L2-normalised, in one provider call.
 
         Rows whose cached vector is missing or stale (text or model changed) are embedded in
-        the same request as ``text`` and their cache rows written (flushed, not committed).
+        the same request as ``text``. With ``persist`` their cache rows are written (flushed,
+        not committed); without it the session is left untouched, so a caller between model
+        calls does not take the database write lock (TASK-140).
         """
         texts = {row.id: embed_text(row.prompt, row.content) for row in rows}
         cached = {
@@ -132,23 +136,29 @@ class QuestionEmbeddingStore:
             or item.text_hash != text_hash(texts[row.id])
         ]
         fresh = self._embedder.embed([text] + [texts[row.id] for row in stale])
+        vectors = {
+            row.id: np.frombuffer(item.vector, dtype=np.float32)
+            for row in rows
+            if (item := cached.get(row.id)) is not None
+        }
         for row, vector in zip(stale, fresh[1:], strict=True):
             arr = np.asarray(vector, dtype=np.float32)
+            vectors[row.id] = arr
+            if not persist:
+                continue
             item = cached.get(row.id)
             if item is None:
                 item = QuestionEmbeddingRow(question_id=row.id)
                 self._session.add(item)
-                cached[row.id] = item
             item.model = self._embedder.model
             item.dim = int(arr.shape[0])
             item.vector = arr.tobytes()
             item.text_hash = text_hash(texts[row.id])
-        self._session.flush()
+        if persist and stale:
+            self._session.flush()
 
         query = _normalised(np.asarray([fresh[0]], dtype=np.float32))[0]
-        matrix = _normalised(
-            np.vstack([np.frombuffer(cached[row.id].vector, dtype=np.float32) for row in rows])
-        )
+        matrix = _normalised(np.vstack([vectors[row.id] for row in rows]))
         return query, matrix
 
 
@@ -160,9 +170,13 @@ class DuplicateChecker:
     missed flag must not cost the round a question.
     """
 
-    def __init__(self, session: Session, embedder: Embedder | None) -> None:
+    def __init__(
+        self, session: Session, embedder: Embedder | None, *, persist_cache: bool = True
+    ) -> None:
         self._session = session
         self._embedder = embedder
+        # A round checks drafts between model calls, where it must not write (TASK-140).
+        self._persist_cache = persist_cache
 
     def similar(
         self,
@@ -192,7 +206,7 @@ class DuplicateChecker:
         scores: dict[int, float] = {}
         if self._embedder is not None and not exact_only:
             query, matrix = QuestionEmbeddingStore(self._session, self._embedder).embed_with(
-                text, candidates
+                text, candidates, persist=self._persist_cache
             )
             scores = {row.id: float(s) for row, s in zip(candidates, matrix @ query, strict=True)}
 

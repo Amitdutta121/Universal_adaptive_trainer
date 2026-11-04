@@ -162,6 +162,17 @@ def test_an_invalid_payload_gets_one_repair_retry(session: Session, setting: Any
     assert "A --> B" in retry["history"][1][1]
 
 
+def test_escaped_quotes_in_a_diagram_label_are_repaired(session: Session, setting: Any) -> None:
+    # Seen live: the model wrote A["\"Literal constants\""], which Mermaid cannot draw.
+    client = QueuedClient(
+        {"mermaid": 'flowchart TD\n  A["\\"for\\""] --> B["body"]', "caption": "c"},
+        {"mermaid": 'flowchart TD\n  A["for"] --> B["body"]', "caption": "c"},
+    )
+    block = _generate(session, setting, client, recipe_id="py.topic_flow")
+    assert block.status is TutorialBlockStatus.DRAFT
+    assert 'labels may not contain \\"' in client.calls[1]["prompt"]
+
+
 def test_a_second_invalid_payload_marks_the_block_failed(session: Session, setting: Any) -> None:
     broken = {"title": "T", "code": "print(1 / 0)\n", "notes": []}
     client = QueuedClient(broken, broken)

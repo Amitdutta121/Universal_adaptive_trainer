@@ -303,10 +303,7 @@ describe("ReviewScreen verdict", () => {
     };
     const user = userEvent.setup();
     render(<ReviewScreen />);
-    expect(screen.getByTestId("audit-banner")).toHaveTextContent(
-      "A judge rejected this — do you agree?",
-    );
-    expect(screen.getByTestId("audit-banner")).toHaveTextContent("this is hard, not easy");
+    expect(screen.queryByTestId("audit-banner")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Skip/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Edit question/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Confirm difficulty" }));
@@ -580,8 +577,10 @@ describe("ReviewScreen judge trust strip", () => {
     render(<ReviewScreen />);
 
     const strip = screen.getByTestId("judge-trust-strip");
-    expect(within(strip).getByText("Building trust: 4 of 10 reviews")).toBeInTheDocument();
-    expect(within(strip).getByText("Topic check: 1 of 3 in this taxonomy")).toBeInTheDocument();
+    expect(within(strip).getByTitle("Building trust: 4 of 10 reviews")).toHaveTextContent("4/10");
+    expect(within(strip).getByTitle("Topic check: 1 of 3 in this taxonomy")).toHaveTextContent(
+      "topic 1/3",
+    );
     expect(within(strip).queryByText("Other taxonomy")).not.toBeInTheDocument();
   });
 });

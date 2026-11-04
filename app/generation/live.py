@@ -364,19 +364,23 @@ def _generate(
         target_subtopic_id=job.subtopic_id,
         style_id=style.id,
     )
+    examples = accepted_examples(
+        session,
+        version.id,
+        (job.subtopic_id, difficulty),
+        style.question_type,
+        chunk_id=chunk_id,
+        embedder=embedder,
+    )
+    # End the read phase (cached vectors, a lowered difficulty) before the model calls:
+    # an open write would hold SQLite's lock through them (TASK-140).
+    session.commit()
     question = GenerationService(session, client=client).generate_round_question(
         spec,
         version=version,
         round_id=None,
         rules=rules,
-        examples=accepted_examples(
-            session,
-            version.id,
-            (job.subtopic_id, difficulty),
-            style.question_type,
-            chunk_id=chunk_id,
-            embedder=embedder,
-        ),
+        examples=examples,
         run_id=new_run_id(),
     )
     if question is None:

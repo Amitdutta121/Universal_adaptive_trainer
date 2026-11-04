@@ -2765,6 +2765,7 @@ class JobOut(BaseModel):
         "coverage_fill",
         "book_import",
         "embedding_switch",
+        "source_embedding",
         "regeneration",
         "tutorial_pregeneration",
         "question_round",
@@ -3063,6 +3064,8 @@ class TutorialRecipeListResponse(BaseModel):
     #: Live tutorials (``app/tutorials/live.py``): students get bank blocks as soon as they
     #: pass their checks, with no approval step, and missing ones are written on demand.
     live: bool = False
+    #: Video-clip recipes the course cannot use yet: it has no playable video.
+    needs_video: list[str] = Field(default_factory=list)
 
 
 class TutorialRecipeStatsOut(BaseModel):
@@ -3142,12 +3145,30 @@ class ExperimentalRecipeOut(BaseModel):
     updated_at: datetime
     #: The parsed recipe, so the page can show it without reading YAML.
     recipe: TutorialRecipe
+    #: On a save: bank blocks hidden because the edit changed how the recipe writes them.
+    blocks_retired: int = 0
+    #: On a save: examples kept as the recipe's first blocks.
+    examples_kept: int = 0
+
+
+class ExperimentalRecipeExample(BaseModel):
+    """A block shown while making the recipe (``POST /try``), sent back to keep on save."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subtopic_id: int
+    guidance_level: GuidanceLevel
+    payload: dict[str, Any]
+    chunk_ids: list[str] = Field(min_length=1, max_length=50)
+    model: str = Field(default="", max_length=200)
 
 
 class ExperimentalRecipeYaml(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     yaml: str = Field(min_length=1, max_length=20_000)
+    #: Examples written from this exact YAML, kept as its first blocks; each is checked again.
+    examples: list[ExperimentalRecipeExample] = Field(default_factory=list, max_length=10)
 
 
 class ExperimentalRecipeDraftRequest(BaseModel):
@@ -3204,3 +3225,54 @@ class TutorialBlockOut(BaseModel):
     error: str | None
     model: str
     created_at: datetime
+
+
+class StyleVisibilityCount(BaseModel):
+    style_id: str
+    approved: int
+    hidden: int
+
+
+class TypeVisibilityCount(BaseModel):
+    question_type: QuestionType
+    approved: int
+    hidden: int
+
+
+class CellVisibilityCount(BaseModel):
+    """Questions tagged with one subtopic, at one difficulty, in one style (``None``: no style)."""
+
+    subtopic_id: int
+    style_id: str | None
+    difficulty: Difficulty
+    approved: int
+    hidden: int
+
+
+class QuestionVisibilityResponse(BaseModel):
+    """``GET /api/question-visibility``: approved and hidden questions (ADR-070).
+
+    ``by_style`` and ``by_type`` cover the whole course; ``by_cell`` only the taxonomy named
+    by ``curriculum_version_id`` (empty when none is named).
+    """
+
+    by_style: list[StyleVisibilityCount]
+    by_type: list[TypeVisibilityCount]
+    by_cell: list[CellVisibilityCount]
+
+
+class SetQuestionVisibilityRequest(BaseModel):
+    """Hide approved questions from students, or show hidden ones again (ADR-070).
+
+    Name ``style_ids`` or ``question_types``, not both. ``subtopic_id`` narrows to questions
+    tagged with that subtopic; without it the whole course.
+    """
+
+    hidden: bool
+    style_ids: list[str] = Field(default_factory=list)
+    question_types: list[QuestionType] = Field(default_factory=list)
+    subtopic_id: int | None = None
+
+
+class SetQuestionVisibilityResponse(BaseModel):
+    changed: int

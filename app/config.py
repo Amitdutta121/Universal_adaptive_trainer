@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # -- Persistence --------------------------------------------------------
     database_url: str = "sqlite:///./data/adaptive_trainer.db"
     database_echo: bool = False
+    # SQLite only: how long a write waits for another writer before "database is locked".
+    database_busy_timeout_seconds: float = Field(default=15.0, gt=0)
 
     # -- LLM provider -------------------------------------------------------
     llm_provider: LLMProvider = LLMProvider.OPENROUTER
