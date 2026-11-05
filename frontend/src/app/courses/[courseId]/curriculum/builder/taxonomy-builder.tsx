@@ -536,7 +536,7 @@ export function TaxonomyBuilder({
         description:
           `${pluralise(detail.topic_count, "topic")} and ` +
           `${pluralise(detail.subtopic_count, "subtopic")}. ` +
-          "It is now the selected taxonomy.",
+          "It is now the selected curriculum.",
       });
       setConfirmOpen(false);
       onSaved?.(detail);
@@ -627,18 +627,18 @@ export function TaxonomyBuilder({
               changes updates it; Save as new version leaves it as it is.
             </>
           ) : (
-            "New taxonomy"
+            "New curriculum"
           )}
         </p>
         <div className="mt-1 flex items-center gap-3">
           <Label htmlFor="version-label" className="sr-only">
-            Taxonomy name
+            Curriculum name
           </Label>
           <Input
             id="version-label"
             value={draft.label}
             maxLength={limits.label}
-            placeholder="Taxonomy name, e.g. Unit outline, Fall 2026"
+            placeholder="Curriculum name, e.g. Unit outline, Fall 2026"
             className="h-auto max-w-xl border-transparent bg-transparent px-1.5 py-0.5 font-heading font-semibold text-xl shadow-none hover:border-input focus-visible:bg-background md:text-xl"
             onChange={(event) => update((d) => ({ ...d, label: event.target.value }))}
           />
@@ -672,7 +672,7 @@ export function TaxonomyBuilder({
             <History />
             <AlertTitle>Unsaved draft restored</AlertTitle>
             <AlertDescription>
-              This is the taxonomy you were building in this browser, last edited{" "}
+              This is the curriculum you were building in this browser, last edited{" "}
               {formatTimestamp(restored.savedAt)}.
             </AlertDescription>
             <AlertAction className="flex gap-1">
@@ -696,7 +696,7 @@ export function TaxonomyBuilder({
           <TaxonomyRefusalAlert
             error={saveError}
             doc={sentDocument}
-            heading="This taxonomy was not saved. Please fix the following:"
+            heading="This curriculum was not saved. Please fix the following:"
           />
         ) : null}
         {guide.error ? <QueryError error={guide.error} /> : null}
@@ -783,7 +783,7 @@ export function TaxonomyBuilder({
               <div
                 ref={treeRef}
                 role="tree"
-                aria-label="Taxonomy outline"
+                aria-label="Curriculum outline"
                 tabIndex={-1}
                 onKeyDown={onTreeKeyDown}
                 className="-mx-1 @2xl:max-h-none max-h-[24rem] min-h-0 flex-1 overflow-y-auto px-1"
@@ -1195,7 +1195,7 @@ export function TaxonomyBuilder({
               <CardContent className="space-y-3 py-10 text-center text-muted-foreground text-sm">
                 {draft.topics.length === 0 ? (
                   <>
-                    <p>This taxonomy is empty. Add a topic to begin.</p>
+                    <p>This curriculum is empty. Add a topic to begin.</p>
                     <Button variant="outline" size="sm" onClick={addTopic}>
                       <Plus />
                       Add topic
@@ -1227,7 +1227,7 @@ export function TaxonomyBuilder({
           </>
         ) : (
           <Button onClick={() => requestSave("create")} disabled={!taxonomyDocument || saving}>
-            {importTaxonomy.isPending ? "Saving…" : "Save taxonomy"}
+            {importTaxonomy.isPending ? "Saving…" : "Save curriculum"}
           </Button>
         )}
         <Button variant="ghost" disabled={!taxonomyDocument} onClick={() => setPreviewOpen(true)}>
@@ -1248,7 +1248,7 @@ export function TaxonomyBuilder({
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Save this taxonomy?</DialogTitle>
+            <DialogTitle>Save this curriculum?</DialogTitle>
             <DialogDescription>
               Saving creates a new version and selects it, the one that question generation and
               coverage use.
@@ -1282,7 +1282,7 @@ export function TaxonomyBuilder({
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Taxonomy document (JSON)</DialogTitle>
+            <DialogTitle>Curriculum document (JSON)</DialogTitle>
             <DialogDescription>
               This is exactly what will be saved. It is checked again when you save.
             </DialogDescription>

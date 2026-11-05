@@ -72,7 +72,7 @@ function setup(openingId: number | null = null) {
 const bodyRows = () => screen.getAllByRole("row").slice(1);
 
 describe("CurriculumVersionsTable", () => {
-  it("shows every column of a taxonomy's record, with its standing", () => {
+  it("shows every column of a curriculum's record, with its standing", () => {
     setup();
 
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
@@ -122,7 +122,7 @@ describe("CurriculumVersionsTable", () => {
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
   });
 
-  it("dims the row whose taxonomy is still being fetched", () => {
+  it("dims the row whose curriculum is still being fetched", () => {
     setup(1);
 
     const [newer, older] = bodyRows();

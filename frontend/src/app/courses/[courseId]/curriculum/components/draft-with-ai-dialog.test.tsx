@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DraftWithAiDialog } from "./draft-with-ai-dialog";
+import { DraftWithAiDialog, DraftWithAiForm } from "./draft-with-ai-dialog";
 
 const draft = vi.fn();
 
@@ -28,7 +28,7 @@ describe("DraftWithAiDialog counts", () => {
     await user.clear(subtopics);
     await user.type(subtopics, "12");
     await user.type(screen.getByLabelText(/Topics/), "4");
-    await user.click(screen.getByRole("button", { name: /Draft taxonomy/ }));
+    await user.click(screen.getByRole("button", { name: /Draft curriculum/ }));
     expect(draft).toHaveBeenCalledWith(
       expect.objectContaining({ subtopic_count: 12, topic_count: 4 }),
     );
@@ -47,7 +47,7 @@ describe("DraftWithAiDialog counts", () => {
     const user = userEvent.setup();
     open();
     const subtopics = screen.getByLabelText("Subtopics in total");
-    const submit = screen.getByRole("button", { name: /Draft taxonomy/ });
+    const submit = screen.getByRole("button", { name: /Draft curriculum/ });
 
     await user.clear(subtopics);
     await user.type(screen.getByLabelText(/Topics/), "5");
@@ -60,6 +60,45 @@ describe("DraftWithAiDialog counts", () => {
     await user.click(submit);
     expect(draft).toHaveBeenCalledWith(
       expect.objectContaining({ subtopic_count: null, topic_count: null, size: "standard" }),
+    );
+  });
+});
+
+describe("DraftWithAiForm beside the builder", () => {
+  beforeEach(() => {
+    draft.mockReset();
+    draft.mockResolvedValue({ drafted_by: "x", analysis: "", document: { label: "", topics: [] } });
+  });
+
+  it("starts from the previous request and drafts again with the edits", async () => {
+    const user = userEvent.setup();
+    const onDrafted = vi.fn();
+    render(
+      <DraftWithAiForm
+        variant="panel"
+        initial={{
+          title: "Earlier title",
+          description: "Earlier description",
+          audience: "",
+          mustCover: "Loops",
+          leaveOut: "",
+          subtopics: "15",
+          topics: "",
+        }}
+        onDrafted={onDrafted}
+      />,
+    );
+    expect(screen.getByLabelText("Title")).toHaveValue("Earlier title");
+    const subtopics = screen.getByLabelText("Subtopics in total");
+    await user.clear(subtopics);
+    await user.type(subtopics, "20");
+    await user.click(screen.getByRole("button", { name: /Draft again/ }));
+    expect(draft).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Earlier title", must_cover: "Loops", subtopic_count: 20 }),
+    );
+    expect(onDrafted).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: "Earlier title", subtopics: "20" }),
     );
   });
 });

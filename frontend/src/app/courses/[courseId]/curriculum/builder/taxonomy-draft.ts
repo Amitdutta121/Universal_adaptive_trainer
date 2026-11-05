@@ -337,7 +337,7 @@ export interface DraftProblem {
  */
 export function findProblem(draft: Draft): DraftProblem | null {
   if (draft.label.trim() === "") {
-    return { message: "Give this taxonomy a name.", at: "label" };
+    return { message: "Give this curriculum a name.", at: "label" };
   }
   if (draft.topics.length === 0) {
     return { message: "Add at least one topic.", at: "label" };

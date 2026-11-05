@@ -72,8 +72,8 @@ export const CURRICULUM_STATUS_VARIANT: Record<CurriculumStatus, "secondary" | "
 };
 
 export const CURRICULUM_STATUS_MEANING: Record<CurriculumStatus, string> = {
-  approved: "Question generation uses this taxonomy.",
-  superseded: "A newer taxonomy replaced it. Questions generated from it keep their taxonomy.",
+  approved: "Question generation uses this curriculum.",
+  superseded: "A newer curriculum replaced it. Questions generated from it keep their curriculum.",
   proposed: "A legacy proposal that was never approved. Nothing generates from it.",
   under_review: "A legacy proposal part-way through review. Nothing generates from it.",
 };
@@ -142,9 +142,9 @@ export const STANDING_VARIANT: Record<VersionStanding, "secondary" | "outline"> 
 
 export const STANDING_MEANING: Record<VersionStanding, string> = {
   ...CURRICULUM_STATUS_MEANING,
-  live: "Chosen in the taxonomy selector at the top right; every page is showing this one.",
+  live: "Chosen in the curriculum selector at the top right; every page is showing this one.",
   replaced:
-    "Saved and usable. Choose it in the taxonomy selector at the top right to work on it; its classroom link works either way.",
+    "Saved and usable. Choose it in the curriculum selector at the top right to work on it; its classroom link works either way.",
 };
 
 /**

@@ -121,6 +121,11 @@ class Settings(BaseSettings):
     # every run to the Piston sandbox at ``piston_url`` (see docker/piston/README.md).
     executor: Literal["local", "piston"] = "local"
     piston_url: str = "http://127.0.0.1:2000"
+    #: Third-party import names the code runner has beyond the standard library. The
+    #: generator is told it may import exactly these, so add one here only after installing
+    #: it where code runs (pyproject ``dependencies`` for local, the Piston image for piston).
+    #: ``EXECUTOR_PACKAGES=numpy,pandas,matplotlib`` in a ``.env`` file; empty means stdlib only.
+    executor_packages: Annotated[list[str], NoDecode] = ["numpy", "pandas", "matplotlib"]
 
     # -- Bulk judge re-run (ADR-030) ----------------------------------------
     # OpenRouter's batch jobs are asynchronous and live under /api/beta, not
@@ -318,6 +323,14 @@ class Settings(BaseSettings):
         """Accept ``BLIND_SOLVE_MODELS=a/b,c/d``; an empty value turns blind solve off."""
         if isinstance(value, str):
             return [model.strip() for model in value.split(",") if model.strip()]
+        return value
+
+    @field_validator("executor_packages", mode="before")
+    @classmethod
+    def _split_packages(cls, value: object) -> object:
+        """Accept ``EXECUTOR_PACKAGES=numpy,pandas``; an empty value means stdlib only."""
+        if isinstance(value, str):
+            return [name.strip() for name in value.split(",") if name.strip()]
         return value
 
     @field_validator("cors_allow_origins", mode="before")

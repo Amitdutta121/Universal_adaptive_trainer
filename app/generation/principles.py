@@ -25,6 +25,7 @@ must behave exactly as the question and its answer claim: code meant to run must
 run, and code meant to fail must fail in the way the answer says. If code reads
 input, state the exact text the user types; do not replace the input call with a
 fixed value.
+{runtime_libraries()}
 Return only the requested structured fields; ensure the reference answer,
 explanation, and any tests agree with the question."""
     else:
@@ -36,6 +37,29 @@ taught skill. The question must contain everything a student needs to answer it.
 Return only the requested structured fields; ensure the reference answer and
 explanation agree with the question."""
     return f"{grounding}\n\n{prompt_style(profile)}"
+
+
+def runtime_libraries() -> str:
+    """What code may import: the runner's packages come from ``EXECUTOR_PACKAGES``.
+
+    Code that imports anything else fails validation, so the generator is told up front.
+    """
+    from app.config import get_settings
+
+    packages = get_settings().executor_packages
+    if not packages:
+        return "Code may import only the Python standard library."
+    text = (
+        f"Code may import only the Python standard library and {', '.join(packages)}. "
+        "It runs in an empty folder with no files and no network, so build any data "
+        "inline (for example a literal list, dict or io.StringIO) rather than reading a file."
+    )
+    if "matplotlib" in packages:
+        text += (
+            " Plots cannot be seen or graded: when code plots, the answer must rest on "
+            "printed values, not on the figure."
+        )
+    return text
 
 
 def prompt_style(profile: SubjectProfile) -> str:

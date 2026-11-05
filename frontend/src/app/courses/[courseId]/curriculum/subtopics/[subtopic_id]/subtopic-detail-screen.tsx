@@ -148,7 +148,7 @@ export function SubtopicDetailScreen({ subtopicId }: { subtopicId: number }) {
           <p className="text-muted-foreground text-sm">{stableIdMeaning(fromUpload)}</p>
           {fromUpload ? (
             <p className="text-muted-foreground text-sm">
-              This subtopic comes from an uploaded taxonomy. It carries no textbook evidence,
+              This subtopic comes from an uploaded curriculum. It carries no textbook evidence,
               grouping rationale or model metadata, by design.
             </p>
           ) : null}

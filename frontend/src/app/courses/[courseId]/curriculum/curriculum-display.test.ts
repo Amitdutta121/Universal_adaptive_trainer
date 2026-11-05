@@ -71,7 +71,7 @@ describe("status maps", () => {
 });
 
 describe("isTaxonomyUpload", () => {
-  it("recognises an uploaded taxonomy", () => {
+  it("recognises an uploaded curriculum", () => {
     expect(isTaxonomyUpload({ generated_by: TAXONOMY_UPLOAD_GENERATOR })).toBe(true);
   });
 
@@ -103,7 +103,7 @@ describe("generatedByLabel", () => {
 });
 
 describe("stableIdMeaning", () => {
-  it("does not mention evidence for an uploaded taxonomy", () => {
+  it("does not mention evidence for an uploaded curriculum", () => {
     // ADR-021: a taxonomy page must not imply an upload carries evidence.
     const meaning = stableIdMeaning(true);
     expect(meaning).not.toMatch(/evidence|source material/);
@@ -144,7 +144,7 @@ describe("versionStanding", () => {
     }
   });
 
-  it("ties standing to the header selector, not to an 'active' taxonomy", () => {
+  it("ties standing to the header selector, not to an 'active' curriculum", () => {
     expect(STANDING_MEANING.live).toMatch(/selector/);
     // A taxonomy that is not selected is still usable: its classroom link works either way.
     expect(STANDING_MEANING.replaced).toMatch(/classroom link works/);
@@ -177,7 +177,7 @@ const style = (
   }) as StyleTrust;
 
 describe("alignmentsForVersion", () => {
-  it("pools a taxonomy's styles the way the Judges page pools the course", () => {
+  it("pools a curriculum's styles the way the Judges page pools the course", () => {
     const styles = [
       style(2, [10, 9], [10, 10]),
       style(2, [10, 7], [6, 3]),
@@ -190,7 +190,7 @@ describe("alignmentsForVersion", () => {
     });
   });
 
-  it("leaves a taxonomy with no reviews blank", () => {
+  it("leaves a curriculum with no reviews blank", () => {
     expect(alignmentsForVersion([style(1, [8, 8], [8, 8])], 2)).toEqual({
       difficulty: "–",
       subtopic: "–",

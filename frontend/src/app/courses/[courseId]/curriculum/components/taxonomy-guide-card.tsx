@@ -99,7 +99,7 @@ export function TaxonomyGuideCard({
 
       <CollapsiblePanel
         title="Example document"
-        summary={`A complete taxonomy this application accepts — schema version ${guide.schema_version}.`}
+        summary={`A complete curriculum this application accepts — schema version ${guide.schema_version}.`}
         openLabel="Show example"
         actions={<CopyButton text={guide.example_json} label="Copy example" copiedLabel="Copied" />}
       >

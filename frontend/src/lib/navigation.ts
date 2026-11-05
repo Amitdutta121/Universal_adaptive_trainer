@@ -65,7 +65,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Curriculum",
     path: "/curriculum",
     summary:
-      "Build a Topic → Subtopic taxonomy, or import one you already have. Every page follows the taxonomy chosen at the top right.",
+      "Build a Topic → Subtopic curriculum, or import one you already have. Every page follows the curriculum chosen at the top right.",
     icon: Network,
   },
   {

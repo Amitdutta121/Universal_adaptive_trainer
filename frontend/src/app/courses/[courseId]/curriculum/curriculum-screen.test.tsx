@@ -39,6 +39,44 @@ vi.mock("@/components/page-header", () => ({ PageHeader: () => <h1>Curriculum</h
 vi.mock("./components/taxonomy-import-dialog", () => ({ TaxonomyImportDialog: () => null }));
 vi.mock("./components/version-edit-dialog", () => ({ VersionEditDialog: () => null }));
 vi.mock("./components/version-delete-dialog", () => ({ VersionDeleteDialog: () => null }));
+// The AI form has its own tests; here it only needs to hand the screen a draft.
+vi.mock("./components/draft-with-ai-dialog", () => ({
+  DraftWithAiDialog: () => null,
+  DraftWithAiForm: ({ onDrafted }: { onDrafted: (draft: unknown, request: unknown) => void }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onDrafted(
+          {
+            draftedBy: "test-model",
+            analysis: "",
+            document: {
+              label: "AI label",
+              topics: [
+                {
+                  name: "Recursion",
+                  description: null,
+                  subtopics: [{ name: "Base cases", description: null }],
+                },
+              ],
+            },
+          },
+          {
+            title: "t",
+            description: "d",
+            audience: "",
+            mustCover: "",
+            leaveOut: "",
+            subtopics: "30",
+            topics: "",
+          },
+        )
+      }
+    >
+      Draft again
+    </button>
+  ),
+}));
 vi.mock("@/lib/api/queries", () => ({
   curriculumVersionQuery: (id: number) => ({ queryKey: ["version", id] }),
   // The builder modal still reads it.
@@ -123,7 +161,7 @@ function renderScreen() {
   );
 }
 
-const modal = () => screen.findByRole("dialog", { name: "Taxonomy builder" });
+const modal = () => screen.findByRole("dialog", { name: "Curriculum builder" });
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -132,12 +170,12 @@ beforeEach(() => {
 });
 
 describe("CurriculumScreen", () => {
-  it("shows the taxonomies as a table and nothing else editable on the page", () => {
+  it("shows the curricula as a table and nothing else editable on the page", () => {
     renderScreen();
 
-    expect(screen.getByRole("table", { name: "Saved taxonomies" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Saved curricula" })).toBeInTheDocument();
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Taxonomy name")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Curriculum name")).not.toBeInTheDocument();
   });
 
   it("opens a row in the builder modal, to edit in place or save as a new version", async () => {
@@ -148,7 +186,7 @@ describe("CurriculumScreen", () => {
 
     const dialog = await modal();
     expect(fetchQuery).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["version", 1] }));
-    expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Older");
+    expect(within(dialog).getByLabelText("Curriculum name")).toHaveValue("Older");
     expect(within(dialog).getByText(/^Editing/)).toHaveTextContent("Older");
     const tree = within(dialog).getByRole("tree");
     expect(within(tree).getByText("Loops")).toBeInTheDocument();
@@ -165,15 +203,42 @@ describe("CurriculumScreen", () => {
     expect(fetchQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("opens a blank builder from New taxonomy", async () => {
+  it("puts the AI request beside a previewed curriculum, and a redraft still updates that one", async () => {
     const user = userEvent.setup();
     renderScreen();
 
-    await user.click(screen.getByRole("button", { name: "New taxonomy" }));
+    await user.click(screen.getByRole("button", { name: "Preview Older" }));
+    const dialog = await modal();
+    const panel = within(dialog).getByRole("complementary", { name: "AI request" });
+
+    await user.click(within(panel).getByRole("button", { name: "Draft again" }));
+
+    expect(within(within(dialog).getByRole("tree")).getByText("Recursion")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Curriculum name")).toHaveValue("Older");
+    expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
+  it("has no AI request beside a blank builder", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    await user.click(screen.getByRole("button", { name: "New curriculum" }));
 
     const dialog = await modal();
-    expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("");
-    expect(within(dialog).getByText("New taxonomy")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("complementary", { name: "AI request" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens a blank builder from New curriculum", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    await user.click(screen.getByRole("button", { name: "New curriculum" }));
+
+    const dialog = await modal();
+    expect(within(dialog).getByLabelText("Curriculum name")).toHaveValue("");
+    expect(within(dialog).getByText("New curriculum")).toBeInTheDocument();
     expect(fetchQuery).not.toHaveBeenCalled();
   });
 
@@ -193,13 +258,13 @@ describe("CurriculumScreen", () => {
     renderScreen();
     await user.click(screen.getByText("Older"));
     const dialog = await modal();
-    await user.type(within(dialog).getByLabelText("Taxonomy name"), " v2");
+    await user.type(within(dialog).getByLabelText("Curriculum name"), " v2");
 
     await user.keyboard("{Escape}");
 
     expect(await screen.findByText("Discard your changes?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(within(await modal()).getByLabelText("Taxonomy name")).toHaveValue("Older v2");
+    expect(within(await modal()).getByLabelText("Curriculum name")).toHaveValue("Older v2");
   });
 
   it("drops the changes, and the kept draft, when told to discard", async () => {
@@ -207,7 +272,7 @@ describe("CurriculumScreen", () => {
     renderScreen();
     await user.click(screen.getByText("Older"));
     const dialog = await modal();
-    await user.type(within(dialog).getByLabelText("Taxonomy name"), " v2");
+    await user.type(within(dialog).getByLabelText("Curriculum name"), " v2");
     await waitFor(() => expect(loadDrafts()).toHaveLength(1));
 
     await user.keyboard("{Escape}");
@@ -215,7 +280,7 @@ describe("CurriculumScreen", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(loadDrafts()).toEqual([]);
-    expect(screen.queryByText(/Unsaved taxonomy/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unsaved curriculum/)).not.toBeInTheDocument();
   });
 
   it("says a load failed and opens nothing", async () => {
@@ -230,14 +295,14 @@ describe("CurriculumScreen", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  describe("with a taxonomy left unsaved in this browser", () => {
+  describe("with a curriculum left unsaved in this browser", () => {
     beforeEach(() => saveDraft(sampleDraft(), { id: 1, label: "Older" }));
 
     it("offers to continue it, naming where it came from", async () => {
       renderScreen();
 
       expect(
-        await screen.findByText(/Unsaved taxonomy: “Introductory Python”/),
+        await screen.findByText(/Unsaved curriculum: “Introductory Python”/),
       ).toBeInTheDocument();
       expect(screen.getByText(/Changes to “Older”/)).toBeInTheDocument();
     });
@@ -249,7 +314,7 @@ describe("CurriculumScreen", () => {
       await user.click(await screen.findByRole("button", { name: "Continue editing" }));
 
       const dialog = await modal();
-      expect(within(dialog).getByLabelText("Taxonomy name")).toHaveValue("Introductory Python");
+      expect(within(dialog).getByLabelText("Curriculum name")).toHaveValue("Introductory Python");
       expect(within(dialog).getByText("Unsaved draft restored")).toBeInTheDocument();
       expect(within(dialog).getByText(/^Editing/)).toHaveTextContent("Older");
       expect(fetchQuery).not.toHaveBeenCalled();
@@ -261,38 +326,38 @@ describe("CurriculumScreen", () => {
 
       await user.click(await screen.findByRole("button", { name: "Discard" }));
 
-      expect(screen.queryByText(/Unsaved taxonomy/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Unsaved curriculum/)).not.toBeInTheDocument();
       expect(loadDrafts()).toEqual([]);
     });
 
     it("never asks anything before previewing a row or starting a new one, and leaves the kept work alone", async () => {
       const user = userEvent.setup();
       renderScreen();
-      await screen.findByText(/Unsaved taxonomy/);
+      await screen.findByText(/Unsaved curriculum/);
 
       await user.click(screen.getByText("Older"));
       const first = await modal();
-      expect(within(first).getByLabelText("Taxonomy name")).toHaveValue("Older");
+      expect(within(first).getByLabelText("Curriculum name")).toHaveValue("Older");
       expect(within(first).queryByText("Unsaved draft restored")).not.toBeInTheDocument();
       expect(screen.queryByText(/Replace your unsaved/)).not.toBeInTheDocument();
 
       await user.keyboard("{Escape}");
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(await screen.findByText(/Unsaved taxonomy/)).toBeInTheDocument();
+      expect(await screen.findByText(/Unsaved curriculum/)).toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: "New taxonomy" }));
-      expect(within(await modal()).getByLabelText("Taxonomy name")).toHaveValue("");
+      await user.click(screen.getByRole("button", { name: "New curriculum" }));
+      expect(within(await modal()).getByLabelText("Curriculum name")).toHaveValue("");
       expect(screen.queryByText(/Replace your unsaved/)).not.toBeInTheDocument();
       expect(loadDrafts()).toHaveLength(1);
     });
 
-    it("leaves work kept for another taxonomy alone when changes to this one are discarded", async () => {
+    it("leaves work kept for another curriculum alone when changes to this one are discarded", async () => {
       const user = userEvent.setup();
       renderScreen();
-      await screen.findByText(/Unsaved taxonomy/);
+      await screen.findByText(/Unsaved curriculum/);
       await user.click(screen.getByText("Newer"));
       const dialog = await modal();
-      await user.type(within(dialog).getByLabelText("Taxonomy name"), " x");
+      await user.type(within(dialog).getByLabelText("Curriculum name"), " x");
       await waitFor(() => expect(loadDrafts()).toHaveLength(2));
       await user.keyboard("{Escape}");
 
@@ -303,19 +368,19 @@ describe("CurriculumScreen", () => {
     });
   });
 
-  it("offers each unsaved taxonomy separately, and discarding one leaves the other", async () => {
+  it("offers each unsaved curriculum separately, and discarding one leaves the other", async () => {
     saveDraft({ ...sampleDraft(), label: "First" }, { id: 1, label: "Older" });
     saveDraft({ ...sampleDraft(), label: "Second" });
     const user = userEvent.setup();
     renderScreen();
 
-    expect(await screen.findByText(/Unsaved taxonomy: “First”/)).toBeInTheDocument();
-    expect(screen.getByText(/Unsaved taxonomy: “Second”/)).toBeInTheDocument();
+    expect(await screen.findByText(/Unsaved curriculum: “First”/)).toBeInTheDocument();
+    expect(screen.getByText(/Unsaved curriculum: “Second”/)).toBeInTheDocument();
 
     const [discardFirst] = screen.getAllByRole("button", { name: "Discard" });
     await user.click(discardFirst as HTMLElement);
 
     expect(loadDrafts()).toHaveLength(1);
-    expect(screen.getAllByText(/Unsaved taxonomy:/)).toHaveLength(1);
+    expect(screen.getAllByText(/Unsaved curriculum:/)).toHaveLength(1);
   });
 });

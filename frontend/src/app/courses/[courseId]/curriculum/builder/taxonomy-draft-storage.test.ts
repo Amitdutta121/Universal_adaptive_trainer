@@ -26,7 +26,7 @@ describe("draft storage", () => {
     expect(only?.key).toBe("new");
   });
 
-  it("keeps one draft per taxonomy, so saving one never touches another", () => {
+  it("keeps one draft per curriculum, so saving one never touches another", () => {
     saveDraft(named("new one"));
     saveDraft(named("alpha one"), ALPHA);
     saveDraft(named("beta one"), BETA);
@@ -66,7 +66,7 @@ describe("draft storage", () => {
     expect(loadDrafts().map((d) => d.draft.label)).toEqual(["second", "first"]);
   });
 
-  it("names the slot after the taxonomy a draft is a copy of", () => {
+  it("names the slot after the curriculum a draft is a copy of", () => {
     expect(draftKey(null)).toBe("new");
     expect(draftKey(ALPHA)).toBe("v1");
   });
@@ -85,7 +85,7 @@ describe("draft storage", () => {
     expect(loadDrafts()).toHaveLength(1);
   });
 
-  it("does not let an older draft overwrite one already kept for the same taxonomy", () => {
+  it("does not let an older draft overwrite one already kept for the same curriculum", () => {
     saveDraft(named("current"), ALPHA);
     window.localStorage.setItem(
       LEGACY_KEY,

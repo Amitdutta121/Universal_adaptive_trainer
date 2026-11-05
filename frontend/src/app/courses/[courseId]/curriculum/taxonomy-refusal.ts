@@ -24,7 +24,7 @@ const named = (value: unknown): string =>
 function describeLocation(path: string, doc: NamedDocument | null | undefined): string | null {
   const parts = path.split(".");
   const [first, topicIndex, second, subtopicIndex, field] = parts;
-  if (first === "label" && parts.length === 1) return "The taxonomy name";
+  if (first === "label" && parts.length === 1) return "The curriculum name";
   if (first === "schema_version" && parts.length === 1) return "The schema version";
   if (first !== "topics") return null;
   if (parts.length === 1) return "The list of topics";
@@ -52,7 +52,7 @@ function describeProblem(message: string): string {
   const text = message.replace(/^Value error, /, "").trim();
   if (text === "Field required") return "this is required";
   if (text === "Extra inputs are not permitted")
-    return "this is not something a taxonomy can contain";
+    return "this is not something a curriculum can contain";
   const tooLong = text.match(/^String should have at most (\d+) characters?$/);
   if (tooLong) return `this is too long (at most ${tooLong[1]} characters)`;
   if (/^String should have at least 1 character/.test(text)) return "this cannot be empty";

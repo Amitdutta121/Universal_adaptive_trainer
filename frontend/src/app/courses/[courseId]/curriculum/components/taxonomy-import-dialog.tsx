@@ -73,7 +73,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
       return file;
     }
 
-    const problem = jsonProblem(pasted, "taxonomy document");
+    const problem = jsonProblem(pasted, "curriculum document");
     if (problem) {
       setLocalProblem(problem);
       return null;
@@ -95,7 +95,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
         description:
           `${pluralise(detail.topic_count, "topic")} and ` +
           `${pluralise(detail.subtopic_count, "subtopic")}. ` +
-          "It is now the selected taxonomy.",
+          "It is now the selected curriculum.",
       });
       // Only closed on success: a refused document is still the professor's work.
       onImported();
@@ -113,7 +113,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
         </TabsList>
 
         <TabsContent value="file" className="mt-3 space-y-2">
-          <Label htmlFor={fileFieldId}>Taxonomy JSON document</Label>
+          <Label htmlFor={fileFieldId}>Curriculum JSON document</Label>
           <Input
             id={fileFieldId}
             type="file"
@@ -132,7 +132,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
         </TabsContent>
 
         <TabsContent value="paste" className="mt-3 space-y-2">
-          <Label htmlFor={pasteFieldId}>Taxonomy JSON document</Label>
+          <Label htmlFor={pasteFieldId}>Curriculum JSON document</Label>
           <Textarea
             id={pasteFieldId}
             value={pasted}
@@ -152,7 +152,7 @@ function ImportForm({ onImported }: { onImported: () => void }) {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={importTaxonomy.isPending}>
-          {importTaxonomy.isPending ? "Validating…" : "Import taxonomy"}
+          {importTaxonomy.isPending ? "Validating…" : "Import curriculum"}
         </Button>
         <p className="text-muted-foreground text-xs">
           The label comes from inside the document. You can rename the version afterwards.
@@ -184,12 +184,12 @@ export function TaxonomyImportDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="size-4 text-muted-foreground" />
-            Import a taxonomy document
+            Import a curriculum document
           </DialogTitle>
           <DialogDescription>
-            Structured taxonomy JSON only
+            Structured curriculum JSON only
             {guide.data ? `, up to ${guide.data.max_upload_mb} MB` : ""}. A valid document becomes
-            the selected taxonomy immediately; an invalid one is refused in full, and nothing is
+            the selected curriculum immediately; an invalid one is refused in full, and nothing is
             stored.
           </DialogDescription>
         </DialogHeader>

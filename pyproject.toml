@@ -21,6 +21,12 @@ dependencies = [
     # numeric answers with units, and symbolic (formula) equivalence.
     "pint>=0.24",
     "sympy>=1.13",
+    # Libraries student and generated code may import (EXECUTOR_PACKAGES in app/config.py;
+    # the local runner is this interpreter). Pinned exactly: output-prediction answers are
+    # stored real runs, and pandas changes how it prints between versions.
+    "numpy==2.5.4",
+    "pandas==3.1.1",
+    "matplotlib==3.11.2",
     # Cookie-session auth for the Instructor Studio (app/auth/). Database
     # strategy: logout revokes server-side rather than only clearing the cookie.
     "fastapi-users[sqlalchemy]>=14.0",

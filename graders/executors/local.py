@@ -65,6 +65,10 @@ def _minimal_environment() -> dict[str, str]:
     environment = {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONIOENCODING": "utf-8",
+        # matplotlib (an executor package, ``EXECUTOR_PACKAGES``) must never open a window,
+        # and without a fixed config dir it rebuilds its font cache on every run (~2 s).
+        "MPLBACKEND": "Agg",
+        "MPLCONFIGDIR": str(Path(tempfile.gettempdir()) / "adaptive-trainer-matplotlib"),
     }
     if sys.platform == "win32":
         environment["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")

@@ -936,7 +936,9 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
 
           {/* Question column: alerts, the result, then the live question. */}
           <div className={`flex min-w-0 flex-col gap-5 xl:row-start-2 ${rightColumn}`}>
-            {nextGenerating && !session.data.ended_at ? (
+            {/* Only while /next is polled: with the result up and the query
+                paused, a "generating" error is stale and would never clear. */}
+            {nextGenerating && (result === null || advancing) && !session.data.ended_at ? (
               <GeneratingBanner title={unavailable?.message ?? "Writing your next question"} />
             ) : null}
             {endTrainingSession.isError ? <QueryError error={endTrainingSession.error} /> : null}

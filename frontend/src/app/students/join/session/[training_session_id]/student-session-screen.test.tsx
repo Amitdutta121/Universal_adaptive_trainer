@@ -156,6 +156,23 @@ describe("student session screen", () => {
     expect(screen.queryByText("Worked tutorial text")).not.toBeInTheDocument();
   });
 
+  it("hides a stale generating banner while the result is up and /next is paused", async () => {
+    const view = render(<StudentSessionScreen trainingSessionId={5} />);
+    await userEvent.type(screen.getByRole("textbox"), "6");
+    await userEvent.click(screen.getByRole("button", { name: /Submit answer/ }));
+
+    // The answer's invalidation fetched /next before the result paused it.
+    next = {
+      data: served,
+      error: new ApiError(409, "question_generating", "A new question is being written"),
+      isError: true,
+    };
+    view.rerender(<StudentSessionScreen trainingSessionId={5} />);
+
+    expect(await screen.findByRole("button", { name: /Next question/ })).toBeEnabled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
   it("offers neither question nor tutorial once the run has ended", () => {
     session = { ended_at: "2026-10-24T11:00:00" };
     render(<StudentSessionScreen trainingSessionId={5} />);
