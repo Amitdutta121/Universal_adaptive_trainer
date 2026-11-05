@@ -31,7 +31,7 @@ describe("explainRefusal", () => {
 
   it("names the label, the topic list and an unknown field in plain words", () => {
     expect(explainRefusal("label: String should have at least 1 character")).toEqual([
-      "The taxonomy name: this cannot be empty",
+      "The curriculum name: this cannot be empty",
     ]);
     expect(
       explainRefusal("topics: List should have at least 1 item after validation, not 0"),

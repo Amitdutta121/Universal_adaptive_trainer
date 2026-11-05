@@ -34,7 +34,7 @@ export function VersionProvenance({ detail }: { detail: CurriculumVersionDetail 
       <div className="space-y-2 text-sm">
         <p>Built or imported by a professor, saved {formatTimestamp(version.created_at)}.</p>
         <p className="text-muted-foreground">
-          A taxonomy is checked in full before it is saved: duplicate names, unknown fields and
+          A curriculum is checked in full before it is saved: duplicate names, unknown fields and
           empty topics are refused, and nothing is stored if anything is wrong. No copy of the
           original file is kept.
         </p>

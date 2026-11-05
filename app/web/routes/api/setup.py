@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.courses.visibility import set_hidden, visibility_counts
 from app.domain.enums import CurriculumStatus
 from app.errors import DomainRuleError, NotFoundError
 from app.generation import rounds
@@ -33,16 +34,24 @@ from app.web.routes.api.deps import (
     CourseScope,
     DbSession,
     ensure_in_course,
+    subtopics_in_course,
+    version_in_course,
 )
 from app.web.routes.api.schemas import (
+    CellVisibilityCount,
     CreateCourseStyleRequest,
     CurrentSetupResponse,
     QuestionSetupOut,
+    QuestionVisibilityResponse,
     SaveSetupRequest,
     SaveSetupResponse,
+    SetQuestionVisibilityRequest,
+    SetQuestionVisibilityResponse,
     SetupSuggestionResponse,
     StyleListResponse,
+    StyleVisibilityCount,
     SuggestSetupRequest,
+    TypeVisibilityCount,
 )
 
 router = APIRouter(tags=["question-setup"])
@@ -194,3 +203,62 @@ def save_setup(
     # Read off the module per request, so tests can replace the pipeline.
     queue.submit(rounds.run_round, first.id)
     return SaveSetupResponse(setup_id=setup.id, round_id=first.id)
+
+
+def _require_course(course: int | None) -> int:
+    if course is None:
+        raise DomainRuleError("This request must name a course.")
+    return course
+
+
+@router.get("/question-visibility", response_model=QuestionVisibilityResponse)
+def question_visibility(
+    session: DbSession, course: CourseScope, curriculum_version_id: int | None = None
+) -> QuestionVisibilityResponse:
+    """Approved and hidden questions per style and type, and per subtopic of one taxonomy, so
+    turning a style or type off can say how many questions it would hide (ADR-070)."""
+    course_id = _require_course(course)
+    if curriculum_version_id is not None:
+        version_in_course(session, curriculum_version_id, course_id)
+    counts = visibility_counts(session, course_id, curriculum_version_id=curriculum_version_id)
+    return QuestionVisibilityResponse(
+        by_style=[
+            StyleVisibilityCount(style_id=key, approved=tally.approved, hidden=tally.hidden)
+            for key, tally in sorted(counts.by_style.items())
+        ],
+        by_type=[
+            TypeVisibilityCount(question_type=key, approved=tally.approved, hidden=tally.hidden)
+            for key, tally in sorted(counts.by_type.items())
+        ],
+        by_cell=[
+            CellVisibilityCount(
+                subtopic_id=subtopic_id,
+                style_id=style_id,
+                difficulty=difficulty,
+                approved=tally.approved,
+                hidden=tally.hidden,
+            )
+            for (subtopic_id, style_id, difficulty), tally in counts.by_cell.items()
+        ],
+    )
+
+
+@router.post("/question-visibility", response_model=SetQuestionVisibilityResponse)
+def set_question_visibility(
+    session: DbSession, course: CourseScope, body: SetQuestionVisibilityRequest
+) -> SetQuestionVisibilityResponse:
+    """Hide the course's approved questions in some styles or types from students, or show
+    hidden ones again; course-wide or in one subtopic. Never a reject (ADR-070)."""
+    course_id = _require_course(course)
+    if body.subtopic_id is not None:
+        subtopics_in_course(session, [body.subtopic_id], course_id)
+    changed = set_hidden(
+        session,
+        course_id,
+        hidden=body.hidden,
+        style_ids=body.style_ids,
+        question_types=body.question_types,
+        subtopic_id=body.subtopic_id,
+    )
+    session.commit()
+    return SetQuestionVisibilityResponse(changed=changed)

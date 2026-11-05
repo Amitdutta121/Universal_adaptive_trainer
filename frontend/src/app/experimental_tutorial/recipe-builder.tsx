@@ -26,7 +26,9 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { QueryError, TableSkeleton } from "@/components/query-state";
 import { TutorialBlockView } from "@/components/tutorial/renderer-registry";
@@ -52,6 +54,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { readApiError } from "@/lib/api/client";
 import {
+  qk,
   useCourses,
   useDeleteExperimentalRecipe,
   useDraftExperimentalRecipe,
@@ -62,6 +65,7 @@ import {
   useSaveExperimentalRecipe,
   useTryExperimentalRecipe,
 } from "@/lib/api/queries";
+import { FORMAT_LABELS, humanize, LEVEL_LABELS } from "@/lib/tutorial-labels";
 import type { Schemas } from "@/lib/api/types";
 
 type Recipe = Schemas["ExperimentalRecipeOut"];
@@ -147,7 +151,7 @@ function RecipeList({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2">
-        <CardTitle className="text-base">Recipes</CardTitle>
+        <CardTitle className="text-base">Styles</CardTitle>
         <Button size="sm" variant="outline" onClick={onNew}>
           <Plus />
           New
@@ -217,6 +221,19 @@ function useGeneratingOn(): string {
   return `${where} · ${role.model}`;
 }
 
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** What a save did to the style's tutorials, or nothing when it touched none. */
+function savedNote(saved: Recipe): string | undefined {
+  const notes = [
+    saved.examples_kept ? `${plural(saved.examples_kept, "example")} kept` : null,
+    saved.blocks_retired ? `${plural(saved.blocks_retired, "old tutorial")} hidden` : null,
+  ].filter(Boolean);
+  return notes.length > 0 ? notes.join(" · ") : undefined;
+}
+
 function Generating({ what, on }: { what: string; on: string }) {
   return (
     <p role="status" className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -240,7 +257,7 @@ function BlockResult({ block }: { block: Schemas["ExperimentalRecipeTryOut"] }) 
     <div className="space-y-2">
       <TutorialBlockView renderer={block.renderer} payload={block.payload} />
       <p className="text-muted-foreground text-xs">
-        Written from {block.chunk_ids.length} book chunks by {block.model || "no model"} · not saved
+        From {block.chunk_ids.length} book chunks · {block.model || "no model"}
       </p>
     </div>
   );
@@ -283,36 +300,29 @@ function ExampleBlock({
 function RecipeSummary({ recipe, edited }: { recipe: ParsedRecipe; edited: boolean }) {
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium">{recipe.name}</p>
-        <span className="font-mono text-muted-foreground text-xs">{recipe.id}</span>
-      </div>
+      <p className="font-medium">{recipe.name}</p>
       <p className="text-sm">{recipe.summary}</p>
       <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
         <div className="flex gap-1">
-          <dt className="text-muted-foreground">Draws as</dt>
-          <dd>{recipe.renderer}</dd>
+          <dt className="text-muted-foreground">Format</dt>
+          <dd>{FORMAT_LABELS[recipe.renderer]}</dd>
         </div>
         <div className="flex gap-1">
-          <dt className="text-muted-foreground">Guidance</dt>
-          <dd>{recipe.guidance_levels.join(", ")}</dd>
+          <dt className="text-muted-foreground">Levels</dt>
+          <dd>{recipe.guidance_levels.map((level) => LEVEL_LABELS[level]).join(", ")}</dd>
         </div>
         <div className="flex gap-1">
-          <dt className="text-muted-foreground">Good for</dt>
-          <dd>{recipe.fits.join(", ")}</dd>
+          <dt className="text-muted-foreground">Teaches well</dt>
+          <dd>{recipe.fits.map(humanize).join(", ")}</dd>
         </div>
         {recipe.tool ? (
           <div className="flex gap-1">
             <dt className="text-muted-foreground">Tool</dt>
-            <dd>{recipe.tool}</dd>
+            <dd>{humanize(recipe.tool)}</dd>
           </div>
         ) : null}
       </dl>
-      {edited ? (
-        <p className="text-muted-foreground text-xs">
-          The YAML was edited by hand; this summary updates when you save.
-        </p>
-      ) : null}
+      {edited ? <p className="text-muted-foreground text-xs">Edited by hand. Updates on save.</p> : null}
     </div>
   );
 }
@@ -434,8 +444,13 @@ function Editor({
   const [parsed, setParsed] = useState<ParsedRecipe | null>(recipe?.recipe ?? null);
   const [edited, setEdited] = useState(false);
   const [showYaml, setShowYaml] = useState(false);
-  // Each run of examples remounts its blocks; 0 means none asked for yet.
-  const [examples, setExamples] = useState<{ run: number; yaml: string }>({ run: 0, yaml: "" });
+  // Each run of examples remounts its blocks; 0 means none asked for yet. `saved` once they
+  // were kept with a save, so a second save does not add them again.
+  const [examples, setExamples] = useState<{ run: number; yaml: string; saved?: boolean }>({
+    run: 0,
+    yaml: "",
+  });
+  const client = useQueryClient();
   const draft = useDraftExperimentalRecipe();
   const save = useSaveExperimentalRecipe();
   const remove = useDeleteExperimentalRecipe();
@@ -447,14 +462,43 @@ function Editor({
   const showExamples = (text: string) =>
     setExamples((current) => ({ run: current.run + 1, yaml: text }));
 
+  /** The examples on screen, if they were written from the YAML being saved. */
+  const examplesToKeep = (): Schemas["ExperimentalRecipeExample"][] => {
+    if (examples.run === 0 || examples.saved || examples.yaml !== yaml) return [];
+    return exampleOn.flatMap((subtopic) => {
+      const block = client.getQueryData<Schemas["ExperimentalRecipeTryOut"]>(
+        qk.experimentalRecipes.example(courseId, examples.run, {
+          yaml,
+          subtopic_id: subtopic.id,
+          guidance_level: level,
+        }),
+      );
+      if (!block || block.error) return [];
+      return [
+        {
+          subtopic_id: subtopic.id,
+          guidance_level: block.guidance_level,
+          payload: block.payload,
+          chunk_ids: block.chunk_ids,
+          model: block.model,
+        },
+      ];
+    });
+  };
+
   const runDraft = async () => {
     const request: Request = { kind: revising ? "change" : "new", text: ask.trim() };
     setRequests((list) => [...list, request]);
     setAsk("");
-    const result = await draft.mutateAsync({
-      courseId,
-      body: { description: request.text, current_yaml: revising ? yaml : null },
-    });
+    let result: Awaited<ReturnType<typeof draft.mutateAsync>>;
+    try {
+      result = await draft.mutateAsync({
+        courseId,
+        body: { description: request.text, current_yaml: revising ? yaml : null },
+      });
+    } catch {
+      return; // shown by the alert under the button (`draft.error`)
+    }
     setYaml(result.yaml);
     setParsed(result.recipe ?? null);
     setEdited(false);
@@ -487,7 +531,7 @@ function Editor({
                     className="rounded-md bg-muted/40 px-3 py-1.5 text-sm"
                   >
                     <span className="text-muted-foreground text-xs">
-                      {request.kind === "new" ? "Recipe" : "Change"}:{" "}
+                      {request.kind === "new" ? "Style" : "Change"}:{" "}
                     </span>
                     {request.text}
                   </li>
@@ -498,7 +542,7 @@ function Editor({
 
           <div className="space-y-1.5">
             <Label htmlFor={`${id}-ask`}>
-              {revising ? "Describe a change" : "Describe the recipe"}
+              {revising ? "Describe a change" : "Describe the style"}
             </Label>
             <Textarea
               id={`${id}-ask`}
@@ -540,7 +584,7 @@ function Editor({
                 {revising ? "Revise with AI" : "Draft with AI"}
               </Button>
               {draft.isPending ? (
-                <Generating what={revising ? "the revised recipe" : "the recipe"} on={on} />
+                <Generating what={revising ? "the revised style" : "the style"} on={on} />
               ) : null}
             </div>
           </div>
@@ -570,7 +614,7 @@ function Editor({
               </Button>
               {showYaml ? (
                 <Textarea
-                  aria-label="Recipe YAML"
+                  aria-label="Style YAML"
                   value={yaml}
                   onChange={(event) => {
                     setYaml(event.target.value);
@@ -588,23 +632,32 @@ function Editor({
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={!yaml.trim() || save.isPending}
-              onClick={async () => {
-                const saved = await save.mutateAsync({ courseId, id: recipe?.id ?? null, yaml });
-                setParsed(saved.recipe);
-                setEdited(false);
-                onSaved(saved);
-              }}
+              // `mutate`, not `mutateAsync`: a refused save shows in the alert above and must
+              // not also surface as an unhandled rejection.
+              onClick={() =>
+                save.mutate(
+                  { courseId, id: recipe?.id ?? null, yaml, examples: examplesToKeep() },
+                  {
+                    onSuccess: (saved) => {
+                      setParsed(saved.recipe);
+                      setEdited(false);
+                      setExamples((current) => ({ ...current, saved: true }));
+                      onSaved(saved);
+                      toast.success("Style saved", { description: savedNote(saved) });
+                    },
+                  },
+                )
+              }
             >
-              {save.isPending ? "Saving…" : recipe ? "Save changes" : "Save recipe"}
+              {save.isPending ? "Saving…" : recipe ? "Save changes" : "Save style"}
             </Button>
             {recipe ? (
               <Button
                 variant="ghost"
                 disabled={remove.isPending}
-                onClick={async () => {
-                  await remove.mutateAsync({ courseId, id: recipe.id });
-                  onDeleted();
-                }}
+                onClick={() =>
+                  remove.mutate({ courseId, id: recipe.id }, { onSuccess: () => onDeleted() })
+                }
               >
                 <Trash2 />
                 Delete
@@ -632,8 +685,7 @@ function Editor({
               </p>
             ) : examples.run === 0 ? (
               <p className="text-muted-foreground text-sm">
-                See what students would get: two blocks written from this recipe for{" "}
-                {exampleOn.map((subtopic) => subtopic.label).join(" and ")}.
+                Examples for {exampleOn.map((subtopic) => subtopic.label).join(" and ")}.
               </p>
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
@@ -685,11 +737,8 @@ export function RecipeEditorDialog({
     <Dialog open onOpenChange={(open) => (open ? null : onClose())}>
       <DialogContent className="flex max-h-[92vh] w-[96vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(96vw,1100px)]">
         <DialogHeader className="border-b px-6 py-4">
-          <DialogTitle>{current ? `Edit “${current.name}”` : "Create a recipe"}</DialogTitle>
-          <DialogDescription>
-            Describe a way of teaching and AI drafts the recipe. Try it on real subtopics, change
-            it, and save it. A saved recipe reaches students once you approve it in the list.
-          </DialogDescription>
+          <DialogTitle>{current ? `Edit “${current.name}”` : "Create a style"}</DialogTitle>
+          <DialogDescription>Describe how it should teach. AI drafts it.</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
           <Editor
@@ -757,8 +806,8 @@ export function RecipeBuilder() {
   return (
     <>
       <PageHeader
-        title="Recipe builder (experimental)"
-        summary="Draft tutorial recipes with AI, edit them, and try one on a real subtopic. A saved recipe reaches students once it is approved on the course's Tutorials page."
+        title="Tutorial styles (experimental)"
+        summary="Draft, edit and try tutorial styles."
         showTaxonomySelector={false}
       />
       {courses.isPending ? <TableSkeleton rows={4} /> : null}
@@ -766,7 +815,7 @@ export function RecipeBuilder() {
       {courses.isSuccess && list.length === 0 ? (
         <Alert>
           <AlertTitle>No course yet</AlertTitle>
-          <AlertDescription>Recipes belong to a course. Create one first.</AlertDescription>
+          <AlertDescription>Styles belong to a course. Create one first.</AlertDescription>
         </Alert>
       ) : null}
       {courseId !== null ? (

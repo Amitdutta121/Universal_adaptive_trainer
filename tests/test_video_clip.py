@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -11,15 +12,23 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.domain.enums import GuidanceLevel, TutorialBlockStatus, TutorialRenderer, VideoAvailability
-from app.errors import DomainRuleError
+from app.errors import DomainRuleError, LLMRequestError
 from app.ingestion.youtube import Segment, YouTubeImportService
-from app.persistence.models import CurriculumVersionRow, SubtopicRow, TopicRow, TutorialBlockRow
+from app.persistence.models import (
+    CourseRow,
+    CurriculumVersionRow,
+    SubtopicRow,
+    TopicRow,
+    TutorialBlockRow,
+)
 from app.persistence.repositories import ChunkRepository
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
-from app.tutorials.clips import CLIP_PAD_SECONDS, clip_payload, playable
+from app.tutorials.clips import CLIP_PAD_SECONDS, clip_payload, course_has_video, playable
 from app.tutorials.generator import BlockRequest, generate_block
 from app.tutorials.renderers import payload_problems
 from app.tutorials.schema import TutorialRecipe
+from app.tutorials.serving import servable_recipes
+from tests.conftest import TEST_PROFESSOR_ID
 
 FIXTURE = json.loads(
     (Path(__file__).parent / "fixtures" / "lecture_transcript.json").read_text(encoding="utf-8")
@@ -82,7 +91,40 @@ class NoModel:
     description = "never/called"
 
     def complete_structured(self, **_kwargs):
-        raise AssertionError("a clip recipe must not call the model")
+        raise AssertionError("the model must not be called here")
+
+
+class LectureModel:
+    """Writes the clip's lecture-style query; records each prompt."""
+
+    description = "fake/lecture"
+    PASSAGE = "So a while loop checks its condition, and while the condition holds it runs again."
+
+    def __init__(self, before_call=None) -> None:
+        self.prompts: list[str] = []
+        self.before_call = before_call
+
+    def complete_structured(self, *, prompt: str, response_model, **_kwargs):
+        if self.before_call is not None:
+            self.before_call()
+        self.prompts.append(prompt)
+        return response_model(text=self.PASSAGE)
+
+
+class DownModel:
+    description = "fake/down"
+
+    def complete_structured(self, **_kwargs):
+        raise LLMRequestError("The model provider could not be reached.")
+
+
+class SpyEmbedder(LoopEmbedder):
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        self.texts.extend(texts)
+        return super().embed(texts)
 
 
 def _video(session: Session, availability=VideoAvailability.AVAILABLE):
@@ -105,12 +147,14 @@ def _subtopic(session: Session) -> SubtopicRow:
     return topic.subtopics[0]
 
 
-def _generate(session: Session, subtopic: SubtopicRow) -> TutorialBlockRow:
+def _generate(
+    session: Session, subtopic: SubtopicRow, client=None, embedder=None
+) -> TutorialBlockRow:
     return generate_block(
         session,
         BlockRequest(subtopic.id, "py.video_clip", GuidanceLevel.WORKED),
-        client=NoModel(),
-        retriever=ChunkRetriever(session, ChunkEmbeddingStore(session, LoopEmbedder())),
+        client=client if client is not None else LectureModel(),
+        retriever=ChunkRetriever(session, ChunkEmbeddingStore(session, embedder or LoopEmbedder())),
     )
 
 
@@ -120,7 +164,7 @@ def test_the_clip_is_the_chunk_that_explains_the_subtopic_padded(session: Sessio
 
     assert block.status is TutorialBlockStatus.DRAFT
     assert block.renderer is TutorialRenderer.VIDEO_CLIP
-    assert block.model == ""
+    assert block.model == "fake/lecture"
     (chunk_id,) = block.chunk_ids
     chunk = ChunkRepository(session).get_many([chunk_id])[chunk_id]
     assert chunk.book_id == book.id
@@ -145,16 +189,61 @@ def test_the_first_clip_of_a_video_is_not_padded_below_zero(session: Session) ->
     assert clip_payload(first)["start"] == 0.0
 
 
-def test_no_playable_video_means_no_clip(session: Session) -> None:
+def test_the_search_query_is_the_subtopic_plus_a_lecture_style_passage(
+    session: Session,
+) -> None:
+    _video(session)
+    model, embedder = LectureModel(), SpyEmbedder()
+    _generate(session, _subtopic(session), client=model, embedder=embedder)
+
+    (prompt,) = model.prompts
+    assert "Loops - while loops: the while loop condition" in prompt
+    query = embedder.texts[-1]  # the chunks are embedded first, the query last
+    assert query == f"Loops - while loops: the while loop condition\n\n{LectureModel.PASSAGE}"
+
+
+def test_a_failed_model_call_falls_back_to_the_subtopic_text(session: Session) -> None:
+    _video(session)
+    embedder = SpyEmbedder()
+    block = _generate(session, _subtopic(session), client=DownModel(), embedder=embedder)
+
+    assert block.status is TutorialBlockStatus.DRAFT
+    assert block.model == ""
+    assert embedder.texts[-1] == "Loops - while loops: the while loop condition"
+
+
+def test_the_lecture_query_holds_no_write_lock(session: Session) -> None:
+    """ADR-071: the model call runs with nothing pending, so others can still write."""
+    _video(session)
+    subtopic = _subtopic(session)
+    path = session.get_bind().url.database
+    blocked: list[bool] = []
+
+    def probe() -> None:
+        other = sqlite3.connect(path, timeout=0.05, isolation_level=None)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+            blocked.append(False)
+        except sqlite3.OperationalError:
+            blocked.append(True)
+        finally:
+            other.close()
+
+    _generate(session, subtopic, client=LectureModel(before_call=probe))
+    assert blocked == [False]
+
+
+def test_no_playable_video_means_no_clip_and_no_model_call(session: Session) -> None:
     subtopic = _subtopic(session)
     with pytest.raises(DomainRuleError, match="YouTube"):
-        _generate(session, subtopic)
+        _generate(session, subtopic, client=NoModel())
 
     # Imported while playable, then flagged by the periodic check.
     _video(session).video_availability = VideoAvailability.NOT_EMBEDDABLE
     session.commit()
     with pytest.raises(DomainRuleError):
-        _generate(session, subtopic)
+        _generate(session, subtopic, client=NoModel())
 
 
 def test_clips_of_a_video_that_went_away_are_not_served(session: Session) -> None:
@@ -166,3 +255,28 @@ def test_clips_of_a_video_that_went_away_are_not_served(session: Session) -> Non
     book.video_availability = VideoAvailability.UNAVAILABLE
     session.flush()
     assert playable(session, [clip, other]) == [other]
+
+
+def test_the_clip_recipe_is_served_only_in_a_course_with_a_playable_video(
+    session: Session,
+) -> None:
+    course = CourseRow(name="C", subject="intro_python", owner_id=TEST_PROFESSOR_ID)
+    session.add(course)
+    session.commit()
+    version_id = _subtopic(session).topic.curriculum_version_id
+
+    def served() -> set[str]:
+        return set(servable_recipes(session, "intro_python", course.id, version_id))
+
+    assert not course_has_video(session, course.id)
+    assert "py.video_clip" not in served()
+    assert "py.misconception_line" in served()
+
+    book = _video(session)
+    book.course_id = course.id
+    session.commit()
+    assert "py.video_clip" in served()
+
+    book.video_availability = VideoAvailability.NOT_EMBEDDABLE
+    session.commit()
+    assert "py.video_clip" not in served()

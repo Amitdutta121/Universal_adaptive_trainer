@@ -613,8 +613,12 @@ class CurriculumRepository:
 #: stay in the bank, where the generator's failure modes are meant to be read.
 NOT_REVIEWABLE_STATUSES = (QuestionStatus.VALIDATION_FAILED,)
 
-#: Pending audit drafts wait in the review queue, not the bank (ADR-064, m9).
-_IN_BANK = or_(QuestionRow.audit.is_(False), QuestionRow.status == QuestionStatus.APPROVED)
+#: Pending audit drafts wait in the review queue, not the bank (ADR-064, m9). An approved audit
+#: that was later hidden (ADR-070) is still in the bank.
+_IN_BANK = or_(
+    QuestionRow.audit.is_(False),
+    QuestionRow.status.in_((QuestionStatus.APPROVED, QuestionStatus.HIDDEN)),
+)
 
 
 def _spec_chunks(spec: object) -> set[str]:
@@ -803,12 +807,15 @@ class QuestionRepository:
         self, *, topic_id: int, exclude_ids: Collection[int] = ()
     ) -> list[QuestionRow]:
         """Existing questions a freshly generated one can be flagged against
-        (m3): approved or validation-passed, in the same topic. Cross-topic and
-        rejected/failed questions are never compared.
+        (m3): approved, hidden or validation-passed, in the same topic. Cross-topic and
+        rejected/failed questions are never compared. A hidden question can be shown again
+        (ADR-070), so a near-copy of it is still worth flagging.
         """
         stmt = select(QuestionRow).where(
             QuestionRow.topic_id == topic_id,
-            QuestionRow.status.in_((QuestionStatus.APPROVED, QuestionStatus.VALIDATION_PASSED)),
+            QuestionRow.status.in_(
+                (QuestionStatus.APPROVED, QuestionStatus.HIDDEN, QuestionStatus.VALIDATION_PASSED)
+            ),
             _IN_BANK,
         )
         if exclude_ids:
@@ -2096,15 +2103,14 @@ class StudentAttemptRepository:
             func.count(StudentAttemptRow.score),
             activity,
         ).group_by(StudentAttemptRow.student_id)
+        rows = self._session.execute(stmt)
         return {
             student_id: StudentAttemptStats(
                 average_score=average_score,
                 answered_count=answered_count or 0,
                 last_activity_at=last_activity_at,
             )
-            for student_id, average_score, answered_count, last_activity_at in self._session.execute(
-                stmt
-            )
+            for student_id, average_score, answered_count, last_activity_at in rows
         }
 
     def scored_series_for(

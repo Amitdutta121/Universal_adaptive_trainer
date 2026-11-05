@@ -68,10 +68,10 @@ export function VersionEditDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Rename this taxonomy</DialogTitle>
+            <DialogTitle>Rename this curriculum</DialogTitle>
             <DialogDescription>
               This changes the name only. To change its topics or subtopics, build or import a
-              corrected taxonomy; it is saved as a new version.
+              corrected curriculum; it is saved as a new version.
             </DialogDescription>
           </DialogHeader>
 

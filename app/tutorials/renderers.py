@@ -137,6 +137,13 @@ def payload_problems(renderer: TutorialRenderer, payload: dict[str, Any]) -> lis
             )
         if _MERMAID_FORBIDDEN.search(source):
             problems.append("the diagram may not use click, init directives, links or scripts")
+        if '\\"' in source:
+            # Mermaid has no backslash escapes: A["\"x\""] does not parse, and the student
+            # would see the source instead of the diagram.
+            problems.append(
+                'labels may not contain \\" (Mermaid has no escapes); write A["label"], '
+                "and #quot; for a quote inside a label"
+            )
     return problems
 
 
@@ -183,6 +190,7 @@ _STEPPER_TEMPLATE = """<!doctype html>
   h1 { font-size: 15px; margin: 0 0 8px; }
   .grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
   ol#code { font: 13px/1.5 ui-monospace, monospace; margin: 0; padding: 6px 0 6px 2.6em;
+    overflow-x: auto;
     background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; }
   ol#code li { white-space: pre; padding: 0 6px; }
   ol#code li.current { background: #fff8c5; outline: 1px solid #d4a72c; }

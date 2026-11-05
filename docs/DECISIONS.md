@@ -2816,3 +2816,145 @@ or a gateway. Azure's model list is not read (deployments are only listed by its
 so its model is typed. Per-role URL and key fields left the UI; a role that stored them before
 keeps using them until it is saved again (which clears both) or reset.
 
+## ADR-069 — Question setup is type-first: course, AI fit, subtopic overrides
+
+**Status:** accepted 2026-11-02. Replaces the per-subtopic style approval of the Set up questions
+dialog (docs/QUESTION_SETUP_PLAN.md, step 2). Task-138; the hide-on-turn-off half is task-139.
+
+**Context.** Step 2 showed one subtopic at a time with the whole library under made-up headings
+("Concept questions", "Code tracing", ...). A professor who did not want a kind of question had
+to skip it in every subtopic, the headings were not the course's question types, and nothing
+connected the dialog to the types the course allows (ADR-054).
+
+**Decision.**
+- **Type first.** Step 2 lists the course's question types, each with a switch, its styles and the
+  difficulties they cover. A scope rail picks the whole course (default) or one subtopic.
+- **Three layers** decide a subtopic's styles: (1) course on/off per style; (2) the AI
+  suggestion's `style_ids` for the subtopic, intersected with what the course has on; (3) optional
+  subtopic overrides (added / removed). Course changes reach every subtopic; a subtopic edit stays
+  local and is marked Custom, with Reset to course. A subtopic can only use styles the course has
+  on. A type switch turns all its styles on or off.
+- **Storage unchanged.** Save still sends `approved_styles`, the resolved set per subtopic. On
+  opening an existing setup the layers are derived: course-on = the union of saved styles; per
+  subtopic, base = suggestion ∩ course-on, added = saved − base, removed = base − saved. A new
+  setup starts with every library style of an allowed type on. No new column
+  (`frontend/.../questions/setup/setup-state.ts`).
+- **Allowed-type gate.** Only `course.question_types` are usable. Other library types are listed
+  greyed ("Not allowed in this course") with an inline "Allow for this course", which saves the
+  course's types through the same `PATCH /api/courses/{id}` as course Settings. A blocked type's
+  styles stay remembered in course-on and come back when it is allowed again.
+
+**Consequences.** Overrides are derived, not stored, so re-enabling a course style can re-add it
+to a subtopic the professor removed it from in an earlier session (accepted). The suggestion only
+covers allowed types, so a type allowed from the dialog is on for the course but in no subtopic
+until added locally or re-suggested. Turning a style off does not touch questions already written
+in it; hiding them (a new `HIDDEN` status, not `REJECTED`) is task-139.
+
+## ADR-070 — Turning a style or type off can hide its questions: a `HIDDEN` status, not a reject
+
+**Status:** accepted 2026-11-02. Task-139, the second half of ADR-069.
+
+**Context.** Turning a style off (ADR-069) or disallowing a type in course Settings (ADR-054)
+stops new questions, but the approved questions already written in it are still served. The
+professor needs a way to withdraw them without deleting them, and without teaching the round
+planner that the style is bad: `rounds.style_rejects` halves a style's draw weight per
+`REJECTED` question and drops it at two.
+
+**Decision.**
+- **A new status**, `QuestionStatus.HIDDEN` (`app/domain/enums.py`, revision
+  `0032_hidden_question_status`). Only `APPROVED` becomes `HIDDEN` and only `HIDDEN` goes back
+  to `APPROVED`. `questions.status` is a plain `VARCHAR`, so the upgrade changes no schema; the
+  downgrade turns hidden questions back into approved ones.
+- **Every status read was decided, not defaulted.** Hidden is excluded wherever `APPROVED` means
+  "may reach a student" (`StudentBank`, `is_servable`, set membership and cell candidates, new
+  sets' `approved_question_ids`, coverage and overview counts), from round cell counts, facet
+  coverage, generator examples and memory examples (the next round refills those cells), and
+  from `style_rejects` (it reads `REJECTED` only). It is included where the question still exists:
+  the bank listing's audit filter (`_IN_BANK`) and dedup candidates, since it can be shown again.
+- **Scope.** The whole course means every question of the course with that style or type; a
+  subtopic means questions *tagged* with it, as serving reads them. Status is per question, so
+  hiding in one subtopic also hides a question tagged with a second one.
+- **API.** `GET /api/question-visibility` returns approved and hidden counts per style and per
+  type for the course, and per subtopic x style x difficulty for one taxonomy;
+  `POST /api/question-visibility` hides or shows by `style_ids` or `question_types`, optionally in
+  one `subtopic_id`. Both are course-scoped (`X-Course-Id`) like every professor route.
+- **UI, from the prototype** (`app/experiments/question-types/toggle-dialog.tsx`). Turning a style
+  or type off where approved questions exist asks "Stop new questions" (default) or "Also hide
+  the N existing questions from students", with the levels that would fall below target;
+  turning one back on where hidden questions exist asks "Show the N hidden questions to students
+  again" (default) or "Keep them hidden". In the setup dialog the choice applies when confirmed,
+  like "Allow for this course"; in course Settings it applies after Save succeeds.
+
+**Consequences.** Cancelling the setup dialog after hiding does not unhide; turning the style
+back on offers it. The hidden count offered on turn-on is what the database holds for that scope,
+not what this session hid, so questions hidden earlier or from Settings are offered too. Questions
+with no `style_id` (written before setups) are hidden only by type, from Settings. A hidden
+question that was auto-approved and never reviewed still appears in the review queue, as an
+approved one does; approving it there shows it again.
+
+## ADR-071 — No open write transaction across a model call
+
+**Context.** SQLite allows one writer at a time. A round target and a live-question job ran as one
+transaction: example retrieval wrote `question_embeddings` cache rows (flushed, not committed),
+then generation, the judges, the blind solvers and up to three retries ran before the target
+committed. The write lock was held for 20-60 s, so professor reviews and student answers waited
+out the driver's 5 s timeout and failed with `database is locked`, surfacing as an unknown 500
+(TASK-140).
+
+**Decision.**
+- A generation unit runs in phases: **read** (target, chunk, spec, examples, cache warm-up), then
+  **commit**, then **model calls** with no pending writes, then one short **write** transaction
+  for the question, its evaluation and flags. `rounds._generate_round` and `live._generate`
+  commit at the end of the read phase.
+- Code that runs between model calls must not write. `QuestionEmbeddingStore.embed_with` takes
+  `persist=False` for that; the round's `DuplicateChecker` uses it (`persist_cache=False`).
+  Vectors it skips are cached the next time example retrieval embeds them, in a read phase.
+- `tests/test_write_lock_discipline.py` enforces the rule: at every fake LLM and embedder call a
+  second connection must be able to take the write lock (`BEGIN IMMEDIATE`). New generation
+  paths should be added there.
+- A lock error that still happens is a `503 database_busy` with `Retry-After: 2`, not a 500
+  (`app/errors.py`; the Postgres lock and serialization SQLSTATEs are included for later).
+  `DATABASE_BUSY_TIMEOUT_SECONDS` (default 15) replaces the driver's 5 s wait on SQLite.
+
+**Consequences.** A round's duplicate check may re-embed a stale candidate on each attempt instead
+of reading it from the cache; embeddings are cheap next to the model calls. A target's
+examples and cache rows are committed even if its generation then fails, which is harmless
+(they are reads and a cache). WAL mode was not adopted: it lets readers run beside a writer but
+does not let two writers overlap, so it would not have fixed this, and it is a pragma (app code
+stays portable to Postgres, where the same rule avoids idle-in-transaction connections).
+
+## ADR-072 — Editing a question setup opens on what was saved; only a new setup asks the AI
+
+**Context.** ADR-069's dialog asked the AI for a suggestion on every opening, including "Edit
+setup". Editing therefore waited on and paid for a model call, replaced the saved
+`cell_targets` with the new suggestion's on Approve, and computed "Custom" against a suggestion
+that could differ each time.
+
+**Decision.** Only a new setup calls `POST /api/setup/suggest`. Editing opens on the saved setup:
+its `approved_styles` and its `cell_targets`, sent back unchanged. Each subtopic's saved styles
+are its fit (in place of the AI fit of ADR-069's three layers), so nothing reads Custom on
+opening. Course switches still reach every subtopic: off removes a style everywhere, and a style no
+subtopic had (`SetupLayers.baseline`) turned on reaches them all.
+
+**Consequences.** Editing shows no "Suggested" badges or AI reasons. A subtopic added to the
+taxonomy after the setup was saved starts with no style (flagged; Approve waits for one) and no
+targets. There is no "ask the AI again" in edit; making a new suggestion means a new setup.
+
+## ADR-073 — Question prompts are light Markdown, rendered by one `PromptText`
+
+**Context.** Pages showed `prompt` as plain text, yet 108 of 440 stored prompts already held
+backticks and some held fenced code, so students saw literal `` ` `` and ```` ``` ````. The
+generator had no rule on how to lay a prompt out.
+
+**Decision.** `prompt` stays a string; it is Markdown. `frontend/src/components/prompt-text.tsx`
+renders it everywhere question text is shown (react-markdown with GFM tables and KaTeX math,
+`skipHtml`, no images); `variant="preview"` flattens it for clamped rows. The generator's system
+prompt (`prompt_style` in `app/generation/principles.py`) adds layout rules every course gets
+(task first, setup in its own paragraph, bullets only for several requirements), plus backticks
+only for courses with code types and LaTeX only for courses with `numeric_response` or
+`equation_response`. A snippet goes in the draft's `code` field when the type has one, never also
+in the prompt.
+
+**Consequences.** No schema change or migration; plain-text prompts render as before. A literal
+`$` pair in prose would render as math, so the rules ask for `\$5`. The alternative, structured
+`task` / `requirements` fields, was not adopted: it needs a schema change for every question type.

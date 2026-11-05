@@ -74,7 +74,7 @@ export function CurriculumVersionsTable({
   onDelete: (version: CurriculumVersionSummary) => void;
 }) {
   return (
-    <Table aria-label="Saved taxonomies">
+    <Table aria-label="Saved curricula">
       <TableHeader>
         <TableRow>
           <TableHead className="w-12">#</TableHead>

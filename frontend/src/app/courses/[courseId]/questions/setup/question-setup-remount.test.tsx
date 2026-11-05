@@ -40,6 +40,9 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
           });
         }
         if (path === "/api/setup") return ok({ setup: null });
+        if (path === "/api/courses/{course_id}") {
+          return ok({ id: 7, name: "Intro Python", question_types: ["output_prediction"] });
+        }
         if (path === "/api/styles") {
           return ok({
             subject: "intro_python",
@@ -62,6 +65,9 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
           });
         }
         if (path === "/api/custom-judges") return ok({ judges: [] });
+        if (path === "/api/question-visibility") {
+          return ok({ by_style: [], by_type: [], by_cell: [] });
+        }
         return ok(null);
       },
       POST: async (path: string) => {
@@ -103,7 +109,9 @@ describe("QuestionSetupDialog remount", () => {
 
     await user.click(await screen.findByRole("button", { name: /set up questions/i }));
 
-    expect(await screen.findByRole("region", { name: "Loops" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("switch", { name: "Use Predict what the code prints" }),
+    ).toBeChecked();
     expect(suggestCalls.count).toBe(1);
   });
 });

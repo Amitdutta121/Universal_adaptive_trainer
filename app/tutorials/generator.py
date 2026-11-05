@@ -12,8 +12,9 @@ traced (``app/tutorials/tools/python_trace.py``) and the recorded steps are embe
 the stepper's html. Code the caller gives (e.g. the question a student got wrong) is traced
 before the call, and the model writes notes for it.
 
-A ``video_clip`` recipe calls no model at all: the block is the course video's chunk that the
-subtopic retrieves best, as a clip (``app/tutorials/clips.py``, Task 31).
+A ``video_clip`` recipe writes no block: the block is the course video's chunk that the
+subtopic retrieves best, as a clip (``app/tutorials/clips.py``, Task 31). Its one model call
+writes the lecture-style search query.
 """
 
 from __future__ import annotations
@@ -41,10 +42,10 @@ from app.errors import DomainRuleError, MalformedModelOutputError, NotFoundError
 from app.llm import ChatTurn, StructuredLLMClient
 from app.persistence.models import ExperimentalRecipeRow, TutorialBlockRow
 from app.persistence.repositories import ChunkRepository, CurriculumRepository
-from app.retrieval.chunks import ChunkRetriever
+from app.retrieval.chunks import ChunkRetriever, playable_video_ids
 from app.subjects import profile_for_version
 from app.tutorials.approval import initial_status
-from app.tutorials.clips import clip_payload
+from app.tutorials.clips import clip_payload, lecture_query
 from app.tutorials.html_check import HtmlCheckUnavailable, check_html_block
 from app.tutorials.loader import load_recipes
 from app.tutorials.renderers import (
@@ -288,7 +289,7 @@ def write_block(
             f"Recipe {recipe.id} is written at {allowed}, not {request.guidance_level.value}."
         )
     if recipe.tool is RecipeTool.VIDEO_CLIP:
-        return _clip_block(session, subtopic, recipe, request, retriever)
+        return _clip_block(session, subtopic, recipe, request, client, retriever)
     trace: TraceResult | None = None
     if request.code is not None:
         if RecipeInput.CODE not in recipe.inputs:
@@ -368,16 +369,24 @@ def _clip_block(
     subtopic,
     recipe: TutorialRecipe,
     request: BlockRequest,
+    client: StructuredLLMClient,
     retriever: ChunkRetriever,
 ) -> TutorialBlockRow:
-    """The block of a ``video_clip`` recipe: the best-matching video chunk, no model call.
-    Not added to the session."""
-    found = retriever.for_subtopic(request.subtopic_id, top_k=1, source_kind=ChunkSourceKind.VIDEO)
+    """The block of a ``video_clip`` recipe: the video chunk a lecture-style query retrieves
+    best. Not added to the session."""
+    no_video = DomainRuleError(
+        "No playable course video was found for this subtopic. Import a YouTube video "
+        "for the course first."
+    )
+    # Checked before the model call, so a course without a video spends nothing.
+    if not playable_video_ids(session, subtopic.topic.curriculum_version.course_id):
+        raise no_video
+    query, used_model = lecture_query(client, subtopic)
+    found = retriever.for_subtopic(
+        request.subtopic_id, top_k=1, source_kind=ChunkSourceKind.VIDEO, query=query
+    )
     if not found:
-        raise DomainRuleError(
-            "No playable course video was found for this subtopic. Import a YouTube video "
-            "for the course first."
-        )
+        raise no_video
     chunk = ChunkRepository(session).get_many([found[0].chunk_id])[found[0].chunk_id]
     payload = clip_payload(chunk)
     problems = payload_problems(recipe.renderer, payload)
@@ -392,7 +401,7 @@ def _clip_block(
         if problems
         else initial_status(session, subtopic.topic.curriculum_version_id, recipe.id),
         error="; ".join(problems) if problems else None,
-        model="",
+        model=client.description if used_model else "",
     )
     return block
 

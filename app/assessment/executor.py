@@ -10,6 +10,7 @@ makes that choice, so scoring and the authoring checks always agree on local vs.
 from __future__ import annotations
 
 import logging
+from importlib.util import find_spec
 
 from app.config import Environment, Settings
 from app.errors import ConfigurationError
@@ -33,3 +34,12 @@ def configure_executor(settings: Settings) -> None:
             )
         set_executor(None)
         logger.warning("Code runs in a local subprocess (EXECUTOR=local); this is not a sandbox.")
+        # The local runner is this interpreter, so a package missing here is missing there --
+        # and the generator would still be told it may import it.
+        missing = [name for name in settings.executor_packages if find_spec(name) is None]
+        if missing:
+            logger.warning(
+                "EXECUTOR_PACKAGES lists %s but this Python cannot import it; install it or "
+                "remove it, or generated questions that use it will fail validation.",
+                ", ".join(missing),
+            )

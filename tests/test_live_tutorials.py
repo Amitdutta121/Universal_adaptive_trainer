@@ -143,10 +143,12 @@ def test_a_block_asked_for_is_not_asked_for_again(
     _answer_wrong(client, set_id)
 
     # Nothing has been written (the queue holds the jobs), and every moment asked for a
-    # different recipe: pre-teaching and the result card, for two students.
+    # different recipe: pre-teaching and the result card, for two students. The course has
+    # no video, so the clip recipe is never asked for.
     planned = [job.request["planned"][0]["recipe_id"] for job in _live_jobs(session)]
-    assert len(planned) == len(set(planned)) == 4
-    assert len(held.submitted) == 4
+    assert len(planned) == len(set(planned)) == 3
+    assert "py.video_clip" not in planned
+    assert len(held.submitted) == 3
 
 
 def test_a_rejected_recipe_is_never_written(

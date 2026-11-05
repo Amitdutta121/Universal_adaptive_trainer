@@ -16,15 +16,16 @@ import {
 import type { Route } from "next";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { CollapsiblePanel } from "@/components/collapsible-panel";
+import { useEffect, useMemo, useState } from "react";
 import { QueryError, TableSkeleton } from "@/components/query-state";
+import { StudentBrand } from "@/components/student-brand";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StudentTutorialBlocks } from "@/components/tutorial/student-tutorial-blocks";
 import { Progress } from "@/components/ui/progress";
+import { PromptText } from "@/components/prompt-text";
 import {
   Sheet,
   SheetContent,
@@ -271,8 +272,8 @@ function PastQuestionSheet({
                     ? ` - ${detail.taxonomy.subtopics.join(", ")}`
                     : ""}
                 </div>
-                <div className="wrap-anywhere whitespace-pre-wrap rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-foreground text-sm leading-7">
-                  {detail.question.prompt}
+                <div className="wrap-anywhere rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-sm">
+                  <PromptText text={detail.question.prompt} />
                 </div>
               </div>
 
@@ -366,11 +367,13 @@ function ResultCard({
   detail,
   submittedAnswer,
   onNext,
+  advancing = false,
 }: {
   result: AnsweredOut;
   detail: QuestionDetail | null;
   submittedAnswer: string;
   onNext: () => void;
+  advancing?: boolean;
 }) {
   const tone = scoreTone(result.score);
   const Icon = resultIcon(result.score);
@@ -415,9 +418,14 @@ function ResultCard({
               ) : null}
             </div>
           </div>
-          <Button type="button" onClick={onNext} className="rounded-full px-4 sm:self-end">
-            <ArrowRight />
-            Next question
+          <Button
+            type="button"
+            onClick={onNext}
+            disabled={advancing}
+            className="rounded-full px-4 sm:self-end"
+          >
+            {advancing ? <Loader2 className="animate-spin" /> : <ArrowRight />}
+            {advancing ? "Preparing next question" : "Next question"}
           </Button>
         </div>
       </CardHeader>
@@ -463,60 +471,88 @@ function ResultCard({
   );
 }
 
-// This run's served questions, most recent first, as a toggleable list in
-// the sidebar rather than a row of pills in the header -- open by default
-// since jumping back to a question is a common thing to want, but
-// collapsible because the list grows across a long session.
-function RecentQuestionsPanel({
+// A live question has no real progress signal, so the bar is simulated: it
+// eases toward 95% (about two thirds there after 20s) and never claims done.
+// It is replaced by the question itself the moment /next serves one.
+function GeneratingBanner({ title }: { title: string }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Date.now() - started), 400);
+    return () => window.clearInterval(timer);
+  }, []);
+  const percent = 95 * (1 - Math.exp(-elapsed / 20_000));
+
+  return (
+    <div
+      role="status"
+      className="space-y-2.5 rounded-[1.25rem] border border-border/70 bg-white/90 px-5 py-4 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)]"
+    >
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex items-center gap-2 font-medium text-foreground">
+          <Loader2 className="size-4 animate-spin text-primary" />
+          {title}
+        </span>
+        <span className="text-muted-foreground tabular-nums">{Math.round(percent)}%</span>
+      </div>
+      <Progress
+        value={percent}
+        aria-label="Question generation progress"
+        className="h-1.5"
+        indicatorClassName="duration-500"
+      />
+      <p className="text-muted-foreground text-xs">Usually under a minute.</p>
+    </div>
+  );
+}
+
+// This run's served questions as a one-line trail in the run header, oldest
+// first so it reads as the run's history. Colour carries the outcome, the
+// tooltip and accessible name carry type and score, and a click opens the
+// past-question sheet. The open question is outlined, not filled.
+function QuestionTrail({
   attempts,
   onSelect,
 }: {
   attempts: AttemptOut[];
   onSelect: (attempt: AttemptOut) => void;
 }) {
-  const ordered = [...attempts].reverse();
-
+  if (attempts.length === 0) return null;
   return (
-    <CollapsiblePanel
-      title="Recent questions"
-      summary={`${attempts.length} from this run`}
-      openLabel="Show"
-      closeLabel="Hide"
-      defaultOpen
-    >
-      {ordered.length === 0 ? (
-        <p className="text-muted-foreground text-xs">Nothing served yet this run.</p>
-      ) : (
-        <div className="space-y-1.5">
-          {ordered.map((attempt) => (
+    <ol className="flex flex-wrap gap-1.5" aria-label="Recent questions">
+      {attempts.map((attempt) => {
+        const tone = attemptTone(attempt);
+        const label = [
+          `Q${attempt.ordinal}`,
+          attempt.question_type ? questionTypeLabel(attempt.question_type) : null,
+          attempt.score === null ? "in progress" : `${attempt.score.toFixed(0)}/100`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <li key={attempt.id}>
             <button
-              key={attempt.id}
               type="button"
+              title={label}
+              aria-label={label}
               onClick={() => onSelect(attempt)}
               className={cn(
-                "flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors hover:bg-white",
-                attemptTone(attempt) === "success" && "border-emerald-500/25 bg-emerald-50/70",
-                attemptTone(attempt) === "warn" && "border-amber-500/25 bg-amber-50/70",
-                attemptTone(attempt) === "error" && "border-rose-500/25 bg-rose-50/70",
-                attemptTone(attempt) === "current" && "border-border/60 bg-background",
+                "h-7 min-w-9 rounded-md border px-2 font-medium text-xs tabular-nums transition-colors",
+                tone === "success" &&
+                  "border-emerald-500/30 bg-emerald-50 text-emerald-900 hover:bg-emerald-100",
+                tone === "warn" &&
+                  "border-amber-500/30 bg-amber-50 text-amber-900 hover:bg-amber-100",
+                tone === "error" && "border-rose-500/30 bg-rose-50 text-rose-900 hover:bg-rose-100",
+                tone === "current" &&
+                  "border-foreground/30 border-dashed bg-white text-foreground hover:bg-muted",
               )}
             >
-              <span className="min-w-0 truncate">
-                <span className="font-medium text-foreground">Q{attempt.ordinal}</span>
-                {attempt.question_type ? (
-                  <span className="ml-1.5 text-muted-foreground">
-                    {questionTypeLabel(attempt.question_type)}
-                  </span>
-                ) : null}
-              </span>
-              <span className="shrink-0 font-medium text-foreground">
-                {attempt.score === null ? "In progress" : `${attempt.score.toFixed(0)}/100`}
-              </span>
+              Q{attempt.ordinal}
             </button>
-          ))}
-        </div>
-      )}
-    </CollapsiblePanel>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -525,82 +561,98 @@ function RecentQuestionsPanel({
 // app/adaptive/selection.py is currently favoring. All of this comes from
 // the same student-progress fetch the session already made for the
 // "recent questions" strip -- nothing new to load.
-function ProgressSidebar({ progress }: { progress: StudentProgressOut }) {
+// The run header's mastery strip: the mean topic mastery by default, with the
+// per-topic bars and the subtopics the roulette in app/adaptive/selection.py
+// is favouring behind "Show more".
+function RunMastery({ progress }: { progress: StudentProgressOut }) {
+  const [expanded, setExpanded] = useState(false);
   // Highest weakness first: these are the subtopics most likely to be
   // picked next by the weighted roulette.
   const weakestSubtopics = useMemo(
     () => [...progress.subtopics].sort((left, right) => right.weakness - left.weakness).slice(0, 5),
     [progress.subtopics],
   );
+  const averageMastery =
+    progress.topics.length === 0
+      ? null
+      : masteryPercent(
+          progress.topics.reduce((sum, topic) => sum + topic.p_known, 0) / progress.topics.length,
+        );
 
   return (
-    <Card className="border-border/70 bg-white/85">
-      <CardContent className="divide-y divide-border/60 py-0">
-        <div className="flex items-center gap-6 py-4 first:pt-5">
-          <div>
-            <div className="text-muted-foreground text-xs">Answered</div>
-            <div className="font-heading font-semibold text-2xl text-foreground">
-              {progress.answered}
-            </div>
+    <div className="mt-5 space-y-4 border-border/60 border-t pt-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="font-medium text-foreground text-sm">Topic mastery</span>
+        {averageMastery === null ? (
+          <span className="text-muted-foreground text-xs">
+            Appears once a question has been scored.
+          </span>
+        ) : (
+          <>
+            <Progress value={averageMastery} className="h-1.5 min-w-32 flex-1" />
+            <span className="text-muted-foreground text-sm">{averageMastery.toFixed(0)}% avg</span>
+          </>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+          className="ml-auto rounded-full"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </Button>
+      </div>
+
+      {expanded ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-3">
+            <div className="font-medium text-foreground text-sm">By topic</div>
+            {progress.topics.length === 0 ? (
+              <p className="text-muted-foreground text-xs">No topics scored yet.</p>
+            ) : (
+              progress.topics.map((topic) => (
+                <div key={topic.topic_id} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-medium text-foreground">{topic.topic_name}</span>
+                    <Badge
+                      variant={topic.band === "high" ? "secondary" : "outline"}
+                      className="text-[10px]"
+                    >
+                      {topic.band}
+                    </Badge>
+                  </div>
+                  <Progress value={masteryPercent(topic.p_known)} className="h-1.5" />
+                </div>
+              ))
+            )}
           </div>
-          {progress.average_score !== null ? (
+
+          <div className="space-y-3">
             <div>
-              <div className="text-muted-foreground text-xs">Average score</div>
-              <div className="font-heading font-semibold text-2xl text-foreground">
-                {progress.average_score.toFixed(0)}
-                <span className="ml-1 font-sans text-muted-foreground text-sm">/100</span>
-              </div>
+              <div className="font-medium text-foreground text-sm">Focus areas</div>
+              <p className="text-muted-foreground text-xs">
+                What the adaptive engine is weighting most heavily for you right now.
+              </p>
             </div>
-          ) : null}
-        </div>
-
-        <div className="space-y-3 py-4">
-          <div className="font-medium text-foreground text-sm">Topic mastery</div>
-          {progress.topics.length === 0 ? (
-            <p className="text-muted-foreground text-xs">
-              Mastery appears here once a question has been scored.
-            </p>
-          ) : (
-            progress.topics.map((topic) => (
-              <div key={topic.topic_id} className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-medium text-foreground">{topic.topic_name}</span>
-                  <Badge
-                    variant={topic.band === "high" ? "secondary" : "outline"}
-                    className="text-[10px]"
-                  >
-                    {topic.band}
-                  </Badge>
+            {weakestSubtopics.length === 0 ? (
+              <p className="text-muted-foreground text-xs">No weak spots measured yet.</p>
+            ) : (
+              weakestSubtopics.map((subtopic) => (
+                <div key={subtopic.subtopic_id} className="space-y-1.5">
+                  <div className="text-xs">
+                    <span className="font-medium text-foreground">{subtopic.subtopic_name}</span>
+                    <span className="text-muted-foreground"> · {subtopic.topic_name}</span>
+                  </div>
+                  <Progress value={weaknessPercent(subtopic.weakness)} className="h-1.5" />
                 </div>
-                <Progress value={masteryPercent(topic.p_known)} className="h-1.5" />
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="space-y-3 py-4 last:pb-5">
-          <div>
-            <div className="font-medium text-foreground text-sm">Focus areas</div>
-            <p className="text-muted-foreground text-xs">
-              What the adaptive engine is weighting most heavily for you right now.
-            </p>
+              ))
+            )}
           </div>
-          {weakestSubtopics.length === 0 ? (
-            <p className="text-muted-foreground text-xs">No weak spots measured yet.</p>
-          ) : (
-            weakestSubtopics.map((subtopic) => (
-              <div key={subtopic.subtopic_id} className="space-y-1.5">
-                <div className="text-xs">
-                  <span className="font-medium text-foreground">{subtopic.subtopic_name}</span>
-                  <span className="text-muted-foreground"> · {subtopic.topic_name}</span>
-                </div>
-                <Progress value={weaknessPercent(subtopic.weakness)} className="h-1.5" />
-              </div>
-            ))
-          )}
         </div>
-      </CardContent>
-    </Card>
+      ) : null}
+    </div>
   );
 }
 
@@ -624,10 +676,17 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   // next question -- the result card needs it to show "your answer" next to
   // the correct one.
   const [lastAnswer, setLastAnswer] = useState("");
+  // The attempt just answered: after "Next question" the query still holds it until /next
+  // returns, and it must not be shown (or submitted) again meanwhile.
+  const [answeredAttemptId, setAnsweredAttemptId] = useState<number | null>(null);
   const [selectedPastAttempt, setSelectedPastAttempt] = useState<AttemptOut | null>(null);
+  // "Next question" was clicked: the result stays on screen while /next is
+  // asked (and polled, if the question is still being written), and is only
+  // swapped out once there is something to show instead.
+  const [advancing, setAdvancing] = useState(false);
 
   const currentQuestion = useNextQuestion(trainingSessionId, {
-    enabled: session.data?.ended_at === null && result === null,
+    enabled: session.data?.ended_at === null && (result === null || advancing),
   });
   const selectedPastQuestion = useAttemptReview(selectedPastAttempt?.id ?? null, {
     enabled: selectedPastAttempt !== null && selectedPastAttempt.score !== null,
@@ -665,7 +724,6 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     () => sessionAttempts.filter((attempt) => attempt.score !== null),
     [sessionAttempts],
   );
-  const pendingCount = sessionAttempts.filter((attempt) => attempt.score === null).length;
   // Position of the open past-question sheet within this run's attempt list,
   // so its Previous/Next buttons can step through the same ordering the
   // "Recent questions" panel shows.
@@ -696,8 +754,12 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
   // `data` outlives a later failed fetch: after an answer, /next can say
   // "being written" while still holding the question just answered. Only a
   // question the server is serving right now, in a run still open, is shown.
+  const staleAnswered =
+    currentQuestion.data !== undefined && currentQuestion.data.attempt_id === answeredAttemptId;
   const openQuestion =
-    currentQuestion.isError || session.data?.ended_at ? undefined : currentQuestion.data;
+    currentQuestion.isError || session.data?.ended_at || staleAnswered
+      ? undefined
+      : currentQuestion.data;
 
   const submitAnswer = async () => {
     if (!openQuestion || answer.trim().length === 0) return;
@@ -711,6 +773,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
         body: { answer: submitted },
       });
       setResult(scored);
+      setAnsweredAttemptId(scored.attempt_id);
       setLastAnswer(submitted);
       setAnswer("");
     } catch {
@@ -718,13 +781,29 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
     }
   };
 
-  // "Next question": clear the result so the served-question query re-enables,
-  // then force it to fetch immediately rather than waiting on cache staleness.
+  // "Next question": keep the result up and fetch /next right away rather than
+  // waiting on cache staleness. The effect below swaps the result out.
   const advance = () => {
-    setResult(null);
+    setAdvancing(true);
     setAnswer("");
     void currentQuestion.refetch();
   };
+
+  // Leave the result once /next has settled on anything but "still being
+  // written": a fresh question, or a state the page renders in its place
+  // (bank empty, curriculum done, a real error).
+  const nextGenerating = unavailable?.code === "question_generating";
+  const nextSettled =
+    !currentQuestion.isFetching &&
+    (currentQuestion.isError
+      ? !nextGenerating
+      : currentQuestion.data !== undefined && !staleAnswered);
+  useEffect(() => {
+    if (advancing && nextSettled) {
+      setResult(null);
+      setAdvancing(false);
+    }
+  }, [advancing, nextSettled]);
 
   // The tutorial column follows the loop: pre-teaching while a question is
   // open, the result card's blocks once it is answered.
@@ -737,9 +816,10 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
       <StudentTutorialBlocks blocks={tutorialBlocks} moment={result ? "after" : "before"} />
     </div>
   ) : null;
-  const rightColumn = hasTutorial
-    ? "xl:col-start-2"
-    : "xl:col-span-2 xl:mx-auto xl:w-full xl:max-w-3xl";
+  // With no tutorial the question gets the full width and splits into a
+  // problem pane and an answer pane, so the prompt keeps a readable measure.
+  const rightColumn = hasTutorial ? "xl:col-start-2" : "xl:col-span-2";
+  const splitQuestion = !hasTutorial;
 
   const endRun = async () => {
     try {
@@ -752,6 +832,7 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
 
   return (
     <>
+      {session.data ? null : <StudentBrand className="mb-0" />}
       {session.isPending ? <TableSkeleton rows={4} /> : null}
       {session.isError ? <QueryError error={session.error} /> : null}
 
@@ -779,75 +860,87 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
             hasNext={selectedPastIndex >= 0 && selectedPastIndex < sessionAttempts.length - 1}
           />
 
-          <section className="rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6 xl:col-span-2 xl:row-start-1">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1 space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
-                    Run #{session.data.id}
-                  </Badge>
-                  {currentStreak >= 2 ? (
-                    <Badge className="gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-900 hover:bg-amber-100">
-                      <Flame className="size-3.5" />
-                      {currentStreak} in a row
+          {/* Brand on the left, run progress on the right. */}
+          <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-stretch xl:col-span-2 xl:row-start-1">
+            <StudentBrand className="mb-0 shrink-0" />
+            <section className="min-w-0 flex-1 rounded-[1.25rem] border border-border/70 bg-white/86 px-5 py-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.28)] sm:px-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1 space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="rounded-full bg-background px-2.5 py-0.5">
+                      Run #{session.data.id}
                     </Badge>
-                  ) : null}
-                  <span className="text-muted-foreground text-sm">
-                    Started {learnerDate(session.data.created_at)}
-                  </span>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] md:items-end">
-                  <div className="space-y-1">
-                    <div className="font-medium text-muted-foreground text-sm">
-                      {session.data.student_name
-                        ? `${session.data.student_name} — progress`
-                        : "Session progress"}
-                    </div>
-                    <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
-                      {session.data.answered_count}
-                      <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
-                        solved
-                      </span>
-                    </div>
+                    {currentStreak >= 2 ? (
+                      <Badge className="gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-900 hover:bg-amber-100">
+                        <Flame className="size-3.5" />
+                        {currentStreak} in a row
+                      </Badge>
+                    ) : null}
+                    <span className="text-muted-foreground text-sm">
+                      Started {learnerDate(session.data.created_at)}
+                    </span>
                   </div>
 
-                  <div className="space-y-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] md:items-end">
+                    <div className="space-y-1">
+                      <div className="font-medium text-muted-foreground text-sm">
+                        {session.data.student_name
+                          ? `${session.data.student_name} — progress`
+                          : "Session progress"}
+                      </div>
+                      <div className="flex items-baseline gap-6">
+                        <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
+                          {session.data.answered_count}
+                          <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
+                            solved
+                          </span>
+                        </div>
+                        {progress.data?.average_score != null ? (
+                          <div className="font-heading font-semibold text-4xl text-foreground tracking-[-0.03em]">
+                            {progress.data.average_score.toFixed(0)}
+                            <span className="ml-2 font-medium font-sans text-base text-muted-foreground">
+                              avg /100
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
                       <div className="font-medium text-foreground text-sm">
                         {session.data.set_label ?? `Set #${session.data.set_version_id ?? "?"}`}
                       </div>
-                      <div className="text-muted-foreground text-sm">
-                        {session.data.answered_count} solved
-                        {pendingCount > 0
-                          ? `, ${pendingCount} in progress`
-                          : ", no pending question"}
+                      <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
+                        <span>{session.data.served_count} served total</span>
+                        <span>{session.data.answered_count} solved</span>
                       </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
-                      <span>{session.data.served_count} served total</span>
-                      <span>{session.data.answered_count} solved</span>
-                      {pendingCount > 0 ? <span>{pendingCount} pending</span> : null}
+                      <QuestionTrail attempts={sessionAttempts} onSelect={setSelectedPastAttempt} />
                     </div>
                   </div>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void endRun()}
+                  disabled={endTrainingSession.isPending || session.data.ended_at !== null}
+                  className="rounded-full bg-white px-4 lg:self-start"
+                >
+                  End session
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void endRun()}
-                disabled={endTrainingSession.isPending || session.data.ended_at !== null}
-                className="rounded-full bg-white px-4 lg:self-start"
-              >
-                End session
-              </Button>
-            </div>
-          </section>
+              {progress.data ? <RunMastery progress={progress.data} /> : null}
+            </section>
+          </div>
 
           {result ? null : tutorialPanel}
 
           {/* Question column: alerts, the result, then the live question. */}
           <div className={`flex min-w-0 flex-col gap-5 xl:row-start-2 ${rightColumn}`}>
+            {/* Only while /next is polled: with the result up and the query
+                paused, a "generating" error is stale and would never clear. */}
+            {nextGenerating && (result === null || advancing) && !session.data.ended_at ? (
+              <GeneratingBanner title={unavailable?.message ?? "Writing your next question"} />
+            ) : null}
             {endTrainingSession.isError ? <QueryError error={endTrainingSession.error} /> : null}
 
             {session.data.ended_at ? (
@@ -867,20 +960,12 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                 detail={answeredQuestion.data ?? null}
                 submittedAnswer={lastAnswer}
                 onNext={advance}
+                advancing={advancing}
               />
             ) : null}
             {answerAttempt.isError ? <QueryError error={answerAttempt.error} /> : null}
 
-            {unavailable?.code === "question_generating" ? (
-              <Alert>
-                <Loader2 className="animate-spin" />
-                <AlertTitle>{unavailable.message}</AlertTitle>
-                <AlertDescription>
-                  {unavailable.detail ? <p>{unavailable.detail}</p> : null}
-                  <p>It will appear here as soon as it is ready.</p>
-                </AlertDescription>
-              </Alert>
-            ) : unavailable ? (
+            {unavailable && !nextGenerating ? (
               <Alert>
                 <AlertCircle />
                 <AlertTitle>
@@ -918,7 +1003,10 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
               </Alert>
             ) : null}
 
-            {currentQuestion.isPending && result === null && !session.data.ended_at ? (
+            {(currentQuestion.isPending || staleAnswered) &&
+            result === null &&
+            !nextGenerating &&
+            !session.data.ended_at ? (
               <TableSkeleton rows={3} />
             ) : null}
             {currentQuestion.isError && unavailable === null ? (
@@ -964,8 +1052,14 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                     </div>
                   ) : null}
                 </CardHeader>
-                <CardContent className="space-y-5 px-6 py-6 sm:px-7">
-                  <div className="space-y-4">
+                <CardContent
+                  className={cn(
+                    "space-y-5 px-6 py-6 sm:px-7",
+                    splitQuestion &&
+                      "xl:grid xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] xl:items-start xl:gap-8 xl:space-y-0",
+                  )}
+                >
+                  <div className="min-w-0 space-y-4">
                     <div className="rounded-[1.5rem] border border-border/70 bg-white/80 p-5 shadow-[0_18px_40px_-34px_rgb(19_26_28_/_0.32)]">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.18em]">
@@ -973,9 +1067,10 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                         </div>
                         <ArrowUpRight className="size-4 text-muted-foreground" />
                       </div>
-                      <div className="wrap-anywhere whitespace-pre-wrap text-[0.98rem] text-foreground leading-8">
-                        {openQuestion.prompt}
-                      </div>
+                      <PromptText
+                        text={openQuestion.prompt}
+                        className="wrap-anywhere text-[0.98rem] leading-8"
+                      />
                     </div>
 
                     {openQuestion.code ? (
@@ -997,28 +1092,21 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                     ) : null}
                   </div>
 
-                  <AnswerForm
-                    question={openQuestion}
-                    answer={answer}
-                    onAnswerChange={setAnswer}
-                    onSubmit={() => void submitAnswer()}
-                    submitting={answerAttempt.isPending}
-                  />
+                  <div className="min-w-0">
+                    <AnswerForm
+                      question={openQuestion}
+                      answer={answer}
+                      onAnswerChange={setAnswer}
+                      onSubmit={() => void submitAnswer()}
+                      submitting={answerAttempt.isPending}
+                    />
+                  </div>
                 </CardContent>
               </Card>
             ) : null}
           </div>
 
           {result ? tutorialPanel : null}
-
-          {/* Omitted until progress has loaded, rather than reserving space
-              with a skeleton. */}
-          {progress.data ? (
-            <div className={`flex min-w-0 flex-col gap-5 xl:row-start-3 ${rightColumn}`}>
-              <RecentQuestionsPanel attempts={sessionAttempts} onSelect={setSelectedPastAttempt} />
-              <ProgressSidebar progress={progress.data} />
-            </div>
-          ) : null}
         </div>
       ) : null}
     </>

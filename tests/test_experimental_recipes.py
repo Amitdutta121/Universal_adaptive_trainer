@@ -15,6 +15,7 @@ from test_tutorial_routes import FlatEmbedder
 
 from app.domain.enums import GuidanceLevel, TutorialBlockStatus, TutorialRenderer
 from app.persistence.models import (
+    ChunkRow,
     CourseRow,
     CurriculumVersionRow,
     SubtopicRow,
@@ -322,3 +323,78 @@ def test_deleting_a_recipe_hides_its_blocks_so_a_reused_id_starts_clean(
 
     session.refresh(block)
     assert block.status is TutorialBlockStatus.REJECTED
+
+
+def test_renaming_a_recipe_keeps_its_blocks(client: TestClient, session: Session) -> None:
+    course = _course(session)
+    subtopic_id = _subtopic(session, course)
+    row = _save(client, course)
+    block = _block(session, subtopic_id, TutorialBlockStatus.APPROVED)
+
+    renamed = client.put(
+        f"/api/experimental/recipes/{row['id']}",
+        json={"yaml": _yaml(name="Analogy first", summary="An analogy, then its limit.")},
+        headers=course,
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["blocks_retired"] == 0
+    session.refresh(block)
+    assert block.status is TutorialBlockStatus.APPROVED
+
+    rewritten = client.put(
+        f"/api/experimental/recipes/{row['id']}",
+        json={"yaml": _yaml(prompt="Use a kitchen analogy, then say where it breaks.")},
+        headers=course,
+    )
+    assert rewritten.json()["blocks_retired"] == 1
+
+
+def _example(subtopic_id: int, chunk_id: str, **changes: object) -> dict:
+    return {
+        "subtopic_id": subtopic_id,
+        "guidance_level": "worked",
+        "payload": {"markdown": "A for loop is like dealing cards one at a time."},
+        "chunk_ids": [chunk_id],
+        "model": "fake/model",
+    } | changes
+
+
+def test_saving_keeps_the_examples_that_pass_the_block_checks(
+    client: TestClient, session: Session
+) -> None:
+    course, other = _course(session), _course(session, "Other")
+    subtopic_id = _subtopic(session, course)
+    foreign_subtopic = _subtopic(session, other)
+    chunk_id = session.scalars(select(ChunkRow.id)).first()
+
+    response = client.post(
+        "/api/experimental/recipes",
+        json={
+            "yaml": _yaml(),
+            "examples": [
+                _example(subtopic_id, chunk_id),
+                _example(subtopic_id, chunk_id, payload={"html": "<p>wrong renderer</p>"}),
+                _example(subtopic_id, chunk_id, guidance_level="faded"),  # not a recipe level
+                _example(subtopic_id, "no-such-chunk"),
+                _example(foreign_subtopic, chunk_id),
+            ],
+        },
+        headers=course,
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["examples_kept"] == 1
+    kept = session.scalars(select(TutorialBlockRow)).all()
+    assert [(b.subtopic_id, b.recipe_id, b.status, b.model) for b in kept] == [
+        (subtopic_id, RECIPE["id"], TutorialBlockStatus.DRAFT, "fake/model")
+    ]
+    listed = client.get(
+        "/api/tutorial-blocks",
+        params={
+            "curriculum_version_id": _version_of(session, subtopic_id),
+            "recipe_id": RECIPE["id"],
+        },
+        headers=course,
+    ).json()
+    assert [block["payload"] for block in listed] == [kept[0].payload]

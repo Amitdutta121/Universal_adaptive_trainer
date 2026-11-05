@@ -17,6 +17,7 @@ import { LogOut, Plus, Settings } from "lucide-react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
+import { type PendingToggle, ToggleDialog } from "@/components/question-setup/toggle-dialog";
 import { QueryError } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +38,8 @@ import {
   useCoursesOverview,
   useCurrentUser,
   useLogout,
+  useQuestionVisibility,
+  useSetQuestionVisibility,
   useUpdateCourse,
 } from "@/lib/api/queries";
 import type { Schemas } from "@/lib/api/types";
@@ -46,6 +49,7 @@ import { NewCourseDialog } from "./new-course-dialog";
 import { GradingNote, TypeGroups } from "./question-type-picker";
 
 type CourseProgress = Schemas["CourseProgressOut"];
+type QuestionType = Schemas["QuestionType"];
 type ActivityEvent = Schemas["ActivityEventOut"];
 
 /** Each setup step: its label, and the screen that completes it. */
@@ -280,8 +284,12 @@ function RecentActivity({ events }: { events: ActivityEvent[] }) {
 /**
  * Rename a course, change its description, or change the question types it allows (ADR-054).
  * Creating one is the New course dialog, which starts from the subject's default types.
+ *
+ * Disallowing a type with approved questions asks whether to also hide them from students;
+ * allowing one back with hidden questions asks whether to show them again (ADR-070). The choice
+ * is applied after the course saves.
  */
-function CourseFormDialog({
+export function CourseFormDialog({
   course,
   onOpenChange,
 }: {
@@ -289,7 +297,13 @@ function CourseFormDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const updateCourse = useUpdateCourse();
-  const mutation = updateCourse;
+  const setVisibility = useSetQuestionVisibility(course.id);
+  const visibility = useQuestionVisibility(course.id, null);
+  const mutation = updateCourse.error ? updateCourse : setVisibility;
+  // Types whose approved questions to hide, or whose hidden questions to show, on save.
+  const [hideTypes, setHideTypes] = useState<ReadonlySet<string>>(new Set());
+  const [showTypes, setShowTypes] = useState<ReadonlySet<string>>(new Set());
+  const [pending, setPending] = useState<(PendingToggle & { typeId: string }) | null>(null);
   const nameId = useId();
   const descriptionId = useId();
   const [name, setName] = useState(course.name);
@@ -302,13 +316,46 @@ function CourseFormDialog({
     types.size !== course.question_types.length ||
     course.question_types.some((id) => !types.has(id));
 
-  function setType(id: string, on: boolean) {
+  function applyType(id: string, on: boolean) {
     setTypes((previous) => {
       const next = new Set(previous);
       if (on) next.add(id);
       else next.delete(id);
       return next;
     });
+  }
+
+  function mark(set: typeof setHideTypes, id: string, on: boolean) {
+    set((previous) => {
+      const next = new Set(previous);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  /** Switch a type, asking first when it has approved (off) or hidden (on) questions. */
+  function setType(id: string, on: boolean) {
+    mark(on ? setHideTypes : setShowTypes, id, false);
+    const tally = visibility.data?.by_type.find((entry) => entry.question_type === id);
+    const count = (on ? tally?.hidden : tally?.approved) ?? 0;
+    if (count === 0) return applyType(id, on);
+    setPending({
+      mode: on ? "on" : "off",
+      label: catalog.data?.question_types.find((type) => type.id === id)?.label ?? id,
+      scopeLabel: "the whole course",
+      count,
+      slotsBelowTarget: 0,
+      typeId: id,
+    });
+  }
+
+  function confirmType(withQuestions: boolean) {
+    if (!pending) return;
+    const on = pending.mode === "on";
+    applyType(pending.typeId, on);
+    mark(on ? setShowTypes : setHideTypes, pending.typeId, withQuestions);
+    setPending(null);
   }
 
   async function submit(event: React.FormEvent) {
@@ -319,8 +366,16 @@ function CourseFormDialog({
       description: description.trim(),
       ...(typesChanged ? { question_types: [...types] } : {}),
     };
+    const hide = [...hideTypes].filter((id) => !types.has(id));
+    const show = [...showTypes].filter((id) => types.has(id));
     try {
       await updateCourse.mutateAsync({ courseId: course.id, body });
+      if (hide.length > 0) {
+        await setVisibility.mutateAsync({ hidden: true, question_types: hide as QuestionType[] });
+      }
+      if (show.length > 0) {
+        await setVisibility.mutateAsync({ hidden: false, question_types: show as QuestionType[] });
+      }
       onOpenChange(false);
     } catch {
       // Rendered below with the backend's own message.
@@ -395,12 +450,21 @@ function CourseFormDialog({
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || types.size === 0 || mutation.isPending}>
-              {mutation.isPending ? "Saving…" : "Save changes"}
+            <Button
+              type="submit"
+              disabled={
+                !name.trim() ||
+                types.size === 0 ||
+                updateCourse.isPending ||
+                setVisibility.isPending
+              }
+            >
+              {updateCourse.isPending || setVisibility.isPending ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
+      <ToggleDialog pending={pending} onCancel={() => setPending(null)} onConfirm={confirmType} />
     </Dialog>
   );
 }

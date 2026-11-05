@@ -149,3 +149,24 @@ def test_an_ml_course_that_picks_a_code_type_gets_the_code_wording() -> None:
     assert ML_WITH_CODE.has_code_types and ML_WITH_CODE.code_language == "Python"
     assert set(issue_codes_for(ML_WITH_CODE)) >= TEST_ISSUE_CODES
     assert "machine-learning assessment question" in common_system(ML_WITH_CODE)
+
+
+def test_every_course_gets_the_prompt_style_rules() -> None:
+    for profile in (PYTHON_PROFILE, PHYSICS, BIOLOGY, ML):
+        system = common_system(profile)
+        assert "Write the prompt field in light Markdown" in system
+        assert "State the task in one short sentence" in system
+
+
+def test_backtick_rule_only_for_code_courses() -> None:
+    assert "`backticks`" in common_system(PYTHON_PROFILE)
+    assert "`backticks`" in common_system(ML_WITH_CODE)
+    for profile in (PHYSICS, BIOLOGY, ML):
+        assert "backtick" not in common_system(profile)
+
+
+def test_latex_rule_only_for_courses_with_math_types() -> None:
+    assert "LaTeX" in common_system(PHYSICS)
+    assert "numeric_response" in PHYSICS.question_types
+    assert "LaTeX" not in common_system(BIOLOGY)
+    assert "LaTeX" not in common_system(PYTHON_PROFILE)

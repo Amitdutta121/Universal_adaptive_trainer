@@ -30,12 +30,12 @@ from app.persistence.models import (
 )
 from app.subjects import profile_for_version
 from app.tutorials.approval import decisions
-from app.tutorials.clips import playable
+from app.tutorials.clips import course_has_video, playable
 from app.tutorials.composer import ComposeState, compose, frozen_blocks, guidance_for
 from app.tutorials.experimental import PREFIX as COURSE_RECIPE_PREFIX
 from app.tutorials.generator import course_recipes
 from app.tutorials.live import LiveQueue, bank_blocks, plan_live_block, queue_live_block
-from app.tutorials.schema import ContentKind, TutorialRecipe
+from app.tutorials.schema import ContentKind, RecipeTool, TutorialRecipe
 from app.tutorials.stats import recipe_weights, record_outcome, record_views
 
 #: A score that counts as a correct answer, as the student page shows it.
@@ -63,12 +63,16 @@ def servable_recipes(
     session: Session, subject: str, course_id: int | None, curriculum_version_id: int
 ) -> dict[str, TutorialRecipe]:
     """The recipes a run may show and write blocks for: the library's, and the course's own
-    (made in the recipe builder) only once a professor approved them for the taxonomy."""
+    (made in the recipe builder) only once a professor approved them for the taxonomy. A
+    video-clip recipe needs a course video; without one it is left out, so no live job is
+    queued for a clip that cannot be cut."""
     approved = decisions(session, curriculum_version_id)
+    has_video = course_has_video(session, course_id)
     return {
         recipe.id: recipe
         for recipe in course_recipes(session, subject, course_id)
-        if not recipe.id.startswith(COURSE_RECIPE_PREFIX) or approved.get(recipe.id) is True
+        if (not recipe.id.startswith(COURSE_RECIPE_PREFIX) or approved.get(recipe.id) is True)
+        and (recipe.tool is not RecipeTool.VIDEO_CLIP or has_video)
     }
 
 

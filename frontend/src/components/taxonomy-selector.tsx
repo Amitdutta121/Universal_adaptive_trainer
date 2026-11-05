@@ -38,8 +38,8 @@ export function TaxonomySelector() {
       const activated = await activateVersion.mutateAsync(versionId);
       toast.success(`Now working in "${activated.version.label}"`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not switch taxonomy.";
-      toast.error("Could not switch taxonomy", { description: message });
+      const message = error instanceof Error ? error.message : "Could not switch curriculum.";
+      toast.error("Could not switch curriculum", { description: message });
     }
   }
 
@@ -48,7 +48,7 @@ export function TaxonomySelector() {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[0.62rem] text-muted-foreground uppercase tracking-[0.16em]">
-            Taxonomy
+            Curriculum
           </span>
           {activeVersionId ? (
             <Badge variant="outline" className="h-5 rounded-full px-2 font-mono text-[0.6rem]">
@@ -65,9 +65,9 @@ export function TaxonomySelector() {
             <SelectTrigger
               size="sm"
               className="mt-1 h-8 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus-visible:ring-0"
-              aria-label="Taxonomy"
+              aria-label="Curriculum"
             >
-              <SelectValue placeholder="Select taxonomy" />
+              <SelectValue placeholder="Select curriculum" />
             </SelectTrigger>
             <SelectContent>
               {approvedVersions.map((version) => (
@@ -81,7 +81,7 @@ export function TaxonomySelector() {
           </Select>
         ) : (
           <p className="mt-1 text-muted-foreground text-sm">
-            No taxonomy yet.{" "}
+            No curriculum yet.{" "}
             <CourseLink href="/curriculum" className="underline underline-offset-4">
               Create one
             </CourseLink>

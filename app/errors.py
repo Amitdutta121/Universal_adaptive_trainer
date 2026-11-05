@@ -12,6 +12,7 @@ import logging
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,18 @@ def _http_error_text(exc: StarletteHTTPException) -> tuple[str, str]:
     return f"http_{exc.status_code}", message
 
 
+#: Postgres SQLSTATEs for "another transaction holds what you need": lock_not_available,
+#: serialization_failure, deadlock_detected. Kept for the move off SQLite.
+_BUSY_SQLSTATES = frozenset({"55P03", "40001", "40P01"})
+
+
+def database_busy(exc: OperationalError) -> bool:
+    """Whether ``exc`` means another writer held the database (worth retrying), not a fault."""
+    if "database is locked" in str(exc.orig).lower():
+        return True
+    return getattr(exc.orig, "pgcode", None) in _BUSY_SQLSTATES
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Attach the application's exception handlers to ``app``."""
 
@@ -329,6 +342,20 @@ def register_error_handlers(app: FastAPI) -> None:
             message="The submitted data was not valid.",
             detail=str(exc.errors()),
         )
+
+    @app.exception_handler(OperationalError)
+    async def _handle_database_error(request: Request, exc: OperationalError) -> Response:
+        if not database_busy(exc):
+            return await _handle_unexpected(request, exc)
+        logger.warning("Database busy on %s %s: %s", request.method, request.url.path, exc.orig)
+        response = _respond(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="database_busy",
+            message="The server is busy saving other work. Try again in a moment.",
+            detail=None,
+        )
+        response.headers["Retry-After"] = "2"
+        return response
 
     @app.exception_handler(Exception)
     async def _handle_unexpected(request: Request, exc: Exception) -> Response:

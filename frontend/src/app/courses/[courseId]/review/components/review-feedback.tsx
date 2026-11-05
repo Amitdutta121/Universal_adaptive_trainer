@@ -176,7 +176,7 @@ export function JudgeRail({
   function agreement(name: string) {
     const metric = detail.judge_trust?.metrics[name];
     if (!metric) return null;
-    const record = `${metric.agreements}/${metric.observations} professor agreements`;
+    const record = `${metric.agreements}/${metric.observations} agreements`;
     return metric.audit_revoked
       ? `${record} · Trust removed after a spot check`
       : `${record} · ${metric.trusted ? "Trusted" : "Learning"}`;

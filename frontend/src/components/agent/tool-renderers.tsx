@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { z } from "zod";
 import { coursePath } from "@/lib/course";
+import { PromptText } from "@/components/prompt-text";
 
 export type StyleSample = {
   prompt: string;
@@ -110,7 +111,7 @@ export function StyleComparison({ styles }: { styles: ComparedStyle[] }) {
           ) : null}
           {style.examples?.slice(0, 1).map((example) => (
             <div key={example.prompt} className="mt-2 rounded-md bg-muted p-1.5">
-              <p className="text-foreground">{example.prompt}</p>
+              <PromptText text={example.prompt} className="space-y-1 leading-normal" />
               {example.code ? (
                 <pre className="mt-1 overflow-x-auto font-mono text-[11px]">{example.code}</pre>
               ) : null}

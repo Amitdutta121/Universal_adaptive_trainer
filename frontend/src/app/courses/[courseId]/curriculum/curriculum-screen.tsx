@@ -61,7 +61,11 @@ import {
 import { draftFromVersion, emptyDraft } from "./builder/taxonomy-draft";
 import { clearDraft, loadDrafts, type SavedDraft } from "./builder/taxonomy-draft-storage";
 import { CurriculumVersionsTable } from "./components/curriculum-versions-table";
-import { DraftWithAiDialog, type TaxonomyDraft } from "./components/draft-with-ai-dialog";
+import {
+  type DraftRequest,
+  DraftWithAiForm,
+  type TaxonomyDraft,
+} from "./components/draft-with-ai-dialog";
 import { TaxonomyImportDialog } from "./components/taxonomy-import-dialog";
 import { VersionDeleteDialog } from "./components/version-delete-dialog";
 import { VersionEditDialog } from "./components/version-edit-dialog";
@@ -102,7 +106,10 @@ export function CurriculumScreen() {
   );
   const [search, setSearch] = useQueryState("q", parseAsString.withDefault(""));
   const [importOpen, setImportOpen] = useState(false);
-  const [draftOpen, setDraftOpen] = useState(false);
+  /** "Draft with AI" opens the builder with the request form beside it, not a separate dialog. */
+  const [aiPanel, setAiPanel] = useState(false);
+  /** The request behind the AI draft in the builder; while set, its form sits beside the builder. */
+  const [aiRequest, setAiRequest] = useState<DraftRequest | null>(null);
 
   // The builder modal. `editor` is what it was opened with (`null` = closed); a `source` of `null`
   // inside it means "pick up the unsaved draft kept in this browser".
@@ -167,29 +174,38 @@ export function CurriculumScreen() {
       });
     } catch {
       toast.error(`Could not open “${target.label}”`, {
-        description: "The taxonomy could not be loaded. Try again.",
+        description: "The curriculum could not be loaded. Try again.",
       });
     } finally {
       if (attempt === opened.current) setOpeningId(null);
     }
   }
 
-  /** Open an AI-proposed taxonomy in the builder, unsaved, for review (ADR-052). */
-  function openAiDraft(result: TaxonomyDraft) {
+  /**
+   * Open an AI-proposed taxonomy in the builder, unsaved, for review (ADR-052). Drafted from beside
+   * a saved taxonomy, the draft stays tied to it: it keeps its name, and "Save changes" updates it.
+   */
+  function openAiDraft(result: TaxonomyDraft, request: DraftRequest) {
     opened.current += 1;
-    setDraftOpen(false);
-    setEditor({
-      source: {
-        origin: null,
-        draft: draftFromVersion(result.document.label, result.document.topics),
-        aiDraft: { draftedBy: result.draftedBy, analysis: result.analysis },
-      },
+    setAiPanel(true);
+    setAiRequest(request);
+    setEditor((current) => {
+      const origin = current?.source?.origin ?? null;
+      return {
+        source: {
+          origin,
+          draft: draftFromVersion(origin?.label ?? result.document.label, result.document.topics),
+          aiDraft: { draftedBy: result.draftedBy, analysis: result.analysis },
+        },
+      };
     });
   }
 
   function closeEditor() {
     opened.current += 1;
     setEditor(null);
+    setAiRequest(null);
+    setAiPanel(false);
     setDirty(false);
     setDiscarding(false);
     setDrafts(loadDrafts());
@@ -212,12 +228,15 @@ export function CurriculumScreen() {
           title="Draft with AI"
           description="Describe the course and the AI proposes topics and subtopics. You review every row before anything is used."
           action="Draft with AI"
-          onClick={() => setDraftOpen(true)}
+          onClick={() => {
+            setAiPanel(true);
+            void open(null);
+          }}
         />
         <StartCard
           icon={<FileJson className="size-4" />}
           title="Import JSON"
-          description="Upload a finished taxonomy document, for example one exported from another course."
+          description="Upload a finished curriculum document, for example one exported from another course."
           action="Import"
           onClick={() => setImportOpen(true)}
         />
@@ -225,7 +244,7 @@ export function CurriculumScreen() {
           icon={<ListTree className="size-4" />}
           title="Build by hand"
           description="Start from a blank outline and add topics and subtopics yourself."
-          action="New taxonomy"
+          action="New curriculum"
           onClick={() => void open(null)}
         />
       </div>
@@ -235,11 +254,11 @@ export function CurriculumScreen() {
         : drafts.map((draft) => (
             <Alert key={draft.key}>
               <History />
-              <AlertTitle>Unsaved taxonomy: “{draft.draft.label || "Untitled"}”</AlertTitle>
+              <AlertTitle>Unsaved curriculum: “{draft.draft.label || "Untitled"}”</AlertTitle>
               <AlertDescription>
                 {draft.origin
                   ? `Changes to “${draft.origin.label}” you were making`
-                  : "A taxonomy you were building"}
+                  : "A curriculum you were building"}
                 , last edited {formatTimestamp(draft.savedAt)}.
               </AlertDescription>
               <AlertAction className="flex gap-1">
@@ -279,7 +298,7 @@ export function CurriculumScreen() {
               onChange={(event) => setSearch(event.target.value || null)}
               placeholder="Search by name"
               className="max-w-xs"
-              aria-label="Search taxonomies by name"
+              aria-label="Search curricula by name"
             />
             <Select
               value={standing}
@@ -311,7 +330,7 @@ export function CurriculumScreen() {
           {versions.isSuccess && visible.length === 0 ? (
             total === 0 ? (
               <EmptyState
-                title="No taxonomy has been saved yet"
+                title="No curriculum has been saved yet"
                 hint="Draft one with AI, import a document, or build one by hand with the options above."
               />
             ) : (
@@ -337,10 +356,6 @@ export function CurriculumScreen() {
       </Card>
 
       <TaxonomyImportDialog open={importOpen} onOpenChange={setImportOpen} />
-      {/* Remounted per opening so a previous attempt's book and error do not linger. */}
-      {draftOpen ? (
-        <DraftWithAiDialog open onOpenChange={setDraftOpen} onDrafted={openAiDraft} />
-      ) : null}
 
       {/* The builder: a big modal, almost the whole screen. */}
       <Dialog open={editor !== null} onOpenChange={(open) => !open && requestClose()}>
@@ -364,17 +379,33 @@ export function CurriculumScreen() {
           }}
         >
           <DialogHeader className="sr-only">
-            <DialogTitle>Taxonomy builder</DialogTitle>
+            <DialogTitle>Curriculum builder</DialogTitle>
             <DialogDescription>
-              Build a topic and subtopic taxonomy, or edit a copy of a saved one.
+              Build a topic and subtopic curriculum, or edit a copy of a saved one.
             </DialogDescription>
           </DialogHeader>
-          <TaxonomyBuilder
-            ref={builder}
-            source={editor?.source ?? null}
-            onDirtyChange={setDirty}
-            onSaved={closeEditor}
-          />
+          <div className="flex min-h-0 flex-1">
+            {aiPanel || aiRequest || editor?.source?.origin ? (
+              <aside
+                aria-label="AI request"
+                className="hidden w-[360px] shrink-0 overflow-y-auto border-r p-4 lg:block"
+              >
+                <DraftWithAiForm
+                  variant="panel"
+                  initial={aiRequest ?? undefined}
+                  onDrafted={openAiDraft}
+                />
+              </aside>
+            ) : null}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <TaxonomyBuilder
+                ref={builder}
+                source={editor?.source ?? null}
+                onDirtyChange={setDirty}
+                onSaved={closeEditor}
+              />
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -383,7 +414,7 @@ export function CurriculumScreen() {
           <DialogHeader>
             <DialogTitle>Discard your changes?</DialogTitle>
             <DialogDescription>
-              This taxonomy has changes that are not saved. Closing throws them away.
+              This curriculum has changes that are not saved. Closing throws them away.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -25,6 +25,7 @@ from app.persistence.repositories import CurriculumRepository
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.settings_store import ModelRole
 from app.tutorials.approval import decide_recipe, decisions, subtopic_ids_of
+from app.tutorials.clips import course_has_video
 from app.tutorials.generator import (
     MAX_ATTEMPTS,
     BlockRequest,
@@ -92,8 +93,14 @@ def list_recipes(
         decided = decisions(session, curriculum_version_id)
     recipes = course_recipes(session, profile.storage_key, course)
     ids = {recipe.id for recipe in recipes}
+    has_video = course_has_video(session, course)
     return TutorialRecipeListResponse(
         live=get_settings().tutorials_live,
+        needs_video=[
+            recipe.id
+            for recipe in recipes
+            if recipe.tool is RecipeTool.VIDEO_CLIP and not has_video
+        ],
         subject=profile.storage_key,
         recipes=recipes,
         decisions=decided,

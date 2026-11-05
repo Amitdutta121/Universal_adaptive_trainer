@@ -1,19 +1,20 @@
 "use client";
 
 /**
- * The Questions page header button that opens the setup modal. Setup is per subtopic of the
- * approved taxonomy, so without one the button is disabled and says why. Once a setup exists it
- * reads "Edit setup".
+ * The Questions page start card that opens the setup modal. Setup is per subtopic of the
+ * approved taxonomy, so without one the card's button is disabled and the card says why.
+ * Once a setup exists the button reads "Edit setup".
  */
 
 import { ListChecks } from "lucide-react";
-import { useId, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useState } from "react";
+import { StartCard } from "@/components/start-card";
 import { useApprovedCurriculum, useCurrentSetup } from "@/lib/api/queries";
 import { QuestionSetupDialog } from "./question-setup-dialog";
 
 const NO_TAXONOMY_HINT = "Approve a taxonomy first: questions are set up per subtopic.";
+const DESCRIPTION =
+  "Choose which question types and styles each subtopic uses and how many questions to aim for.";
 
 export function QuestionSetupButton() {
   const curriculum = useApprovedCurriculum();
@@ -23,50 +24,36 @@ export function QuestionSetupButton() {
   // A new number each opening. The suggestion query uses it so a remount of this
   // opening shares one request, and the next opening asks again.
   const [suggestionSession, setSuggestionSession] = useState(0);
-  const hintId = useId();
 
   const existing = current.data?.setup ?? null;
   const label = existing ? "Edit setup" : "Set up questions";
+  const card = {
+    icon: <ListChecks className="size-4" />,
+    title: "Question setup",
+    action: label,
+  };
 
   if (!curriculum.data) {
-    const hint = curriculum.isPending ? null : NO_TAXONOMY_HINT;
-    const button = (
-      <Button size="sm" className="h-9" disabled aria-describedby={hint ? hintId : undefined}>
-        <ListChecks data-icon="inline-start" />
-        {label}
-      </Button>
-    );
-    if (!hint) return button;
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {/* A disabled button gets no pointer events; the wrapper carries the tooltip. */}
-          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus target for the tooltip of a disabled button */}
-          <span tabIndex={0} className="inline-flex rounded-lg">
-            {button}
-            <span id={hintId} className="sr-only">
-              {hint}
-            </span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{hint}</TooltipContent>
-      </Tooltip>
+      <StartCard
+        {...card}
+        description={curriculum.isPending ? DESCRIPTION : NO_TAXONOMY_HINT}
+        onClick={() => {}}
+        disabled
+      />
     );
   }
 
   return (
     <>
-      <Button
-        size="sm"
-        className="h-9"
+      <StartCard
+        {...card}
+        description={DESCRIPTION}
         onClick={() => {
           setSuggestionSession((session) => session + 1);
           setOpen(true);
         }}
-      >
-        <ListChecks data-icon="inline-start" />
-        {label}
-      </Button>
+      />
       {open ? (
         <QuestionSetupDialog
           curriculum={curriculum.data}

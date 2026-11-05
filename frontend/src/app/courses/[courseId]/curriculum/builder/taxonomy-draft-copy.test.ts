@@ -55,7 +55,7 @@ describe("draftFromVersion", () => {
   });
 });
 
-describe("editing a saved taxonomy in place", () => {
+describe("editing a saved curriculum in place", () => {
   const SAVED = [
     {
       id: 10,
@@ -145,7 +145,7 @@ describe("draftSignature", () => {
     expect(draftSignature(edited)).toBe(before);
   });
 
-  it("treats a blank draft as the baseline for a new taxonomy", () => {
+  it("treats a blank draft as the baseline for a new curriculum", () => {
     expect(draftSignature(emptyDraft())).toBe(draftSignature({ label: "", topics: [] }));
     expect(draftSignature({ label: "typed", topics: [] })).not.toBe(draftSignature(emptyDraft()));
   });

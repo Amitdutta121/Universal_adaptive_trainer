@@ -258,6 +258,9 @@ class QuestionStatus(StrEnum):
     VALIDATION_FAILED = "validation_failed"
     APPROVED = "approved"
     REJECTED = "rejected"
+    #: Approved, then hidden from students because its style or type was turned off
+    #: (ADR-070). Kept in the bank and shown again on request; never a reject.
+    HIDDEN = "hidden"
 
 
 class ReviewDecision(StrEnum):
@@ -439,6 +442,8 @@ class JobKind(StrEnum):
     BOOK_IMPORT = "book_import"
     #: Re-embedding every chunk in a newly chosen embedding model (Task 43).
     EMBEDDING_SWITCH = "embedding_switch"
+    #: Embedding a just-imported book or video's chunks (``app/retrieval/source_embedding.py``).
+    SOURCE_EMBEDDING = "source_embedding"
     #: One new question from an existing one, with instructor feedback (ADR-066).
     REGENERATION = "regeneration"
     #: A taxonomy's tutorial blocks, every subtopic x recipe x guidance level (Task 24).

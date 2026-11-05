@@ -163,6 +163,21 @@ describe("JobsMenu", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["questions"] });
   });
 
+  it("announces a job that started and finished between two refetches", () => {
+    jobs = [failed];
+    const { rerender } = renderMenu();
+
+    jobs = [{ ...running, status: "done", done: 40, finished_at: "2026-10-06T12:06:00" }, failed];
+    rerender(
+      <NuqsTestingAdapter>
+        <JobsMenu />
+      </NuqsTestingAdapter>,
+    );
+
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["books"] });
+  });
+
   it("does not announce jobs that had already finished when the page loaded", () => {
     jobs = [failed, judged];
     renderMenu();

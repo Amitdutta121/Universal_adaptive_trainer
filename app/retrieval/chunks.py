@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -107,21 +108,44 @@ class ChunkEmbeddingStore:
             group = pending[start : start + _COMMIT_EVERY]
             texts = [embedding_text(chunk) for chunk in group]
             vectors = self._embedder.embed(texts)
-            for chunk, text, vector in zip(group, texts, vectors, strict=True):
-                arr = np.asarray(vector, dtype=np.float32)
-                self._session.add(
-                    ChunkEmbeddingRow(
-                        chunk_id=chunk.id,
-                        model=self._embedder.model,
-                        dim=int(arr.shape[0]),
-                        vector=arr.tobytes(),
-                        content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            rows = [
+                self._row(chunk.id, text, vector)
+                for chunk, text, vector in zip(group, texts, vectors, strict=True)
+            ]
+            self._session.add_all(rows)
+            try:
+                self._session.commit()
+            except IntegrityError:
+                # Another job (an import's embedding job, a round) embedded some of these
+                # chunks meanwhile (Task 137): keep its vectors, add only the rest.
+                self._session.rollback()
+                taken = set(
+                    self._session.scalars(
+                        select(ChunkEmbeddingRow.chunk_id).where(
+                            ChunkEmbeddingRow.model == self._embedder.model,
+                            ChunkEmbeddingRow.chunk_id.in_([row.chunk_id for row in rows]),
+                        )
                     )
                 )
-            self._session.commit()
+                self._session.add_all(
+                    self._row(chunk.id, text, vector)
+                    for chunk, text, vector in zip(group, texts, vectors, strict=True)
+                    if chunk.id not in taken
+                )
+                self._session.commit()
             if on_group is not None:
                 on_group(len(group))
         return len(pending)
+
+    def _row(self, chunk_id: str, text: str, vector: Sequence[float]) -> ChunkEmbeddingRow:
+        arr = np.asarray(vector, dtype=np.float32)
+        return ChunkEmbeddingRow(
+            chunk_id=chunk_id,
+            model=self._embedder.model,
+            dim=int(arr.shape[0]),
+            vector=arr.tobytes(),
+            content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        )
 
     def load(self, book_ids: Sequence[int] | None = None) -> ChunkVectors:
         """Every current-version vector in this embedder's model, normalised."""
@@ -220,12 +244,14 @@ class ChunkRetriever:
         top_k: int = 5,
         book_ids: list[int] | None = None,
         source_kind: ChunkSourceKind | None = None,
+        query: str | None = None,
     ) -> list[RetrievedChunk]:
         """Chunks for a subtopic: from its taxonomy's source books, else ``book_ids``, else the
         books of the taxonomy's own course -- never another course's books (ADR-060).
 
         ``source_kind=VIDEO`` searches the course's playable videos instead (Task 31): a
-        taxonomy's source books never list them.
+        taxonomy's source books never list them. ``query`` replaces the subtopic's own text
+        there (the clip recipe's lecture-style query).
         """
         subtopic = CurriculumRepository(self._session).get_subtopic(subtopic_id)
         version = self._session.get(CurriculumVersionRow, subtopic.topic.curriculum_version_id)
@@ -233,7 +259,8 @@ class ChunkRetriever:
             videos = playable_video_ids(self._session, version.course_id if version else None)
             if not videos:
                 return []
-            return self.search(subtopic_query_text(subtopic), book_ids=videos, top_k=top_k)
+            text = query if query is not None else subtopic_query_text(subtopic)
+            return self.search(text, book_ids=videos, top_k=top_k)
         if version and version.source_book_ids:
             scoped: list[int] | None = list(version.source_book_ids)
         elif book_ids is not None:

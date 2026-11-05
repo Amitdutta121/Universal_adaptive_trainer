@@ -1,6 +1,6 @@
 "use client";
 
-/** "Create a recipe" in the tutorials header: opens the recipe builder in a modal. */
+/** "Create a style" in the tutorials header: opens the recipe builder in a modal. */
 
 import { Plus } from "lucide-react";
 import { useState } from "react";
@@ -15,7 +15,7 @@ export function CreateRecipeButton() {
     <>
       <Button size="sm" className="h-9" onClick={() => setOpen(true)}>
         <Plus data-icon="inline-start" />
-        Create a recipe
+        Create a style
       </Button>
       {open ? (
         <RecipeEditorDialog courseId={courseId} recipe={null} onClose={() => setOpen(false)} />

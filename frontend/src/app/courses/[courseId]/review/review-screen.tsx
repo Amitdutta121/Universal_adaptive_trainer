@@ -146,7 +146,7 @@ export function ReviewScreen() {
       <div className="review-header-sticky sticky top-0 z-30 -mx-6 px-6 pt-1 pb-4">
         <PageHeader
           title="Review Queue"
-          summary="Professor feedback lives here now. Review the student-facing surface first, then decide."
+          summary="Review the questions for better alignment."
           actions={
             <>
               <NextRoundButton
@@ -195,29 +195,17 @@ export function ReviewScreen() {
       {isPending ? <TableSkeleton rows={6} /> : null}
 
       {data ? (
-        <Card className="review-panel border">
-          <CardHeader>
-            <div className="review-eyebrow">Queue</div>
-            <CardTitle>Professor feedback progress</CardTitle>
-            <CardDescription className="flex flex-wrap items-center gap-2">
-              <span>
-                <strong>{data.reviewed}</strong> of {data.total} reviewed
-              </span>
-              <span>-</span>
-              <span>{data.remaining} left</span>
-              {data.mode === "scoreable" ? (
-                <span>- {data.scoreable_remaining} scoreable left</span>
-              ) : null}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Progress
-              value={data.total ? (data.reviewed / data.total) * 100 : 0}
-              className="review-progress"
-            />
-            <JudgeTrustStrip curriculumVersionId={curriculumVersionId} />
-          </CardContent>
-        </Card>
+        <div className="review-panel flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[1rem] border px-4 py-2.5">
+          <span className="whitespace-nowrap text-sm">
+            <strong>{data.reviewed}</strong> of {data.total} reviewed · {data.remaining} left
+            {data.mode === "scoreable" ? ` · ${data.scoreable_remaining} scoreable left` : null}
+          </span>
+          <Progress
+            value={data.total ? (data.reviewed / data.total) * 100 : 0}
+            className="review-progress h-1.5 w-32 shrink-0"
+          />
+          <JudgeTrustStrip curriculumVersionId={curriculumVersionId} />
+        </div>
       ) : null}
       {data && !detail ? (
         nextRound.isGenerating ? (
@@ -261,20 +249,6 @@ export function ReviewScreen() {
               <div>
                 <div className="review-banner-title">A judge is unsure</div>
                 <p className="review-banner-copy">{detail.borderline_notes.join(". ")}.</p>
-              </div>
-            </div>
-          ) : null}
-          {detail.question.audit ? (
-            <div className="review-banner" data-tone="warn" data-testid="audit-banner">
-              <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--review-critical)]" />
-              <div>
-                <div className="review-banner-title">A judge rejected this — do you agree?</div>
-                <p className="review-banner-copy">
-                  {detail.question.audit_metric === "topic" ? "Topic" : "Difficulty"} judge
-                  {detail.question.audit_reason
-                    ? `: ${detail.question.audit_reason}`
-                    : " flagged this draft."}
-                </p>
               </div>
             </div>
           ) : null}

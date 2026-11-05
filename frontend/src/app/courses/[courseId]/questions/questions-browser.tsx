@@ -73,6 +73,7 @@ import {
 } from "@/lib/api/queries";
 import type { Difficulty, QuestionStatus, QuestionSummary } from "@/lib/api/types";
 import { CourseLink } from "@/components/course-link";
+import { PromptText } from "@/components/prompt-text";
 import { BUILT_QUESTION_TYPES, questionTypeLabel } from "@/lib/question-types/registry";
 import { useCourseId } from "@/lib/use-course";
 import { questionsSummary, subjectLabel } from "./questions-summary";
@@ -91,6 +92,7 @@ const STATUSES = [
   "validation_passed",
   "validation_failed",
   "approved",
+  "hidden",
   "rejected",
 ] as const satisfies readonly QuestionStatus[];
 
@@ -129,6 +131,7 @@ const NUMERIC_COLUMNS = new Set([
 const STATUS_VARIANT: Record<QuestionStatus, "default" | "secondary" | "destructive" | "outline"> =
   {
     approved: "default",
+    hidden: "outline",
     validation_passed: "secondary",
     generated: "outline",
     validation_failed: "destructive",
@@ -209,9 +212,11 @@ const columns: ColumnDef<QuestionSummary>[] = [
         onClick={() => table.options.meta?.openPreview(row.original.id)}
         className="block min-w-48 max-w-lg whitespace-normal text-left"
       >
-        <p className="line-clamp-3 text-foreground text-sm leading-6 underline-offset-4 hover:underline">
-          {row.original.prompt}
-        </p>
+        <PromptText
+          text={row.original.prompt}
+          variant="preview"
+          className="line-clamp-3 text-foreground text-sm leading-6 underline-offset-4 hover:underline"
+        />
       </button>
     ),
   },
@@ -522,7 +527,6 @@ export function QuestionsBrowser() {
             <Button asChild variant="outline" size="sm" className="h-9 border-border/80">
               <CourseLink href="/coverage">Show coverage</CourseLink>
             </Button>
-            <QuestionSetupButton />
             <Badge variant="outline" className="h-7 rounded-full px-3 font-mono tracking-[0.08em]">
               live bank
             </Badge>
@@ -531,8 +535,9 @@ export function QuestionsBrowser() {
       />
 
       <section className="space-y-4">
-        {/* The two ways questions are made. Each opens its own generate screen. */}
-        <div className="grid gap-4 md:grid-cols-2">
+        {/* Setting up the bank, then the two ways questions are made. */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <QuestionSetupButton />
           <StartCard
             icon={<Wand2 className="size-4" />}
             title="Generate questions"
@@ -772,7 +777,7 @@ export function QuestionsBrowser() {
           if (!open) void setPreviewId(null);
         }}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[min(72rem,calc(100vw-4rem))]">
           <DialogHeader>
             <DialogTitle>{previewId !== null ? `Question ${previewId}` : "Question"}</DialogTitle>
             <DialogDescription>

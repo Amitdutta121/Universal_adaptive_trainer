@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { RosterScreen } from "./roster-screen";
 
 export default function StudentsRosterPage() {
-  return <RosterScreen />;
+  return (
+    <Suspense fallback={null}>
+      <RosterScreen />
+    </Suspense>
+  );
 }

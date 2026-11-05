@@ -14,6 +14,7 @@
 import { QueryError } from "@/components/query-state";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PromptText } from "@/components/prompt-text";
 import { useQuestionsForChunk } from "@/lib/api/queries";
 import { QUESTION_TYPE_SHORT } from "../../spec-sheet-types";
 
@@ -22,6 +23,7 @@ const STATUS_LABEL: Record<string, string> = {
   validation_passed: "Validated",
   validation_failed: "Failed validation",
   approved: "Approved",
+  hidden: "Hidden from students",
   rejected: "Rejected",
 };
 
@@ -80,7 +82,7 @@ export function QuestionsForChunk({
                       : "hover:bg-muted/50"
                   }`}
                 >
-                  <p className="line-clamp-2 text-[0.8rem] leading-5">{question.prompt}</p>
+                  <PromptText text={question.prompt} variant="preview" className="block" />
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     <Badge variant="outline" className="font-mono text-[0.6rem]">
                       {question.question_type

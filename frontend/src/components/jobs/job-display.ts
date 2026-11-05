@@ -14,6 +14,7 @@ export const KIND_LABEL: Record<Job["kind"], string> = {
   coverage_fill: "Coverage fill",
   book_import: "Book import",
   embedding_switch: "Embedding model switch",
+  source_embedding: "Source embedding",
   regeneration: "Regeneration",
   tutorial_pregeneration: "Tutorial blocks",
   question_round: "Question round",
@@ -99,6 +100,8 @@ export function outcomeText(job: Job): string {
     }
     case "embedding_switch":
       return `${pluralise(counts.chunks ?? job.done, "chunk")} re-embedded`;
+    case "source_embedding":
+      return `${pluralise(counts.chunks ?? job.done, "chunk")} embedded`;
     case "tutorial_pregeneration":
       return [
         `${pluralise(counts.made ?? job.done, "block")} made`,
@@ -128,6 +131,7 @@ export function linkLabel(job: Job): string {
     case "judge_run":
       return "Open judges";
     case "book_import":
+    case "source_embedding":
       return "Open book";
     case "tutorial_pregeneration":
       return "Open tutorials";

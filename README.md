@@ -44,8 +44,9 @@ Azure OpenAI or a local model.
   or any subject you define.
 
 <p align="center">
-  <img src="docs/images/dashboard.png" alt="Course dashboard with the setup checklist" width="440">
-  <img src="docs/images/coverage.png" alt="Coverage map showing how many questions each topic has" width="440">
+  <img src="docs/images/demo.webp" alt="Product tour recorded in the running app: uploading a book, the curriculum of topics and subtopics, creating a tutorial recipe that AI drafts and writes examples for from the book, the verified question bank, reviewing questions with AI judges, and a student getting live tutorials and adaptive questions as their mastery changes" width="900">
+  <br>
+  <sub><a href="docs/videos/demo.mp4">Watch the tour in full quality (MP4, 1 min 54 s)</a></sub>
 </p>
 
 ## Getting started

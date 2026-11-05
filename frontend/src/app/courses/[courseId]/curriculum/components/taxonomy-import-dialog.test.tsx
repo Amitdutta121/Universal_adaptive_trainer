@@ -42,9 +42,9 @@ describe("TaxonomyImportDialog", () => {
     render(<Harness />);
 
     await user.click(screen.getByRole("tab", { name: "Paste JSON" }));
-    await user.click(screen.getByLabelText("Taxonomy JSON document"));
+    await user.click(screen.getByLabelText("Curriculum JSON document"));
     await user.paste(DOCUMENT);
-    await user.click(screen.getByRole("button", { name: "Import taxonomy" }));
+    await user.click(screen.getByRole("button", { name: "Import curriculum" }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
     const [[{ file }]] = mutateAsync.mock.calls as [[{ file: File }]];
@@ -59,13 +59,13 @@ describe("TaxonomyImportDialog", () => {
     render(<Harness />);
 
     await user.click(screen.getByRole("tab", { name: "Paste JSON" }));
-    await user.click(screen.getByLabelText("Taxonomy JSON document"));
+    await user.click(screen.getByLabelText("Curriculum JSON document"));
     await user.paste(DOCUMENT);
-    await user.click(screen.getByRole("button", { name: "Import taxonomy" }));
+    await user.click(screen.getByRole("button", { name: "Import curriculum" }));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
     expect(screen.getByText("open")).toBeInTheDocument();
-    expect(screen.getByLabelText("Taxonomy JSON document")).toHaveValue(DOCUMENT);
+    expect(screen.getByLabelText("Curriculum JSON document")).toHaveValue(DOCUMENT);
   });
 
   it("does not send text that is not JSON, and says why", async () => {
@@ -73,9 +73,9 @@ describe("TaxonomyImportDialog", () => {
     render(<Harness />);
 
     await user.click(screen.getByRole("tab", { name: "Paste JSON" }));
-    await user.click(screen.getByLabelText("Taxonomy JSON document"));
+    await user.click(screen.getByLabelText("Curriculum JSON document"));
     await user.paste("not json");
-    await user.click(screen.getByRole("button", { name: "Import taxonomy" }));
+    await user.click(screen.getByRole("button", { name: "Import curriculum" }));
 
     expect(await screen.findByText(/not valid JSON/i)).toBeInTheDocument();
     expect(mutateAsync).not.toHaveBeenCalled();

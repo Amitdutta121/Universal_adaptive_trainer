@@ -3,7 +3,8 @@
 import { GraduationCap } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -155,14 +156,23 @@ function groupAttemptsByStudent(
 }
 
 export function RosterScreen() {
-  const [searchInput, setSearchInput] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
+  // Students table "Details" deep-links here with ?search=&student=&taxonomy=.
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams.get("search")?.trim() ?? "";
+  const initialStudent = Number(searchParams.get("student"));
+  const initialTaxonomy = searchParams.get("taxonomy");
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
   const [answeredFilter, setAnsweredFilter] = useState<AnsweredFilter>("all");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
-  const [curriculumFilter, setCurriculumFilter] = useState<string>("all");
+  const [curriculumFilter, setCurriculumFilter] = useState<string>(initialTaxonomy ?? "all");
   const [page, setPage] = useState(1);
-  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(
+    Number.isInteger(initialStudent) && initialStudent > 0 ? initialStudent : null,
+  );
+  // A deep-linked taxonomy wins over the first active-taxonomy sync below.
+  const keepLinkedTaxonomy = useRef(initialTaxonomy !== null);
 
   // Debounce the search box so a keystroke is not a request. A settled search
   // term is a new query, so it restarts at the first page.
@@ -190,6 +200,10 @@ export function RosterScreen() {
   // that override holds until the active taxonomy changes again.
   useEffect(() => {
     if (activeVersionId !== null) {
+      if (keepLinkedTaxonomy.current) {
+        keepLinkedTaxonomy.current = false;
+        return;
+      }
       setCurriculumFilter(String(activeVersionId));
       setPage(1);
     }

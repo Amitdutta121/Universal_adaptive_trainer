@@ -65,7 +65,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Curriculum",
     path: "/curriculum",
     summary:
-      "Build a Topic → Subtopic taxonomy, or import one you already have. Every page follows the taxonomy chosen at the top right.",
+      "Build a Topic → Subtopic curriculum, or import one you already have. Every page follows the curriculum chosen at the top right.",
     icon: Network,
   },
   {
@@ -80,7 +80,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Tutorials",
     path: "/tutorials",
     summary:
-      "The ways tutorials teach in this course: approve or stop each recipe, preview its blocks as students see them, and create your own.",
+      "How tutorials teach in this course.",
     icon: Presentation,
   },
   {
@@ -88,7 +88,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Review Queue",
     path: "/review",
     summary:
-      "Professor feedback now lives here: review, approve, reject, or edit queued questions.",
+      "Review the questions for better alignment.",
     icon: ClipboardCheck,
   },
   {

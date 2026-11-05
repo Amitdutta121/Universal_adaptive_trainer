@@ -84,22 +84,34 @@ def try_recipe(
     return ExperimentalRecipeTryOut.model_validate(block)
 
 
+def _store(
+    session: DbSession, profile: CourseProfile, body: ExperimentalRecipeYaml, row_id: int | None
+) -> ExperimentalRecipeOut:
+    stored = experimental.store_recipe(session, profile, body.yaml, row_id)
+    kept = experimental.keep_examples(
+        session,
+        profile,
+        body.yaml,
+        [experimental.Example(**example.model_dump()) for example in body.examples],
+    )
+    session.commit()
+    return _out(profile, stored.row).model_copy(
+        update={"blocks_retired": stored.blocks_retired, "examples_kept": kept}
+    )
+
+
 @router.post("", response_model=ExperimentalRecipeOut, status_code=status.HTTP_201_CREATED)
 def create(
     session: DbSession, profile: CourseProfile, body: ExperimentalRecipeYaml
 ) -> ExperimentalRecipeOut:
-    row = experimental.save_recipe(session, profile, body.yaml)
-    session.commit()
-    return _out(profile, row)
+    return _store(session, profile, body, None)
 
 
 @router.put("/{row_id}", response_model=ExperimentalRecipeOut)
 def update(
     session: DbSession, profile: CourseProfile, row_id: int, body: ExperimentalRecipeYaml
 ) -> ExperimentalRecipeOut:
-    row = experimental.save_recipe(session, profile, body.yaml, row_id)
-    session.commit()
-    return _out(profile, row)
+    return _store(session, profile, body, row_id)
 
 
 @router.delete("/{row_id}", status_code=status.HTTP_204_NO_CONTENT)
