@@ -184,7 +184,9 @@ def _sequential_taxonomy(
         ids = []
         for sub_index in range(subtopics_per_topic):
             subtopic = SubtopicRow(
-                topic_id=topic.id, name=f"Topic {topic_index} Subtopic {sub_index}", position=sub_index
+                topic_id=topic.id,
+                name=f"Topic {topic_index} Subtopic {sub_index}",
+                position=sub_index,
             )
             session.add(subtopic)
             session.flush()
@@ -195,7 +197,12 @@ def _sequential_taxonomy(
 
 
 def _sequential_bank(
-    session: Session, *, topics: int = 2, subtopics_per_topic: int = 1, seed: int = 7, name: str = "Ada"
+    session: Session,
+    *,
+    topics: int = 2,
+    subtopics_per_topic: int = 1,
+    seed: int = 7,
+    name: str = "Ada",
 ) -> SequentialBank:
     """Every topic gets one approved question tagged to all of its subtopics."""
     version, topic_ids, subtopics_by_topic = _sequential_taxonomy(

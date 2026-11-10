@@ -6,7 +6,7 @@ from app.assessment.specs import GradingPlan, Unmarkable
 from app.domain.enums import QuestionKind, QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import OutputPredictionDraft
-from app.question_types._shared import explanation, parses, same, script_evidence
+from app.question_types._shared import explanation, figure_view, parses, same, script_evidence
 from app.question_types.base import DraftColumns, StudentView
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner, normalize_output
@@ -80,7 +80,9 @@ class OutputPrediction:
     def student_view(self, content: dict, *, seed: int) -> StudentView:
         del seed
         code = content.get("code")
-        return StudentView(code=code if isinstance(code, str) else None)
+        return StudentView(
+            code=code if isinstance(code, str) else None, figure=figure_view(content)
+        )
 
 
 TYPE = OutputPrediction()

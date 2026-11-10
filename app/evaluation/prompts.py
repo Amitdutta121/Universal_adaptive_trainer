@@ -16,12 +16,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.domain.enums import JudgeMetricId, RejectionReason
 from app.subjects import PYTHON_PROFILE, SubjectProfile
 
 RUBRIC_VERSION = "question-metrics@2"
+
+#: Appended to the panel name of an evaluation of a question with a figure: its issues judge ran
+#: with :data:`FIGURE_ISSUE_GUIDE` added, so it is a different panel (ADR-035, ADR-080).
+FIGURE_RUBRIC_SUFFIX = "+figure"
 
 
 @dataclass(frozen=True)
@@ -127,6 +132,30 @@ def _issue_code_guide(profile: SubjectProfile) -> str:
         rendered.append(f"  {code.value:<27}{first}")
         rendered.extend(f"{'':29}{line}" for line in rest)
     return "\n".join(rendered)
+
+
+#: Added to the issues judge's system prompt only for a question with a figure, so the panel of
+#: every question without one is unchanged.
+FIGURE_ISSUE_GUIDE = f"""This question shows the student a figure, given to you as text in the
+question's "figure" field. You may also select this code:
+  {RejectionReason.FIGURE_MISMATCH.value:<27}The figure gives away the answer, or does not match
+{"":29}the question: its values, labels or structure
+{"":29}contradict the stem, the options or the answer key."""
+
+
+def has_figure(content: Mapping[str, object] | None) -> bool:
+    """Whether a question's ``content`` carries a figure (ADR-080)."""
+    return content is not None and content.get("figure") is not None
+
+
+def with_figure_guide(system: str, *, figure: bool) -> str:
+    """The issues judge's ``system`` with :data:`FIGURE_ISSUE_GUIDE`, when there is a figure."""
+    return f"{system}\n\n{FIGURE_ISSUE_GUIDE}" if figure else system
+
+
+def with_figure_rubric(rubric_version: str, *, figure: bool) -> str:
+    """The panel name an evaluation of a question with or without a figure is stored under."""
+    return f"{rubric_version}{FIGURE_RUBRIC_SUFFIX}" if figure else rubric_version
 
 
 def _issues_system(profile: SubjectProfile) -> str:

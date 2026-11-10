@@ -50,6 +50,7 @@ export const REJECTION_REASON_LABEL: Record<RejectionReason, string> = {
   poor_tests: "Poor tests",
   not_pedagogically_useful: "Not pedagogically useful",
   too_similar_repetitive: "Too similar/repetitive",
+  figure_mismatch: "Figure mismatch",
   other: "Other",
 };
 

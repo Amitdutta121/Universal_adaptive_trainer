@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from app.config import Settings, get_settings
 from app.domain.enums import QuestionType
 from app.domain.questions import Question
+from app.figures.text import figure_as_text
 from app.llm import StructuredLLMClient
 from app.llm.client import InstructorStructuredClient
 
@@ -38,7 +39,10 @@ SOLVE_SYSTEM = (
     "Then audit the question: list EVERY option that is correct, and report anything "
     "ambiguous, contradictory, or impossible (e.g. no option is right). An option is correct "
     "when a careful Python teacher would mark it right as written. If the question asks for "
-    "the best or most appropriate option, list only the best one."
+    "the best or most appropriate option, list only the best one. A question may show a "
+    "figure, given to you as text (its description and the data or source it is drawn "
+    "from): read it as the student would see it, and report it as a problem when the "
+    "figure contradicts the question or its options."
 )
 
 
@@ -72,7 +76,11 @@ class SolveFinding:
 
 
 def student_view(question: Question) -> tuple[str, str] | None:
-    """The question text a student sees and its key letter; ``None`` when not solvable."""
+    """The question text a student sees and its key letter; ``None`` when not solvable.
+
+    A figure is included as text, so a solver reading the chart's values or the diagram's
+    source can catch a figure that disagrees with the key.
+    """
     content = question.content or {}
     if question.question_type is QuestionType.MULTIPLE_CHOICE:
         options = [str(option) for option in content.get("options") or []]
@@ -90,6 +98,9 @@ def student_view(question: Question) -> tuple[str, str] | None:
     parts = [question.prompt or ""]
     if content.get("code"):
         parts.append(str(content["code"]))
+    figure = figure_as_text(content.get("figure"))
+    if figure:
+        parts.append(figure)
     choices = "\n".join(f"{LETTERS[i]}. {option}" for i, option in enumerate(options))
     return "\n\n".join(parts) + f"\n\nOptions:\n{choices}", key
 

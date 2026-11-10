@@ -31,13 +31,14 @@ from sqlalchemy.orm import Session
 from app.domain.enums import ReviewDecision
 from app.errors import DomainRuleError
 from app.feedback.outcomes import ReviewOutcome, route_review_outcome
-from app.feedback.service import delete_review, submit_review
+from app.feedback.service import delete_review, rejudge_edited_figure, submit_review
 from app.persistence.models import ProfessorReviewRow
 
 __all__ = [
     "ReviewOutcome",
     "delete_review",
     "record_review",
+    "rejudge_edited_figure",
     "route_review_outcome",
     "submit_review",
 ]

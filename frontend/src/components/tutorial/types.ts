@@ -21,7 +21,13 @@ export interface MermaidPayload {
 export interface ChartPayload {
   chart: {
     type: "bar" | "line" | "pie" | "doughnut" | "scatter";
-    data: { labels: string[]; datasets: { label: string; data: number[] }[] };
+    data: {
+      /** Empty or absent for a scatter chart, whose points carry their own x. */
+      labels?: string[];
+      datasets: { label: string; data: number[] | { x: number; y: number }[] }[];
+    };
+    x_title?: string | null;
+    y_title?: string | null;
   };
   caption?: string;
 }

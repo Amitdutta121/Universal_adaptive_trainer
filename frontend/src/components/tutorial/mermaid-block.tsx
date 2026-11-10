@@ -7,7 +7,16 @@ import { useEffect, useId, useState } from "react";
  * `securityLevel: "strict"`: no click handlers, html labels sanitised. A diagram that does not
  * parse shows its source instead.
  */
-export function MermaidBlock({ source, caption }: { source: string; caption?: string }) {
+export function MermaidBlock({
+  source,
+  caption,
+  alt,
+}: {
+  source: string;
+  caption?: string;
+  /** What the diagram shows, for screen readers. */
+  alt?: string;
+}) {
   const id = `mermaid-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -42,6 +51,8 @@ export function MermaidBlock({ source, caption }: { source: string; caption?: st
       ) : svg ? (
         <div
           className="overflow-x-auto [&_svg]:mx-auto"
+          role="img"
+          aria-label={alt || caption || "Diagram"}
           // biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid's own svg, sanitised by it under securityLevel "strict"
           dangerouslySetInnerHTML={{ __html: svg }}
         />

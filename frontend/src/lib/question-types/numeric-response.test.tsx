@@ -29,6 +29,7 @@ function served(
     question_type: "numeric_response",
     prompt: CONTENT.prompt,
     answer_hint: hint,
+    takes_unit: true,
   } as unknown as StudentQuestion;
 }
 
@@ -112,6 +113,25 @@ describe("numeric response answer input", () => {
     );
     fireEvent.keyDown(screen.getByLabelText("Unit"), { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("numeric response without a unit", () => {
+  it("hides the unit box and the powers hint", () => {
+    const { AnswerInput } = ui();
+    const question = { ...served("Give a number."), takes_unit: false } as StudentQuestion;
+    render(<AnswerInput question={question} value="" onChange={() => {}} />);
+    expect(screen.getByLabelText("Number")).toBeTruthy();
+    expect(screen.queryByLabelText("Unit")).toBeNull();
+    expect(screen.queryByText(/m\^3/)).toBeNull();
+  });
+
+  it("keeps them when the question takes a unit", () => {
+    const { AnswerInput } = ui();
+    const question = { ...served(), takes_unit: true } as StudentQuestion;
+    render(<AnswerInput question={question} value="" onChange={() => {}} />);
+    expect(screen.getByLabelText("Unit")).toBeTruthy();
+    expect(screen.getByText(/m\^3/)).toBeTruthy();
   });
 });
 

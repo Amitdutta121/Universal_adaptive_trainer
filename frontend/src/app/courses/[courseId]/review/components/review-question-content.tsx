@@ -1,8 +1,11 @@
 "use client";
 
+import { QuestionBody } from "@/components/question-body";
+import { QuestionFigureCopies } from "@/components/question-figure-copies";
+import { QuestionFigureEditor } from "@/components/question-figure-editor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { PromptText } from "@/components/prompt-text";
+import type { QuestionFigure } from "@/lib/api/types";
 import { type AuthoringReviewProps, questionTypeUI } from "@/lib/question-types/registry";
 import { CodeBlock, ReviewChip } from "./review-primitives";
 
@@ -13,7 +16,14 @@ export function ReviewQuestionSurface({
   isInlineEditing,
   promptEdit,
   onPromptEdit,
-}: Pick<ReviewQuestionContentProps, "detail" | "isInlineEditing" | "promptEdit" | "onPromptEdit">) {
+  figureEdit = null,
+  onFigureEdit,
+  onFigureError,
+}: Pick<ReviewQuestionContentProps, "detail" | "isInlineEditing" | "promptEdit" | "onPromptEdit"> & {
+  figureEdit?: QuestionFigure | null;
+  onFigureEdit?: (figure: QuestionFigure) => void;
+  onFigureError?: (message: string | null) => void;
+}) {
   return (
     <Card className="review-panel border">
       <CardHeader>
@@ -32,18 +42,30 @@ export function ReviewQuestionSurface({
       </CardHeader>
       <CardContent className="space-y-3">
         {isInlineEditing ? (
-          <Textarea
-            rows={7}
-            value={promptEdit}
-            onChange={(event) => onPromptEdit(event.target.value)}
-            className="review-textarea"
-          />
+          <>
+            <Textarea
+              rows={7}
+              value={promptEdit}
+              onChange={(event) => onPromptEdit(event.target.value)}
+              className="review-textarea"
+            />
+            {figureEdit && onFigureEdit && onFigureError ? (
+              <QuestionFigureEditor
+                key={detail.question.id}
+                figure={figureEdit}
+                onChange={onFigureEdit}
+                onError={onFigureError}
+              />
+            ) : null}
+          </>
         ) : (
-          <PromptText
-            text={detail.question.prompt}
-            className="text-[15px] text-[var(--review-foreground)]"
+          <QuestionBody
+            prompt={detail.question.prompt}
+            figure={detail.question.figure}
+            promptClassName="text-[15px] text-[var(--review-foreground)]"
           />
         )}
+        <QuestionFigureCopies detail={detail} />
       </CardContent>
     </Card>
   );
@@ -61,7 +83,11 @@ export function ReviewQuestionContent(props: ReviewQuestionContentProps) {
         <CardDescription>This question has no specialized renderer yet.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <PromptText text={detail.question.prompt} className="text-[14px]" />
+        <QuestionBody
+          prompt={detail.question.prompt}
+          figure={detail.question.figure}
+          promptClassName="text-[14px]"
+        />
         {referenceEdit ? <CodeBlock>{referenceEdit}</CodeBlock> : null}
       </CardContent>
     </Card>

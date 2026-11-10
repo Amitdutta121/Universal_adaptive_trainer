@@ -79,6 +79,7 @@ const style = (
   difficulty_range,
   checked_by: "Runs the code and compares the output",
   applies_to: [],
+  figure: "none",
   examples: [example(`${name} example one`), example(`${name} example two`)],
 });
 

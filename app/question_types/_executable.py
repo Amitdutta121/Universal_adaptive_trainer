@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.assessment.specs import GradingPlan, Unmarkable
 from app.domain.enums import QuestionKind
-from app.question_types._shared import same, stored_case_specs, tests_json
+from app.question_types._shared import figure_view, same, stored_case_specs, tests_json
 from app.question_types.base import DraftColumns, StudentView
 
 
@@ -34,7 +34,8 @@ class Executable:
 
     def student_view(self, content: dict, *, seed: int) -> StudentView:
         del seed
+        figure = figure_view(content)
         if not self.shows_code:
-            return StudentView()
+            return StudentView(figure=figure)
         code = content.get("code")
-        return StudentView(code=code if isinstance(code, str) else None)
+        return StudentView(code=code if isinstance(code, str) else None, figure=figure)

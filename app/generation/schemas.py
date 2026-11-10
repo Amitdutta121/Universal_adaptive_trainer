@@ -12,10 +12,16 @@ from __future__ import annotations
 import hashlib
 import random
 import re
+from functools import cache
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from app.domain.enums import QuestionKind, QuestionType
+from app.figures.schema import ChartFigure, DiagramFigure
+
+if TYPE_CHECKING:
+    from app.styles.schema import QuestionStyle
 
 
 def scoring_kind_for(question_type: QuestionType) -> QuestionKind:
@@ -25,11 +31,52 @@ def scoring_kind_for(question_type: QuestionType) -> QuestionKind:
     return get_type(question_type).kind
 
 
-def response_model_for(question_type: QuestionType) -> type[TaxonomyClaim]:
-    """The structured-output schema the LLM must return for this type (its module's)."""
+#: Figure kinds the generator writes itself, and the field each adds to a draft (ADR-080).
+#: A computed figure is drawn by a program instead (``app.generation.computed``).
+WRITTEN_FIGURES: dict[str, type[DiagramFigure] | type[ChartFigure]] = {
+    "diagram": DiagramFigure,
+    "chart": ChartFigure,
+}
+
+
+def response_model_for(
+    question_type: QuestionType, style: QuestionStyle | None = None
+) -> type[TaxonomyClaim]:
+    """The structured-output schema the LLM must return for this type (its module's).
+
+    When ``style`` asks for a diagram or chart, the type's draft model with a required
+    ``figure`` of that kind; the type's own validators still run. Otherwise the type's draft
+    model itself, so a style without a figure is asked for exactly what it was before.
+    """
     from app.question_types import get_type
 
-    return get_type(question_type).draft_model
+    model = get_type(question_type).draft_model
+    kind = style.figure if style is not None else "none"
+    if kind in WRITTEN_FIGURES:
+        return with_figure(model, kind)
+    return model
+
+
+@cache
+def with_figure(model: type[TaxonomyClaim], kind: str) -> type[TaxonomyClaim]:
+    """``model`` with a required ``figure`` of ``kind``: one class per pair, built once.
+
+    A subclass, so ``app.question_types.type_for_draft`` still finds the type by its class
+    hierarchy, and the whole draft (figure included) goes into the question's ``content``.
+    """
+    figure = WRITTEN_FIGURES[kind]
+    return create_model(
+        f"{model.__name__}With{kind.title()}",
+        __base__=model,
+        __module__=model.__module__,
+        figure=(
+            figure,
+            Field(
+                description=f"The {kind} the student reads to answer; `alt` describes it fully "
+                "in words.",
+            ),
+        ),
+    )
 
 
 class TaxonomyClaim(BaseModel):

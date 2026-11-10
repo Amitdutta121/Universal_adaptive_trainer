@@ -170,5 +170,5 @@ def test_a_round_prompt_states_a_course_style_in_an_owned_course(session: Sessio
             target_subtopic_id=subtopics[0].id,
             style_id=style_id,
         )
-        block = generator._round_target(spec, version, profile, None)
+        block = generator._round_target(spec, version, None, generator.style_for(spec, version))
         assert f"Write it in this question style: {name}" in block

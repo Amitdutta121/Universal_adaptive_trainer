@@ -36,6 +36,7 @@ APPROVAL_REQUIRED = frozenset(
     {
         "import_material",
         "approve_curriculum",
+        "approve_course_design",
         "edit_curriculum",
         "save_style",
         "publish_set",

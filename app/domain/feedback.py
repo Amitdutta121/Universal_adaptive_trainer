@@ -27,6 +27,7 @@ REJECTION_REASON_LABELS: dict[RejectionReason, str] = {
     RejectionReason.POOR_TESTS: "Poor tests",
     RejectionReason.NOT_PEDAGOGICALLY_USEFUL: "Not pedagogically useful",
     RejectionReason.TOO_SIMILAR_REPETITIVE: "Too similar/repetitive",
+    RejectionReason.FIGURE_MISMATCH: "Figure mismatch",
     RejectionReason.OTHER: "Other",
 }
 

@@ -112,4 +112,101 @@ describe("findCall", () => {
     });
     expect(findCall(messages, { ...interrupt, toolCallId: "other" })).toBeNull();
   });
+
+  it("shows the proposed design an approve_course_design call saves", () => {
+    const design = {
+      design_id: "d1",
+      title: "AI in Games",
+      topic_count: 2,
+      subtopic_count: 5,
+      styles: [
+        { name: "Trace A* by hand", new: true },
+        { name: "Pick the right search", new: false },
+      ],
+      recipes: [{ name: "State machine diagram", new: true }],
+    };
+    const messages = [
+      { role: "tool", content: JSON.stringify(design) },
+      {
+        role: "assistant",
+        toolCalls: [
+          {
+            id: "call-2",
+            function: { name: "approve_course_design", arguments: '{"design_id":"d1"}' },
+          },
+        ],
+      },
+    ];
+    const call = findCall(messages, { id: "i", reason: "tool_call", toolCallId: "call-2" });
+    expect(call?.args.design).toEqual(design);
+    const { title, lines } = describeCall(call as NonNullable<typeof call>);
+    expect(title).toBe('Save the course design "AI in Games"');
+    expect(lines).toContain("New question style: Trace A* by hand (you review its examples next)");
+    expect(lines).toContain("New tutorial recipe: State machine diagram");
+    expect(lines.join(" ")).not.toContain("Pick the right search");
+    expect(lines.join(" ")).toContain("about 2 model calls");
+  });
+
+  it("shows a drafted style's examples on its save_style card", () => {
+    const style = {
+      id: "ai.trace_astar",
+      name: "Trace A* by hand",
+      summary: "Give the order A* expands nodes.",
+      question_type: "multiple_choice",
+      difficulty_range: ["medium"],
+      checked_by: "the answer key",
+      examples: [
+        { prompt: "Which node does A* expand next?", options: [{ text: "B", correct: true }] },
+      ],
+    };
+    const messages = [
+      { role: "tool", content: JSON.stringify({ style_drafts: [{ name: style.name, style }] }) },
+      {
+        role: "assistant",
+        toolCalls: [
+          {
+            id: "call-3",
+            function: {
+              name: "save_style",
+              arguments: JSON.stringify({ yaml: "id: ai.trace_astar\nname: Trace A* by hand\n" }),
+            },
+          },
+        ],
+      },
+    ];
+    const call = findCall(messages, { id: "i", reason: "tool_call", toolCallId: "call-3" });
+    expect(call?.args.draft).toEqual(style);
+    render(<ApprovalCardView call={call as NonNullable<typeof call>} onDecide={() => {}} />);
+    expect(screen.getByText("Which node does A* expand next?")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Approve/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Reject/ })).toBeTruthy();
+  });
+
+  it("names the subject and question types by their labels on the subject card", () => {
+    const messages = [
+      {
+        role: "tool",
+        content: JSON.stringify({
+          subjects: [{ id: "custom", label: "Something else" }],
+          question_types: [{ id: "multiple_choice", label: "Multiple choice" }],
+        }),
+      },
+      {
+        role: "assistant",
+        toolCalls: [
+          {
+            id: "call-4",
+            function: {
+              name: "set_course_subject",
+              arguments: '{"subject":"custom","question_types":["multiple_choice"]}',
+            },
+          },
+        ],
+      },
+    ];
+    const call = findCall(messages, { id: "i", reason: "tool_call", toolCallId: "call-4" });
+    const { title, lines } = describeCall(call as NonNullable<typeof call>);
+    expect(title).toBe("Set the course's subject to Something else");
+    expect(lines[0]).toBe("Question types: Multiple choice");
+  });
 });

@@ -291,6 +291,8 @@ class RejectionReason(StrEnum):
     POOR_TESTS = "poor_tests"
     NOT_PEDAGOGICALLY_USEFUL = "not_pedagogically_useful"
     TOO_SIMILAR_REPETITIVE = "too_similar_repetitive"
+    #: The question's figure gives away the answer or does not match the question (ADR-080).
+    FIGURE_MISMATCH = "figure_mismatch"
     OTHER = "other"
 
 
@@ -372,6 +374,8 @@ class EvaluationTrigger(StrEnum):
 
     GENERATION = "generation"
     BATCH_RERUN = "batch_rerun"
+    #: Re-judged because a professor edited the question's figure (ADR-080).
+    PROFESSOR_EDIT = "professor_edit"
 
 
 class JudgeBatchStatus(StrEnum):

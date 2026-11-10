@@ -6,7 +6,7 @@ from app.assessment.specs import GradingPlan, Unmarkable
 from app.domain.enums import QuestionKind, QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import TrueFalseDraft
-from app.question_types._shared import explanation, present_text
+from app.question_types._shared import explanation, figure_view, present_text
 from app.question_types.base import DraftColumns, StudentView
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
@@ -57,8 +57,8 @@ class TrueFalse:
         ]
 
     def student_view(self, content: dict, *, seed: int) -> StudentView:
-        del content, seed
-        return StudentView()
+        del seed
+        return StudentView(figure=figure_view(content))
 
 
 TYPE = TrueFalse()

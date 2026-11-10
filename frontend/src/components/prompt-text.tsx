@@ -11,21 +11,26 @@ import { cn } from "@/lib/utils";
  * rendered, so a prompt cannot inject markup or load anything. Plain-text prompts render as before.
  *
  * `variant="preview"` is for clamped one- or two-line rows (tables, lists): the Markdown is
- * flattened to a single line, code blocks become `[code]`, tables `[table]`, display math `[formula]`.
+ * flattened to a single line, code blocks become `[code]`, tables `[table]`, display math `[formula]`,
+ * and `hasFigure` starts it with `[figure]`.
  */
 export function PromptText({
   text,
   variant = "full",
   className,
+  hasFigure = false,
 }: {
   text: string;
   variant?: "full" | "preview";
   className?: string;
+  hasFigure?: boolean;
 }) {
   if (variant === "preview") {
+    const segments = previewSegments(text);
+    if (hasFigure) segments.unshift({ text: "[figure] ", muted: true });
     return (
       <span className={cn("line-clamp-2 text-[0.8rem] leading-5", className)}>
-        {previewSegments(text).map((segment, index) =>
+        {segments.map((segment, index) =>
           segment.code ? (
             // biome-ignore lint/suspicious/noArrayIndexKey: static derived segments
             <code key={index} className="font-mono text-[0.92em]">

@@ -165,6 +165,9 @@ export const qk = {
     catalog: () => ["courses", "catalog"] as const,
     detail: (courseId: number) => ["courses", "detail", courseId] as const,
   },
+  agentThreads: {
+    list: (courseId: number) => ["agent-threads", courseId] as const,
+  },
   experimentalRecipes: {
     all: ["experimental-recipes"] as const,
     list: (courseId: number) => ["experimental-recipes", "list", courseId] as const,
@@ -467,6 +470,22 @@ export function useSubmitReview() {
       client.invalidateQueries({ queryKey: qk.judgePrompts.all });
       // The approved count per taxonomy: course setup's review and share steps read it.
       client.invalidateQueries({ queryKey: qk.questionSets.taxonomyLinks() });
+    },
+  });
+}
+
+/** Replace one copy of a computed-figure question by re-running its program (ADR-080). */
+export function useRegenerateFigureCopy() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ questionId, ordinal }: { questionId: number; ordinal: number }) =>
+      unwrap(
+        api.POST("/api/questions/{question_id}/copies/{ordinal}/regenerate", {
+          params: { path: { question_id: questionId, ordinal } },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: qk.questions.all });
     },
   });
 }
@@ -2170,5 +2189,55 @@ export function useDeleteExperimentalRecipe() {
       client.invalidateQueries({ queryKey: qk.experimentalRecipes.list(courseId) });
       client.invalidateQueries({ queryKey: qk.tutorials.all });
     },
+  });
+}
+
+// --- Course assistant chats (ADR-075) ------------------------------------------
+
+/** The professor's saved chats in a course, most recently used first. */
+export const useAgentThreads = (courseId: number) =>
+  useQuery({
+    queryKey: qk.agentThreads.list(courseId),
+    queryFn: () => unwrap(api.GET("/api/agent/threads", inCourse(courseId))),
+  });
+
+/**
+ * One chat's messages, read once when it is opened. Not a query: a refetch must never replace
+ * the conversation the professor is in.
+ */
+export const fetchAgentThread = (courseId: number, threadId: string) =>
+  unwrap(
+    api.GET("/api/agent/threads/{thread_id}", {
+      ...inCourse(courseId),
+      params: { path: { thread_id: threadId } },
+    }),
+  );
+
+export function useSaveAgentThread(courseId: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ threadId, messages }: { threadId: string; messages: unknown[] }) =>
+      unwrap(
+        api.PUT("/api/agent/threads/{thread_id}", {
+          ...inCourse(courseId),
+          params: { path: { thread_id: threadId } },
+          body: { messages: messages as Record<string, unknown>[] },
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.agentThreads.list(courseId) }),
+  });
+}
+
+export function useDeleteAgentThread(courseId: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      unwrap(
+        api.DELETE("/api/agent/threads/{thread_id}", {
+          ...inCourse(courseId),
+          params: { path: { thread_id: threadId } },
+        }),
+      ),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.agentThreads.list(courseId) }),
   });
 }

@@ -6,8 +6,10 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.assessment.catalog import FIGURE_KINDS_BY_ID
 from app.domain.enums import QuestionType
 from app.evaluation.prompts import difficulty_bands
+from app.figures.schema import MERMAID_KINDS
 from app.generation.principles import common_system
 from app.generation.spec import MAX_CLAIMED_SUBTOPICS, QuestionSpec
 from app.persistence.models import CurriculumVersionRow, SubtopicRow
@@ -142,6 +144,52 @@ def _with_comment(line: str, comment: str | None) -> list[str]:
     return [line] + ([f"  Professor's comment: {comment}"] if comment else [])
 
 
+#: Mermaid diagram types the generator is told to use: every type the validator accepts
+#: (``app.figures.mermaid_problems``) except the state diagram, whose labels overlap.
+_DIAGRAM_KINDS = tuple(kind for kind in MERMAID_KINDS if not kind.startswith("stateDiagram"))
+
+#: Rules for any figure (ADR-080). Subject-neutral by rule: ``tests/test_figure_styles.py``
+#: scans every line here for subject words.
+FIGURE_RULES = (
+    "The student must read the figure to answer: ask about what it shows, and do not repeat "
+    "its content in the prompt.",
+    "The figure must not give the answer away: no highlighted, marked or labelled answer, and "
+    "no caption or title that states it.",
+    "Label every node, edge that matters, axis and series, with the names the prompt uses.",
+    "Set `alt` to a full description in words of everything the figure shows (every node and "
+    "connection, or every value), so a reader who cannot see it can still answer.",
+)
+
+#: Rules for each figure kind the generator writes itself.
+FIGURE_KIND_RULES: dict[str, tuple[str, ...]] = {
+    "diagram": (
+        'Set `figure` to {"kind": "diagram", "source": <Mermaid source>, "alt", "caption"}.',
+        f"The source starts with one of: {', '.join(_DIAGRAM_KINDS)}.",
+        "Draw states and transitions (state machines, automata, life cycles) as a flowchart "
+        "with labelled edges, not a stateDiagram: its labels overlap.",
+        "No click, init directives, links or scripts. Mermaid has no escapes: write "
+        'A["label"], and #quot; for a quote inside a label.',
+    ),
+    "chart": (
+        'Set `figure` to {"kind": "chart", "chart": {"type", "data": {"labels", "datasets": '
+        '[{"label", "data"}]}, "x_title", "y_title"}, "alt", "caption"}.',
+        "`type` is bar, line, pie, doughnut or scatter. Each dataset has one number per label; "
+        'a scatter chart has no labels and its data are {"x", "y"} points.',
+        "Set `x_title` and `y_title` (with units where there are any). Keep the data small "
+        "enough to read values off the chart.",
+    ),
+}
+
+
+def figure_rules(kind: str) -> list[str]:
+    """The block a figure style adds to a round target: what the figure must and must not do."""
+    label = FIGURE_KINDS_BY_ID[kind].label.lower() if kind in FIGURE_KINDS_BY_ID else kind
+    return [
+        f"Every question in this style shows the student a {label}.",
+        *(f"- {rule}" for rule in (*FIGURE_RULES, *FIGURE_KIND_RULES.get(kind, ()))),
+    ]
+
+
 def render_round_target(
     *,
     subtopic: SubtopicRow,
@@ -175,6 +223,8 @@ def render_round_target(
             f"What the student does: {style.summary}",
             f"How the answer is checked: {style.checked_by}",
         ]
+        if style.figure != "none":
+            lines += ["", *figure_rules(style.figure)]
     examples = examples or RoundExamples()
     number = 0
     accepted = _shown_examples(examples.accepted)

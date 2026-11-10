@@ -20,7 +20,7 @@ from app.domain.enums import QuestionKind, QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import TaxonomyClaim
 from app.question_types._arithmetic import evaluate_arithmetic
-from app.question_types._shared import explanation, present_text, same
+from app.question_types._shared import explanation, figure_view, present_text, same
 from app.question_types.base import DraftColumns, StudentView
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
@@ -255,14 +255,17 @@ class NumericResponse:
         accepted = content.get("accepted_units")
         if isinstance(accepted, list) and accepted and all(isinstance(u, str) for u in accepted):
             hint = f"Give a number with its unit, in {' or '.join(accepted)}."
+            takes_unit = True
         elif _is_dimensionless(unit):
             hint = "Give a number."
+            takes_unit = False
         else:
             hint = f"Give a number with its unit, e.g. in {unit}."
+            takes_unit = True
         sig_figs = content.get("sig_figs")
         if isinstance(sig_figs, int) and not isinstance(sig_figs, bool) and sig_figs > 0:
             hint += f" Use at least {sig_figs} significant figures."
-        return StudentView(answer_hint=hint)
+        return StudentView(answer_hint=hint, figure=figure_view(content), takes_unit=takes_unit)
 
 
 TYPE = NumericResponse()

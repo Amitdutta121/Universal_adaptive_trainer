@@ -306,8 +306,11 @@ export function CourseFormDialog({
   const [pending, setPending] = useState<(PendingToggle & { typeId: string }) | null>(null);
   const nameId = useId();
   const descriptionId = useId();
+  const figuresId = useId();
   const [name, setName] = useState(course.name);
   const [description, setDescription] = useState(course.description ?? "");
+  // Older rows may omit the flag; treat missing as on so the professor does not lose figures.
+  const [figuresEnabled, setFiguresEnabled] = useState(course.figures_enabled ?? true);
   const catalog = useAssessmentCatalog();
   const [types, setTypes] = useState<Set<string>>(() => new Set(course.question_types));
   const subject =
@@ -315,6 +318,7 @@ export function CourseFormDialog({
   const typesChanged =
     types.size !== course.question_types.length ||
     course.question_types.some((id) => !types.has(id));
+  const figuresChanged = figuresEnabled !== (course.figures_enabled ?? true);
 
   function applyType(id: string, on: boolean) {
     setTypes((previous) => {
@@ -365,6 +369,7 @@ export function CourseFormDialog({
       name: name.trim(),
       description: description.trim(),
       ...(typesChanged ? { question_types: [...types] } : {}),
+      ...(figuresChanged ? { figures_enabled: figuresEnabled } : {}),
     };
     const hide = [...hideTypes].filter((id) => !types.has(id));
     const show = [...showTypes].filter((id) => types.has(id));
@@ -443,6 +448,26 @@ export function CourseFormDialog({
               <p className="text-destructive text-xs">Keep at least one question type.</p>
             ) : null}
           </section>
+
+          <label
+            htmlFor={figuresId}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5"
+          >
+            <input
+              id={figuresId}
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--accent-solid)]"
+              checked={figuresEnabled}
+              onChange={(event) => setFiguresEnabled(event.target.checked)}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="font-medium text-sm">Allow figure questions</span>
+              <span className="mt-0.5 block text-muted-foreground text-xs">
+                Diagrams, charts, and computed figures in generated questions. Existing figure
+                questions stay as they are.
+              </span>
+            </span>
+          </label>
 
           {mutation.error ? <QueryError error={mutation.error} /> : null}
 

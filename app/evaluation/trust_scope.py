@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.evaluation.judge_prompts import effective_rubric_version
+from app.evaluation.prompts import with_figure_rubric
 from app.evaluation.trust import TrustReport, judge_trust
 from app.persistence.models import QuestionRow
 from app.subjects import SubjectProfile
@@ -35,6 +36,8 @@ def style_trust_under_current_panel(
 ) -> list[StyleTrust]:
     """Trust per (taxonomy, style) of this subject, judged under the panel in force now."""
     rubric = effective_rubric_version(session, profile=profile)
+    # A figure style's questions are judged under the panel plus the figure guide (ADR-080).
+    panels = {rubric, with_figure_rubric(rubric, figure=True)}
     stmt = select(QuestionRow).where(
         QuestionRow.style_id.is_not(None),
         QuestionRow.curriculum_version_id.is_not(None),
@@ -48,7 +51,7 @@ def style_trust_under_current_panel(
     for row in rows:
         if key_of_version(keys, row.curriculum_version_id) != profile.personal_key:
             continue
-        if (row.pedagogical_eval or {}).get("rubric_version") != rubric:
+        if (row.pedagogical_eval or {}).get("rubric_version") not in panels:
             continue
         newest.setdefault((row.curriculum_version_id, row.style_id), row)
     return [

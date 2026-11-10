@@ -126,6 +126,12 @@ class Settings(BaseSettings):
     #: it where code runs (pyproject ``dependencies`` for local, the Piston image for piston).
     #: ``EXECUTOR_PACKAGES=numpy,pandas,matplotlib`` in a ``.env`` file; empty means stdlib only.
     executor_packages: Annotated[list[str], NoDecode] = ["numpy", "pandas", "matplotlib"]
+    #: Computed figures (ADR-080 point 3): how many copies of a question its program makes,
+    #: and the limits one run of it gets. A run over the timeout is rejected, not waited for.
+    computed_figure_copies: int = Field(default=3, ge=1, le=10)
+    computed_figure_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    computed_figure_max_output_bytes: int = Field(default=64 * 1024, gt=0)
+    computed_figure_max_program_chars: int = Field(default=20_000, gt=0)
 
     # -- Bulk judge re-run (ADR-030) ----------------------------------------
     # OpenRouter's batch jobs are asynchronous and live under /api/beta, not
@@ -212,6 +218,8 @@ class Settings(BaseSettings):
 
     # -- Book ingestion -----------------------------------------------------
     book_upload_dir: Path = PROJECT_ROOT / "data" / "books"
+    #: Computed question figures (SVG files); the database stores only their keys (ADR-080).
+    figure_dir: Path = PROJECT_ROOT / "data" / "figures"
     max_book_upload_mb: int = Field(default=100, gt=0)
     #: Which parser turns an upload into chunks (``app.ingestion.parsing``): ``auto`` uses
     #: Docling when the ``parse`` extra is installed, else page-text chunks.

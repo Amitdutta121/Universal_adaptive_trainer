@@ -8,6 +8,7 @@ import {
   ChevronsUpDown,
   LayoutDashboard,
   LogOut,
+  MessageSquare,
   Moon,
   SlidersHorizontal,
   Sun,
@@ -57,6 +58,8 @@ type AppTheme = "light" | "dark" | "system";
 
 /** The course dashboard, relative to the open course (`app/courses/[courseId]/dashboard`). */
 const DASHBOARD_PATH = "/dashboard";
+/** The course assistant's own page (`app/courses/[courseId]/assistant`). */
+const ASSISTANT_PATH = "/assistant";
 
 /** Presentational grouping only — every key still comes from the single `NAV_SECTIONS` source of truth. */
 const NAV_GROUPS: ReadonlyArray<{ label: string; keys: readonly string[] }> = [
@@ -334,6 +337,19 @@ export function AppSidebar() {
                       <Link href={href(DASHBOARD_PATH)}>
                         <LayoutDashboard />
                         <span>Dashboard</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === ASSISTANT_PATH}
+                      tooltip="Assistant"
+                      className="text-[13px]"
+                    >
+                      <Link href={href(ASSISTANT_PATH)}>
+                        <MessageSquare />
+                        <span>Assistant</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { QuestionFigure } from "@/lib/api/types";
 import type {
   Difficulty,
   QuestionDetail,
@@ -31,6 +32,9 @@ export function useReviewForm(detail: QuestionDetail | null) {
   const [promptEdit, setPromptEdit] = useState("");
   const [referenceEdit, setReferenceEdit] = useState("");
   const [testsEdit, setTestsEdit] = useState("");
+  const [figureEdit, setFigureEdit] = useState<QuestionFigure | null>(null);
+  // A figure edit the browser already knows cannot be sent (chart JSON that does not parse).
+  const [figureError, setFigureError] = useState<string | null>(null);
   // The professor's final difficulty and subtopics. Always sent with the review; the
   // backend compares them to the judges' answers to decide who was right.
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
@@ -46,6 +50,8 @@ export function useReviewForm(detail: QuestionDetail | null) {
     setPromptEdit(detail.question.prompt);
     setReferenceEdit(detail.reference_solution ?? "");
     setTestsEdit(detail.tests ?? "");
+    setFigureEdit(detail.question.figure ?? null);
+    setFigureError(null);
     setDifficulty(presetDifficulty(detail));
     setSubtopicIds(presetSubtopicIds(detail));
     setDifficultyConfirmed(false);
@@ -58,8 +64,14 @@ export function useReviewForm(detail: QuestionDetail | null) {
     if (promptEdit !== detail.question.prompt) fields.push("prompt");
     if (referenceEdit !== (detail.reference_solution ?? "")) fields.push("reference_solution");
     if (testsEdit !== (detail.tests ?? "")) fields.push("tests");
+    if (
+      figureEdit !== null &&
+      JSON.stringify(figureEdit) !== JSON.stringify(detail.question.figure ?? null)
+    ) {
+      fields.push("figure");
+    }
     return fields;
-  }, [detail, promptEdit, referenceEdit, testsEdit]);
+  }, [detail, promptEdit, referenceEdit, testsEdit, figureEdit]);
 
   const effectiveDecision: ReviewDecision =
     decision === "approve" && changedFields.length > 0 ? "edit" : decision;
@@ -77,6 +89,10 @@ export function useReviewForm(detail: QuestionDetail | null) {
     setReferenceEdit,
     testsEdit,
     setTestsEdit,
+    figureEdit,
+    setFigureEdit,
+    figureError,
+    setFigureError,
     difficulty,
     setDifficulty: (value: Difficulty) => {
       setDifficulty(value);

@@ -16,6 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.domain.enums import TutorialRenderer
+from app.figures.schema import mermaid_problems
 from app.tutorials.tools.python_trace import TraceStep
 
 # ------------------------------------------------------------------ payloads
@@ -102,21 +103,6 @@ _CONTRACTS: dict[TutorialRenderer, type[BaseModel]] = {
     TutorialRenderer.VIDEO_CLIP: VideoClipPayload,
 }
 
-#: First keyword of every Mermaid diagram type a tutorial may use.
-_MERMAID_KINDS = (
-    "flowchart",
-    "graph",
-    "sequenceDiagram",
-    "classDiagram",
-    "stateDiagram",
-    "stateDiagram-v2",
-    "erDiagram",
-    "mindmap",
-    "timeline",
-)
-#: Mermaid directives that reach outside the diagram: links, callbacks, init overrides.
-_MERMAID_FORBIDDEN = re.compile(r"^\s*(click|%%\{)|javascript:|<script", re.IGNORECASE | re.M)
-
 
 def payload_problems(renderer: TutorialRenderer, payload: dict[str, Any]) -> list[str]:
     """Why ``payload`` cannot be drawn by ``renderer``, as plain sentences; ``[]`` if it can."""
@@ -129,21 +115,7 @@ def payload_problems(renderer: TutorialRenderer, payload: dict[str, Any]) -> lis
         ]
     problems: list[str] = []
     if renderer is TutorialRenderer.MERMAID:
-        source = payload["mermaid"].strip()
-        first = source.split(None, 1)[0] if source else ""
-        if first not in _MERMAID_KINDS:
-            problems.append(
-                f"the diagram must start with a Mermaid diagram type ({', '.join(_MERMAID_KINDS)})"
-            )
-        if _MERMAID_FORBIDDEN.search(source):
-            problems.append("the diagram may not use click, init directives, links or scripts")
-        if '\\"' in source:
-            # Mermaid has no backslash escapes: A["\"x\""] does not parse, and the student
-            # would see the source instead of the diagram.
-            problems.append(
-                'labels may not contain \\" (Mermaid has no escapes); write A["label"], '
-                "and #quot; for a quote inside a label"
-            )
+        problems.extend(mermaid_problems(payload["mermaid"]))
     return problems
 
 

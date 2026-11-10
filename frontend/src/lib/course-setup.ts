@@ -30,6 +30,7 @@ import {
   useCurriculumVersions,
   useJobs,
   useRound,
+  useStyles,
   useTaxonomyLinks,
   useTutorialRecipes,
 } from "@/lib/api/queries";
@@ -151,7 +152,7 @@ export function deriveSetup(input: SetupInputs): CourseSetup {
     detail: setup
       ? `${plural(styleCount, "question style")} · ${plural(target, "target question")}`
       : input.subjectWithoutStyles
-        ? `No question styles for ${input.subjectWithoutStyles} yet`
+        ? `No question styles for ${input.subjectWithoutStyles} yet; the assistant can draft them`
         : approved
           ? "Pick the question styles for each subtopic; the AI suggests them"
           : "Needs an approved curriculum",
@@ -247,6 +248,7 @@ export function useCourseSetup(courseId: number): { setup: CourseSetup | null; e
   const current = useCurrentSetup(versionId);
   const links = useTaxonomyLinks();
   const recipes = useTutorialRecipes(versionId);
+  const styles = useStyles();
   const jobs = useJobs();
   const imports = (jobs.data?.jobs ?? []).filter((job) => job.kind === "book_import");
   const importsActive = imports.filter((job) => ACTIVE_ROUND.has(job.status)).length;
@@ -271,6 +273,7 @@ export function useCourseSetup(courseId: number): { setup: CourseSetup | null; e
   const pending =
     course.isPending ||
     catalog.isPending ||
+    styles.isPending ||
     books.isPending ||
     versions.isPending ||
     approved.isPending ||
@@ -292,11 +295,14 @@ export function useCourseSetup(courseId: number): { setup: CourseSetup | null; e
       allLinks: links.data?.links,
       recipes: recipes.data,
       imports,
+      // Blocked only when the course has no style at all: a subject without a library still
+      // works once the course assistant has drafted styles of the course's own.
       subjectWithoutStyles: (() => {
         const subject = catalog.data?.subjects.find(
           (entry) => entry.id === (course.data?.subject ?? "intro_python"),
         );
-        return subject && !subject.ready ? subject.label : null;
+        if (!subject || subject.ready || (styles.data?.styles.length ?? 0) > 0) return null;
+        return subject.label;
       })(),
     }),
     error: null,

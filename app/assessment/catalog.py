@@ -317,7 +317,63 @@ SUBJECTS: tuple[SubjectPreset, ...] = (
     ),
 )
 
+
+@dataclass(frozen=True)
+class FigureKind:
+    """A kind of figure a question can carry for the student to read (ADR-080).
+
+    Defined once for every subject: a course gets a figure from its own material (a structure,
+    a process, a dataset, a grid), never from its subject.
+    """
+
+    id: str
+    label: str
+    #: What it can show, in the words the course designer and the style drafter are given.
+    description: str
+
+    @property
+    def built(self) -> bool:
+        """Whether questions with this figure can be generated today.
+
+        Diagrams and charts are written by the generator itself. A computed figure needs the
+        program-running generator (``app.generation.computed``); until it exists, the kind is
+        not offered.
+        """
+        if self.id != "computed":
+            return True
+        try:
+            from app.generation import computed
+        except ImportError:
+            return False
+        return callable(getattr(computed, "generate_computed_question", None))
+
+
+FIGURE_KINDS: tuple[FigureKind, ...] = (
+    FigureKind(
+        "diagram",
+        "Diagram",
+        "boxes and arrows drawn from text: a structure (a tree, a graph, a hierarchy, a "
+        "network), a process or flow with its steps and branches, a cycle, states and the "
+        "transitions between them, a sequence of messages between parts, a timeline, or "
+        "things and how they relate",
+    ),
+    FigureKind(
+        "chart",
+        "Chart",
+        "a bar, line, pie or scatter chart of a small dataset with labelled axes and series, "
+        "for reading values off it, comparing groups or spotting a trend",
+    ),
+    FigureKind(
+        "computed",
+        "Computed figure",
+        "a picture drawn by a program that also works out the answer, with different numbers "
+        "in each copy: a plot of generated data (histogram, box plot, scatter with a fitted "
+        "line), a grid, or a measured layout",
+    ),
+)
+
 CAPABILITIES_BY_ID: dict[str, Capability] = {item.id: item for item in CAPABILITIES}
+FIGURE_KINDS_BY_ID: dict[str, FigureKind] = {item.id: item for item in FIGURE_KINDS}
 TYPES_BY_ID: dict[str, QuestionTypeSpec] = {item.id: item for item in QUESTION_TYPES}
 SUBJECTS_BY_ID: dict[str, SubjectPreset] = {item.id: item for item in SUBJECTS}
 
@@ -334,6 +390,11 @@ def is_offerable(type_id: str) -> bool:
     return any(cap in built for cap in spec.graded_by) and all(
         cap in built for cap in spec.also_needs
     )
+
+
+def built_figure_kinds() -> list[FigureKind]:
+    """The figure kinds a style may ask for today, in catalogue order."""
+    return [kind for kind in FIGURE_KINDS if kind.built]
 
 
 def default_types_for(subject_id: str) -> list[str]:

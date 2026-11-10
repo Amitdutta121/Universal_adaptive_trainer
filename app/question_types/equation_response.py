@@ -21,7 +21,7 @@ from app.assessment.specs import GradingPlan, Unmarkable
 from app.domain.enums import QuestionKind, QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import TaxonomyClaim
-from app.question_types._shared import explanation, present_text, same
+from app.question_types._shared import explanation, figure_view, present_text, same
 from app.question_types.base import DraftColumns, StudentView
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
@@ -214,7 +214,7 @@ class EquationResponse:
             parts.append(
                 f"Functions you may use: {', '.join(names)}." if names else "Use no functions."
             )
-        return StudentView(answer_hint=" ".join(parts))
+        return StudentView(answer_hint=" ".join(parts), figure=figure_view(content))
 
 
 TYPE = EquationResponse()

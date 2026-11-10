@@ -25,8 +25,10 @@ from app.evaluation import (
 )
 from app.evaluation.custom import CustomRule
 from app.evaluation.schema import MetricStatus
+from app.generation.attempts import MAX_GENERATION_ATTEMPTS
 from app.generation.base import BaseQuestionGenerator
 from app.generation.batch import ChunkQuestionRequest, compile_chunk_requests
+from app.generation.computed import MAX_PROGRAM_ATTEMPTS, generate_computed_question
 from app.generation.prompts import RoundExamples
 from app.generation.review import ConceptCheck, DuplicateCheck, RoundReview
 from app.generation.solve import BlindSolve
@@ -279,12 +281,18 @@ class GenerationService:
         A hard cell does this in two steps. First it generates a medium question and
         keeps it only when the answer check passes. Then it asks for a harder question
         made from that one, and the difficulty judge runs on the harder question.
+
+        A style with a computed figure is written by a program instead
+        (:func:`app.generation.computed.generate_computed_question`, ADR-080): asked once at
+        the cell's difficulty, its copy 0 judged like any question, and stored with its copies.
         """
         if not spec.is_round_spec:
             raise InvalidQuestionSpecError(
                 "Round generation needs a target subtopic.",
                 detail="Use generate_for_chunks for chunk-only specs.",
             )
+        style = self._generator.style_for(spec, version)
+        computed = style is not None and style.figure == "computed"
         review = RoundReview(
             self._judge,
             rules,
@@ -293,7 +301,17 @@ class GenerationService:
             duplicates=duplicates,
             concepts=concepts,
             solver=solver,
+            max_attempts=MAX_PROGRAM_ATTEMPTS if computed else MAX_GENERATION_ATTEMPTS,
         )
+        if computed:
+            return self._computed_round_question(
+                spec,
+                version=version,
+                review=review,
+                examples=examples,
+                round_id=round_id,
+                run_id=run_id,
+            )
         question = self._question_for_round(spec, version=version, review=review, examples=examples)
         if not question.generation_attempts or not question.generation_attempts[-1].usable:
             self._maybe_store_audit(spec, review, round_id)
@@ -307,11 +325,64 @@ class GenerationService:
         row.style_id = spec.style_id
         row.round_id = round_id
         row.target_subtopic_id = spec.target_subtopic_id
-        row.solve_flag = review.last_solve_flag
         row = self._questions.add(row)
         report = question.validation_report or self._validator.validate(question)
         row.validation_report = report
         row.status = report.resulting_status()
+        return self._finish_round_question(
+            row, spec, review, evaluation, round_id=round_id, run_id=run_id
+        )
+
+    def _computed_round_question(
+        self,
+        spec: QuestionSpec,
+        *,
+        version: CurriculumVersionRow,
+        review: RoundReview,
+        examples: RoundExamples | None,
+        round_id: int | None,
+        run_id: str | None,
+    ) -> QuestionRow | None:
+        """A round question of a computed-figure style: a program, K copies, then the tail."""
+        prepared = self._generator.prepare(spec, version=version, examples=examples)
+        result = generate_computed_question(
+            self._session,
+            spec,
+            version=version,
+            system=prepared.system,
+            prompt=prepared.prompt,
+            client=self._client,
+            validator=self._validator,
+            review=review,
+            sources=prepared.sources,
+            round_id=round_id,
+            personalization_context=prepared.instruction_stamp,
+        )
+        evaluation = review.last_evaluation
+        if result.row is None or evaluation is None:
+            if result.row is not None:
+                for variant in result.variants:
+                    self._session.delete(variant)
+                self._session.delete(result.row)
+                self._session.flush()
+            self._maybe_store_audit(spec, review, round_id)
+            return None
+        return self._finish_round_question(
+            result.row, spec, review, evaluation, round_id=round_id, run_id=run_id
+        )
+
+    def _finish_round_question(
+        self,
+        row: QuestionRow,
+        spec: QuestionSpec,
+        review: RoundReview,
+        evaluation: PedagogicalEvaluation,
+        *,
+        round_id: int | None,
+        run_id: str | None,
+    ) -> QuestionRow:
+        """Store the judgement that passed a round question, its flags, and route it."""
+        row.solve_flag = review.last_solve_flag
         evaluation = evaluation.model_copy(update={"question_id": row.id})
         stored = record_evaluation(
             self._session,
@@ -444,6 +515,11 @@ class GenerationService:
         row.audit = True
         row.audit_metric = metric
         row.audit_reason = _audit_reason(evaluation, metric)
+        # A computed-figure draft carries its program in ``content`` for repairs; it is
+        # stored apart, as on a kept question, so it never reaches a student.
+        content = dict(row.content or {})
+        row.figure_program = content.pop("program", None)
+        row.content = content
         row = self._questions.add(row)
         report = question.validation_report or self._validator.validate(question)
         row.validation_report = report

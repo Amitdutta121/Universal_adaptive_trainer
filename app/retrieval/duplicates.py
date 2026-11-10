@@ -8,8 +8,8 @@ cosine at or above :data:`DUPLICATE_THRESHOLD` fails the attempt, a score at or 
 
 The comparison pool is the same topic, approved or validation-passed questions
 (:meth:`~app.persistence.repositories.QuestionRepository.list_dedup_candidates`). The text
-compared is the prompt, the code and the options (:func:`embed_text`): output-prediction
-questions share one generic stem, so without the code they all look alike.
+compared is the prompt, the code, the options and the figure as text (:func:`embed_text`):
+output-prediction questions share one generic stem, so without the code they all look alike.
 
 Candidate vectors are cached in ``question_embeddings`` and re-embedded only when the
 question's text or the model changes, so a check costs one embedding call: the new question,
@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.questions import Question
+from app.figures.text import figure_as_text
 from app.persistence.models import QuestionEmbeddingRow, QuestionRow, QuestionSimilarityRow
 from app.persistence.repositories import QuestionRepository
 from app.retrieval.embedder import Embedder
@@ -66,7 +67,11 @@ EXACT_MATCH_MODEL = "exact-text"
 
 
 def embed_text(prompt: str | None, content: Mapping[str, Any] | None) -> str:
-    """The text a question is compared on: prompt, then code, then options."""
+    """The text a question is compared on: prompt, then code, then options, then figure.
+
+    The figure (as :func:`~app.figures.text.figure_as_text`) is part of the question: the same
+    wording over a different chart or diagram is a different question.
+    """
     content = content or {}
     parts = [prompt or ""]
     code = content.get("code")
@@ -75,6 +80,9 @@ def embed_text(prompt: str | None, content: Mapping[str, Any] | None) -> str:
     options = content.get("options")
     if isinstance(options, list):
         parts.extend(str(option) for option in options)
+    figure = figure_as_text(content.get("figure"))
+    if figure:
+        parts.append(figure)
     return "\n".join(parts)
 
 

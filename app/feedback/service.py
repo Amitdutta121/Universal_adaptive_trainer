@@ -6,11 +6,24 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.domain.enums import Difficulty, QuestionStatus, RejectionReason, ReviewDecision
+from app.domain.enums import (
+    Difficulty,
+    EvaluationTrigger,
+    QuestionStatus,
+    RejectionReason,
+    ReviewDecision,
+)
 from app.domain.questions import Question, apply_professor_edit
-from app.errors import DomainRuleError, NotFoundError
-from app.evaluation import PedagogicalEvaluation
+from app.errors import ConfigurationError, DomainRuleError, NotFoundError
+from app.evaluation import (
+    PedagogicalEvaluation,
+    PedagogicalJudge,
+    new_run_id,
+    record_evaluation,
+)
 from app.evaluation.severity import borderline_notes
+from app.figures import figure_problems, parse_figure
+from app.llm import StructuredLLMClient
 from app.memory import (
     SOURCE_AUDIT,
     SOURCE_BORDERLINE,
@@ -25,6 +38,7 @@ from app.persistence.models import (
     ProfessorReviewRow,
     QuestionRow,
     QuestionSubtopicRow,
+    QuestionVariantRow,
     ReviewOutcomeRow,
     SubtopicRow,
     TopicRow,
@@ -48,6 +62,7 @@ def submit_review(
     prompt: str | None = None,
     reference_solution: str | None = None,
     tests: str | None = None,
+    figure: dict | None = None,
     professor_id: int | None = None,
     corrected_difficulty: Difficulty | None = None,
     corrected_subtopic_ids: list[int] | None = None,
@@ -57,6 +72,10 @@ def submit_review(
     Edit updates current question fields but never touches ``original_*``.
     ``changed_fields`` are derived here by comparing submitted values to the
     persisted question, never trusted from the client.
+
+    ``figure`` (edit only; ``None`` leaves it as it is) replaces the question's figure, of
+    the same kind. It must be drawable (:func:`app.figures.figure_problems`), and a computed
+    figure may change only its ``alt`` and ``caption``: its picture is the program's.
 
     ``corrected_difficulty`` / ``corrected_subtopic_ids`` are what the professor says the
     question really is (the review form requires explicit confirmation). They are
@@ -78,6 +97,7 @@ def submit_review(
     edited_prompt: str | None = None
     edited_reference_solution: str | None = None
     edited_tests: str | None = None
+    edited_figure: dict | None = None
     changed_fields: list[str] = []
 
     if decision is ReviewDecision.APPROVE:
@@ -108,6 +128,9 @@ def submit_review(
             "tests": edited_tests,
         }
         changed_fields = [name for name in _EDITABLE if current[name] != submitted[name]]
+        edited_figure = _edited_figure(question, figure)
+        if edited_figure is not None:
+            changed_fields.append("figure")
         if not changed_fields:
             raise DomainRuleError("Edit requires at least one changed field.")
 
@@ -132,6 +155,8 @@ def submit_review(
         question.prompt = edited_question.prompt
         question.reference_solution = edited_question.reference_solution
         question.tests = edited_question.tests
+        if edited_figure is not None:
+            _apply_figure(session, question, edited_figure)
         question.updated_at = edited_question.updated_at
         question.status = QuestionStatus.APPROVED
     else:
@@ -169,6 +194,7 @@ def submit_review(
         edited_prompt=edited_prompt,
         edited_reference_solution=edited_reference_solution,
         edited_tests=edited_tests,
+        edited_figure=edited_figure,
         changed_fields=changed_fields,
         professor_id=professor_id,
         corrected_difficulty=corrected_difficulty,
@@ -183,6 +209,80 @@ def submit_review(
     review = ProfessorReviewRepository(session).add(review)
     record_review_episode(session, review, reviewed, source=_episode_source(question))
     return review
+
+
+def rejudge_edited_figure(
+    session: Session, review: ProfessorReviewRow, *, client: StructuredLLMClient | None = None
+) -> bool:
+    """Judge a question again after an edit that changed its figure. Flushes; never commits.
+
+    Run after the review's outcome is routed, so the outcome keeps the verdict the professor
+    reviewed. The new evaluation is appended to the question's history (trigger
+    ``professor_edit``) and becomes current. ``False`` when nothing was judged: the edit kept
+    the figure, or no model is configured.
+    """
+    if "figure" not in (review.changed_fields or []):
+        return False
+    try:
+        judge = PedagogicalJudge(session, client=client)
+    except ConfigurationError:
+        return False
+    question = QuestionRepository(session).get(review.question_id)
+    evaluation = judge.evaluate(Question.model_validate(question))
+    record_evaluation(
+        session,
+        question.id,
+        evaluation.model_copy(update={"question_id": question.id}),
+        run_id=new_run_id(),
+        trigger=EvaluationTrigger.PROFESSOR_EDIT,
+    )
+    session.flush()
+    return True
+
+
+def _edited_figure(question: QuestionRow, figure: dict | None) -> dict | None:
+    """The submitted figure, validated and normalized; ``None`` when it changes nothing."""
+    if figure is None:
+        return None
+    current = (question.content or {}).get("figure")
+    if not isinstance(current, dict):
+        raise DomainRuleError("This question has no figure to edit.")
+    problems = figure_problems(figure)
+    if problems:
+        raise DomainRuleError("The edited figure cannot be shown.", detail="; ".join(problems))
+    edited = parse_figure(figure).model_dump(mode="json")
+    if edited["kind"] != current.get("kind"):
+        raise DomainRuleError(
+            "An edited figure keeps its kind.",
+            detail=f"The figure is a {current.get('kind')}, not a {edited['kind']}.",
+        )
+    if edited["kind"] == "computed" and edited["file"] != current.get("file"):
+        raise DomainRuleError(
+            "A computed figure is drawn by its program; edit only its alt text and caption.",
+            detail="Regenerate the copy for a new picture.",
+        )
+    try:
+        unchanged = edited == parse_figure(current).model_dump(mode="json")
+    except ValidationError:
+        unchanged = False
+    return None if unchanged else edited
+
+
+def _apply_figure(session: Session, question: QuestionRow, figure: dict) -> None:
+    """Make ``figure`` the question's, keeping the generated one (ADR-002)."""
+    content = dict(question.content or {})
+    if question.original_figure is None:
+        question.original_figure = content.get("figure")
+    content["figure"] = figure
+    question.content = content
+    # Copy 0 of a computed question is its content (``app.generation.computed``).
+    first = session.scalar(
+        select(QuestionVariantRow).where(
+            QuestionVariantRow.question_id == question.id, QuestionVariantRow.ordinal == 0
+        )
+    )
+    if first is not None:
+        first.content = {**(first.content or {}), "figure": figure}
 
 
 def delete_review(session: Session, review_id: int) -> None:

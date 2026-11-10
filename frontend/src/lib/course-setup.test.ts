@@ -244,6 +244,6 @@ describe("deriveSetup", () => {
   it("says when the course's subject has no question styles, instead of offering setup", () => {
     const result = deriveSetup(inputs({ approved: approved(), subjectWithoutStyles: "Physics" }));
     expect(result.steps[2].state).toBe("blocked");
-    expect(result.steps[2].detail).toBe("No question styles for Physics yet");
+    expect(result.steps[2].detail).toBe("No question styles for Physics yet; the assistant can draft them");
   });
 });

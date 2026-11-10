@@ -39,6 +39,7 @@ export function joinAnswer(number: string, unit: string): string {
 function NumericResponseAnswerInput({ question, value, onChange, onSubmit }: AnswerInputProps) {
   const { number, unit } = splitAnswer(value);
   const id = `answer-${question.attempt_id}`;
+  const takesUnit = question.takes_unit === true;
   const submitOnEnter = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -63,20 +64,22 @@ function NumericResponseAnswerInput({ question, value, onChange, onSubmit }: Ans
           placeholder="Number"
           className="h-10 flex-[3] font-mono"
         />
-        <Input
-          aria-label="Unit"
-          autoComplete="off"
-          spellCheck={false}
-          value={unit}
-          onChange={(event) => onChange(joinAnswer(number, event.target.value))}
-          onKeyDown={submitOnEnter}
-          placeholder="Unit"
-          className="h-10 flex-[2] font-mono"
-        />
+        {takesUnit ? (
+          <Input
+            aria-label="Unit"
+            autoComplete="off"
+            spellCheck={false}
+            value={unit}
+            onChange={(event) => onChange(joinAnswer(number, event.target.value))}
+            onKeyDown={submitOnEnter}
+            placeholder="Unit"
+            className="h-10 flex-[2] font-mono"
+          />
+        ) : null}
       </div>
       <p className="text-muted-foreground text-xs">
         {question.answer_hint ? `${question.answer_hint} ` : null}
-        Use a decimal point; write powers with ^, e.g. m^3.
+        {takesUnit ? "Use a decimal point; write powers with ^, e.g. m^3." : "Use a decimal point."}
       </p>
     </fieldset>
   );

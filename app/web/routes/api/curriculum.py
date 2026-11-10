@@ -130,6 +130,7 @@ def draft_with_ai(
         drafted_by=draft.drafted_by,
         document=draft.document.model_dump(),
         analysis=draft.analysis,
+        out_of_scope=draft.out_of_scope,
     )
 
 

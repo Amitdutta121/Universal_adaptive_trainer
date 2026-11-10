@@ -48,7 +48,9 @@ export function QuestionReview({
   if (isPending) return <TableSkeleton rows={3} />;
   if (isError || !detail) return <QueryError error={error} />;
 
-  const canSubmit = form.effectiveDecision !== "edit" || form.changedFields.length > 0;
+  const canSubmit =
+    !form.figureError &&
+    (form.effectiveDecision !== "edit" || form.changedFields.length > 0);
 
   async function onSubmit() {
     if (!canSubmit || submitReview.isPending) return;
@@ -60,6 +62,7 @@ export function QuestionReview({
             prompt: form.promptEdit,
             reference_solution: form.referenceEdit,
             tests: form.testsEdit,
+            ...(form.changedFields.includes("figure") ? { figure: form.figureEdit } : {}),
           }
         : {}),
     };
@@ -94,6 +97,9 @@ export function QuestionReview({
         isInlineEditing={form.isInlineEditing}
         promptEdit={form.promptEdit}
         onPromptEdit={form.setPromptEdit}
+        figureEdit={form.figureEdit}
+        onFigureEdit={form.setFigureEdit}
+        onFigureError={form.setFigureError}
       />
       <ReviewQuestionContent
         detail={detail}

@@ -20,7 +20,13 @@ from app.errors import (
     NotFoundError,
 )
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
-from app.evaluation.prompts import JudgeContext, build_user_prompt
+from app.evaluation.prompts import (
+    JudgeContext,
+    build_user_prompt,
+    has_figure,
+    with_figure_guide,
+    with_figure_rubric,
+)
 from app.evaluation.schema import (
     RESPONSE_MODEL_FOR,
     DifficultyVerdict,
@@ -37,6 +43,7 @@ from app.evaluation.schema import (
     result_from_issues,
     result_from_subtopic,
 )
+from app.figures.text import figure_as_text
 from app.ingestion import SourceRetrieval
 from app.llm import StructuredLLMClient, get_structured_client
 from app.persistence.repositories import CurriculumRepository
@@ -61,7 +68,7 @@ def build_judge_context(session: Session, question: Question) -> JudgeContext:
     """
     retrieval = SourceRetrieval(session)
     content = question.content or {}
-    artifact = {
+    artifact: dict[str, object] = {
         "prompt": question.prompt,
         "question_type": question.question_type.value if question.question_type else None,
         "difficulty": question.difficulty.value,
@@ -69,6 +76,11 @@ def build_judge_context(session: Session, question: Question) -> JudgeContext:
         "tests": question.tests,
         "content": content,
     }
+    if has_figure(content):
+        # Judges read pictures as text (ADR-080); the raw spec (or a computed file key) moves
+        # out of ``content`` so the figure is given once.
+        artifact["content"] = {key: value for key, value in content.items() if key != "figure"}
+        artifact["figure"] = figure_as_text(content["figure"])
     sources = []
     for chunk_id in _source_chunk_ids(question):
         chunk = retrieval.get_chunk(chunk_id)
@@ -196,6 +208,7 @@ class PedagogicalJudge:
         """
         model = self._client.description
         prompts, rubric_version = self._panel(question)
+        rubric_version = with_figure_rubric(rubric_version, figure=has_figure(question.content))
         # Read per call, not at construction: the panel is configuration, and a judge
         # built before a settings change must not keep running the old one.
         panel = enabled_metrics()
@@ -269,6 +282,8 @@ class PedagogicalJudge:
         self, metric: JudgeMetricId, context: JudgeContext, question: Question, system: str
     ) -> MetricResult:
         """One judge, retried on transport and shape failures alike."""
+        if metric is JudgeMetricId.ISSUES:
+            system = with_figure_guide(system, figure=has_figure(question.content))
         system = self._compose(metric, question, system)
         prompt = build_user_prompt(metric, context)
         last_detail = "unknown"

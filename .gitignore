@@ -51,3 +51,6 @@ desktop.ini
 raganything_eval/rag_storage/
 raganything_eval/*.log
 spikes/
+
+# graphify knowledge graph output
+graphify-out/

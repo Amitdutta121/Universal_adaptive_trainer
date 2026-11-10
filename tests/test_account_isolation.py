@@ -42,6 +42,7 @@ from app.domain.enums import (
     TutorialRenderer,
 )
 from app.persistence.models import (
+    AgentThreadRow,
     BookRow,
     BookSectionRow,
     ChunkRow,
@@ -114,6 +115,10 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", "/api/courses"): "creates the caller's own course; owner stamping tested below",
     ("POST", "/api/students"): "public student enrolment; creates a new learner, reads nothing",
     ("POST", "/api/students/resume"): "public, but keyed by a 256-bit resume token, not an id",
+    ("GET", "/api/figures/{course_id}/{name}.svg"): (
+        "public question figure (ADR-080) for a student's <img>; keyed by the SVG's sha256, "
+        "so it cannot be found without being given (test_figures.py)"
+    ),
     ("GET", "/api/question-sets/prod"): (
         "public join lobby for the installation-wide prod link (ADR-041); repointing it is "
         "guarded, see test_the_prod_link_cannot_be_taken_over"
@@ -141,6 +146,7 @@ NON_ID_PARAMS = {
     "metric": "issues",
     "question_type": "true_false",
     "rule_index": "0",
+    "ordinal": "0",
     # A shipped recipe; the taxonomy in the body is what the probe owns or not.
     "recipe_id": "py.topic_flow",
 }
@@ -198,6 +204,9 @@ BODIES: dict[tuple[str, str], Any] = {
         "dry_run": True,
     },
     ("PUT", "/api/experimental/recipes/{row_id}"): {"yaml": EXPERIMENTAL_RECIPE},
+    ("PUT", "/api/agent/threads/{thread_id}"): {
+        "messages": [{"id": "m1", "role": "user", "content": "Taken"}]
+    },
     ("POST", "/api/experimental/recipes/try"): {
         "yaml": EXPERIMENTAL_RECIPE,
         "subtopic_id": "{subtopic}",
@@ -246,6 +255,7 @@ PATH_IDS = {
     "style_id": "style",
     "row_id": "experimental_recipe",
     "block_id": "tutorial_block",
+    "thread_id": "agent_thread",
     # ``round-<id>``: A's question round, as the Jobs panel addresses it.
     "job_id": "job",
 }
@@ -305,6 +315,8 @@ class Seed:
     experimental_recipe: int = 0
     #: A's tutorial bank block.
     tutorial_block: int = 0
+    #: A's saved chat with the course assistant ("" for the other content sets).
+    agent_thread: str = ""
 
 
 # ---------------------------------------------------------------- accounts and seed
@@ -370,11 +382,20 @@ def seed(alice: TestClient, session: Session) -> Seed:
         confirmed_by_professor=False,
     )
     session.add(guideline)
+    thread = AgentThreadRow(
+        id=str(uuid.uuid4()),
+        course_id=course_id,
+        owner_id=owner.id,
+        title=f"{SECRET} chat",
+        messages=[{"id": "m1", "role": "user", "content": f"{SECRET} chat"}],
+    )
+    session.add(thread)
     session.add(QuestionSetAliasRow(alias=f"taxonomy-{rows.version}", set_version_id=rows.qset))
     session.add(QuestionSetAliasRow(alias="prod", set_version_id=rows.qset))
     session.commit()
     assert owner.id is not None
     rows.guideline = guideline.id
+    rows.agent_thread = thread.id
 
     edited = alice.put(
         "/api/judge-prompts/issues",
@@ -773,6 +794,7 @@ def test_another_account_changes_nothing_of_the_owners(
         "/api/question-sets",
         "/api/students",
         "/api/counts",
+        f"/api/agent/threads/{seed.agent_thread}",
     ]
     before = [alice.get(url, headers=headers).json() for url in reads]
 

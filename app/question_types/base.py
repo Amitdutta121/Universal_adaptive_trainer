@@ -49,6 +49,10 @@ class StudentView:
     blocks: list[dict[str, Any]] | None = None
     #: A short instruction on the answer's form, e.g. "Give a number with its unit (m/s)."
     answer_hint: str | None = None
+    #: The validated figure the student reads (ADR-080), any type; never answer fields.
+    figure: dict[str, Any] | None = None
+    #: Numeric response only: whether the answer takes a unit.
+    takes_unit: bool | None = None
 
 
 @runtime_checkable

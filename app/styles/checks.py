@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 from app.assessment.specs import Unmarkable
 from app.domain.enums import QuestionType
+from app.figures.schema import figure_problems
 from app.styles.schema import ExampleQuestion, QuestionStyle
 from app.validation.runner import LocalCodeRunner
 from graders import SpecError, get_grader
@@ -43,6 +44,8 @@ def example_content(style: QuestionStyle, example: ExampleQuestion) -> dict[str,
     """
     kind = style.question_type
     content: dict[str, Any] = {"prompt": example.prompt, "explanation": example.answer}
+    if example.figure is not None:
+        content["figure"] = example.figure.model_dump(mode="json")
     if kind is QuestionType.MULTIPLE_CHOICE:
         content["options"] = [option.text for option in example.options]
         correct = [n for n, option in enumerate(example.options) if option.correct]
@@ -92,6 +95,7 @@ def check_example(
         module = get_type(style.question_type)
     except KeyError:
         return [f"{where}: question type {style.question_type.value} has no module"]
+    problems += [f"{where}: {problem}" for problem in example_figure_problems(style, example)]
     content = example_content(style, example)
     for check in module.authoring_checks(content, runner or LocalCodeRunner()):
         if not check.passed:
@@ -105,6 +109,27 @@ def check_example(
     else:
         problems.extend(f"{where}: grader says {issue.code}: {issue.message}" for issue in issues)
     return problems
+
+
+def example_figure_problems(style: QuestionStyle, example: ExampleQuestion) -> list[str]:
+    """Why an example's figure does not fit its style, or cannot be drawn; ``[]`` if fine.
+
+    A diagram or chart style's examples each show that kind of figure, drawable
+    (:func:`app.figures.figure_problems`). A computed figure is drawn by a program when
+    questions are generated, so its examples carry none; neither does a style without a figure.
+    """
+    figure = example.figure
+    if style.figure in ("diagram", "chart"):
+        if figure is None:
+            return [f"a {style.figure} style's example needs a {style.figure} figure"]
+        if figure.kind != style.figure:
+            return [f"the figure is a {figure.kind}, but the style asks for a {style.figure}"]
+        return [f"figure: {problem}" for problem in figure_problems(figure)]
+    if figure is None:
+        return []
+    if style.figure == "computed":
+        return ["a computed figure is drawn when questions are generated; examples carry none"]
+    return [f"the style has no figure, so its examples carry none (found a {figure.kind})"]
 
 
 def check_ids(libraries: Mapping[str, Sequence[HasId]]) -> list[str]:

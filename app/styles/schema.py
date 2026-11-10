@@ -11,14 +11,28 @@ suggester can all import them.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import Difficulty, QuestionType
+from app.figures.schema import ChartFigure, ComputedFigure, DiagramFigure, Figure
 
 #: Easy and medium stay at least one. Hard may be 0 when the lesson cannot support it.
 #: No cell asks for more than six.
 MIN_CELL_TARGET = 1
 MAX_CELL_TARGET = 6
+
+#: Whether a style's questions carry a figure, and which kind (ADR-080). The kinds are
+#: described once in ``app.assessment.catalog.FIGURE_KINDS``; ``none`` is the default.
+StyleFigure = Literal["none", "diagram", "chart", "computed"]
+
+#: The figure model a question of a style carries, per kind.
+FIGURE_MODELS: dict[str, type[DiagramFigure] | type[ChartFigure] | type[ComputedFigure]] = {
+    "diagram": DiagramFigure,
+    "chart": ChartFigure,
+    "computed": ComputedFigure,
+}
 
 
 class ExampleOption(BaseModel):
@@ -72,6 +86,8 @@ class ExampleQuestion(BaseModel):
     test_cases: list[ExampleTestCase] = Field(default_factory=list)
     #: The book section (or kind of section) the example is grounded in.
     grounding: str = ""
+    #: The figure the student reads, for a style with a diagram or chart figure (ADR-080).
+    figure: Figure | None = None
 
 
 class QuestionStyle(BaseModel):
@@ -99,6 +115,8 @@ class QuestionStyle(BaseModel):
     #: Hints for the suggester about which subtopics the style fits ("loops", "string methods").
     #: Advisory: the suggester may still pick it elsewhere, and may skip it where hinted.
     applies_to: list[str] = Field(default_factory=list)
+    #: Whether each question carries a figure the student reads to answer, and which kind.
+    figure: StyleFigure = "none"
     #: Exactly two examples, shown on the approve/skip card.
     examples: tuple[ExampleQuestion, ExampleQuestion]
 

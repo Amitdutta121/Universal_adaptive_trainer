@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import uuid
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, ParamSpec, TypeVar
@@ -18,8 +19,12 @@ from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import FunctionToolset, RunContext
 from sqlalchemy.orm import Session
 
+from app import course_design
 from app.agent.approvals import APPROVAL_REQUIRED, PlannedRun, open_plan, store_plan
+from app.assessment import catalog
+from app.course_design.approve import ApprovedDesign, approve_design
 from app.curriculum import TaxonomyImportService, TreeUpdate
+from app.curriculum.capabilities import capabilities_text
 from app.curriculum.drafting import DraftBrief, draft_taxonomy
 from app.curriculum.taxonomy_schema import TaxonomyDocument
 from app.domain.enums import GuidanceLevel
@@ -27,15 +32,18 @@ from app.errors import AdaptiveTrainerError, DomainRuleError, NotFoundError
 from app.generation.rounds import plan_targets
 from app.ingestion.youtube import AvailabilityCheck, TranscriptFetch
 from app.jobs.queue import JobQueue
-from app.llm.client import StructuredLLMClient
-from app.persistence.models import QuestionSetupRow
-from app.persistence.repositories import CurriculumRepository
+from app.llm.client import StructuredLLMClient, get_structured_client
+from app.persistence.models import BookRow, CourseRow, QuestionSetupRow
+from app.persistence.repositories import ChunkRepository, CurriculumRepository
 from app.retrieval.chunks import ChunkEmbeddingStore, ChunkRetriever
 from app.retrieval.embedder import Embedder
+from app.styles import drafting as style_drafting
+from app.styles.library import get_library
 from app.styles.schema import SetupSuggestion
 from app.subjects import profile_for_course_id
 from app.tutorials import experimental
 from app.web.routes.api import books as books_routes
+from app.web.routes.api import courses as course_routes
 from app.web.routes.api import coverage as coverage_routes
 from app.web.routes.api import curriculum as curriculum_routes
 from app.web.routes.api import generation_runs as run_routes
@@ -46,13 +54,12 @@ from app.web.routes.api import tutorials as tutorial_routes
 from app.web.routes.api.deps import (
     book_in_course,
     ensure_in_course,
-    question_in_course,
     subtopics_in_course,
-    version_in_course,
 )
 from app.web.routes.api.retrieval import get_query_embedder
 from app.web.routes.api.schemas import (
     ChunksRunTarget,
+    CourseUpdate,
     CreateCourseStyleRequest,
     CurriculumVersionDetail,
     GapsRunTarget,
@@ -141,9 +148,9 @@ def import_material(
 ) -> ImportedMaterial:
     """Import a YouTube video as course material, from its transcript.
 
-    Book files (PDF, DOCX, PPTX) are uploaded in the Library's import dialog instead; open it
-    with ``open_view``. If the transcript cannot be fetched, ask the professor to paste it and
-    call again with ``transcript``.
+    Book files (PDF, DOCX, PPTX) are attached in the chat instead, which imports them. If the
+    transcript cannot be fetched, ask the professor to paste it and call again with
+    ``transcript``.
     """
     deps = ctx.deps
     with deps.session_factory() as session:
@@ -169,6 +176,8 @@ class CurriculumProposal(BaseModel):
     document: dict[str, Any]
     analysis: str
     drafted_by: str
+    #: Parts of the course the app cannot teach or check: tell the professor about them.
+    out_of_scope: list[str]
 
 
 @tool
@@ -176,7 +185,240 @@ def propose_curriculum(ctx: RunContext[AgentDeps], brief: DraftBrief) -> Curricu
     """Draft a Topic -> Subtopic taxonomy from the professor's description. Saves nothing."""
     draft = draft_taxonomy(brief, client=ctx.deps.draft_client)
     return CurriculumProposal(
-        document=draft.document.model_dump(), analysis=draft.analysis, drafted_by=draft.drafted_by
+        document=draft.document.model_dump(),
+        analysis=draft.analysis,
+        drafted_by=draft.drafted_by,
+        out_of_scope=draft.out_of_scope,
+    )
+
+
+# -- Course design: the curriculum with how each subtopic is taught and checked (ADR-078) ------
+
+
+class DesignStyleView(BaseModel):
+    name: str
+    #: The question type as the professor sees it.
+    question_type: str
+    summary: str
+    #: The figure each question shows the student, as the professor sees it; ``None`` for none.
+    figure: str | None = None
+    #: True when it would be drafted on approval; false when the course already has it.
+    new: bool
+    #: A reused style's own name, when it was written for another course.
+    reused_from: str | None = None
+    used_by: int
+
+
+class DesignRecipeView(BaseModel):
+    name: str
+    #: The tutorial form as the professor sees it.
+    form: str
+    summary: str
+    new: bool
+    reused_from: str | None = None
+    used_by: int
+
+
+class DesignSubtopicView(BaseModel):
+    name: str
+    description: str
+    styles: list[str]
+    recipes: list[str]
+
+
+class DesignTopicView(BaseModel):
+    name: str
+    subtopics: list[DesignSubtopicView]
+
+
+class CourseDesignView(BaseModel):
+    """A course design as it stands, in the professor's terms. Nothing is saved."""
+
+    #: Pass to the next step: suggest_styles, suggest_recipes, show_design, a revision, approval.
+    design_id: str
+    title: str
+    audience: str
+    topic_count: int
+    subtopic_count: int
+    #: False until suggest_styles has run for the current curriculum.
+    styles_ready: bool
+    #: False until suggest_recipes has run for the current curriculum.
+    recipes_ready: bool
+    styles: list[DesignStyleView]
+    recipes: list[DesignRecipeView]
+    topics: list[DesignTopicView]
+    #: Syllabus parts left outside the app: always tell the professor.
+    out_of_scope: list[str]
+
+
+_FORM_LABELS = {
+    "markdown": "Written explanation",
+    "mermaid": "Diagram",
+    "chartjs": "Chart",
+    "html": "Interactive page",
+    "video_clip": "Lecture clip",
+}
+
+
+def _figure_label(kind: str) -> str | None:
+    figure = catalog.FIGURE_KINDS_BY_ID.get(kind)
+    return figure.label if figure is not None else None
+
+
+def design_view(design) -> CourseDesignView:
+    """What the chat shows of a ``CourseDesign``: names, never keys or ids."""
+    style_names = {s.key: s.name for s in design.styles}
+    recipe_names = {r.key: r.name for r in design.recipes}
+    style_keys = design.style_use or {}
+    recipe_keys = design.recipe_use or {}
+    style_use = Counter(k for ks in style_keys.values() for k in ks)
+    recipe_use = Counter(k for ks in recipe_keys.values() for k in ks)
+    topics = []
+    for t, topic in enumerate(design.curriculum.topics, start=1):
+        subtopics = []
+        for n, sub in enumerate(topic.subtopics, start=1):
+            key = f"T{t}.S{n}"
+            subtopics.append(
+                DesignSubtopicView(
+                    name=sub.name,
+                    description=sub.description or "",
+                    styles=[style_names[k] for k in style_keys.get(key, [])],
+                    recipes=[recipe_names[k] for k in recipe_keys.get(key, [])],
+                )
+            )
+        topics.append(DesignTopicView(name=topic.name, subtopics=subtopics))
+    return CourseDesignView(
+        design_id=design.id,
+        title=design.curriculum.label,
+        audience=design.brief.audience,
+        topic_count=len(topics),
+        subtopic_count=sum(len(t.subtopics) for t in topics),
+        styles_ready=design.style_use is not None,
+        recipes_ready=design.recipe_use is not None,
+        styles=[
+            DesignStyleView(
+                name=s.name,
+                question_type=catalog.TYPES_BY_ID[s.question_type].label,
+                summary=s.summary,
+                figure=_figure_label(s.figure),
+                new=s.existing_id is None,
+                reused_from=s.original_name,
+                used_by=style_use[s.key],
+            )
+            for s in design.styles
+        ],
+        recipes=[
+            DesignRecipeView(
+                name=r.name,
+                form=_FORM_LABELS.get(r.form, r.form),
+                summary=r.summary,
+                new=r.existing_id is None,
+                reused_from=r.original_name,
+                used_by=recipe_use[r.key],
+            )
+            for r in design.recipes
+        ],
+        topics=topics,
+        out_of_scope=design.out_of_scope,
+    )
+
+
+def _catalogue(deps: AgentDeps) -> course_design.DesignCatalogue:
+    with deps.session_factory() as session:
+        return course_design.design_catalogue(
+            session, profile_for_course_id(session, deps.course_id)
+        )
+
+
+@tool
+def design_curriculum(
+    ctx: RunContext[AgentDeps],
+    brief: DraftBrief | None = None,
+    design_id: str = "",
+    change: str = "",
+) -> CourseDesignView:
+    """Start a course design with its curriculum, or redraft a design's curriculum. Saves nothing.
+
+    For a new design pass ``brief``, filled from the material; the result's ``design_id`` is
+    what the other design tools take. To change topics or subtopics, pass ``design_id`` and the
+    professor's ``change``: the styles and recipes then need suggesting again. One model call.
+    """
+    deps = ctx.deps
+    design = course_design.get_design(design_id, deps.course_id) if design_id else None
+    return design_view(
+        course_design.design_curriculum(
+            course_id=deps.course_id,
+            brief=brief,
+            design=design,
+            change=change,
+            draft_client=deps.draft_client,
+        )
+    )
+
+
+@tool
+def suggest_styles(
+    ctx: RunContext[AgentDeps], design_id: str, change: str = ""
+) -> CourseDesignView:
+    """Suggest the design's question styles: how each subtopic is checked. Saves nothing.
+
+    Picks as few styles as the curriculum needs, reusing the course's own where they fit, and
+    which ones each subtopic uses. Pass the professor's ``change`` to revise them; the rest of
+    the design is kept. One model call; can run alongside suggest_recipes.
+    """
+    deps = ctx.deps
+    design = course_design.get_design(design_id, deps.course_id)
+    return design_view(
+        course_design.suggest_styles(
+            design, _catalogue(deps), change=change, client=deps.setup_client
+        )
+    )
+
+
+@tool
+def suggest_recipes(
+    ctx: RunContext[AgentDeps], design_id: str, change: str = ""
+) -> CourseDesignView:
+    """Suggest the design's tutorial recipes: how each subtopic is taught. Saves nothing.
+
+    Picks as few recipes as the curriculum needs, reusing the course's own where they fit, and
+    which ones each subtopic uses. Pass the professor's ``change`` to revise them; the rest of
+    the design is kept. One model call; can run alongside suggest_styles.
+    """
+    deps = ctx.deps
+    design = course_design.get_design(design_id, deps.course_id)
+    return design_view(
+        course_design.suggest_recipes(
+            design, _catalogue(deps), change=change, client=deps.setup_client
+        )
+    )
+
+
+@tool
+def show_design(ctx: RunContext[AgentDeps], design_id: str) -> CourseDesignView:
+    """Show the professor the design as it stands, as a card they review and change in place.
+
+    Call it once the steps you ran are done, instead of describing the design in text. No model
+    call.
+    """
+    return design_view(course_design.get_design(design_id, ctx.deps.course_id))
+
+
+@tool
+def approve_course_design(ctx: RunContext[AgentDeps], design_id: str) -> ApprovedDesign:
+    """Save a proposed course design as the professor approved it. Waits for approval.
+
+    Saves the curriculum, drafts and saves each new tutorial recipe, and approves the design's
+    recipes for the curriculum. Drafts each new question style without saving it (one model
+    call each): offer every ``style_drafts`` entry with ``save_style``. Returns every
+    subtopic's saved and pending style ids for planning generation.
+    """
+    deps = ctx.deps
+    return approve_design(
+        course_design.get_design(design_id, deps.course_id),
+        session_factory=deps.session_factory,
+        style_client=deps.setup_client or get_structured_client(),
+        recipe_client=_tutorial_client(deps),
     )
 
 
@@ -301,6 +543,190 @@ def approve_curriculum(ctx: RunContext[AgentDeps], document: TaxonomyDocument) -
         return CurriculumTree.from_detail(
             curriculum_routes.get_version(session, deps.course_id, version.id)
         )
+
+
+class MaterialText(BaseModel):
+    """A stretch of one imported book's text, in reading order."""
+
+    book_id: int
+    title: str
+    #: Text of the chunks from ``start`` on, each under its section heading, up to the limit.
+    text: str
+    #: Pass as ``start`` to read on; ``None`` when this reached the end.
+    next_start: int | None
+    total_chunks: int
+
+
+#: The most text one ``read_material`` call returns; read on with ``next_start``.
+MATERIAL_CHARS = 24_000
+
+
+@tool
+def read_material(ctx: RunContext[AgentDeps], book_id: int, start: int = 0) -> MaterialText:
+    """Read an imported book, syllabus or slide deck: its text in reading order.
+
+    Ids come from ``course_overview``. A file attached a moment ago is listed there only once
+    its import has finished. Long material comes in parts: call again with ``next_start``.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        book_in_course(session, book_id, deps.course_id)
+        book = session.get(BookRow, book_id)
+        chunks = ChunkRepository(session).list_for_book(book_id)
+        parts: list[str] = []
+        used = 0
+        index = start
+        last_heading: tuple[str, ...] = ()
+        while index < len(chunks) and (used < MATERIAL_CHARS or not parts):
+            chunk = chunks[index]
+            heading = tuple(chunk.heading_path or ())
+            piece = chunk.text
+            if heading and heading != last_heading:
+                piece = f"## {' > '.join(heading)}\n{piece}"
+                last_heading = heading
+            parts.append(piece)
+            used += len(piece)
+            index += 1
+        return MaterialText(
+            book_id=book_id,
+            title=book.title if book else "",
+            text="\n\n".join(parts),
+            next_start=index if index < len(chunks) else None,
+            total_chunks=len(chunks),
+        )
+
+
+class AppCapabilities(BaseModel):
+    """The boundary of what can be made for any course (ADR-077)."""
+
+    text: str
+
+
+@tool
+def app_capabilities(ctx: RunContext[AgentDeps]) -> AppCapabilities:
+    """What tutorial recipes and question styles are built from, and what no course can do.
+
+    Read it before drafting a curriculum, a style or a recipe, or judging which parts of a
+    syllabus the app can take on. No model call.
+    """
+    return AppCapabilities(text=capabilities_text())
+
+
+# -- The course itself: subject and question types ---------------------------------------------
+
+
+class SubjectOptions(BaseModel):
+    """What ``set_course_subject`` accepts."""
+
+    subjects: list[dict[str, Any]]
+    #: The question types a course can use today (each must be built end to end).
+    question_types: list[dict[str, Any]]
+
+
+@tool
+def subject_options(ctx: RunContext[AgentDeps]) -> SubjectOptions:
+    """The subject presets and usable question types, for choosing the course's subject.
+
+    ``has_library``: the subject ships curated question styles; without one, draft the
+    course's own with ``draft_style``. Use ``custom`` when no preset fits.
+    """
+    return SubjectOptions(
+        subjects=[
+            {
+                "id": preset.id,
+                "label": preset.label,
+                "description": preset.description,
+                "default_types": catalog.default_types_for(preset.id),
+                "has_library": bool(get_library(preset.id)),
+            }
+            for preset in catalog.SUBJECTS
+        ],
+        question_types=[
+            {"id": spec.id, "label": spec.label}
+            for spec in catalog.QUESTION_TYPES
+            if catalog.is_offerable(spec.id)
+        ],
+    )
+
+
+class CourseSettings(BaseModel):
+    subject: str
+    question_types: list[str]
+    #: False when the course already had this subject and these types: nothing was asked.
+    changed: bool = True
+
+
+@tool
+def set_course_subject(
+    ctx: RunContext[AgentDeps], subject: str, question_types: list[str] | None = None
+) -> CourseSettings:
+    """Set the course's subject and, optionally, its question types, as detected from the
+    material. Runs at once, with no approval card: the professor corrects it in the chat.
+    Asking for what the course already has changes nothing and returns ``changed`` false.
+
+    Only before the course has questions or styles of its own. Without ``question_types``
+    the course takes the subject's default types. Ids come from ``subject_options``.
+    """
+    deps = ctx.deps
+    if deps.course_id is None:
+        raise DomainRuleError("Open a course first.")
+    with deps.session_factory() as session:
+        course = session.get(CourseRow, deps.course_id)
+        if course is None:
+            raise NotFoundError("Course not found.")
+        wanted = (
+            question_types if question_types is not None else catalog.default_types_for(subject)
+        )
+        if course.subject == subject and set(course.question_types) == set(wanted):
+            return CourseSettings(
+                subject=subject, question_types=list(course.question_types), changed=False
+            )
+    with deps.session_factory() as session:
+        course = course_routes.change_course(
+            session,
+            deps.user_id,
+            deps.course_id,
+            CourseUpdate(subject=subject, question_types=question_types),
+        )
+    return CourseSettings(
+        subject=course.subject or catalog.LEGACY_SUBJECT,
+        question_types=list(course.question_types),
+    )
+
+
+class StyleDraftOut(BaseModel):
+    """A style in the library's YAML format, ready for ``save_style``. Never saved."""
+
+    yaml: str
+    #: Empty when the draft passes the style checks; otherwise why not, after one repair.
+    problems: list[str]
+    #: The style's fields, which the chat shows as a card.
+    style: dict[str, Any] | None = None
+
+
+@tool
+def draft_style(
+    ctx: RunContext[AgentDeps], description: str, current_yaml: str = ""
+) -> StyleDraftOut:
+    """Draft a question style from the professor's words, or revise ``current_yaml``.
+
+    One model call. The draft is checked like a saved style: its two examples go through
+    their question type's checks and grader. Saves nothing; show it, then ``save_style``.
+    """
+    deps = ctx.deps
+    with deps.session_factory() as session:
+        result = style_drafting.draft_style(
+            session,
+            profile_for_course_id(session, deps.course_id),
+            deps.setup_client or get_structured_client(),
+            description,
+            current_yaml or None,
+        )
+    return StyleDraftOut(
+        yaml=result.yaml,
+        problems=result.problems,
+        style=result.style.model_dump(mode="json", exclude={"subject"}) if result.style else None,
+    )
 
 
 class SavedStyle(BaseModel):
@@ -454,6 +880,16 @@ def run_generation(ctx: RunContext[AgentDeps], plan_id: str, model_calls: int) -
 class CourseOverview(BaseModel):
     """The ids the other tools take: the course's material and curriculum versions."""
 
+    name: str
+    #: Subject preset id (``intro_python``, ``custom``, ...); see ``subject_options``.
+    subject: str
+    #: What the professor calls it. ``custom`` means no preset: the course's own styles and
+    #: recipes carry the subject, and the prompts are named after the course.
+    subject_name: str
+    #: ``{"id", "label"}``: say the label, pass the id.
+    question_types: list[dict[str, str]]
+    #: Styles the course can use: its subject's library plus the ones made for it.
+    style_count: int
     books: list[dict[str, Any]]
     curriculum_versions: list[dict[str, Any]]
     approved_curriculum_version_id: int | None
@@ -461,12 +897,29 @@ class CourseOverview(BaseModel):
 
 @tool
 def course_overview(ctx: RunContext[AgentDeps]) -> CourseOverview:
-    """The course's imported material and curriculum versions, with their ids."""
+    """The course's subject, question types, imported material and curriculum versions."""
     deps = ctx.deps
     with deps.session_factory() as session:
+        # The route already checked the professor may open this course (``X-Course-Id``).
+        course = session.get(CourseRow, deps.course_id) if deps.course_id is not None else None
+        profile = profile_for_course_id(session, deps.course_id)
+        style_count = len(setup_routes.list_styles(session, profile).styles)
         books = books_routes.list_books(session, deps.course_id)
         versions = curriculum_routes.list_versions(session, deps.course_id)
     return CourseOverview(
+        name=course.name if course else "",
+        subject=profile.subject_id,
+        subject_name=(
+            "Not set (custom: the course's own styles and recipes)"
+            if profile.subject_id == "custom"
+            else catalog.SUBJECTS_BY_ID[profile.subject_id].label
+        ),
+        question_types=[
+            {"id": type_id, "label": catalog.TYPES_BY_ID[type_id].label}
+            for type_id in profile.question_types
+            if type_id in catalog.TYPES_BY_ID
+        ],
+        style_count=style_count,
         books=[
             {"id": b.id, "title": b.title, "status": str(b.status), "format": str(b.source_format)}
             for b in books.books
@@ -505,7 +958,14 @@ def preview_styles(
             styles=[
                 style.model_dump(
                     mode="json",
-                    include={"id", "name", "summary", "question_type", "difficulty_range"},
+                    include={
+                        "id",
+                        "name",
+                        "summary",
+                        "question_type",
+                        "difficulty_range",
+                        "figure",
+                    },
                 )
                 for style in library
             ]
@@ -882,73 +1342,3 @@ def decide_recipe(
                 curriculum_version_id=curriculum_version_id, approved=approved
             ),
         )
-
-
-# -- Navigation -------------------------------------------------------------------------------
-
-#: Each Studio view's path inside ``/courses/{course}``; ``{id}`` is ``open_view``'s ``id``.
-VIEW_PATHS: dict[str, str] = {
-    "dashboard": "/dashboard",
-    "library": "/books",
-    "book": "/books/{id}",
-    "curriculum": "/curriculum",
-    "curriculum_version": "/curriculum/versions/{id}",
-    "subtopic": "/curriculum/subtopics/{id}",
-    "questions": "/questions",
-    "question": "/questions/{id}",
-    "generate": "/questions/generate",
-    "review": "/review",
-    "coverage": "/coverage",
-    "students": "/students",
-    "tutorials": "/tutorials",
-    "judges": "/judges",
-}
-View = Literal[
-    "dashboard",
-    "library",
-    "book",
-    "curriculum",
-    "curriculum_version",
-    "subtopic",
-    "questions",
-    "question",
-    "generate",
-    "review",
-    "coverage",
-    "students",
-    "tutorials",
-    "judges",
-]
-
-
-class OpenedView(BaseModel):
-    """The Studio page the chat panel navigates to, inside the current course."""
-
-    view: str
-    path: str
-
-
-@tool
-def open_view(ctx: RunContext[AgentDeps], view: View, id: int | None = None) -> OpenedView:
-    """Open a page of the Studio, only when the professor asks to see or go to one.
-
-    Not a way to answer a question: read the answer with the matching tool and say it.
-    ``book``, ``curriculum_version``, ``subtopic`` and ``question`` need that row's ``id``.
-    """
-    template = VIEW_PATHS[view]
-    if "{id}" not in template:
-        return OpenedView(view=view, path=template)
-    if id is None:
-        raise DomainRuleError(f"Opening the {view} page needs its id.")
-    deps = ctx.deps
-    with deps.session_factory() as session:
-        if view == "book":
-            book_in_course(session, id, deps.course_id)
-        elif view == "curriculum_version":
-            version_in_course(session, id, deps.course_id)
-        elif view == "subtopic":
-            CurriculumRepository(session).get_subtopic(id)
-            subtopics_in_course(session, [id], deps.course_id)
-        else:
-            question_in_course(session, id, deps.course_id)
-    return OpenedView(view=view, path=template.format(id=id))

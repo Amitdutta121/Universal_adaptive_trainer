@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from pathlib import Path
-from typing import get_args
 
 import pytest
 from fastapi import FastAPI
@@ -21,20 +19,16 @@ from sqlalchemy import select
 
 from app.agent.agent import INSTRUCTIONS, agent_model
 from app.agent.tools import (
-    VIEW_PATHS,
     ClassReport,
     CourseOverview,
     CoverageSummary,
     CurriculumProposal,
     CurriculumTree,
-    OpenedView,
     ReviewSummary,
     StudentReport,
     StylePreview,
     ToolRefusal,
-    View,
     _student_lines,
-    open_view,
     student_report,
 )
 from app.config import LLMProvider, Settings
@@ -267,7 +261,7 @@ def test_the_ag_ui_route_runs_the_agent_with_its_tools(
 
 
 # -- Task 34: course_overview, preview_styles, suggest_setup, review_summary, student_report,
-# -- open_view ---------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------
 
 
 def test_course_overview_lists_the_ids_the_other_tools_take(db) -> None:
@@ -393,42 +387,9 @@ def test_class_report_lists_students_weakest_first_from_this_course_only() -> No
     ]
 
 
-def test_open_view_returns_the_studio_path_inside_the_course(db) -> None:
-    version_id = _import_taxonomy()
-
-    def opened(args: dict):
-        return result_of(_run(("open_view", args)), "open_view")
-
-    assert opened({"view": "coverage"}) == OpenedView(view="coverage", path="/coverage")
-    assert opened({"view": "curriculum_version", "id": version_id}).path == (
-        f"/curriculum/versions/{version_id}"
-    )
-    assert isinstance(opened({"view": "book"}), ToolRefusal)  # needs an id
-    assert isinstance(opened({"view": "book", "id": 999_999}), ToolRefusal)
-    assert isinstance(opened({"view": "subtopic", "id": 999_999}), ToolRefusal)
-
-
-def test_open_view_cannot_open_a_row_of_another_course(db) -> None:
-    mine, other = _course("Mine"), _course("Other")
-    version_id = _import_taxonomy(course_id=other)
-    refusal = result_of(
-        _run(("open_view", {"view": "curriculum_version", "id": version_id}), course_id=mine),
-        "open_view",
-    )
-    assert isinstance(refusal, ToolRefusal)
-
-
 def test_the_agent_is_told_to_answer_questions_rather_than_open_pages() -> None:
     # A professor's "how many students do I have?" opened the Students page instead of an answer.
     assert "answer it in the chat" in INSTRUCTIONS
     assert "student_report" in INSTRUCTIONS
     assert "how many there are" in (student_report.__doc__ or "")
-    assert "Not a way to answer a question" in (open_view.__doc__ or "")
-
-
-def test_every_view_has_a_studio_page() -> None:
-    pages = Path(__file__).parents[1] / "frontend" / "src" / "app" / "courses" / "[courseId]"
-    assert set(VIEW_PATHS) == set(get_args(View))
-    for path in VIEW_PATHS.values():
-        folder = path.strip("/").replace("{id}", "*")
-        assert list(pages.glob(f"{folder}/page.tsx")), path
+    assert "you cannot open or move to a page" in INSTRUCTIONS

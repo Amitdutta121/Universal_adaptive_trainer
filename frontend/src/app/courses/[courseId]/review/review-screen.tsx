@@ -74,10 +74,12 @@ export function ReviewScreen() {
   const detail = data?.question ?? null;
   const form = useReviewForm(detail);
   // Reject needs no reason any more; an edit needs an actual change.
+  // A figure the browser already knows is invalid must not be submitted.
   const canSubmit =
     form.difficultyConfirmed &&
     form.subtopicsConfirmed &&
     form.subtopicIds.length > 0 &&
+    !form.figureError &&
     (form.effectiveDecision !== "edit" || form.changedFields.length > 0);
 
   async function onSubmit() {
@@ -98,6 +100,7 @@ export function ReviewScreen() {
             prompt: form.promptEdit,
             reference_solution: form.referenceEdit,
             tests: form.testsEdit,
+            ...(form.changedFields.includes("figure") ? { figure: form.figureEdit } : {}),
           }
         : {}),
     };
@@ -268,6 +271,9 @@ export function ReviewScreen() {
                 isInlineEditing={form.isInlineEditing}
                 promptEdit={form.promptEdit}
                 onPromptEdit={form.setPromptEdit}
+                figureEdit={form.figureEdit}
+                onFigureEdit={form.setFigureEdit}
+                onFigureError={form.setFigureError}
               />
               <ReviewQuestionContent
                 detail={detail}

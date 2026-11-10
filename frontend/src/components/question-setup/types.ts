@@ -3,7 +3,7 @@
  * on the Questions page and the design prototype under `app/experiments/question-setup`.
  */
 
-import type { Difficulty } from "@/lib/api/types";
+import type { Difficulty, QuestionFigure } from "@/lib/api/types";
 
 export type { Difficulty };
 
@@ -23,6 +23,8 @@ export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
  */
 export interface ExampleQuestion {
   prompt: string;
+  /** The figure the student reads with the prompt (ADR-080). */
+  figure?: QuestionFigure | null;
   /** A code listing shown under the prompt. */
   code?: string | null;
   /** Choice options; `correct` marks the key. */

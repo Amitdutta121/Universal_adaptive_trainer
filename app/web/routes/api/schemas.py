@@ -78,6 +78,7 @@ from app.domain.questions import GenerationAttempt, QuestionCheck
 from app.evaluation import IngestResult, PedagogicalEvaluation, SubmissionResult
 from app.evaluation.custom import CustomJudgeResult
 from app.evaluation.trust import TrustReport
+from app.figures import Figure
 from app.generation import ChunkQuestionRequest, PlannedQuestion
 from app.persistence.models import (
     BookRow,
@@ -251,6 +252,8 @@ class TaxonomyDraftResponse(BaseModel):
     document: dict[str, Any]
     #: The model's chapter-by-chapter notes, written before the taxonomy.
     analysis: str
+    #: Parts of the course the app cannot teach or check, left out of the taxonomy (ADR-077).
+    out_of_scope: list[str] = Field(default_factory=list)
 
 
 class CourseOut(BaseModel):
@@ -269,6 +272,8 @@ class CourseOut(BaseModel):
     question_types: list[str]
     #: Worked out from ``question_types``; never chosen directly (ADR-054).
     capabilities: list[str]
+    #: Whether new questions may carry a figure (ADR-080).
+    figures_enabled: bool = True
 
     @classmethod
     def from_row(cls, row: CourseRow, counts: tuple[int, int, int] = (0, 0, 0)) -> CourseOut:
@@ -286,6 +291,7 @@ class CourseOut(BaseModel):
             subject=subject,
             question_types=types,
             capabilities=capabilities_for(types),
+            figures_enabled=row.figures_enabled,
         )
 
 
@@ -412,6 +418,12 @@ class CourseUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     #: The question types to allow; each must be offerable. The capabilities follow (ADR-054).
     question_types: list[str] | None = None
+    #: A subject preset id. Allowed only while the course has no questions and no styles of its
+    #: own, because both are stored under the subject's key (ADR-056). Without
+    #: ``question_types``, the course takes the subject's default types.
+    subject: str | None = Field(default=None, max_length=50)
+    #: Off, new questions are written without figures (ADR-080); existing ones keep theirs.
+    figures_enabled: bool | None = None
 
 
 class BookSummary(BaseModel):
@@ -875,9 +887,13 @@ class QuestionSummary(BaseModel):
     audit_reason: str | None = None
     #: Other models, answering without the key, disagreed with it on the last attempt.
     solve_flag: str | None = None
+    #: The question's figure (ADR-080), as students see it; ``None`` when it has none.
+    figure: Figure | None = None
 
     @classmethod
     def from_row(cls, row: QuestionRow) -> QuestionSummary:
+        from app.question_types import figure_view
+
         report = row.validation_report
         return cls(
             id=row.id,
@@ -921,6 +937,7 @@ class QuestionSummary(BaseModel):
             audit_metric=row.audit_metric,
             audit_reason=row.audit_reason,
             solve_flag=row.solve_flag,
+            figure=figure_view(row.content or {}),
         )
 
 
@@ -940,6 +957,17 @@ class PersonalizationEvidence(BaseModel):
     preference_ids: list[int]
     review_ids: list[int]
     profile_version: str | None = None
+
+
+class FigureCopyOut(BaseModel):
+    """One copy of a computed-figure question, made by its program for one seed (ADR-080)."""
+
+    ordinal: int
+    seed: int
+    prompt: str
+    reference_solution: str | None
+    #: The copy's own content: its answer fields, key and ``figure`` pointer.
+    content: dict[str, Any]
 
 
 class QuestionDetail(BaseModel):
@@ -969,9 +997,16 @@ class QuestionDetail(BaseModel):
     original_prompt: str | None
     original_reference_solution: str | None
     original_tests: str | None
+    #: The generated figure, once a professor edit has changed it; ``None`` otherwise.
+    original_figure: dict[str, Any] | None = None
     reviews: list[ReviewOut]
     #: Judge failures that were kept as borderline rather than retried (m10).
     borderline_notes: list[str] = Field(default_factory=list)
+    #: A computed-figure question's copies, in order, for review side by side; empty for any
+    #: other question. Professor-only, like ``figure_program``: a student route clears both.
+    figure_copies: list[FigureCopyOut] = Field(default_factory=list)
+    #: The program that drew the copies.
+    figure_program: str | None = None
 
 
 class QuestionListResponse(BaseModel):
@@ -1124,6 +1159,9 @@ class ReviewRequest(BaseModel):
     prompt: str | None = None
     reference_solution: str | None = None
     tests: str | None = None
+    #: An edit's figure (ADR-080), same kind as the question's; omitted leaves it as it is.
+    #: Checked by the server, which answers with why it cannot be drawn.
+    figure: dict[str, Any] | None = None
     professor_id: int | None = None
     #: The difficulty the professor says the question really is. Omitted by older clients;
     #: when present, the difficulty judge is at fault iff its verdict differs.
@@ -2279,6 +2317,10 @@ class ServedQuestionOut(BaseModel):
     blocks: list[ParsonsBlockOut] | None = None
     #: How to write the answer, for types that need it (e.g. "a number with its unit").
     answer_hint: str | None = None
+    #: The figure to read before answering (ADR-080), any type.
+    figure: Figure | None = None
+    #: Numeric response only: whether the answer takes a unit. ``None`` for other types.
+    takes_unit: bool | None = None
     #: Read before answering: the first question of a topic whose prior mastery is low
     #: (Phase 6). Empty otherwise.
     preteach_blocks: list[StudentTutorialBlockOut] = Field(default_factory=list)
@@ -2308,6 +2350,8 @@ class ServedQuestionOut(BaseModel):
             if view.blocks is None
             else [ParsonsBlockOut(**block) for block in view.blocks],
             answer_hint=view.answer_hint,
+            figure=view.figure,
+            takes_unit=view.takes_unit,
         )
 
 
@@ -3276,3 +3320,27 @@ class SetQuestionVisibilityRequest(BaseModel):
 
 class SetQuestionVisibilityResponse(BaseModel):
     changed: int
+
+
+# -- Course assistant chats (ADR-075) ------------------------------------------------------------
+
+
+class AgentThreadSummary(BaseModel):
+    id: str
+    title: str
+    updated_at: datetime
+
+
+class AgentThreadListResponse(BaseModel):
+    """The professor's chats in this course, most recently used first."""
+
+    threads: list[AgentThreadSummary]
+
+
+class AgentThreadOut(AgentThreadSummary):
+    #: The chat's AG-UI messages, as the panel saved them.
+    messages: list[dict[str, Any]]
+
+
+class AgentThreadSave(BaseModel):
+    messages: list[dict[str, Any]]

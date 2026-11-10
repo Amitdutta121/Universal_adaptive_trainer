@@ -1,5 +1,210 @@
 {
   "$defs": {
+    "ChartData": {
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "datasets": {
+          "items": {
+            "$ref": "#/$defs/ChartDataset"
+          },
+          "minItems": 1,
+          "title": "Datasets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "datasets"
+      ],
+      "title": "ChartData",
+      "type": "object"
+    },
+    "ChartDataset": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/XYPoint"
+              },
+              "type": "array"
+            }
+          ],
+          "minLength": 1,
+          "title": "Data"
+        }
+      },
+      "required": [
+        "label",
+        "data"
+      ],
+      "title": "ChartDataset",
+      "type": "object"
+    },
+    "ChartFigure": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Alt",
+          "type": "string"
+        },
+        "caption": {
+          "default": "",
+          "title": "Caption",
+          "type": "string"
+        },
+        "kind": {
+          "const": "chart",
+          "title": "Kind",
+          "type": "string"
+        },
+        "chart": {
+          "$ref": "#/$defs/ChartSpec"
+        }
+      },
+      "required": [
+        "alt",
+        "kind",
+        "chart"
+      ],
+      "title": "ChartFigure",
+      "type": "object"
+    },
+    "ChartSpec": {
+      "additionalProperties": false,
+      "description": "A Chart.js chart as data only: no callbacks, no plugins, no options beyond axis titles.",
+      "properties": {
+        "type": {
+          "enum": [
+            "bar",
+            "line",
+            "pie",
+            "doughnut",
+            "scatter"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/ChartData"
+        },
+        "x_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "X Title"
+        },
+        "y_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Y Title"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "title": "ChartSpec",
+      "type": "object"
+    },
+    "ComputedFigure": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Alt",
+          "type": "string"
+        },
+        "caption": {
+          "default": "",
+          "title": "Caption",
+          "type": "string"
+        },
+        "kind": {
+          "const": "computed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "file": {
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alt",
+        "kind",
+        "file"
+      ],
+      "title": "ComputedFigure",
+      "type": "object"
+    },
+    "DiagramFigure": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Alt",
+          "type": "string"
+        },
+        "caption": {
+          "default": "",
+          "title": "Caption",
+          "type": "string"
+        },
+        "kind": {
+          "const": "diagram",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alt",
+        "kind",
+        "source"
+      ],
+      "title": "DiagramFigure",
+      "type": "object"
+    },
     "Difficulty": {
       "description": "Question difficulty. Selected from student topic mastery.",
       "enum": [
@@ -109,6 +314,36 @@
           "default": "",
           "title": "Grounding",
           "type": "string"
+        },
+        "figure": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "chart": "#/$defs/ChartFigure",
+                  "computed": "#/$defs/ComputedFigure",
+                  "diagram": "#/$defs/DiagramFigure"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/DiagramFigure"
+                },
+                {
+                  "$ref": "#/$defs/ChartFigure"
+                },
+                {
+                  "$ref": "#/$defs/ComputedFigure"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure"
         }
       },
       "required": [
@@ -168,6 +403,25 @@
       ],
       "title": "QuestionType",
       "type": "string"
+    },
+    "XYPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "XYPoint",
+      "type": "object"
     }
   },
   "description": "One style in a subject's library.\n\n``id`` is stable and namespaced by subject (``py.trace_output``): it is stored on every\nquestion generated in this style and on every approved setup, so renaming a style must not\nchange it.",
@@ -211,6 +465,17 @@
       },
       "title": "Applies To",
       "type": "array"
+    },
+    "figure": {
+      "default": "none",
+      "enum": [
+        "none",
+        "diagram",
+        "chart",
+        "computed"
+      ],
+      "title": "Figure",
+      "type": "string"
     },
     "examples": {
       "maxItems": 2,

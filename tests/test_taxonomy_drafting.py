@@ -153,3 +153,18 @@ def test_one_number_alone_shapes_the_size_line() -> None:
         "Exactly 12 subtopics in all, grouped into topics of 2 to 5 subtopics."
     )
     assert "about 30 subtopics" in size_target(DraftBrief(title="t", description="d"))
+
+
+def test_out_of_scope_parts_come_back_with_the_draft(client: TestClient, drafter) -> None:
+    original = drafter.complete_structured
+
+    def with_out_of_scope(**kwargs):
+        result = original(**kwargs)
+        return result.model_copy(update={"out_of_scope": ["Lab safety demo", "  "]})
+
+    drafter.complete_structured = with_out_of_scope
+    response = client.post(
+        "/api/curriculum/drafts", json={"title": "Intro Biology", "description": "Cells."}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["out_of_scope"] == ["Lab safety demo"]

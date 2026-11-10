@@ -39,6 +39,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request,
 from fastapi.responses import JSONResponse
 
 from app.adaptive import AdaptiveTrainingEngine
+from app.adaptive.service import attempt_variant
 from app.auth.backend import current_active_user
 from app.coverage import get_prod_question_set, get_taxonomy_question_set
 from app.domain.enums import RoundStatus
@@ -840,7 +841,41 @@ def review_attempt(session: DbSession, learner: Learner, attempt_id: int) -> Que
 
     # Attempt ownership pins the reviewed question; the student page carries no
     # instructor course filter. Use the explicit scope added by the course API.
-    return get_question(session, course=None, question_id=attempt.question_id)
+    detail = get_question(session, course=None, question_id=attempt.question_id)
+    # The program and the other copies' keys are the professor's (ADR-080).
+    detail = detail.model_copy(update={"figure_copies": [], "figure_program": None})
+    variant = attempt_variant(session, attempt)
+    if variant is None:
+        return detail
+    # A computed-figure question (ADR-080): show the copy this student answered, with its own
+    # key. The checks, attempts and judge notes describe a different copy, so they are left out.
+    from app.question_types import figure_view
+
+    return detail.model_copy(
+        update={
+            "question": type(detail.question).model_validate(
+                {
+                    **detail.question.model_dump(),
+                    "prompt": variant.prompt,
+                    "figure": figure_view(variant.content),
+                }
+            ),
+            "reference_solution": variant.reference_solution,
+            "content": variant.content,
+            "validation_checks": [],
+            "generation_attempts": [],
+            "pedagogical_eval": None,
+            "pedagogical_error_message": None,
+            "custom_results": [],
+            "judge_trust": None,
+            "personalization": None,
+            "original_prompt": None,
+            "original_reference_solution": None,
+            "original_tests": None,
+            "reviews": [],
+            "borderline_notes": [],
+        }
+    )
 
 
 @router.post("/training-sessions/{training_session_id}/end", response_model=TrainingSessionOut)

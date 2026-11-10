@@ -2958,3 +2958,207 @@ in the prompt.
 **Consequences.** No schema change or migration; plain-text prompts render as before. A literal
 `$` pair in prose would render as math, so the rules ask for `\$5`. The alternative, structured
 `task` / `requirements` fields, was not adopted: it needs a schema change for every question type.
+
+## ADR-074 — A course is created by name, then set up by chatting with the course assistant
+
+**Status:** accepted. Amends the "subject, then question types" creation step of ADR-054.
+
+**Context.** The New course dialog asked for a subject, but only Intro Python had a style
+library, so every other choice was "Coming soon": a question with one possible answer. The
+course assistant already had the tools to draft curricula and recipes.
+
+**Decision.**
+- The dialog asks for a name and an optional description, then opens the course's assistant
+  page (`/courses/{id}/assistant`): saved chats, the conversation, and the setup steps, each of
+  which can be handed to the assistant. The side panel on every other course page shows the same
+  conversation (`AgentProvider`). The server stores the legacy subject until the assistant sets
+  one.
+- `PATCH /api/courses/{id}` accepts `subject` while the course has no questions and no styles of
+  its own (both are stored under the subject's key, ADR-056); without `question_types` the course
+  takes the new subject's defaults. The agent's `set_course_subject` calls it behind approval.
+- `draft_style` (`app/styles/drafting.py`) drafts a style from the professor's words and runs the
+  course-style checks on it, with one repair retry. It saves nothing; `save_style` saves on
+  approval. A custom course's styles use the prefix `c<course id>`; a course with a library uses
+  the library's prefix.
+- The agent's instructions carry the new-course workflow. Drafts (curricula, styles, recipes)
+  stay in the chat; only an approved one becomes structured rows.
+
+**Consequences.** Subjects without a library are usable once the assistant has drafted styles;
+the setup checklist blocks question setup only when the course has no style at all. Chats are
+saved per course (ADR-075).
+
+## ADR-075 — Course assistant chats are saved in the app, per course and professor
+
+**Status:** accepted.
+
+**Context.** A reload lost the conversation, and setting a course up runs over several sessions.
+CopilotKit's own thread list (`useThreads`, the threads drawer) needs its paid cloud service, and
+giving the chat a `threadId` makes it reconnect to a server-side thread the relay does not keep.
+
+**Decision.**
+- Table `agent_threads` (migration 0033): the AG-UI thread id, `course_id`, `owner_id`, a title
+  (the first user message) and the chat's AG-UI messages as JSON. `GET/PUT/DELETE
+  /api/agent/threads[/{id}]`, scoped to the request's course and the logged-in professor.
+- The panel saves the whole message list after every run, under the agent's thread id; opening a
+  chat puts its messages back on the agent. The panel opens on the latest chat.
+- A tool call still waiting for an approval when the chat was saved is dropped on reopen: its
+  approval card is gone, and a model refuses a history with an unanswered call.
+- A thread is a scratch pad. What the professor approves in it is saved by the agent's tools as
+  the app's own rows; nothing reads a thread's messages back except the panel.
+
+**Consequences.** One more table per course; a conversation over 5 MB of JSON is refused rather
+than truncated. A pending approval does not survive a reload; the agent asks again.
+
+## ADR-076 — Files are attached in the chat, and what the model reads is decided per file
+
+**Status:** accepted.
+
+**Context.** Professors expect to attach files in the chat (paperclip, drag and drop, paste), as in
+ChatGPT. The "+" menu instead opened the Contents uploader. Sent as CopilotKit attaches them, a
+document would reach Pydantic AI as a URL the model provider cannot fetch.
+
+**Decision.**
+- The chat's `attachments` are on in the side panel and on the assistant page; `onUpload`
+  (`components/agent/chat-attachments.ts`) decides what each file becomes before it is sent:
+  a format the app imports (PDF, Word, PowerPoint, ...) is uploaded as course material through
+  `POST /api/books`, like the Contents uploader, and sent as a reference (`kind: course_material`,
+  the import job id); a small text file (.txt, .md, .csv, .json, .yaml, .tex, up to 2 MB) is sent
+  as its text (`kind: text_file`); an image is sent as the image; anything else is refused with
+  the formats that work.
+- The agent route rewrites the tagged parts before the run (`app/agent/attachments.py`): course
+  material becomes a note naming the file and its import job; a text file becomes its text, cut
+  at 60,000 characters. Images pass through for a model that can see them.
+
+**Consequences.** Attaching a book imports it at once, whether or not the message is sent; it is
+course material like any upload. The model cannot read a book until its import finishes; it
+reads it through the course's tools, as before.
+
+## ADR-077 — Curricula and the agent work inside a stated boundary of what can be made
+
+**Status:** accepted.
+
+**Context.** Drafting a curriculum from a syllabus turned every syllabus item into a subtopic,
+including ones no tutorial block can teach and no question type can check (work in an editor or
+engine, version control, profiling, demos). Neither the drafter nor the agent was told what the
+app can make.
+
+**Decision.**
+- `app/curriculum/capabilities.py` states the boundary for any course: new tutorial recipes and
+  question styles can be drafted at any time, but each is built from fixed parts -- the tutorial
+  renderers and tools, and the question types built end to end -- and work in outside software,
+  practical skills, demos and projects, prose (while no written-answer type ships) and code in
+  languages other than Python are outside it. The lists are read from the live catalogue, and no
+  subject is named.
+- The curriculum drafter's request opens with it; a subtopic must be teachable and checkable
+  within it. Parts outside go to `out_of_scope` (returned by `POST /api/curriculum/drafts` and
+  `propose_curriculum`), and only the understanding behind them can be a subtopic.
+- The agent reads it with `app_capabilities` before drafting a curriculum, style or recipe, and
+  always tells the professor which syllabus parts stay outside the app.
+
+**Consequences.** A mostly hands-on course gets a thinner curriculum and a visible list of what
+it leaves out. The boundary moves by itself when a question type or renderer ships.
+
+## ADR-078 — A course is set up through one design the professor reviews and revises in chat
+
+**Status:** accepted, implemented.
+
+**Context.** Asked to set up a course from a syllabus, the agent asked to approve a curriculum
+shown only as topic headings, listed the app's question types and a subject's unrelated
+library styles, and said nothing about how any subtopic would be taught or checked. Professors
+rarely accept a first version, so a setup has to be revised by talking, not redone.
+
+**Decision.**
+- `app/course_design/` proposes a *course design*: the curriculum, a small set of question
+  styles and tutorial recipes (existing ones reused when they fit the subject, new ones only
+  where several subtopics need them), and which of them each subtopic uses. The chat agent is
+  the planner and builds it with one tool per step, all on one `design_id`: `design_curriculum`
+  (inside the boundary, ADR-077), then `suggest_styles` and `suggest_recipes` (called in the
+  same turn, so they run side by side), then `show_design` to show it. Each step is one
+  structured model call the agent can run again on its own later, so a change re-runs only the
+  step it is about; `draft_style` and `draft_recipe` make one item when the agent needs it. A
+  single service that ran every step was tried first and dropped: the agent could not run or
+  repeat one step without the others.
+- A reused style or recipe is shown under a name in this course's terms, with the name it was
+  written under beside it ("Reused: ..."), so a library item made for another course does not
+  confuse the professor; what it generates is still the reused item's own wording.
+- The plan is checked in code: unknown ids are treated as new, a style needs an offerable
+  question type and a recipe a tutorial renderer, unused items are dropped, and every subtopic
+  ends with at least one style and one recipe (the most used ones when the plan left it out).
+- A design is kept in the process for four hours under one id that every step updates in
+  place, each writing only its own part under a lock, so the two suggesters running together
+  never lose each other's work. Redrafting the curriculum (`draft_taxonomy` gained `current` and
+  `change`) keeps the styles and recipes but clears which subtopic uses them, so both are
+  suggested again; approval refuses a design until both are. Nothing is written until approval.
+- The chat shows the design as a card (`design-card.tsx`, rendered for `show_design` only): a
+  summary line, a table of styles
+  (how students are checked) and of recipes (how they are taught), every topic and subtopic with
+  what it uses, and what stays outside the app. Each row has Change (an inline box) and Remove,
+  topics have Change, and the card has a box for any other change and Approve design; each
+  sends a follow-up the agent turns into a revision of that part. The agent's own reply is two
+  lines at most and never repeats the card.
+
+- `approve_course_design` (approval-gated) saves the design: the curriculum as designed, each
+  new recipe drafted from the name and summary the professor saw (one model call each), and the
+  design's recipes approved for the new curriculum. New styles are drafted but not saved: the
+  agent offers each with `save_style`, whose approval card shows that style's example questions
+  with Approve and Reject, so no style reaches students unseen. A draft that still fails its
+  checks is reported, not offered. Each subtopic comes back with its saved and pending style
+  ids; the agent passes the saved ones as the question setup's styles. The approval card shows the
+  design from the chat's own `propose_course_design` result: counts, the new styles and recipes,
+  and the model calls making them costs. The design itself is shown as Markdown, not a widget.
+
+**Consequences.** Designs are lost on a backend restart; the professor asks again. New recipes
+are saved without a sample block; the professor sees their blocks in review.
+
+## ADR-079 — The agent sets the course's subject itself, from the material
+
+**Status:** accepted. Supersedes ADR-074's approval on `set_course_subject`.
+
+**Context.** Asked to set up an AI-in-Games course created with the Python preset, the agent
+asked the professor to approve "intro_python", the subject the course already had, and planned
+the design against the Python style library before any subject was settled. Professors expect
+the subject to be read off their syllabus, not chosen by them.
+
+**Decision.** `set_course_subject` runs without an approval card. The agent decides the subject
+from the material (a preset only when the course *is* that subject; otherwise custom), sets it
+before the design so the design reuses the right library, and says in one line what it chose;
+the professor corrects it in the chat. A call that asks for the subject and types the course
+already has changes nothing and returns `changed: false`. The subject still can only change
+before the course has questions or styles of its own, so an unapproved change cannot strand work.
+
+**Consequences.** One fewer click in setup; a wrong guess is visible in the reply and fixed by
+asking.
+
+## ADR-080 — A question can carry a figure: diagram, chart or computed (PrairieLearn-style)
+
+**Status:** accepted. Plan: `docs/FIGURE_QUESTIONS_MILESTONES.md` (fig1–fig6).
+
+**Context.** Diagrams existed only in tutorials; question prompts drop images and raw html
+(`frontend/src/components/prompt-text.tsx`), so the agent could promise a diagram question the app
+could not make. Professors in CS, statistics and science courses ask about trees, processes, charts
+and plots. A prototype (`/experiments/figure-questions`) showed the student side across subjects.
+
+**Decision.**
+1. A figure is an optional `figure` on any question's content, never a new question type; grading
+   is unchanged. Kinds are defined once in `app/assessment/catalog.py` (`FIGURE_KINDS`) and nothing
+   in the figure code names a subject: a course gets figures from its own material.
+2. Three kinds: `diagram` (Mermaid source), `chart` (Chart.js spec with axis titles and x/y points),
+   `computed` (an SVG drawn by a program that also computes the answer).
+3. Computed figures are made at generation time, never while a student waits: the LLM writes a
+   `generate(seed)` program, the configured executor runs it for K seeds (K=3) under a short timeout
+   and output cap, each copy is validated by the question type's own draft model, and an attempt is
+   served one copy chosen by its seed and scored against that copy's key. Programs that run long are
+   rejected, not waited for.
+4. A computed SVG is stored as a file under a configured directory and the database stores a pointer
+   to it, never the SVG text: rows stay small and storage can move to object storage later.
+5. A style says whether it uses a figure (`figure: none | diagram | chart | computed`), chosen by the
+   drafter from the material.
+6. Every figure has a required text alternative (`alt`): screen readers read it, and it is the only
+   view of a computed figure the text-only judges and blind solver get.
+7. A computed SVG is shown only through `<img>`, never inlined, so a script inside it cannot run;
+   Mermaid keeps `securityLevel: "strict"`.
+
+**Consequences.** Figure questions flow through the same dedup, solver and judge gates as text
+questions, which now read the figure as text. Judges still cannot see pictures; a vision-model
+judge is the follow-up if the cross-subject eval shows misdrawn figures passing. Figures from the
+course book and answers given by drawing on a figure stay out of scope.

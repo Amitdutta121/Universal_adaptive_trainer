@@ -196,7 +196,7 @@ class CalibrationPair(BaseModel):
 #: on their side to compare that judge against. Inventing a proxy would report an
 #: agreement rate for a question the professor was never asked.
 PROFESSOR_OBJECTIONS: dict[JudgeMetricId, frozenset[RejectionReason]] = {
-    JudgeMetricId.ISSUES: frozenset(JUDGE_ISSUE_CODES),
+    JudgeMetricId.ISSUES: frozenset(JUDGE_ISSUE_CODES) | {RejectionReason.FIGURE_MISMATCH},
     JudgeMetricId.SUBTOPIC: frozenset({RejectionReason.WRONG_TOPIC_SUBTOPIC}),
     JudgeMetricId.DIFFICULTY: frozenset({RejectionReason.TOO_EASY, RejectionReason.TOO_DIFFICULT}),
 }

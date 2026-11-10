@@ -1055,3 +1055,53 @@ html.dark [data-copilotkit] {
     }
   }
 }
+
+/* Chat replies in the Studio's own type. CopilotKit renders Markdown with its `prose` scale
+   (system font, 16px on a 28px line, padded and spaced list items, so every bullet read as its
+   own paragraph); these bring it to the app's font and 14px, with tight lists and real
+   headings. Scoped to the chat, so nothing else on a page changes. */
+[data-copilotkit] .copilotKitMessage,
+[data-copilotkit] .copilotKitMessage .cpk\:prose {
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+[data-copilotkit] .copilotKitMessage .cpk\:prose > div > * {
+  margin-block: 0 0.65em;
+}
+[data-copilotkit] .copilotKitMessage .cpk\:prose > div > *:last-child {
+  margin-bottom: 0;
+}
+[data-copilotkit] .copilotKitMessage :is(ul, ol) {
+  list-style-position: outside;
+  padding-left: 1.25em;
+}
+[data-copilotkit] .copilotKitMessage li {
+  margin: 0.2em 0;
+  padding: 0;
+}
+[data-copilotkit] .copilotKitMessage li::marker {
+  color: var(--muted-foreground);
+}
+[data-copilotkit] .copilotKitMessage li > :is(p, ul, ol) {
+  margin: 0;
+}
+[data-copilotkit] .copilotKitMessage :is(h1, h2, h3, h4) {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 1.1em 0 0.35em;
+}
+[data-copilotkit] .copilotKitMessage .cpk\:prose > div > :is(h1, h2, h3, h4):first-child {
+  margin-top: 0;
+}
+[data-copilotkit] .copilotKitMessage strong {
+  font-weight: 600;
+}
+[data-copilotkit] .copilotKitMessage :not(pre) > code {
+  font-size: 0.85em;
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+  background: var(--muted);
+}

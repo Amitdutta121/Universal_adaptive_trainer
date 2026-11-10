@@ -41,7 +41,13 @@ from app.domain.questions import Question
 from app.errors import AdaptiveTrainerError, ConfigurationError, DomainRuleError
 from app.evaluation.custom import CustomJudgeResult
 from app.evaluation.judge_prompts import effective_rubric_version, resolve_system_prompts
-from app.evaluation.prompts import RUBRIC_VERSION, build_user_prompt
+from app.evaluation.prompts import (
+    RUBRIC_VERSION,
+    build_user_prompt,
+    has_figure,
+    with_figure_guide,
+    with_figure_rubric,
+)
 from app.evaluation.schema import (
     RESPONSE_MODEL_FOR,
     MetricResult,
@@ -371,11 +377,15 @@ def _build_request_items(
             logger.warning("Skipping question %s in run %s: %s", row.id, run_id, exc)
             skipped += 1
             continue
+        figure = has_figure(row.content)
         for metric in JudgeMetricId:
+            system = prompts[metric]
+            if metric is JudgeMetricId.ISSUES:
+                system = with_figure_guide(system, figure=figure)
             items[metric].append(
                 BatchRequestItem(
                     custom_id=batch_transport.build_custom_id(run_id, row.id, metric.value),
-                    system=prompts[metric],
+                    system=system,
                     prompt=build_user_prompt(metric, context),
                 )
             )
@@ -459,7 +469,9 @@ def poll_and_ingest(
             # The panel this run was *submitted* with, not the one in force now:
             # a professor may have edited a judge while the batch was in flight,
             # and these answers came from the older prompts (ADR-038).
-            rubric_version=run.rubric_version or RUBRIC_VERSION,
+            rubric_version=with_figure_rubric(
+                run.rubric_version or RUBRIC_VERSION, figure=has_figure(question.content)
+            ),
         )
         record_evaluation(
             session,

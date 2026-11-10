@@ -51,6 +51,7 @@ const COURSE = {
   description: null,
   subject: "intro_python",
   question_types: ["multiple_choice", "coding"],
+  figures_enabled: true,
 } as unknown as Schemas["CourseOut"];
 
 function counts(approved: number, hidden: number) {
@@ -136,5 +137,22 @@ describe("CourseFormDialog: disallowing a type with questions (ADR-070)", () => 
     await user.click(screen.getByRole("checkbox", { name: /write code/i }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(screen.getByRole("checkbox", { name: /write code/i })).not.toBeChecked();
+  });
+
+  it("turns figures off for the course", async () => {
+    visibility.mockReturnValue(counts(0, 0));
+    const user = userEvent.setup();
+    render(<CourseFormDialog course={COURSE} onOpenChange={() => {}} />);
+
+    const figures = screen.getByRole("checkbox", { name: /allow figure questions/i });
+    expect(figures).toBeChecked();
+    await user.click(figures);
+    expect(figures).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateCourse).toHaveBeenCalledWith({
+      courseId: 2,
+      body: { name: "CS115", description: "", figures_enabled: false },
+    });
   });
 });

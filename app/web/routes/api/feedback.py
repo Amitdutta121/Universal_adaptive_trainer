@@ -14,13 +14,14 @@ generator and the judges is learned at the start of the next round
 from __future__ import annotations
 
 from collections import Counter
+from typing import Any
 
 from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.domain.enums import RejectionReason, ReviewDecision
 from app.domain.feedback import REJECTION_REASON_LABELS
-from app.feedback import route_review_outcome, submit_review
+from app.feedback import rejudge_edited_figure, route_review_outcome, submit_review
 from app.persistence.models import CurriculumVersionRow, ProfessorReviewRow, QuestionRow
 from app.persistence.repositories import ProfessorReviewRepository
 from app.web.routes.api.deps import (
@@ -51,15 +52,20 @@ router = APIRouter(tags=["feedback"])
 def create_review(
     session: DbSession, course: CourseScope, question_id: int, payload: ReviewRequest
 ) -> ReviewOut:
-    """Record a professor verdict and the cell it lands in (ADR-037). No model call."""
+    """Record a professor verdict and the cell it lands in (ADR-037).
+
+    No model call, except that an edit changing the figure is judged again (ADR-080) once
+    its outcome is recorded; without a configured model that step is skipped.
+    """
     question_in_course(session, question_id, course)
     subtopics_in_course(session, payload.corrected_subtopic_ids or [], course)
-    edit_fields: dict[str, str | None] = {}
+    edit_fields: dict[str, Any] = {}
     if payload.decision is ReviewDecision.EDIT:
         edit_fields = {
             "prompt": payload.prompt,
             "reference_solution": payload.reference_solution,
             "tests": payload.tests,
+            "figure": payload.figure,
         }
     try:
         review = submit_review(
@@ -74,6 +80,7 @@ def create_review(
             **edit_fields,
         )
         outcome = route_review_outcome(session, review)
+        rejudge_edited_figure(session, review)
     except Exception:
         session.rollback()
         raise

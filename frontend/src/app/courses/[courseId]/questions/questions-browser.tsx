@@ -215,6 +215,7 @@ const columns: ColumnDef<QuestionSummary>[] = [
         <PromptText
           text={row.original.prompt}
           variant="preview"
+          hasFigure={Boolean(row.original.figure)}
           className="line-clamp-3 text-foreground text-sm leading-6 underline-offset-4 hover:underline"
         />
       </button>

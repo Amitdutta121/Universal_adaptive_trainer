@@ -30,6 +30,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     and_,
+    true,
 )
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
@@ -165,6 +166,9 @@ class CourseRow(TimestampMixin, Base):
     capabilities: Mapped[list[str]] = mapped_column(
         "capabilities_json", JsonList, default=list, nullable=True
     )
+    #: Whether new questions may carry a figure (ADR-080). Off, every style is generated as
+    #: text only; questions already written keep their figures.
+    figures_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
 
 
 class BookRow(TimestampMixin, Base):
@@ -653,6 +657,10 @@ class QuestionRow(TimestampMixin, Base):
     original_prompt: Mapped[str | None] = mapped_column(Text, default=None)
     original_reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     original_tests: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The generated ``content["figure"]``, kept from the first professor edit that changed it.
+    original_figure: Mapped[dict | None] = mapped_column(
+        "original_figure_json", JsonObject, default=None
+    )
 
     #: The question this one was regenerated from, when an instructor asked for a
     #: new version with feedback. ``NULL`` for every question generated directly.
@@ -690,6 +698,9 @@ class QuestionRow(TimestampMixin, Base):
     #: What blind solvers said against the key of a round question kept on its last attempt
     #: (app/generation/solve.py). Such a question waits for the professor.
     solve_flag: Mapped[str | None] = mapped_column(Text, default=None)
+    #: A computed-figure question only (ADR-080 point 3): the ``generate(seed)`` program that
+    #: drew its copies (``question_variants``). Kept for the professor; never sent to a student.
+    figure_program: Mapped[str | None] = mapped_column(Text, default=None)
 
     generator_kind: Mapped[GeneratorKind] = mapped_column(
         StrEnumType(GeneratorKind, 32), default=GeneratorKind.BASE
@@ -738,6 +749,34 @@ class QuestionRow(TimestampMixin, Base):
         order_by="QuestionSimilarityRow.score.desc()",
         lazy="selectin",
     )
+
+
+class QuestionVariantRow(TimestampMixin, Base):
+    """One copy of a computed-figure question, made by its program for one seed (ADR-080).
+
+    ``content`` is the copy's own draft fields (prompt, options, key, explanation) plus
+    ``figure`` = ``{"kind": "computed", "file", "alt", "caption"}``; the SVG is a file under
+    ``settings.figure_dir`` and only its key is stored. A student attempt is served one copy and
+    scored against that copy's key (``StudentAttemptRow.variant_id``). A question without a
+    computed figure has no rows here.
+    """
+
+    __tablename__ = "question_variants"
+    __table_args__ = (
+        UniqueConstraint("question_id", "ordinal", name="uq_question_variants_question_ordinal"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    seed: Mapped[int] = mapped_column(Integer)
+    #: Position among the question's copies, from 0.
+    ordinal: Mapped[int] = mapped_column(Integer)
+    content: Mapped[dict] = mapped_column("content_json", JsonObject)
+    prompt: Mapped[str] = mapped_column(Text)
+    reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class QuestionSubtopicRow(Base):
@@ -940,6 +979,10 @@ class ProfessorReviewRow(TimestampMixin, Base):
     edited_prompt: Mapped[str | None] = mapped_column(Text, default=None)
     edited_reference_solution: Mapped[str | None] = mapped_column(Text, default=None)
     edited_tests: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The figure as the professor left it, when the edit changed it (ADR-080).
+    edited_figure: Mapped[dict | None] = mapped_column(
+        "edited_figure_json", JsonObject, default=None
+    )
     changed_fields: Mapped[list[str]] = mapped_column(
         "changed_fields_json", JsonList, default=list, nullable=True
     )
@@ -1613,6 +1656,28 @@ class ExperimentalRecipeRow(TimestampMixin, Base):
     )
 
 
+class AgentThreadRow(TimestampMixin, Base):
+    """One conversation with the course assistant, kept so the professor can come back to it.
+
+    ``messages`` are the chat's AG-UI messages as the panel last saved them. A thread is a
+    scratch pad: what the professor approves in it is saved as the app's own rows by the
+    agent's tools, never read back from here. ``id`` is the AG-UI thread id the panel chose.
+    """
+
+    __tablename__ = "agent_threads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    messages: Mapped[list] = mapped_column("messages_json", JsonList, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class TutorialBlockRow(TimestampMixin, Base):
     """One generated tutorial block for a subtopic (Phase 5, Task 19).
 
@@ -1887,6 +1952,11 @@ class StudentAttemptRow(TimestampMixin, Base):
     passed_tests: Mapped[int | None] = mapped_column(Integer, default=None)
     total_tests: Mapped[int | None] = mapped_column(Integer, default=None)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: The copy of a computed-figure question this attempt was served and is scored against
+    #: (ADR-080). ``None`` for every other question.
+    variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_variants.id", ondelete="SET NULL"), default=None
+    )
 
     session: Mapped[TrainingSessionRow] = relationship(back_populates="attempts")
     question: Mapped[QuestionRow] = relationship()

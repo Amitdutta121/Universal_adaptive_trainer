@@ -286,6 +286,8 @@ def _prompt(
             "difficulties": [difficulty.value for difficulty in style.difficulty_range],
             "checked_by": style.checked_by,
             "fits": style.applies_to,
+            # Only a figure style says so, so a library without one is shown as before.
+            **({"figure": style.figure} if style.figure != "none" else {}),
         }
         for style in styles
     ]

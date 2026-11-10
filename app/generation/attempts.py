@@ -85,6 +85,7 @@ CHECK_LABELS: dict[str, str] = {
     "custom_rule": "professor's rule",
     "target_subtopic": "target subtopic",
     "same_concept": "same idea",
+    "figure_drawable": "figure",
 }
 
 

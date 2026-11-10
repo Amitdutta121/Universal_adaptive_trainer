@@ -9,7 +9,7 @@ import {
   learningCurve,
   rateOf,
 } from "./learning-analysis";
-import { MOCK_CLASS } from "./mock-learning";
+import { MOCK_CLASS, updateMastery } from "./mock-learning";
 
 const a = (student: string, subtopic: string, correct: boolean): Answer => ({
   student,
@@ -150,5 +150,30 @@ describe("the simulated class", () => {
   it("learns: the fixed cohort ends higher than it starts", () => {
     const { cohort } = learningCurve(MOCK_CLASS, 4);
     expect(cohort[3].rate ?? 0).toBeGreaterThan((cohort[0].rate ?? 0) + 15);
+  });
+});
+
+describe("the simulated class moves on like the tutor", () => {
+  it("updates mastery with the engine's BKT step", () => {
+    // Same numbers as app.adaptive.state.update_mastery(0.1, 100 / 0) with default parameters.
+    expect(updateMastery(0.1, true)).toBeCloseTo(0.28247, 4);
+    expect(updateMastery(0.1, false)).toBeCloseTo(0.03764, 4);
+  });
+
+  it("leaves a subtopic once mastery reaches 0.60, not after a streak", () => {
+    const runs = new Map<string, boolean[]>();
+    for (const answer of MOCK_CLASS) {
+      const key = `${answer.student}|${answer.subtopic}`;
+      runs.set(key, [...(runs.get(key) ?? []), answer.correct]);
+    }
+    for (const run of runs.values()) {
+      let mastery = 0.1;
+      for (const correct of run) {
+        // Every answer was asked while mastery was still under the ceiling.
+        expect(mastery).toBeLessThan(0.6);
+        mastery = updateMastery(mastery, correct);
+      }
+      expect(mastery >= 0.6 || run.length === 9).toBe(true);
+    }
   });
 });

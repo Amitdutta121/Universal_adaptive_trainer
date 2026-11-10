@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 
 from app.domain.enums import QuestionType
+from app.question_types._shared import figure_view
 from app.question_types.base import DraftColumns, QuestionTypeModule, StudentView
 
 _MODULES: tuple[str, ...] = (
@@ -79,6 +80,7 @@ __all__ = [
     "DraftColumns",
     "QuestionTypeModule",
     "StudentView",
+    "figure_view",
     "get_type",
     "implemented_types",
     "type_for_draft",

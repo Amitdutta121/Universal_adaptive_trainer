@@ -286,7 +286,8 @@ export interface paths {
         head?: never;
         /**
          * Update Course
-         * @description Rename a course, change its description, or change the question types it allows.
+         * @description Rename a course, change its description, its subject, the question types it allows, or
+         *     whether its new questions may carry figures.
          */
         patch: operations["update_course_api_courses__course_id__patch"];
         trace?: never;
@@ -723,6 +724,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/questions/{question_id}/copies/{ordinal}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Figure Copy
+         * @description Replace one copy of a computed-figure question by its program at a new seed (ADR-080).
+         *
+         *     No model call: the stored program runs again. A copy a student was served is kept.
+         */
+        post: operations["regenerate_figure_copy_api_questions__question_id__copies__ordinal__regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/generation-runs": {
         parameters: {
             query?: never;
@@ -756,7 +779,10 @@ export interface paths {
         put?: never;
         /**
          * Create Review
-         * @description Record a professor verdict and the cell it lands in (ADR-037). No model call.
+         * @description Record a professor verdict and the cell it lands in (ADR-037).
+         *
+         *     No model call, except that an edit changing the figure is judged again (ADR-080) once
+         *     its outcome is recorded; without a configured model that step is skipped.
          */
         post: operations["create_review_api_questions__question_id__review_post"];
         delete?: never;
@@ -1844,6 +1870,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Threads
+         * @description The professor's chats in this course, most recently used first.
+         */
+        get: operations["list_threads_api_agent_threads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Thread */
+        get: operations["get_thread_api_agent_threads__thread_id__get"];
+        /**
+         * Save Thread
+         * @description Create the chat or replace its messages; the panel saves after every run.
+         */
+        put: operations["save_thread_api_agent_threads__thread_id__put"];
+        post?: never;
+        /** Delete Thread */
+        delete: operations["delete_thread_api_agent_threads__thread_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/question-sets/prod": {
         parameters: {
             query?: never;
@@ -2247,6 +2315,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/figures/{course_id}/{name}.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Figure */
+        get: operations["get_figure_api_figures__course_id___name__svg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evaluation/rerun-preview": {
         parameters: {
             query?: never;
@@ -2380,6 +2465,49 @@ export interface components {
             course_id: number | null;
             /** Course Name */
             course_name: string | null;
+        };
+        /**
+         * AgentThreadListResponse
+         * @description The professor's chats in this course, most recently used first.
+         */
+        AgentThreadListResponse: {
+            /** Threads */
+            threads: components["schemas"]["AgentThreadSummary"][];
+        };
+        /** AgentThreadOut */
+        AgentThreadOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** AgentThreadSave */
+        AgentThreadSave: {
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** AgentThreadSummary */
+        AgentThreadSummary: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * AgreementTrendResponse
@@ -2798,6 +2926,52 @@ export interface components {
             /** Hidden */
             hidden: number;
         };
+        /** ChartData */
+        ChartData: {
+            /** Labels */
+            labels?: string[];
+            /** Datasets */
+            datasets: components["schemas"]["ChartDataset"][];
+        };
+        /** ChartDataset */
+        ChartDataset: {
+            /** Label */
+            label: string;
+            /** Data */
+            data: number[] | components["schemas"]["XYPoint"][];
+        };
+        /** ChartFigure */
+        ChartFigure: {
+            /** Alt */
+            alt: string;
+            /**
+             * Caption
+             * @default
+             */
+            caption: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "chart";
+            chart: components["schemas"]["ChartSpec"];
+        };
+        /**
+         * ChartSpec
+         * @description A Chart.js chart as data only: no callbacks, no plugins, no options beyond axis titles.
+         */
+        ChartSpec: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "bar" | "line" | "pie" | "doughnut" | "scatter";
+            data: components["schemas"]["ChartData"];
+            /** X Title */
+            x_title?: string | null;
+            /** Y Title */
+            y_title?: string | null;
+        };
         /**
          * ChunkGenerationSpec
          * @description One chunk's instruction on the spec sheet (ADR-044).
@@ -2991,6 +3165,23 @@ export interface components {
             /** Answered */
             answered: number;
         };
+        /** ComputedFigure */
+        ComputedFigure: {
+            /** Alt */
+            alt: string;
+            /**
+             * Caption
+             * @default
+             */
+            caption: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "computed";
+            /** File */
+            file: string;
+        };
         /**
          * ConceptConfidence
          * @description How sure the analysis is about a proposed concept or grouping.
@@ -3118,6 +3309,11 @@ export interface components {
             question_types: string[];
             /** Capabilities */
             capabilities: string[];
+            /**
+             * Figures Enabled
+             * @default true
+             */
+            figures_enabled: boolean;
         };
         /**
          * CourseProgressOut
@@ -3158,6 +3354,10 @@ export interface components {
             description?: string | null;
             /** Question Types */
             question_types?: string[] | null;
+            /** Subject */
+            subject?: string | null;
+            /** Figures Enabled */
+            figures_enabled?: boolean | null;
         };
         /** CoursesOverviewResponse */
         CoursesOverviewResponse: {
@@ -3503,6 +3703,23 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** DiagramFigure */
+        DiagramFigure: {
+            /** Alt */
+            alt: string;
+            /**
+             * Caption
+             * @default
+             */
+            caption: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "diagram";
+            /** Source */
+            source: string;
+        };
         /**
          * Difficulty
          * @description Question difficulty. Selected from student topic mastery.
@@ -3667,7 +3884,7 @@ export interface components {
          *     generated (ADR-030).
          * @enum {string}
          */
-        EvaluationTrigger: "generation" | "batch_rerun";
+        EvaluationTrigger: "generation" | "batch_rerun" | "professor_edit";
         /**
          * ExampleOption
          * @description One choice of a choice-type example.
@@ -3709,6 +3926,8 @@ export interface components {
              * @default
              */
             grounding: string;
+            /** Figure */
+            figure?: (components["schemas"]["DiagramFigure"] | components["schemas"]["ChartFigure"] | components["schemas"]["ComputedFigure"]) | null;
         };
         /**
          * ExampleTestCase
@@ -3893,6 +4112,24 @@ export interface components {
             max_length: number | null;
             /** Meaning */
             meaning: string;
+        };
+        /**
+         * FigureCopyOut
+         * @description One copy of a computed-figure question, made by its program for one seed (ADR-080).
+         */
+        FigureCopyOut: {
+            /** Ordinal */
+            ordinal: number;
+            /** Seed */
+            seed: number;
+            /** Prompt */
+            prompt: string;
+            /** Reference Solution */
+            reference_solution: string | null;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
         };
         /**
          * GapsRunTarget
@@ -4974,10 +5211,18 @@ export interface components {
             original_reference_solution: string | null;
             /** Original Tests */
             original_tests: string | null;
+            /** Original Figure */
+            original_figure?: {
+                [key: string]: unknown;
+            } | null;
             /** Reviews */
             reviews: components["schemas"]["ReviewOut"][];
             /** Borderline Notes */
             borderline_notes?: string[];
+            /** Figure Copies */
+            figure_copies?: components["schemas"]["FigureCopyOut"][];
+            /** Figure Program */
+            figure_program?: string | null;
         };
         /**
          * QuestionKind
@@ -5103,6 +5348,12 @@ export interface components {
             checked_by: string;
             /** Applies To */
             applies_to?: string[];
+            /**
+             * Figure
+             * @default none
+             * @enum {string}
+             */
+            figure: "none" | "diagram" | "chart" | "computed";
             /** Examples */
             examples: [
                 components["schemas"]["ExampleQuestion"],
@@ -5179,6 +5430,8 @@ export interface components {
             audit_reason?: string | null;
             /** Solve Flag */
             solve_flag?: string | null;
+            /** Figure */
+            figure?: (components["schemas"]["DiagramFigure"] | components["schemas"]["ChartFigure"] | components["schemas"]["ComputedFigure"]) | null;
         };
         /**
          * QuestionTaxonomy
@@ -5297,7 +5550,7 @@ export interface components {
          * @description Structured professor rationale for reject or edit decisions.
          * @enum {string}
          */
-        RejectionReason: "technically_incorrect" | "incorrect_answer" | "incorrect_tests" | "not_grounded_in_source" | "wrong_topic_subtopic" | "too_easy" | "too_difficult" | "ambiguous" | "poor_wording" | "poor_distractors" | "poor_tests" | "not_pedagogically_useful" | "too_similar_repetitive" | "other";
+        RejectionReason: "technically_incorrect" | "incorrect_answer" | "incorrect_tests" | "not_grounded_in_source" | "wrong_topic_subtopic" | "too_easy" | "too_difficult" | "ambiguous" | "poor_wording" | "poor_distractors" | "poor_tests" | "not_pedagogically_useful" | "too_similar_repetitive" | "figure_mismatch" | "other";
         /**
          * ResumeStudentRequest
          * @description A returning browser identifying itself against one classroom link.
@@ -5449,6 +5702,10 @@ export interface components {
             reference_solution?: string | null;
             /** Tests */
             tests?: string | null;
+            /** Figure */
+            figure?: {
+                [key: string]: unknown;
+            } | null;
             /** Professor Id */
             professor_id?: number | null;
             corrected_difficulty?: components["schemas"]["Difficulty"] | null;
@@ -5621,6 +5878,10 @@ export interface components {
             blocks?: components["schemas"]["ParsonsBlockOut"][] | null;
             /** Answer Hint */
             answer_hint?: string | null;
+            /** Figure */
+            figure?: (components["schemas"]["DiagramFigure"] | components["schemas"]["ChartFigure"] | components["schemas"]["ComputedFigure"]) | null;
+            /** Takes Unit */
+            takes_unit?: boolean | null;
             /** Preteach Blocks */
             preteach_blocks?: components["schemas"]["StudentTutorialBlockOut"][];
         };
@@ -6181,6 +6442,8 @@ export interface components {
             };
             /** Analysis */
             analysis: string;
+            /** Out Of Scope */
+            out_of_scope?: string[];
         };
         /** TaxonomyLinkListResponse */
         TaxonomyLinkListResponse: {
@@ -6721,6 +6984,13 @@ export interface components {
             hard: number;
             /** Question Types */
             question_types?: components["schemas"]["QuestionType"][];
+        };
+        /** XYPoint */
+        XYPoint: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
         };
         /**
          * YouTubeImportRequest
@@ -8070,6 +8340,40 @@ export interface operations {
             };
             path: {
                 question_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_figure_copy_api_questions__question_id__copies__ordinal__regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                question_id: number;
+                ordinal: number;
             };
             cookie?: never;
         };
@@ -10184,6 +10488,138 @@ export interface operations {
             };
         };
     };
+    list_threads_api_agent_threads_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_thread_api_agent_threads__thread_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_thread_api_agent_threads__thread_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentThreadSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_thread_api_agent_threads__thread_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Course-Id"?: number | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_prod_classroom_api_question_sets_prod_get: {
         parameters: {
             query?: never;
@@ -10796,6 +11232,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TrainingSessionOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_figure_api_figures__course_id___name__svg_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: number;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

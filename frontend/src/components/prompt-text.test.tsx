@@ -33,6 +33,11 @@ describe("PromptText", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
+  it("marks a question with a figure in the clamped preview", () => {
+    const { container } = render(<PromptText text="How many moves?" variant="preview" hasFigure />);
+    expect(container.textContent).toBe("[figure] How many moves?");
+  });
+
   it("keeps angle brackets in prose such as Python reprs", () => {
     const { container } = render(<PromptText text={"It prints <class 'int'>."} />);
     expect(container.textContent).toContain("<class 'int'>");

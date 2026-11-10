@@ -63,3 +63,34 @@ describe("agentErrorMessage", () => {
     expect(agentErrorMessage(new Error("network down"))).toBe("network down");
   });
 });
+
+describe("DraftedStyleCard", () => {
+  it("shows the drafted style with both examples, the correct option marked", async () => {
+    const { DraftedStyleCard } = await import("./tool-renderers");
+    render(
+      <DraftedStyleCard
+        style={{
+          id: "c4.unit_check",
+          name: "Spot the right unit",
+          summary: "Pick the SI unit.",
+          question_type: "multiple_choice",
+          difficulty_range: ["easy"],
+          checked_by: "One correct option",
+          examples: [
+            {
+              prompt: "Unit of force?",
+              options: [{ text: "newton", correct: true }, { text: "joule" }],
+            },
+            { prompt: "Unit of energy?", answer: "joule" },
+          ],
+        }}
+        problems={["example 2: needs options"]}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Spot the right unit" })).toBeInTheDocument();
+    expect(screen.getByText("multiple choice · easy")).toBeInTheDocument();
+    expect(screen.getByText("Unit of energy?")).toBeInTheDocument();
+    expect(screen.getByLabelText("Correct").nextSibling).toHaveTextContent("newton");
+    expect(screen.getByText("example 2: needs options")).toBeInTheDocument();
+  });
+});

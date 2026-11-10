@@ -74,6 +74,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'test.db').as_posix()}")
     monkeypatch.setenv("BOOK_UPLOAD_DIR", str(tmp_path / "books"))
+    monkeypatch.setenv("FIGURE_DIR", str(tmp_path / "figures"))
 
     get_settings.cache_clear()
     database.reset_engine_for_testing()

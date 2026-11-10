@@ -9,7 +9,9 @@ The only input is what the professor writes (:class:`DraftBrief`): a title and
 description, and optionally the audience, what it must cover, what to leave out
 and how big it should be. No book is read, so a taxonomy can be drafted before
 any material is uploaded, and the professor's intent -- not one textbook's
-chapter order -- decides the shape.
+chapter order -- decides the shape. The request opens with the boundary of what the app can
+teach and check (:mod:`app.curriculum.capabilities`, ADR-077); a part of the course outside it
+comes back in ``out_of_scope`` instead of as a subtopic.
 
 The instruction says what the rest of the product does with a taxonomy -- topics
 are walked in order (the adaptive engine), every subtopic needs about nine
@@ -26,6 +28,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.curriculum.capabilities import capabilities_text
 from app.curriculum.stable_ids import normalize_label
 from app.curriculum.taxonomy_schema import (
     DESCRIPTION_MAX_LENGTH,
@@ -53,11 +56,17 @@ difficulties), so every subtopic you add costs the instructor real review work.
 - Questions are later written from the course's reading material: each subtopic's topic \
 name, name and description are used to search that material for the passage to write \
 questions from.
+- The request starts with what can be made for a course: the kinds of tutorial block that \
+teach a subtopic and the question types that check it. New ones of those kinds can be made \
+for any course, but nothing beyond them, so a subtopic outside that boundary can never be \
+taught or tested.
 
 First fill in `analysis`, before writing any topic. Note, briefly:
 - the level and audience, and what the instructor asks to emphasise or leave out;
 - the skills the course should cover, grouped into areas;
-- which skills depend on which, and so the order a student should learn them in.
+- which skills depend on which, and so the order a student should learn them in;
+- which parts of the course fall outside what can be made, and the understanding behind \
+each of them that can still be a subtopic.
 
 Then write the taxonomy:
 1. Topics in learning order: prerequisites first.
@@ -77,6 +86,11 @@ the search text that finds the right reading passage, so be concrete.
 sharpen their descriptions until they cannot.
 8. Names are short skill names.
 9. `label` is the taxonomy title, shortened if needed.
+10. Every subtopic must be teachable and checkable within the boundary given with the \
+request. A hands-on part of the course (work in outside software, a practical skill, a demo \
+or project, writing the student must compose) is not a subtopic: put it in `out_of_scope`, \
+in the instructor's words, and keep as a subtopic only the understanding behind it that a \
+question can check. A "Must cover" item outside the boundary goes to `out_of_scope` too.
 """
 
 
@@ -131,25 +145,38 @@ class _DraftTaxonomy(BaseModel):
     )
     label: str
     topics: list[_DraftTopic]
+    out_of_scope: list[str] = Field(
+        default_factory=list,
+        description="Parts of the course outside what can be made: not subtopics.",
+    )
 
 
 class TaxonomyDraft(BaseModel):
     document: TaxonomyDocument
     analysis: str
     drafted_by: str
+    #: Parts of the course the app cannot teach or check, so they are not in the taxonomy.
+    out_of_scope: list[str] = Field(default_factory=list)
 
 
 def draft_taxonomy(
-    brief: DraftBrief, *, client: StructuredLLMClient | None = None
+    brief: DraftBrief,
+    *,
+    client: StructuredLLMClient | None = None,
+    current: TaxonomyDocument | None = None,
+    change: str = "",
 ) -> TaxonomyDraft:
-    """Propose a taxonomy from what the professor wrote.
+    """Propose a taxonomy from what the professor wrote, or revise ``current`` by ``change``.
+
+    A revision keeps everything the change does not touch, so a professor iterating in the
+    chat ("merge these two", "drop the last topic") is not handed a different curriculum.
 
     Raises:
         DomainRuleError: the model's answer had nothing usable left after repair.
         LLMRequestError, MalformedModelOutputError: the provider call failed.
     """
     client = client or get_structured_client()
-    prompt = draft_user_prompt(brief)
+    prompt = draft_user_prompt(brief, current=current, change=change)
     raw = client.complete_structured(
         system=DRAFT_SYSTEM_PROMPT, prompt=prompt, response_model=_DraftTaxonomy
     )
@@ -171,7 +198,10 @@ def draft_taxonomy(
         sum(len(topic.subtopics) for topic in document.topics),
     )
     return TaxonomyDraft(
-        document=document, analysis=raw.analysis.strip(), drafted_by=client.description
+        document=document,
+        analysis=raw.analysis.strip(),
+        drafted_by=client.description,
+        out_of_scope=[item.strip() for item in raw.out_of_scope if item.strip()],
     )
 
 
@@ -199,8 +229,13 @@ def _count_miss(document: TaxonomyDocument, brief: DraftBrief) -> str | None:
     return f"Your last draft had {' and '.join(wrong)}." if wrong else None
 
 
-def draft_user_prompt(brief: DraftBrief) -> str:
-    """The user message: the professor's own words, section by section; empty ones are omitted."""
+def draft_user_prompt(
+    brief: DraftBrief, *, current: TaxonomyDocument | None = None, change: str = ""
+) -> str:
+    """The user message: the professor's own words, section by section; empty ones are omitted.
+
+    With ``current``, the taxonomy to revise and the change asked for come before the size.
+    """
     sections = [
         ("Taxonomy title", brief.title),
         ("Description", brief.description),
@@ -208,7 +243,15 @@ def draft_user_prompt(brief: DraftBrief) -> str:
         ("Must cover", brief.must_cover),
         ("Leave out", brief.leave_out),
     ]
-    parts = [f"# {heading}\n{text.strip()}" for heading, text in sections if text.strip()]
+    parts = [capabilities_text()]
+    parts += [f"# {heading}\n{text.strip()}" for heading, text in sections if text.strip()]
+    if current is not None:
+        parts.append(
+            "# Current taxonomy\nRevise this one. Keep every topic and subtopic the change "
+            "does not touch, with its name and description as they are.\n"
+            + current.model_dump_json(indent=1)
+        )
+        parts.append(f"# Change requested\n{change.strip() or 'Improve it.'}")
     parts.append(f"# Size\n{size_target(brief)}")
     return "\n\n".join(parts)
 

@@ -42,6 +42,7 @@ from app.errors import CurriculumCompletedError, DomainRuleError, NoQuestionAvai
 from app.persistence.models import (
     LiveQuestionJobRow,
     QuestionRow,
+    QuestionVariantRow,
     StudentAttemptRow,
     TrainingSessionRow,
 )
@@ -70,6 +71,46 @@ def is_servable(question: QuestionRow) -> bool:
     return bool(question.live_generated) and question.status in LIVE_SERVABLE_STATUSES
 
 
+class ServedCopy:
+    """A computed-figure question as one attempt shows it (ADR-080): the question row, with
+    the prompt and content of the copy the attempt was given. Everything else reads through to
+    the row, so a caller cannot tell it from a plain question.
+    """
+
+    def __init__(self, row: QuestionRow, variant: QuestionVariantRow) -> None:
+        self._row = row
+        self.variant = variant
+        self.prompt = variant.prompt
+        self.content = variant.content
+        self.reference_solution = variant.reference_solution
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._row, name)
+
+
+def variants_of(session: Session, question_id: int) -> list[QuestionVariantRow]:
+    """A computed-figure question's copies, in order; empty for any other question."""
+    return list(
+        session.scalars(
+            select(QuestionVariantRow)
+            .where(QuestionVariantRow.question_id == question_id)
+            .order_by(QuestionVariantRow.ordinal)
+        )
+    )
+
+
+def pick_variant(variants: list[QuestionVariantRow], attempt_id: int) -> QuestionVariantRow:
+    """The copy an attempt gets: fixed by the attempt's id, so consecutive attempts differ."""
+    return variants[attempt_id % len(variants)]
+
+
+def attempt_variant(session: Session, attempt: StudentAttemptRow) -> QuestionVariantRow | None:
+    """The copy ``attempt`` was served, if its question has copies."""
+    if attempt.variant_id is None:
+        return None
+    return session.get(QuestionVariantRow, attempt.variant_id)
+
+
 @dataclass(frozen=True)
 class DrawPlan:
     """What :meth:`AdaptiveTrainingEngine.plan_draw` would serve, before anything is written."""
@@ -91,7 +132,8 @@ class ServedQuestion:
     """A question handed to a student, and the attempt row recording that."""
 
     attempt: StudentAttemptRow
-    question: QuestionRow
+    #: A :class:`ServedCopy` when the question has computed-figure copies.
+    question: QuestionRow | ServedCopy
     #: True when the cell the roulette asked for was empty and the engine had to
     #: relax difficulty or redraw. Surfaced rather than hidden: a bank with gaps
     #: otherwise reads as a bank that chose these questions deliberately.
@@ -177,8 +219,12 @@ class AdaptiveTrainingEngine:
         live = self._session.scalar(
             select(LiveQuestionJobRow.id).where(LiveQuestionJobRow.attempt_id == open_attempt.id)
         )
+        variant = attempt_variant(self._session, open_attempt)
         return ServedQuestion(
-            attempt=open_attempt, question=question, resumed=True, live=live is not None
+            attempt=open_attempt,
+            question=question if variant is None else ServedCopy(question, variant),
+            resumed=True,
+            live=live is not None,
         )
 
     def plan_draw(self, run: TrainingSessionRow) -> DrawPlan:
@@ -454,6 +500,12 @@ class AdaptiveTrainingEngine:
                 mastery_before=mastery,
             )
         )
+        # A computed-figure question: this attempt gets one copy, and is scored against it.
+        variants = variants_of(self._session, question.id)
+        variant = pick_variant(variants, attempt.id) if variants else None
+        if variant is not None:
+            attempt.variant_id = variant.id
+            self._session.flush()
         logger.info(
             "Session %s served question %s (subtopic %s, %s) as attempt %s.",
             run.id,
@@ -464,7 +516,7 @@ class AdaptiveTrainingEngine:
         )
         return ServedQuestion(
             attempt=attempt,
-            question=question,
+            question=question if variant is None else ServedCopy(question, variant),
             fallback_used=fallback_used,
             resumed=False,
             live=live,
@@ -487,7 +539,18 @@ class AdaptiveTrainingEngine:
             )
 
         row = self._questions.get(attempt.question_id)
-        scored = score_answer(Question.model_validate(row), answer)
+        question = Question.model_validate(row)
+        variant = attempt_variant(self._session, attempt)
+        if variant is not None:
+            # Scored against the key of the copy this attempt was shown.
+            question = question.model_copy(
+                update={
+                    "prompt": variant.prompt,
+                    "content": variant.content,
+                    "reference_solution": variant.reference_solution,
+                }
+            )
+        scored = score_answer(question, answer)
 
         mastery_before, mastery_after = self._update_mastery(
             student_id=attempt.student_id, topic_id=row.topic_id, score=scored.score

@@ -19,7 +19,12 @@ from pydantic_ai import DeferredToolRequests
 from pydantic_ai.messages import ToolReturnPart
 from sqlalchemy import select
 
-from app.agent.approvals import APPROVAL_REQUIRED, PlannedRun, open_plan, store_plan
+from app.agent.approvals import (
+    APPROVAL_REQUIRED,
+    PlannedRun,
+    open_plan,
+    store_plan,
+)
 from app.agent.tools import (
     CurriculumTree,
     PricedPlan,
@@ -405,6 +410,7 @@ def test_approval_card_arguments_are_the_wire_shape() -> None:
     }
     assert properties == {
         "approve_curriculum": ["schema_version", "label", "topics"],
+        "approve_course_design": ["design_id"],
         "edit_curriculum": ["version_id", "update"],
         "save_style": ["yaml"],
         "publish_set": ["curriculum_version_id"],

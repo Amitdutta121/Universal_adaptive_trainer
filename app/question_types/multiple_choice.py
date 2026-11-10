@@ -6,7 +6,7 @@ from app.assessment.specs import GradingPlan, Unmarkable
 from app.domain.enums import QuestionKind, QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import MultipleChoiceDraft
-from app.question_types._shared import explanation, present_text, same
+from app.question_types._shared import explanation, figure_view, present_text, same
 from app.question_types.base import DraftColumns, StudentView
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
@@ -64,9 +64,10 @@ class MultipleChoice:
     def student_view(self, content: dict, *, seed: int) -> StudentView:
         del seed
         options = content.get("options")
+        figure = figure_view(content)
         if not isinstance(options, list):
-            return StudentView()
-        return StudentView(options=[str(option) for option in options])
+            return StudentView(figure=figure)
+        return StudentView(options=[str(option) for option in options], figure=figure)
 
 
 TYPE = MultipleChoice()

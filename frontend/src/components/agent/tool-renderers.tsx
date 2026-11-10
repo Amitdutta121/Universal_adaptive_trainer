@@ -4,20 +4,26 @@
  * How the agent's tool calls show in the chat (Task 35).
  *
  * `preview_styles` renders the compared styles side by side with their worked examples,
- * `open_view` navigates the Studio to the page it names, and every other tool shows one
- * status line, with the app's refusal when it refused.
+ * `draft_style` renders the drafted style as a card with both examples and their answers,
+ * `show_design` renders the course design as three cards the professor revises in place
+ * (an earlier version of the same design collapses to one line),
+ * and every other tool shows one status line, with the app's refusal when it refused. No tool
+ * moves the professor to another page: everything happens in the chat.
  */
 
-import { useRenderTool } from "@copilotkit/react-core/v2";
+import { useAgent, useRenderTool } from "@copilotkit/react-core/v2";
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, CircleAlert, Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { z } from "zod";
-import { coursePath } from "@/lib/course";
-import { PromptText } from "@/components/prompt-text";
+import type { QuestionFigure } from "@/lib/api/types";
+import { QuestionBody } from "@/components/question-body";
+import { useChatAsk } from "./chat-ask";
+import { type CourseDesign, DesignCard } from "./design-card";
 
 export type StyleSample = {
   prompt: string;
+  figure?: QuestionFigure | null;
   code?: string | null;
 };
 
@@ -47,6 +53,11 @@ function refusalOf(result: string | undefined): string | null {
 const LABELS: Record<string, string> = {
   import_material: "Import material",
   propose_curriculum: "Draft a curriculum",
+  design_curriculum: "Plan the curriculum",
+  suggest_styles: "Suggest question styles",
+  suggest_recipes: "Suggest tutorial recipes",
+  show_design: "Show the course design",
+  approve_course_design: "Save the course design",
   edit_curriculum: "Edit the curriculum",
   coverage_report: "Check coverage",
   approve_curriculum: "Save the curriculum",
@@ -64,8 +75,37 @@ const LABELS: Record<string, string> = {
   try_recipe: "Try a recipe",
   save_recipe: "Save a recipe",
   decide_recipe: "Approve or stop a recipe",
-  open_view: "Open a page",
+  subject_options: "Read the subjects",
+  set_course_subject: "Set the subject",
+  draft_style: "Draft a question style",
 };
+
+/** Tools that change the course; the Studio's cached reads are refetched when one completes. */
+const WRITES = new Set([
+  "import_material",
+  "approve_curriculum",
+  "approve_course_design",
+  "edit_curriculum",
+  "save_style",
+  "set_course_subject",
+  "publish_set",
+  "run_generation",
+  "save_recipe",
+  "decide_recipe",
+]);
+
+/** Write calls already refetched for, by tool call id, so a re-render never refetches twice. */
+const refreshed = new Set<string>();
+
+function RefreshAfterWrite({ toolCallId }: { toolCallId: string }) {
+  const client = useQueryClient();
+  useEffect(() => {
+    if (refreshed.has(toolCallId)) return;
+    refreshed.add(toolCallId);
+    void client.invalidateQueries();
+  }, [toolCallId, client]);
+  return null;
+}
 
 export function ToolStatusLine({
   name,
@@ -111,7 +151,12 @@ export function StyleComparison({ styles }: { styles: ComparedStyle[] }) {
           ) : null}
           {style.examples?.slice(0, 1).map((example) => (
             <div key={example.prompt} className="mt-2 rounded-md bg-muted p-1.5">
-              <PromptText text={example.prompt} className="space-y-1 leading-normal" />
+              <QuestionBody
+                prompt={example.prompt}
+                figure={example.figure}
+                className="space-y-2"
+                promptClassName="space-y-1 leading-normal"
+              />
               {example.code ? (
                 <pre className="mt-1 overflow-x-auto font-mono text-[11px]">{example.code}</pre>
               ) : null}
@@ -123,28 +168,130 @@ export function StyleComparison({ styles }: { styles: ComparedStyle[] }) {
   );
 }
 
-/** Navigations already made, by tool call id, so a re-render never navigates twice. */
-const opened = new Set<string>();
+type DraftedExample = StyleSample & {
+  options?: { text: string; correct?: boolean }[];
+  lines?: string[];
+  answer?: string | null;
+};
 
-function OpenView({
-  toolCallId,
-  path,
-  courseId,
-}: {
-  toolCallId: string;
-  path: string;
-  courseId: number;
-}) {
-  const router = useRouter();
-  useEffect(() => {
-    if (opened.has(toolCallId)) return;
-    opened.add(toolCallId);
-    router.push(coursePath(courseId, path));
-  }, [toolCallId, path, courseId, router]);
-  return <ToolStatusLine name="open_view" status="complete" />;
+export type DraftedStyle = {
+  id: string;
+  name: string;
+  summary: string;
+  question_type: string;
+  difficulty_range: string[];
+  checked_by: string;
+  examples: DraftedExample[];
+};
+
+/** A style `draft_style` wrote, with both examples and answer keys, as the professor approves it. */
+export function DraftedStyleCard({ style, problems }: { style: DraftedStyle; problems: string[] }) {
+  return (
+    <section className="my-2 rounded-lg border bg-card p-3 text-xs">
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="font-medium text-card-foreground text-sm">{style.name}</h4>
+        <span className="shrink-0 text-muted-foreground">
+          {style.question_type.replaceAll("_", " ")} · {style.difficulty_range.join(", ")}
+        </span>
+      </div>
+      <p className="mt-0.5 text-muted-foreground">{style.summary}</p>
+      <p className="mt-1 text-muted-foreground">Checked by: {style.checked_by}</p>
+      {style.examples.map((example) => (
+        <div key={example.prompt} className="mt-2 rounded-md bg-muted p-2">
+          <QuestionBody
+                prompt={example.prompt}
+                figure={example.figure}
+                className="space-y-2"
+                promptClassName="space-y-1 leading-normal"
+              />
+          {example.code ? (
+            <pre className="mt-1 overflow-x-auto font-mono text-[11px]">{example.code}</pre>
+          ) : null}
+          {example.lines?.length ? (
+            <pre className="mt-1 overflow-x-auto font-mono text-[11px]">
+              {example.lines.join("\n")}
+            </pre>
+          ) : null}
+          {example.options?.length ? (
+            <ul className="mt-1 space-y-0.5">
+              {example.options.map((option) => (
+                <li key={option.text} className="flex items-start gap-1">
+                  {option.correct ? (
+                    <Check className="mt-px size-3.5 shrink-0 text-primary" aria-label="Correct" />
+                  ) : (
+                    <span className="size-3.5 shrink-0" />
+                  )}
+                  <span className={option.correct ? "font-medium" : undefined}>{option.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {example.answer && !example.options?.length ? (
+            <p className="mt-1">
+              <span className="text-muted-foreground">Answer:</span> {example.answer}
+            </p>
+          ) : null}
+        </div>
+      ))}
+      {problems.length ? (
+        <ul className="mt-2 list-disc space-y-0.5 pl-4 text-destructive">
+          {problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
 }
 
-export function useAgentToolRenderers(courseId: number) {
+/** The design card, with follow-ups sent through the course chat when there is one. */
+type ChatMessage = {
+  role?: string;
+  content?: unknown;
+  toolCallId?: string;
+  toolCalls?: { id: string; function: { name: string } }[];
+};
+
+/** Whether a later `show_design` result in the chat shows the same design again. */
+export function isSuperseded(messages: ChatMessage[], toolCallId: string, designId: string) {
+  const showCalls = new Set(
+    messages.flatMap((m) =>
+      (m.toolCalls ?? []).filter((c) => c.function.name === "show_design").map((c) => c.id),
+    ),
+  );
+  const own = messages.findIndex((m) => m.role === "tool" && m.toolCallId === toolCallId);
+  if (own < 0) return false;
+  return messages
+    .slice(own + 1)
+    .some(
+      (m) =>
+        m.role === "tool" &&
+        showCalls.has(m.toolCallId ?? "") &&
+        typeof m.content === "string" &&
+        parse<{ design_id?: string }>(m.content)?.design_id === designId,
+    );
+}
+
+function ProposedDesign({ design, toolCallId }: { design: CourseDesign; toolCallId: string }) {
+  const { agent } = useAgent();
+  const superseded = isSuperseded(agent.messages as ChatMessage[], toolCallId, design.design_id);
+  return <DesignCard design={design} ask={useChatAsk()} superseded={superseded} />;
+}
+
+export function useAgentToolRenderers() {
+  useRenderTool(
+    {
+      name: "show_design",
+      parameters: z.object({}).passthrough(),
+      render: ({ status, result, toolCallId }) => {
+        const design = status === "complete" ? parse<CourseDesign>(result) : null;
+        if (design?.design_id && Array.isArray(design.styles))
+          return <ProposedDesign design={design} toolCallId={toolCallId} />;
+        return <ToolStatusLine name="show_design" status={status} result={result} />;
+      },
+    },
+    [],
+  );
   useRenderTool(
     {
       name: "preview_styles",
@@ -161,21 +308,40 @@ export function useAgentToolRenderers(courseId: number) {
   );
   useRenderTool(
     {
-      name: "open_view",
-      parameters: z.object({ view: z.string(), id: z.number().nullish() }),
-      render: ({ status, result, toolCallId }) => {
-        const path = status === "complete" ? parse<{ path?: string }>(result)?.path : undefined;
-        if (path) return <OpenView toolCallId={toolCallId} path={path} courseId={courseId} />;
-        return <ToolStatusLine name="open_view" status={status} result={result} />;
+      name: "draft_style",
+      parameters: z.object({ description: z.string(), current_yaml: z.string().nullish() }),
+      render: ({ status, result }) => {
+        const draft =
+          status === "complete"
+            ? parse<{ style?: DraftedStyle | null; problems?: string[] }>(result)
+            : null;
+        if (draft?.style)
+          return <DraftedStyleCard style={draft.style} problems={draft.problems ?? []} />;
+        return <ToolStatusLine name="draft_style" status={status} result={result} />;
       },
     },
-    [courseId],
+    [],
   );
   useRenderTool(
     {
       name: "*",
-      render: ({ name, status, result }: { name: string; status: string; result?: string }) => (
-        <ToolStatusLine name={name} status={status} result={result} />
+      render: ({
+        name,
+        status,
+        result,
+        toolCallId,
+      }: {
+        name: string;
+        status: string;
+        result?: string;
+        toolCallId: string;
+      }) => (
+        <>
+          {status === "complete" && WRITES.has(name) && !refusalOf(result) ? (
+            <RefreshAfterWrite toolCallId={toolCallId} />
+          ) : null}
+          <ToolStatusLine name={name} status={status} result={result} />
+        </>
       ),
     },
     [],

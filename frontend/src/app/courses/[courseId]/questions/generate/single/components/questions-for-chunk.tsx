@@ -82,7 +82,12 @@ export function QuestionsForChunk({
                       : "hover:bg-muted/50"
                   }`}
                 >
-                  <PromptText text={question.prompt} variant="preview" className="block" />
+                  <PromptText
+                    text={question.prompt}
+                    variant="preview"
+                    hasFigure={Boolean(question.figure)}
+                    className="block"
+                  />
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     <Badge variant="outline" className="font-mono text-[0.6rem]">
                       {question.question_type

@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StudentTutorialBlocks } from "@/components/tutorial/student-tutorial-blocks";
 import { Progress } from "@/components/ui/progress";
-import { PromptText } from "@/components/prompt-text";
+import { QuestionBody } from "@/components/question-body";
 import {
   Sheet,
   SheetContent,
@@ -273,7 +273,7 @@ function PastQuestionSheet({
                     : ""}
                 </div>
                 <div className="wrap-anywhere rounded-[1rem] border border-border/70 bg-card/80 px-4 py-4 text-sm">
-                  <PromptText text={detail.question.prompt} />
+                  <QuestionBody prompt={detail.question.prompt} figure={detail.question.figure} />
                 </div>
               </div>
 
@@ -1067,9 +1067,10 @@ export function StudentSessionScreen({ trainingSessionId }: { trainingSessionId:
                         </div>
                         <ArrowUpRight className="size-4 text-muted-foreground" />
                       </div>
-                      <PromptText
-                        text={openQuestion.prompt}
-                        className="wrap-anywhere text-[0.98rem] leading-8"
+                      <QuestionBody
+                        prompt={openQuestion.prompt}
+                        figure={openQuestion.figure}
+                        promptClassName="wrap-anywhere text-[0.98rem] leading-8"
                       />
                     </div>
 

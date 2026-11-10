@@ -48,6 +48,7 @@ export type TrainingSessionOut = Schemas["TrainingSessionOut"];
 export type AttemptOut = Schemas["AttemptOut"];
 export type AnsweredOut = Schemas["AnsweredOut"];
 export type ServedQuestionOut = Schemas["ServedQuestionOut"];
+export type QuestionFigure = NonNullable<ServedQuestionOut["figure"]>;
 export type QuestionSetListResponse = Schemas["QuestionSetListResponse"];
 export type QuestionSetOut = Schemas["QuestionSetOut"];
 export type BookListResponse = Schemas["BookListResponse"];

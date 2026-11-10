@@ -15,6 +15,8 @@ BLOCKING_ISSUE_CODES: frozenset[RejectionReason] = frozenset(
         RejectionReason.INCORRECT_TESTS,
         # Two defensible answers cannot be graded fairly (a student may pick either).
         RejectionReason.AMBIGUOUS,
+        # A figure that contradicts the key is a wrong key the student can see.
+        RejectionReason.FIGURE_MISMATCH,
     }
 )
 

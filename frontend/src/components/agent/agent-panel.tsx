@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * The professor agent as a side panel on every course page (Phase 8, Task 35).
+ * The professor agent: one conversation per course, shown in a side panel on every course page
+ * (Phase 8, Task 35) and full-page on the assistant page (`app/courses/[courseId]/assistant`).
+ * `AgentProvider` holds it, with its saved chats and the "+" menu's dialogs, so moving between the
+ * two views keeps the conversation.
  *
  * CopilotKit renders the chat. Its runtime (`app/copilotkit/[[...path]]/route.ts`) relays each
  * run to the backend's AG-UI endpoint (`POST /api/agent`, Pydantic AI), sending the course in
@@ -18,12 +21,14 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
-import { useCallback, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { BookImportDialog } from "@/app/courses/[courseId]/books/components/book-import-dialog";
 import { RecipeEditorDialog } from "@/app/experimental_tutorial/recipe-builder";
 import { COURSE_HEADER } from "@/lib/api/client";
 import { useApprovalCards } from "./approval-card";
+import { ChatAskContext } from "./chat-ask";
+import { type ChatAttachments, useChatAttachments } from "./chat-attachments";
+import { ChatThreadsProvider, chatHeader, useChatThreads } from "./chat-threads";
 import { useAgentToolRenderers } from "./tool-renderers";
 
 /**
@@ -43,9 +48,9 @@ export function agentErrorMessage(error: Error): string {
   return error.message || "The assistant could not answer.";
 }
 
-function AgentRenderers({ courseId }: { courseId: number }) {
+function AgentRenderers() {
   useApprovalCards();
-  useAgentToolRenderers(courseId);
+  useAgentToolRenderers();
   return null;
 }
 
@@ -59,16 +64,14 @@ export const QUICK_QUESTIONS = [
 ] as const;
 
 /**
- * The "+" menu of the chat input. CopilotKit enables the button only when it has items, so
- * without these it showed disabled. The dialogs are the Studio's own, opened over the page.
+ * The "+" menu of the chat input, after CopilotKit's own "Attach files" (attachments, ADR-076).
+ * The recipe editor is the Studio's own dialog, opened over the page.
  */
 export function quickActions(handlers: {
-  onUpload: () => void;
   onCreateRecipe: () => void;
   onAsk: (question: string) => void;
 }): ToolsMenuItem[] {
   return [
-    { label: "Upload content…", action: handlers.onUpload },
     { label: "Create a recipe…", action: handlers.onCreateRecipe },
     {
       label: "Ask",
@@ -80,19 +83,49 @@ export function quickActions(handlers: {
   ];
 }
 
-type ToolsMenuItem = { label: string } & (
+export type ToolsMenuItem = { label: string } & (
   | { action: () => void; items?: never }
   | { action?: never; items: ToolsMenuItem[] }
 );
 
-function AgentSidebar({ courseId }: { courseId: number }) {
+/** The chat's wording, the same in the side panel and on the assistant page. */
+export const CHAT_LABELS = {
+  modalHeaderTitle: "Course assistant",
+  chatInputPlaceholder: "Ask about this course, or tell it what to set up",
+  // Also the "+" menu's attach item, which CopilotKit adds first.
+  chatInputToolbarAddButtonLabel: "Attach files",
+  welcomeMessageText:
+    "Tell me what you teach and to whom, and I'll set the course up: subject, curriculum, question styles and tutorial recipes. Drop your material here or attach it with +. Anything that saves or spends waits for your Approve.",
+  chatDisclaimerText: "",
+};
+
+type CourseChat = {
+  courseId: number;
+  /** Sends a message as the professor would, the way the chat input submits one. */
+  ask: (question: string) => void;
+  toolsMenu: ToolsMenuItem[];
+  attachments: ChatAttachments;
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
+};
+
+const CourseChatContext = createContext<CourseChat | null>(null);
+
+/** The course's conversation and its actions; only inside `AgentProvider`. */
+export function useCourseChat(): CourseChat {
+  const chat = useContext(CourseChatContext);
+  if (!chat) throw new Error("useCourseChat needs an AgentProvider.");
+  return chat;
+}
+
+function CourseChatRoot({ courseId, children }: { courseId: number; children: ReactNode }) {
   const { agent } = useAgent();
   const { copilotkit } = useCopilotKit();
-  const [open, setOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const threads = useChatThreads(courseId, agent);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const attachments = useChatAttachments(courseId);
   const [creatingRecipe, setCreatingRecipe] = useState(false);
 
-  // Sends a question as the professor would, the way the chat input submits one.
   const ask = useCallback(
     (question: string) => {
       if (agent.isRunning) {
@@ -109,15 +142,11 @@ function AgentSidebar({ courseId }: { courseId: number }) {
 
   const toolsMenu = useMemo(
     () =>
-      // The Studio's dialogs sit under the chat panel (z-50 against its z-1200), so the panel
+      // The Studio's dialogs sit under the side panel (z-50 against its z-1200), so the panel
       // closes while one is open; the conversation is kept and returns when it reopens.
       quickActions({
-        onUpload: () => {
-          setOpen(false);
-          setUploading(true);
-        },
         onCreateRecipe: () => {
-          setOpen(false);
+          setSidebarOpen(false);
           setCreatingRecipe(true);
         },
         onAsk: ask,
@@ -125,38 +154,52 @@ function AgentSidebar({ courseId }: { courseId: number }) {
     [ask],
   );
 
+  const chat = useMemo(
+    () => ({ courseId, ask, toolsMenu, attachments, sidebarOpen, setSidebarOpen }),
+    [courseId, ask, toolsMenu, attachments, sidebarOpen],
+  );
+
   return (
-    <>
-      <CopilotSidebar
-        open={open}
-        onOpenChange={setOpen}
-        width={420}
-        input={{ toolsMenu }}
-        labels={{
-          modalHeaderTitle: "Course assistant",
-          chatInputPlaceholder: "Ask about this course, or tell it what to set up",
-          chatInputToolbarAddButtonLabel: "Upload, create or ask",
-          welcomeMessageText:
-            "Ask about your students, coverage or review queue, or have me draft a curriculum or a tutorial recipe. Use + to upload content or create a recipe. Anything that saves or spends waits for your Approve.",
-          chatDisclaimerText: "",
-        }}
-      />
-      <BookImportDialog open={uploading} onOpenChange={setUploading} />
-      {creatingRecipe ? (
-        <RecipeEditorDialog
-          courseId={courseId}
-          recipe={null}
-          onClose={() => setCreatingRecipe(false)}
-        />
-      ) : null}
-    </>
+    <ChatThreadsProvider value={threads}>
+      <CourseChatContext.Provider value={chat}>
+        <ChatAskContext.Provider value={ask}>{children}</ChatAskContext.Provider>
+        {creatingRecipe ? (
+          <RecipeEditorDialog
+            courseId={courseId}
+            recipe={null}
+            onClose={() => setCreatingRecipe(false)}
+          />
+        ) : null}
+      </CourseChatContext.Provider>
+    </ChatThreadsProvider>
   );
 }
 
-export function AgentPanel({ courseId }: { courseId: number }) {
+/** The side panel, on every course page but the assistant page. */
+export function AgentSidebar() {
+  const { toolsMenu, attachments, sidebarOpen, setSidebarOpen } = useCourseChat();
+  return (
+    <CopilotSidebar
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
+      width={420}
+      header={{ children: chatHeader }}
+      input={{ toolsMenu }}
+      attachments={attachments}
+      labels={CHAT_LABELS}
+    />
+  );
+}
+
+/**
+ * The agent for one course, around the course's pages. Keyed by course, so a conversation never
+ * carries another course's ids into the next one.
+ */
+export function AgentProvider({ courseId, children }: { courseId: number; children: ReactNode }) {
   const headers = useMemo(() => ({ [COURSE_HEADER]: String(courseId) }), [courseId]);
   return (
     <CopilotKitProvider
+      key={courseId}
       runtimeUrl="/copilotkit"
       headers={headers}
       showDevConsole={false}
@@ -165,9 +208,8 @@ export function AgentPanel({ courseId }: { courseId: number }) {
         toast.error(agentErrorMessage(error));
       }}
     >
-      <AgentRenderers courseId={courseId} />
-      {/* A new chat per course: a conversation never carries another course's ids. */}
-      <AgentSidebar key={courseId} courseId={courseId} />
+      <AgentRenderers />
+      <CourseChatRoot courseId={courseId}>{children}</CourseChatRoot>
     </CopilotKitProvider>
   );
 }

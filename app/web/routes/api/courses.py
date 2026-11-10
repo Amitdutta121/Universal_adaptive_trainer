@@ -8,14 +8,17 @@ books and taxonomies, and what removing one should do to them is undecided.
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, status
+from sqlalchemy.orm import Session
 
 from app.assessment import catalog
 from app.courses.overview import SETUP_STEPS, build_overview
 from app.errors import DomainRuleError
 from app.persistence.models import CourseRow
 from app.persistence.repositories import CourseRepository
-from app.styles.library import get_library
+from app.styles.library import course_styles, get_library
 from app.web.routes.api.deps import CurrentUser, DbSession
 from app.web.routes.api.schemas import (
     ActivityEventOut,
@@ -183,15 +186,43 @@ def get_course(session: DbSession, user: CurrentUser, course_id: int) -> CourseO
 def update_course(
     session: DbSession, user: CurrentUser, course_id: int, body: CourseUpdate
 ) -> CourseOut:
-    """Rename a course, change its description, or change the question types it allows."""
+    """Rename a course, change its description, its subject, the question types it allows, or
+    whether its new questions may carry figures."""
+    return change_course(session, user.id, course_id, body)
+
+
+def change_course(
+    session: Session, owner_id: uuid.UUID, course_id: int, body: CourseUpdate
+) -> CourseOut:
+    """Apply a :class:`CourseUpdate` to a course the professor owns (the route and the agent).
+
+    Raises:
+        DomainRuleError: an unknown subject, a subject change once the course has questions or
+            styles of its own, or question types that cannot be used.
+    """
     repo = CourseRepository(session)
-    course = repo.get_owned(course_id, user.id)
+    course = repo.get_owned(course_id, owner_id)
     if body.name is not None and body.name.strip():
         course.name = body.name.strip()
     if body.description is not None:
         course.description = body.description.strip() or None
+    if body.subject is not None and body.subject != (course.subject or catalog.LEGACY_SUBJECT):
+        if body.subject not in catalog.SUBJECTS_BY_ID:
+            raise DomainRuleError(f"Unknown subject {body.subject!r}.")
+        questions = repo.content_counts().get(course_id, (0, 0, 0))[2]
+        if questions or course_styles(session, course_id):
+            raise DomainRuleError(
+                "The subject can only change before the course has questions or styles.",
+                detail="Questions, styles and what the judges learn are stored per subject.",
+            )
+        course.subject = body.subject
+        if body.question_types is None:
+            course.question_types = catalog.default_types_for(body.subject)
+            course.capabilities = catalog.capabilities_for(course.question_types)
     if body.question_types is not None:
         course.question_types = _offerable(body.question_types)
         course.capabilities = catalog.capabilities_for(course.question_types)
+    if body.figures_enabled is not None:
+        course.figures_enabled = body.figures_enabled
     session.commit()
     return CourseOut.from_row(course, repo.content_counts().get(course_id, (0, 0, 0)))

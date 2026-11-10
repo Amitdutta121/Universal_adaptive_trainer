@@ -7,6 +7,9 @@ import ast
 import json
 from typing import Any
 
+from pydantic import ValidationError
+
+from app.figures import figure_problems, parse_figure
 from app.generation.schemas import ExecutableTestCase
 from app.validation.runner import (
     EVIDENCE_LIMIT,
@@ -58,6 +61,24 @@ def stored_case_specs(raw: object) -> list[dict[str, Any]] | None:
     return [
         {"stdin": case.stdin, "stdout": case.stdout, "assert": case.assert_code} for case in cases
     ]
+
+
+# --- student view ---------------------------------------------------------------------------
+
+
+def figure_view(content: dict) -> dict[str, Any] | None:
+    """The question's figure as a student may see it, or ``None`` when it has none or it is
+    not drawable. Only the validated figure fields: nothing else from ``content``."""
+    raw = content.get("figure")
+    if raw is None:
+        return None
+    try:
+        figure = parse_figure(raw)
+    except ValidationError:
+        return None
+    if figure_problems(figure):
+        return None
+    return figure.model_dump(mode="json")
 
 
 # --- legacy columns ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ from app.assessment.specs import GradingPlan, Unmarkable
 from app.domain.enums import QuestionKind, QuestionType
 from app.domain.questions import QuestionCheck
 from app.generation.schemas import ParsonsDraft
-from app.question_types._shared import explanation, same
+from app.question_types._shared import explanation, figure_view, same
 from app.question_types.base import DraftColumns, StudentView
 from app.validation.report import make_check
 from app.validation.runner import LocalCodeRunner
@@ -90,7 +90,7 @@ class Parsons:
         """
         blocks = content.get("blocks")
         if not isinstance(blocks, list):
-            return StudentView()
+            return StudentView(figure=figure_view(content))
         presentable = [
             {
                 "id": str(block.get("id")),
@@ -103,7 +103,7 @@ class Parsons:
             and block.get("text") is not None
         ]
         random.Random(seed).shuffle(presentable)
-        return StudentView(blocks=presentable)
+        return StudentView(blocks=presentable, figure=figure_view(content))
 
 
 def _reference_source(blocks: list[dict], order_ids: list[str]) -> str | None:

@@ -21,8 +21,14 @@ from fastapi import APIRouter, Query
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.adaptive.service import variants_of
 from app.domain.enums import Difficulty, JobKind, JudgeMetricId, QuestionStatus
-from app.errors import DomainRuleError, InvalidQuestionSpecError, NotFoundError
+from app.errors import (
+    CodeExecutionUnavailableError,
+    DomainRuleError,
+    InvalidQuestionSpecError,
+    NotFoundError,
+)
 from app.evaluation import (
     PedagogicalEvalStatus,
     PedagogicalEvaluation,
@@ -32,6 +38,7 @@ from app.evaluation import (
 from app.evaluation.severity import borderline_notes
 from app.evaluation.trust import judge_trust
 from app.generation import GenerationService, compile_chunk_requests, count_identical_requests
+from app.generation.computed import regenerate_copy
 from app.generation.service import regeneration_spec
 from app.generation.spec import require_approved_version
 from app.jobs.queue import JobQueue
@@ -54,6 +61,7 @@ from app.web.routes.api.schemas import (
     BatchPlanResponse,
     BatchPlanTotals,
     ChunkGenerationSpec,
+    FigureCopyOut,
     GenerateBatchRequest,
     GenerateBatchResponse,
     JobStartedResponse,
@@ -68,6 +76,7 @@ from app.web.routes.api.schemas import (
     ReviewQueueMode,
     ReviewQueueResponse,
 )
+from graders import ExecutorError
 
 logger = logging.getLogger(__name__)
 
@@ -417,9 +426,44 @@ def get_question(session: DbSession, course: CourseScope, question_id: int) -> Q
         original_prompt=question.original_prompt,
         original_reference_solution=question.original_reference_solution,
         original_tests=question.original_tests,
+        original_figure=question.original_figure,
         reviews=[ReviewOut.from_row(review) for review in question.reviews],
         borderline_notes=_borderline_notes(question, evaluation),
+        figure_copies=[
+            FigureCopyOut(
+                ordinal=variant.ordinal,
+                seed=variant.seed,
+                prompt=variant.prompt,
+                reference_solution=variant.reference_solution,
+                content=variant.content,
+            )
+            for variant in variants_of(session, question.id)
+        ],
+        figure_program=question.figure_program,
     )
+
+
+@router.post("/{question_id}/copies/{ordinal}/regenerate", response_model=QuestionDetail)
+def regenerate_figure_copy(
+    session: DbSession, course: CourseScope, question_id: int, ordinal: int
+) -> QuestionDetail:
+    """Replace one copy of a computed-figure question by its program at a new seed (ADR-080).
+
+    No model call: the stored program runs again. A copy a student was served is kept.
+    """
+    question_in_course(session, question_id, course)
+    try:
+        regenerate_copy(session, question_id, ordinal)
+    except ExecutorError as error:
+        session.rollback()
+        raise CodeExecutionUnavailableError(
+            "Figure programs could not be run right now.", detail=str(error)
+        ) from error
+    except Exception:
+        session.rollback()
+        raise
+    session.commit()
+    return get_question(session, course, question_id)
 
 
 def resolve_taxonomy(session: Session, question: QuestionRow) -> QuestionTaxonomy:

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { AgentPanel } from "@/components/agent/agent-panel";
+import { AgentProvider, AgentSidebar } from "@/components/agent/agent-panel";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthGate } from "@/components/auth-gate";
 import { CourseGate } from "@/components/course-gate";
@@ -18,33 +18,42 @@ function ProfessorChrome({
   children: React.ReactNode;
   isWideRoute: boolean;
 }) {
-  // The agent works inside one course, so its panel exists only on course pages.
-  const courseId = courseIdFromPath(usePathname());
-  return (
-    <AuthGate>
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset className="app-inset min-w-0">
-          {/* `min-w-0`: without it this flex child refuses to shrink below the
+  // The agent works inside one course, so it exists only on course pages. Its side panel is
+  // left out on the assistant page, which shows the same conversation full-page.
+  const pathname = usePathname();
+  const courseId = courseIdFromPath(pathname);
+  const onAssistantPage = ASSISTANT_ROUTE.test(pathname);
+  const chrome = (
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset className="app-inset min-w-0">
+        {/* `min-w-0`: without it this flex child refuses to shrink below the
               width of its widest content, and a long code listing would push
               the whole page into horizontal scroll instead of scrolling itself.
               `isWideRoute` drops the usual reading-width cap for screens built
               as a multi-column workspace rather than a document, so they use
               the full window on a wide monitor instead of leaving it blank. */}
-          <div
-            className={`app-shell mx-auto flex w-full min-w-0 flex-col gap-6 p-6 ${
-              isWideRoute ? "h-[100dvh] overflow-hidden" : "max-w-7xl"
-            }`}
-          >
-            <VerifyEmailBanner />
-            <CourseGate>{children}</CourseGate>
-          </div>
-        </SidebarInset>
-        {courseId !== null ? <AgentPanel courseId={courseId} /> : null}
-      </SidebarProvider>
+        <div
+          className={`app-shell mx-auto flex w-full min-w-0 flex-col gap-6 p-6 ${
+            isWideRoute ? "h-[100dvh] overflow-hidden" : "max-w-7xl"
+          }`}
+        >
+          <VerifyEmailBanner />
+          <CourseGate>{children}</CourseGate>
+        </div>
+      </SidebarInset>
+      {courseId !== null && !onAssistantPage ? <AgentSidebar /> : null}
+    </SidebarProvider>
+  );
+  return (
+    <AuthGate>
+      {courseId !== null ? <AgentProvider courseId={courseId}>{chrome}</AgentProvider> : chrome}
     </AuthGate>
   );
 }
+
+/** The course assistant's own page: full height, with no side panel of its own. */
+const ASSISTANT_ROUTE = /^\/courses\/\d+\/assistant(\/|$)/;
 
 function StudentChrome({ children, wide }: { children: React.ReactNode; wide: boolean }) {
   return (
@@ -83,7 +92,8 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   const isSignedOutRoute = SIGNED_OUT_ROUTES.has(pathname);
   // A multi-column workspace, not a document — capping it to reading width
   // wastes a wide monitor instead of giving the PDF pane the room it needs.
-  const isWideRoute = /^\/courses\/\d+\/questions\/generate\/single/.test(pathname);
+  const isWideRoute =
+    /^\/courses\/\d+\/questions\/generate\/single/.test(pathname) || ASSISTANT_ROUTE.test(pathname);
   // The course list is where a professor lands after login, before any course is
   // open, so there is no course navigation to show yet: signed-in, no sidebar.
   const isCoursePicker = pathname === "/courses";
